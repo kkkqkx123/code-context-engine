@@ -3,7 +3,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import { healthState, healthActions } from '$lib/stores/health';
+	import { healthStore } from '$lib/stores/health.svelte';
 
 	/**
 	 * Retry queue card: pending write-behind operations with process and
@@ -24,29 +24,29 @@
 </script>
 
 <Card title="Retry Queue" subtitle="Pending write-behind operations">
-	{#if $healthState.retryQueue}
+	{#if healthStore.retryQueue}
 		<div class="retry-row">
 			<div class="retry-stat">
 				<span class="kv-label">Pending operations</span>
-				<span class="retry-count">{$healthState.retryQueue.pending_count}</span>
+				<span class="retry-count">{healthStore.retryQueue.pending_count}</span>
 			</div>
 			<Badge
-				label={$healthState.retryQueue.is_empty ? 'Empty' : 'Backlog'}
-				variant={$healthState.retryQueue.is_empty ? 'success' : 'warning'}
+				label={healthStore.retryQueue.is_empty ? 'Empty' : 'Backlog'}
+				variant={healthStore.retryQueue.is_empty ? 'success' : 'warning'}
 			/>
 		</div>
 		<div class="retry-actions">
 			<Button
 				variant="secondary"
-				onclick={() => runAction(() => healthActions.processRetryQueue())}
-				disabled={actionBusy || $healthState.retryQueue?.is_empty}
+				onclick={() => runAction(() => healthStore.processRetryQueue())}
+				disabled={actionBusy || healthStore.retryQueue?.is_empty}
 			>
 				{actionBusy ? 'Working...' : 'Process Queue'}
 			</Button>
 			<Button
 				variant="danger"
 				onclick={() => (clearConfirmOpen = true)}
-				disabled={actionBusy || $healthState.retryQueue?.is_empty}
+				disabled={actionBusy || healthStore.retryQueue?.is_empty}
 			>
 				Clear Queue
 			</Button>
@@ -89,7 +89,7 @@
 				>
 				<Button
 					variant="danger"
-					onclick={() => runAction(() => healthActions.clearRetryQueue())}
+					onclick={() => runAction(() => healthStore.clearRetryQueue())}
 					disabled={actionBusy}
 				>
 					{actionBusy ? 'Clearing...' : 'Clear Queue'}

@@ -7,7 +7,7 @@
 
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
-import { readStoredToken } from '../stores/auth';
+import { authStore } from '../stores/auth.svelte';
 
 /**
  * Base URL for the backend API.
@@ -123,7 +123,7 @@ export const client = createClient<paths>({
 // token-free, so requests without a token keep their previous shape.
 client.use({
 	async onRequest({ request }) {
-		const token = readStoredToken();
+		const token = authStore.readStoredToken();
 		if (!token) return undefined;
 		const headers = new Headers(request.headers);
 		if (!headers.has('authorization')) {

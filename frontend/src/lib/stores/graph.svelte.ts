@@ -1,13 +1,18 @@
 /**
- * Graph State Store
+ * Graph State Store.
  *
  * Owns the working set of graph elements shown by the graph explorer, plus the
  * filters applied on top of them. Elements are accumulated incrementally as the
  * user expands neighborhoods, and the server-side relation epoch is tracked so
  * a rebuilt index invalidates the accumulated graph automatically.
+ *
+ * Rune-based replacement of the previous `writable<GraphState>` + `graphActions`
+ * object. State is `$state` fields; actions are methods; the helpers `toGraphError`,
+ * `replaceGraph`, `mergeGraph` and `activeDomains` stay at module level (the latter
+ * two as private methods operating on the store instance).
  */
 
-import { writable, get } from 'svelte/store';
+import { errorMessage, errorCodeOf } from '../utils/errors';
 import {
 	graphApi,
 	type EntityImpactOptions,
@@ -35,8 +40,7 @@ import {
 	toElementNode,
 	type GraphElement,
 } from '../utils/graph-elements';
-import { currentProjectId } from './project';
-import { errorCodeOf, errorMessage } from '../utils/errors';
+import { projectStore } from './project.svelte';
 
 /** Maximum number of nodes held in memory before expansion is refused. */
 export const MAX_RENDERED_NODES = 800;
@@ -100,31 +104,31 @@ export interface GraphState {
 	meta: GraphMeta;
 }
 
-const initialState: GraphState = {
-	projectId: get(currentProjectId),
-	nodes: [],
-	edges: [],
-	elements: [],
-	loading: false,
-	error: null,
-	truncated: false,
-	filters: {
-		domains: [...RELATION_DOMAIN_ORDER],
-		kinds: [],
-		search: '',
-	},
-	meta: {
-		epoch: 0,
-		focusId: null,
-		communities: {},
-		communitiesEpoch: 0,
-		impactDirect: [],
-		impactTransitive: [],
-		impactFile: null,
-	},
-};
-
-export const graphState = writable<GraphState>(initialState);
+function makeInitialState(): GraphState {
+	return {
+		projectId: projectStore.currentProjectId,
+		nodes: [],
+		edges: [],
+		elements: [],
+		loading: false,
+		error: null,
+		truncated: false,
+		filters: {
+			domains: [...RELATION_DOMAIN_ORDER],
+			kinds: [],
+			search: '',
+		},
+		meta: {
+			epoch: 0,
+			focusId: null,
+			communities: {},
+			communitiesEpoch: 0,
+			impactDirect: [],
+			impactTransitive: [],
+			impactFile: null,
+		},
+	};
+}
 
 function toGraphError(
 	error: unknown,
@@ -158,74 +162,81 @@ function toGraphError(
 	return { code: 'UNKNOWN', message: fallback, details: error };
 }
 
-/**
- * Replace the working set. Used when the focus entity changes, or when the
- * server reports a newer relation epoch than the accumulated data.
- */
-function replaceGraph(
-	nodes: GraphNode[],
-	edges: GraphEdge[],
-	epoch: number,
-	focusId: string | null,
-): void {
-	graphState.update((state) => ({
-		...state,
-		nodes,
-		edges,
-		elements: [...nodes.map(toElementNode), ...edges.map(toElementEdge)],
-		meta: { ...state.meta, epoch, focusId },
-		error: null,
-	}));
-}
+class GraphStore {
+	projectId = $state(makeInitialState().projectId);
+	nodes = $state<GraphNode[]>([]);
+	edges = $state<GraphEdge[]>([]);
+	elements = $state<GraphElement[]>([]);
+	loading = $state(false);
+	error = $state<GraphError | null>(null);
+	truncated = $state(false);
+	filters = $state<GraphFilters>(makeInitialState().filters);
+	meta = $state<GraphMeta>(makeInitialState().meta);
 
-/**
- * Merge a newly fetched neighborhood into the working set.
- *
- * Nodes are keyed by id and edges by their derived element id, so expansion is
- * idempotent: re-fetching a neighborhood the user already expanded adds
- * nothing. When the response carries a newer epoch the previous data belongs to
- * a stale index and is discarded instead of merged.
- */
-function mergeGraph(
-	nodes: GraphNode[],
-	edges: GraphEdge[],
-	epoch: number,
-	focusId: string | null,
-): number {
-	const state = get(graphState);
-	if (epoch > state.meta.epoch && state.meta.epoch !== 0) {
-		replaceGraph(nodes, edges, epoch, focusId);
-		return nodes.length;
+	/**
+	 * Replace the working set. Used when the focus entity changes, or when the
+	 * server reports a newer relation epoch than the accumulated data.
+	 */
+	#replaceGraph(
+		nodes: GraphNode[],
+		edges: GraphEdge[],
+		epoch: number,
+		focusId: string | null,
+	): void {
+		this.nodes = nodes;
+		this.edges = edges;
+		this.elements = [...nodes.map(toElementNode), ...edges.map(toElementEdge)];
+		this.meta = { ...this.meta, epoch, focusId };
+		this.error = null;
 	}
 
-	const knownNodes = new Set(state.nodes.map((node) => node.id));
-	const knownEdges = new Set(state.edges.map(edgeElementId));
+	/**
+	 * Merge a newly fetched neighborhood into the working set.
+	 *
+	 * Nodes are keyed by id and edges by their derived element id, so expansion is
+	 * idempotent: re-fetching a neighborhood the user already expanded adds
+	 * nothing. When the response carries a newer epoch the previous data belongs to
+	 * a stale index and is discarded instead of merged.
+	 */
+	#mergeGraph(
+		nodes: GraphNode[],
+		edges: GraphEdge[],
+		epoch: number,
+		focusId: string | null,
+	): number {
+		if (epoch > this.meta.epoch && this.meta.epoch !== 0) {
+			this.#replaceGraph(nodes, edges, epoch, focusId);
+			return nodes.length;
+		}
 
-	const freshNodes = nodes.filter((node) => !knownNodes.has(node.id));
-	const freshEdges = edges.filter(
-		(edge) => !knownEdges.has(edgeElementId(edge)),
-	);
+		const knownNodes = new Set(this.nodes.map((node) => node.id));
+		const knownEdges = new Set(this.edges.map(edgeElementId));
 
-	if (freshNodes.length === 0 && freshEdges.length === 0) {
-		return 0;
-	}
+		const freshNodes = nodes.filter((node) => !knownNodes.has(node.id));
+		const freshEdges = edges.filter(
+			(edge) => !knownEdges.has(edgeElementId(edge)),
+		);
 
-	graphState.update((current) => ({
-		...current,
-		nodes: [...current.nodes, ...freshNodes],
-		edges: [...current.edges, ...freshEdges],
-		elements: [
-			...current.elements,
+		if (freshNodes.length === 0 && freshEdges.length === 0) {
+			return 0;
+		}
+
+		this.nodes = [...this.nodes, ...freshNodes];
+		this.edges = [...this.edges, ...freshEdges];
+		this.elements = [
+			...this.elements,
 			...freshNodes.map(toElementNode),
 			...freshEdges.map(toElementEdge),
-		],
-		meta: { ...current.meta, epoch, focusId: focusId ?? current.meta.focusId },
-	}));
+		];
+		this.meta = {
+			...this.meta,
+			epoch,
+			focusId: focusId ?? this.meta.focusId,
+		};
 
-	return freshNodes.length;
-}
+		return freshNodes.length;
+	}
 
-export const graphActions = {
 	/** Load the neighborhood of an entity and replace the working set. */
 	async loadEgo(
 		entityId: string,
@@ -234,13 +245,10 @@ export const graphActions = {
 		projectId?: number,
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
-		const pid = projectId ?? get(currentProjectId);
-		graphState.update((state) => ({
-			...state,
-			projectId: pid,
-			loading: true,
-			error: null,
-		}));
+		const pid = projectId ?? projectStore.currentProjectId;
+		this.projectId = pid;
+		this.loading = true;
+		this.error = null;
 		try {
 			const response = await graphApi.getEgo(pid, {
 				entityId,
@@ -248,21 +256,21 @@ export const graphActions = {
 				direction,
 				...filter,
 			});
-			replaceGraph(
+			this.#replaceGraph(
 				response.nodes,
 				response.edges,
 				response.relation_epoch,
 				entityId,
 			);
+			this.loading = false;
 			return { ok: true, value: response.nodes.length };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			this.loading = false;
+			this.error = ge;
 			return { ok: false, error: ge };
-		} finally {
-			graphState.update((state) => ({ ...state, loading: false }));
 		}
-	},
+	}
 
 	/**
 	 * Expand the graph by one hop around an entity, merging the result into the
@@ -274,40 +282,38 @@ export const graphActions = {
 		direction: GraphDirection = 'both',
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
-		const state = get(graphState);
-		if (state.nodes.length >= MAX_RENDERED_NODES) {
-			graphState.update((current) => ({ ...current, truncated: true }));
+		if (this.nodes.length >= MAX_RENDERED_NODES) {
+			this.truncated = true;
 			const ge: GraphError = {
 				code: 'LIMIT_EXCEEDED',
 				message: `Render limit of ${MAX_RENDERED_NODES} nodes reached. Reload a smaller seed to expand further.`,
 			};
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-		graphState.update((current) => ({ ...current, loading: true }));
+		this.loading = true;
 		try {
-			const response = await graphApi.getEgo(state.projectId, {
+			const response = await graphApi.getEgo(this.projectId, {
 				entityId,
 				depth,
 				direction,
 				...filter,
 			});
-			return {
-				ok: true,
-				value: mergeGraph(
-					response.nodes,
-					response.edges,
-					response.relation_epoch,
-					entityId,
-				),
-			};
+			const added = this.#mergeGraph(
+				response.nodes,
+				response.edges,
+				response.relation_epoch,
+				entityId,
+			);
+			this.loading = false;
+			return { ok: true, value: added };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((current) => ({ ...current, error: ge }));
+			this.error = ge;
+			this.loading = false;
 			return { ok: false, error: ge };
-		} finally {
-			graphState.update((current) => ({ ...current, loading: false }));
 		}
-	},
+	}
 
 	/** Replace the working set with an explicit subgraph. */
 	async loadSubgraph(
@@ -315,30 +321,27 @@ export const graphActions = {
 		projectId?: number,
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
-		const pid = projectId ?? get(currentProjectId);
-		graphState.update((state) => ({
-			...state,
-			projectId: pid,
-			loading: true,
-			error: null,
-		}));
+		const pid = projectId ?? projectStore.currentProjectId;
+		this.projectId = pid;
+		this.loading = true;
+		this.error = null;
 		try {
 			const response = await graphApi.getSubgraph(pid, ids, filter);
-			replaceGraph(
+			this.#replaceGraph(
 				response.nodes,
 				response.edges,
 				response.relation_epoch,
 				null,
 			);
+			this.loading = false;
 			return { ok: true, value: response.nodes.length };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			this.loading = false;
+			this.error = ge;
 			return { ok: false, error: ge };
-		} finally {
-			graphState.update((state) => ({ ...state, loading: false }));
 		}
-	},
+	}
 
 	/**
 	 * Replace the working set with the shortest relation path between two
@@ -353,13 +356,10 @@ export const graphActions = {
 		projectId?: number,
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<GraphPathResponse>> {
-		const pid = projectId ?? get(currentProjectId);
-		graphState.update((state) => ({
-			...state,
-			projectId: pid,
-			loading: true,
-			error: null,
-		}));
+		const pid = projectId ?? projectStore.currentProjectId;
+		this.projectId = pid;
+		this.loading = true;
+		this.error = null;
 		try {
 			const response = await graphApi.getPath(pid, {
 				start,
@@ -368,7 +368,7 @@ export const graphActions = {
 				...filter,
 			});
 			if (response.path_found) {
-				replaceGraph(
+				this.#replaceGraph(
 					response.nodes ?? [],
 					response.edges ?? [],
 					response.relation_epoch,
@@ -379,18 +379,18 @@ export const graphActions = {
 					code: 'NO_PATH',
 					message: `No relation path found between '${start}' and '${end}' within depth ${maxDepth}.`,
 				};
-				graphState.update((state) => ({ ...state, error: ge }));
+				this.error = ge;
 				return { ok: false, error: ge };
 			}
+			this.loading = false;
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			this.loading = false;
+			this.error = ge;
 			return { ok: false, error: ge };
-		} finally {
-			graphState.update((state) => ({ ...state, loading: false }));
 		}
-	},
+	}
 
 	/** Load a bounded slice of the project graph. */
 	async loadOverview(
@@ -398,30 +398,27 @@ export const graphActions = {
 		projectId?: number,
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
-		const pid = projectId ?? get(currentProjectId);
-		graphState.update((state) => ({
-			...state,
-			projectId: pid,
-			loading: true,
-			error: null,
-		}));
+		const pid = projectId ?? projectStore.currentProjectId;
+		this.projectId = pid;
+		this.loading = true;
+		this.error = null;
 		try {
 			const response = await graphApi.exportGraph(pid, limit, filter);
-			replaceGraph(
+			this.#replaceGraph(
 				response.nodes,
 				response.edges,
 				response.relation_epoch,
 				null,
 			);
+			this.loading = false;
 			return { ok: true, value: response.nodes.length };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			this.loading = false;
+			this.error = ge;
 			return { ok: false, error: ge };
-		} finally {
-			graphState.update((state) => ({ ...state, loading: false }));
 		}
-	},
+	}
 
 	/**
 	 * Fetch connected components and map every node id to its component index.
@@ -432,7 +429,7 @@ export const graphActions = {
 		projectId?: number,
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<GraphComponentsResponse>> {
-		const pid = projectId ?? get(currentProjectId);
+		const pid = projectId ?? projectStore.currentProjectId;
 		try {
 			const response = await graphApi.getComponents(pid, filter);
 			const communities: Record<string, number> = {};
@@ -441,21 +438,18 @@ export const graphActions = {
 					communities[nodeId] = index;
 				}
 			});
-			graphState.update((state) => ({
-				...state,
-				meta: {
-					...state.meta,
-					communities,
-					communitiesEpoch: response.relation_epoch,
-				},
-			}));
+			this.meta = {
+				...this.meta,
+				communities,
+				communitiesEpoch: response.relation_epoch,
+			};
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, error: ge }));
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-	},
+	}
 
 	/**
 	 * Fetch connected components only when the relation index has moved past
@@ -467,69 +461,62 @@ export const graphActions = {
 		projectId?: number,
 		filter?: GraphFilter,
 	): Promise<GraphActionResult<GraphComponentsResponse>> {
-		const state = get(graphState);
-		if (state.meta.communitiesEpoch >= state.meta.epoch) {
+		if (this.meta.communitiesEpoch >= this.meta.epoch) {
 			return {
 				ok: true,
 				value: {
 					components: [],
-					relation_epoch: state.meta.epoch,
+					relation_epoch: this.meta.epoch,
 					success: true,
 				},
 			};
 		}
-		return graphActions.loadComponents(projectId, filter);
-	},
+		return this.loadComponents(projectId, filter);
+	}
 
 	/** Run impact analysis for a changed file and record the result. */
 	async loadImpact(
 		file: string,
 		projectId?: number,
 	): Promise<GraphActionResult<GraphImpactResponse>> {
-		const pid = projectId ?? get(currentProjectId);
+		const pid = projectId ?? projectStore.currentProjectId;
 		try {
 			const response = await graphApi.getImpact(pid, file);
-			graphState.update((state) => ({
-				...state,
-				meta: {
-					...state.meta,
-					impactFile: response.changed_file,
-					impactDirect: response.direct_dependents,
-					impactTransitive: response.indirect_dependents,
-				},
-			}));
+			this.meta = {
+				...this.meta,
+				impactFile: response.changed_file,
+				impactDirect: response.direct_dependents,
+				impactTransitive: response.indirect_dependents,
+			};
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, error: ge }));
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-	},
+	}
 
 	/** Run impact analysis for a changed entity. */
 	async loadEntityImpact(
 		options: EntityImpactOptions,
 		projectId?: number,
 	): Promise<GraphActionResult<number>> {
-		const pid = projectId ?? get(currentProjectId);
+		const pid = projectId ?? projectStore.currentProjectId;
 		try {
 			const response = await graphApi.getEntityImpact(pid, options);
-			graphState.update((state) => ({
-				...state,
-				meta: {
-					...state.meta,
-					impactFile: response.changed_entity,
-					impactDirect: response.direct_dependents,
-					impactTransitive: response.indirect_dependents,
-				},
-			}));
+			this.meta = {
+				...this.meta,
+				impactFile: response.changed_entity,
+				impactDirect: response.direct_dependents,
+				impactTransitive: response.indirect_dependents,
+			};
 			return { ok: true, value: response.direct_dependents.length };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, error: ge }));
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-	},
+	}
 
 	/** Fetch dependency cycles at entity or file level. */
 	async loadCycles(
@@ -537,97 +524,93 @@ export const graphActions = {
 		limit = 100,
 		projectId?: number,
 	): Promise<GraphActionResult<GraphCyclesResponse>> {
-		const pid = projectId ?? get(currentProjectId);
+		const pid = projectId ?? projectStore.currentProjectId;
 		try {
 			const response = await graphApi.getCycles(pid, { level, limit });
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, error: ge }));
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-	},
+	}
 
 	/** Fetch typed structural relations rooted at one entity. */
 	async loadStructural(
 		options: StructuralOptions,
 		projectId?: number,
 	): Promise<GraphActionResult<GraphStructuralResponse>> {
-		const pid = projectId ?? get(currentProjectId);
+		const pid = projectId ?? projectStore.currentProjectId;
 		try {
 			const response = await graphApi.getStructural(pid, options);
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, error: ge }));
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-	},
+	}
 
 	/** Fetch module-level relations of one file. */
 	async loadModule(
 		file: string,
 		projectId?: number,
 	): Promise<GraphActionResult<GraphModuleResponse>> {
-		const pid = projectId ?? get(currentProjectId);
+		const pid = projectId ?? projectStore.currentProjectId;
 		try {
 			const response = await graphApi.getModule(pid, file);
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);
-			graphState.update((state) => ({ ...state, error: ge }));
+			this.error = ge;
 			return { ok: false, error: ge };
 		}
-	},
+	}
 
 	/** Clear the recorded impact analysis highlight. */
 	clearImpact() {
-		graphState.update((state) => ({
-			...state,
-			meta: {
-				...state.meta,
-				impactFile: null,
-				impactDirect: [],
-				impactTransitive: [],
-			},
-		}));
-	},
+		this.meta = {
+			...this.meta,
+			impactFile: null,
+			impactDirect: [],
+			impactTransitive: [],
+		};
+	}
 
 	setFilters(patch: Partial<GraphFilters>) {
-		graphState.update((state) => ({
-			...state,
-			filters: { ...state.filters, ...patch },
-		}));
-	},
+		this.filters = { ...this.filters, ...patch };
+	}
 
 	toggleDomain(domain: RelationDomain) {
-		graphState.update((state) => {
-			const active = state.filters.domains.includes(domain)
-				? state.filters.domains.filter((item) => item !== domain)
-				: [...state.filters.domains, domain];
-			return { ...state, filters: { ...state.filters, domains: active } };
-		});
-	},
+		const active = this.filters.domains.includes(domain)
+			? this.filters.domains.filter((item) => item !== domain)
+			: [...this.filters.domains, domain];
+		this.filters = { ...this.filters, domains: active };
+	}
 
 	setSearch(search: string) {
-		graphState.update((state) => ({
-			...state,
-			filters: { ...state.filters, search },
-		}));
-	},
+		this.filters = { ...this.filters, search };
+	}
 
 	/** Drop the working set, for example after switching projects. */
 	reset(projectId?: number) {
-		graphState.set({
-			...initialState,
-			projectId: projectId ?? get(currentProjectId),
-			filters: {
-				...initialState.filters,
-				domains: [...RELATION_DOMAIN_ORDER],
-			},
-		});
-	},
-};
+		const fresh = makeInitialState();
+		this.projectId = projectId ?? fresh.projectId;
+		this.nodes = fresh.nodes;
+		this.edges = fresh.edges;
+		this.elements = fresh.elements;
+		this.loading = fresh.loading;
+		this.error = fresh.error;
+		this.truncated = fresh.truncated;
+		this.filters = {
+			...fresh.filters,
+			domains: [...RELATION_DOMAIN_ORDER],
+		};
+		this.meta = fresh.meta;
+	}
+}
+
+export const graphStore = new GraphStore();
 
 /**
  * Distinct relation domains present in the current edge set.

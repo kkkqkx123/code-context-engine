@@ -1,14 +1,18 @@
 /**
- * Search State Store
+ * Search State Store.
  * Single entry point for both standard and aggregated search.
  *
  * Pagination model: the backend API has no offset parameter, so each fetch
  * requests `limit = page * pageSize` and slices client-side. Filters apply
  * uniformly to standard and aggregated modes; changing a filter or query
  * type after a search marks the results stale and auto re-runs the search.
+ *
+ * Rune-based replacement of the previous `writable<SearchState>` + `searchActions`
+ * object. State is `$state` fields; actions are methods; the URL helpers and
+ * `buildCommonFilterFields`/`buildAggregatedRequest` stay at module level.
  */
 
-import { writable, get } from 'svelte/store';
+import { errorMessage } from '$lib/utils/errors';
 import {
 	searchApi,
 	type SearchRequest,
@@ -16,8 +20,7 @@ import {
 	type QueryType,
 	type SubQuery,
 } from '../api/search';
-import { currentProjectId, onProjectChange } from './project';
-import { errorMessage } from '$lib/utils/errors';
+import { projectStore, onProjectChange } from './project.svelte';
 
 export const QUERY_TYPES: readonly QueryType[] = [
 	'vector',
@@ -158,65 +161,7 @@ function modeFromUrl(): SearchMode {
 		: AGGREGATED_TYPE;
 }
 
-export const searchState = writable<SearchState>({
-	query: '',
-	mode: modeFromUrl(),
-	subQueries: [],
-	results: [],
-	total: 0,
-	elapsedMs: null,
-	sourcesUsed: [],
-	failedSubQueries: [],
-	relationEpoch: null,
-	relationStale: false,
-	isSearching: false,
-	error: null,
-	stale: false,
-	filters: filtersFromUrl(),
-	pagination: {
-		page: 1,
-		pageSize: 10,
-	},
-});
-
-let requestSeq = 0;
-let autoSearchTimer: ReturnType<typeof setTimeout> | undefined;
-
-function syncUrl(state: SearchState) {
-	if (typeof window === 'undefined') return;
-	const params = new URLSearchParams();
-	params.set('q', state.query);
-	params.set('mode', state.mode);
-	if (state.filters.directory_prefix)
-		params.set('dir', state.filters.directory_prefix);
-	if (state.filters.min_score > 0)
-		params.set('min', String(state.filters.min_score));
-	if (state.filters.exclude_content_types)
-		params.set('excl_types', state.filters.exclude_content_types);
-	if (state.filters.exclude_categories)
-		params.set('excl_cats', state.filters.exclude_categories);
-	if (state.filters.include_categories)
-		params.set('incl_cats', state.filters.include_categories);
-	if (state.filters.exclude_patterns)
-		params.set('excl_glob', state.filters.exclude_patterns);
-	if (state.filters.include_patterns)
-		params.set('incl_glob', state.filters.include_patterns);
-	if (state.filters.enable_rerank !== null)
-		params.set('rerank', state.filters.enable_rerank ? 'on' : 'off');
-	if (state.filters.rerank_max_candidates !== null)
-		params.set('rerank_n', String(state.filters.rerank_max_candidates));
-	if (state.filters.query_intent)
-		params.set('intent', state.filters.query_intent);
-	if (state.filters.expand !== null)
-		params.set('expand', state.filters.expand ? 'on' : 'off');
-	window.history.replaceState(
-		null,
-		'',
-		`${window.location.pathname}?${params}`,
-	);
-}
-
-export function buildCommonFilterFields(state: SearchState) {
+function buildCommonFilterFields(state: SearchState) {
 	return {
 		min_score: state.filters.min_score || undefined,
 		directory_prefix: state.filters.directory_prefix || undefined,
@@ -232,164 +177,197 @@ export function buildCommonFilterFields(state: SearchState) {
 	};
 }
 
-/** Actions */
-export const searchActions = {
+let requestSeq = 0;
+let autoSearchTimer: ReturnType<typeof setTimeout> | undefined;
+
+class SearchStore {
+	query = $state('');
+	mode = $state<SearchMode>(modeFromUrl());
+	/** Aggregated-mode sub-queries; empty list = auto-decompose from the main query */
+	subQueries = $state<SubQueryDraft[]>([]);
+	results = $state<SearchResultItem[]>([]);
+	total = $state(0);
+	elapsedMs = $state<number | null>(null);
+	sourcesUsed = $state<string[]>([]);
+	failedSubQueries = $state<string[]>([]);
+	/** Relation epoch backing the last result set, when reported. */
+	relationEpoch = $state<number | null>(null);
+	/** True when the serving relation snapshot reported itself stale. */
+	relationStale = $state(false);
+	isSearching = $state(false);
+	error = $state<string | null>(null);
+	/** True when filters/mode changed after the last search */
+	stale = $state(false);
+	filters = $state<SearchFilters>(filtersFromUrl());
+	pagination = $state({
+		page: 1,
+		pageSize: 10,
+	});
+
 	setQuery(query: string) {
-		searchState.update((state) => ({ ...state, query }));
-	},
+		this.query = query;
+	}
 
 	setMode(mode: SearchMode) {
-		searchState.update((state) => ({ ...state, mode, stale: true }));
+		this.mode = mode;
+		this.stale = true;
 		this.scheduleAutoSearch();
-	},
+	}
 
 	setAggSubQueries(subQueries: SubQueryDraft[]) {
-		searchState.update((s) => ({
-			...s,
-			subQueries: subQueries.slice(0, MAX_SUB_QUERIES),
-			stale: true,
-		}));
+		this.subQueries = subQueries.slice(0, MAX_SUB_QUERIES);
+		this.stale = true;
 		this.scheduleAutoSearch();
-	},
+	}
 
 	updateFilter<K extends keyof SearchState['filters']>(
 		key: K,
 		value: SearchState['filters'][K],
 	) {
-		searchState.update((state) => ({
-			...state,
-			filters: { ...state.filters, [key]: value },
-			stale: true,
-		}));
+		this.filters = { ...this.filters, [key]: value };
+		this.stale = true;
 		this.scheduleAutoSearch();
-	},
+	}
 
 	/** Auto re-run the last search after filters/mode changed (debounced). */
 	scheduleAutoSearch() {
-		const state = get(searchState);
-		if (!state.query.trim() || !state.stale) return;
+		if (!this.query.trim() || !this.stale) return;
 		clearTimeout(autoSearchTimer);
 		autoSearchTimer = setTimeout(() => {
-			if (get(searchState).stale) void this.executeSearch();
+			if (this.stale) void this.executeSearch();
 		}, 400);
-	},
+	}
 
 	/** Drop the result set and re-run it under the newly selected project. */
 	markProjectChanged() {
-		searchState.update((state) => ({
-			...state,
-			results: [],
-			total: 0,
-			elapsedMs: null,
-			sourcesUsed: [],
-			failedSubQueries: [],
-			relationEpoch: null,
-			relationStale: false,
-			stale: true,
-		}));
+		this.results = [];
+		this.total = 0;
+		this.elapsedMs = null;
+		this.sourcesUsed = [];
+		this.failedSubQueries = [];
+		this.relationEpoch = null;
+		this.relationStale = false;
+		this.stale = true;
 		this.scheduleAutoSearch();
-	},
+	}
 
 	async executeSearch(page = 1) {
-		let state: SearchState;
-		searchState.subscribe((s) => {
-			state = s;
-		})();
+		this.isSearching = true;
+		this.error = null;
 
-		const query = state!.query.trim();
+		const query = this.query.trim();
 		if (!query) return;
 
 		// Race guard: ignore responses from outdated requests.
 		const seq = ++requestSeq;
 
-		searchState.update((s) => ({ ...s, isSearching: true, error: null }));
+		const projectId = projectStore.currentProjectId;
+		const filterFields = buildCommonFilterFields(this);
+		// Cumulative fetch: page N needs page*pageSize rows on the client.
+		const limit = page * this.pagination.pageSize;
 
 		try {
-			const projectId = get(currentProjectId);
-			const filterFields = buildCommonFilterFields(state!);
-			// Cumulative fetch: page N needs page*pageSize rows on the client.
-			const limit = page * state!.pagination.pageSize;
-
 			const response =
-				state!.mode === AGGREGATED_TYPE
+				this.mode === AGGREGATED_TYPE
 					? await buildAggregatedRequest(
 							projectId,
 							query,
-							state!,
+							this,
 							limit,
 							filterFields,
 						)
 					: await searchApi.search({
 							project_id: projectId,
 							query,
-							query_type: state!.mode,
+							query_type: this.mode,
 							limit,
 							...filterFields,
 						} satisfies SearchRequest);
 
 			if (seq !== requestSeq) return;
 
-			searchState.update((s) => ({
-				...s,
-				results: response.items,
-				total: response.total,
-				elapsedMs: response.elapsed_ms,
-				sourcesUsed: response.sources_used ?? [],
-				failedSubQueries: response.failed_sub_queries ?? [],
-				relationEpoch: response.relation_epoch ?? null,
-				relationStale: response.relation_stale ?? false,
-				isSearching: false,
-				error: null,
-				stale: false,
-				pagination: { ...s.pagination, page },
-			}));
-			syncUrl({ ...state!, query });
+			this.results = response.items;
+			this.total = response.total;
+			this.elapsedMs = response.elapsed_ms;
+			this.sourcesUsed = response.sources_used ?? [];
+			this.failedSubQueries = response.failed_sub_queries ?? [];
+			this.relationEpoch = response.relation_epoch ?? null;
+			this.relationStale = response.relation_stale ?? false;
+			this.isSearching = false;
+			this.error = null;
+			this.stale = false;
+			this.pagination = { ...this.pagination, page };
+			this.#syncUrl(query);
 		} catch (error) {
 			if (seq !== requestSeq) return;
 			const message = errorMessage(error) ?? 'Search failed';
-			searchState.update((s) => ({
-				...s,
-				isSearching: false,
-				error: message,
-			}));
+			this.isSearching = false;
+			this.error = message;
 		}
-	},
+	}
 
 	setPage(page: number) {
-		searchState.update((state) => ({
-			...state,
-			pagination: { ...state.pagination, page },
-		}));
-	},
+		this.pagination = { ...this.pagination, page };
+	}
 
 	// Paginated view of the cumulatively fetched results.
 	getPaginatedResults(): SearchResultItem[] {
-		const currentState = get(searchState);
-		const start =
-			(currentState.pagination.page - 1) * currentState.pagination.pageSize;
-		const end = start + currentState.pagination.pageSize;
-		return currentState.results.slice(start, end);
-	},
+		const start = (this.pagination.page - 1) * this.pagination.pageSize;
+		const end = start + this.pagination.pageSize;
+		return this.results.slice(start, end);
+	}
 
 	/** Total number of client-side pages given the fetched result set. */
 	totalPages(): number {
-		const state = get(searchState);
-		return Math.max(
-			1,
-			Math.ceil(state.results.length / state.pagination.pageSize),
+		return Math.max(1, Math.ceil(this.results.length / this.pagination.pageSize));
+	}
+
+	#syncUrl(currentQuery: string) {
+		if (typeof window === 'undefined') return;
+		const params = new URLSearchParams();
+		params.set('q', currentQuery);
+		params.set('mode', this.mode);
+		if (this.filters.directory_prefix)
+			params.set('dir', this.filters.directory_prefix);
+		if (this.filters.min_score > 0)
+			params.set('min', String(this.filters.min_score));
+		if (this.filters.exclude_content_types)
+			params.set('excl_types', this.filters.exclude_content_types);
+		if (this.filters.exclude_categories)
+			params.set('excl_cats', this.filters.exclude_categories);
+		if (this.filters.include_categories)
+			params.set('incl_cats', this.filters.include_categories);
+		if (this.filters.exclude_patterns)
+			params.set('excl_glob', this.filters.exclude_patterns);
+		if (this.filters.include_patterns)
+			params.set('incl_glob', this.filters.include_patterns);
+		if (this.filters.enable_rerank !== null)
+			params.set('rerank', this.filters.enable_rerank ? 'on' : 'off');
+		if (this.filters.rerank_max_candidates !== null)
+			params.set('rerank_n', String(this.filters.rerank_max_candidates));
+		if (this.filters.query_intent)
+			params.set('intent', this.filters.query_intent);
+		if (this.filters.expand !== null)
+			params.set('expand', this.filters.expand ? 'on' : 'off');
+		window.history.replaceState(
+			null,
+			'',
+			`${window.location.pathname}?${params}`,
 		);
-	},
-};
+	}
+}
+
+export const searchStore = new SearchStore();
 
 // Results belong to the project that was selected when they were fetched.
 onProjectChange(() => {
-	searchActions.markProjectChanged();
+	searchStore.markProjectChanged();
 });
 
 async function buildAggregatedRequest(
 	projectId: number | null,
 	query: string,
-	state: SearchState,
+	state: SearchStore,
 	limit: number,
 	filterFields: ReturnType<typeof buildCommonFilterFields>,
 ) {

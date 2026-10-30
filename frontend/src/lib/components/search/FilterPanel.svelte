@@ -1,77 +1,69 @@
 <script lang="ts">
-	import {
-		searchState,
-		searchActions,
-		QUERY_TYPES,
-		SUB_QUERY_TYPES,
-		AGGREGATED_TYPE,
-		MAX_SUB_QUERIES,
-		type SubQueryDraft,
-	} from '$lib/stores/search';
+	import { searchStore, QUERY_TYPES, SUB_QUERY_TYPES, AGGREGATED_TYPE, MAX_SUB_QUERIES, type SubQueryDraft } from '$lib/stores/search.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 
 	function addSubQuery() {
-		if ($searchState.subQueries.length >= MAX_SUB_QUERIES) return;
-		searchActions.setAggSubQueries([
-			...$searchState.subQueries,
+		if (searchStore.subQueries.length >= MAX_SUB_QUERIES) return;
+		searchStore.setAggSubQueries([
+			...searchStore.subQueries,
 			{ text: '', query_type: 'bm25', weight: 1.0 },
 		]);
 	}
 
 	function updateSubQuery(index: number, patch: Partial<SubQueryDraft>) {
-		searchActions.setAggSubQueries(
-			$searchState.subQueries.map((sq, i) =>
+		searchStore.setAggSubQueries(
+			searchStore.subQueries.map((sq, i) =>
 				i === index ? { ...sq, ...patch } : sq,
 			),
 		);
 	}
 
 	function removeSubQuery(index: number) {
-		searchActions.setAggSubQueries(
-			$searchState.subQueries.filter((_, i) => i !== index),
+		searchStore.setAggSubQueries(
+			searchStore.subQueries.filter((_, i) => i !== index),
 		);
 	}
 
 	function handleDirectoryChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('directory_prefix', target.value);
+		searchStore.updateFilter('directory_prefix', target.value);
 	}
 
 	function handleMinScoreRangeChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('min_score', parseFloat(target.value));
+		searchStore.updateFilter('min_score', parseFloat(target.value));
 	}
 
 	function handleMinScoreInputChange(event: Event) {
 		const target = event.target as HTMLInputElement;
 		const n = parseFloat(target.value);
 		if (Number.isNaN(n)) return;
-		searchActions.updateFilter('min_score', Math.min(1, Math.max(0, n)));
+		searchStore.updateFilter('min_score', Math.min(1, Math.max(0, n)));
 	}
 
 	function handleExcludeTypesChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('exclude_content_types', target.value);
+		searchStore.updateFilter('exclude_content_types', target.value);
 	}
 
 	function handleExcludeCategoriesChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('exclude_categories', target.value);
+		searchStore.updateFilter('exclude_categories', target.value);
 	}
 
 	function handleIncludeCategoriesChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('include_categories', target.value);
+		searchStore.updateFilter('include_categories', target.value);
 	}
 
 	function handleExcludePatternsChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('exclude_patterns', target.value);
+		searchStore.updateFilter('exclude_patterns', target.value);
 	}
 
 	function handleIncludePatternsChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		searchActions.updateFilter('include_patterns', target.value);
+		searchStore.updateFilter('include_patterns', target.value);
 	}
 
 	const RERANK_CHOICES = [
@@ -81,8 +73,8 @@
 	] as const;
 
 	function rerankValue(): string {
-		if ($searchState.filters.enable_rerank === true) return 'on';
-		if ($searchState.filters.enable_rerank === false) return 'off';
+		if (searchStore.filters.enable_rerank === true) return 'on';
+		if (searchStore.filters.enable_rerank === false) return 'off';
 		return 'default';
 	}
 
@@ -90,13 +82,13 @@
 		const target = event.target as HTMLSelectElement;
 		const value =
 			target.value === 'on' ? true : target.value === 'off' ? false : null;
-		searchActions.updateFilter('enable_rerank', value);
+		searchStore.updateFilter('enable_rerank', value);
 	}
 
 	function handleRerankMaxChange(event: Event) {
 		const target = event.target as HTMLInputElement;
 		const n = Number(target.value);
-		searchActions.updateFilter(
+		searchStore.updateFilter(
 			'rerank_max_candidates',
 			Number.isInteger(n) && n > 0 ? n : null,
 		);
@@ -112,7 +104,7 @@
 
 	function handleIntentChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
-		searchActions.updateFilter('query_intent', target.value);
+		searchStore.updateFilter('query_intent', target.value);
 	}
 
 	const EXPAND_CHOICES = [
@@ -122,8 +114,8 @@
 	] as const;
 
 	function expandValue(): string {
-		if ($searchState.filters.expand === true) return 'on';
-		if ($searchState.filters.expand === false) return 'off';
+		if (searchStore.filters.expand === true) return 'on';
+		if (searchStore.filters.expand === false) return 'off';
 		return 'default';
 	}
 
@@ -131,7 +123,7 @@
 		const target = event.target as HTMLSelectElement;
 		const value =
 			target.value === 'on' ? true : target.value === 'off' ? false : null;
-		searchActions.updateFilter('expand', value);
+		searchStore.updateFilter('expand', value);
 	}
 </script>
 
@@ -142,8 +134,8 @@
 			{#each [...QUERY_TYPES, AGGREGATED_TYPE] as mode (mode)}
 				<button type="button"
 					class="tab"
-					class:active={$searchState.mode === mode}
-					onclick={() => searchActions.setMode(mode)}
+					class:active={searchStore.mode === mode}
+					onclick={() => searchStore.setMode(mode)}
 				>
 					{mode.toUpperCase()}
 				</button>
@@ -151,10 +143,10 @@
 		</div>
 	</div>
 
-	{#if $searchState.mode === AGGREGATED_TYPE}
+	{#if searchStore.mode === AGGREGATED_TYPE}
 		<div class="filter-section agg-section">
 			<span class="section-label">Aggregated Sub-queries (optional)</span>
-			{#each $searchState.subQueries as sq, i (i)}
+			{#each searchStore.subQueries as sq, i (i)}
 				<div class="sub-query-row">
 					<input
 						class="sub-query-text"
@@ -203,7 +195,7 @@
 			<button
 				class="sub-query-add"
 				type="button"
-				disabled={$searchState.subQueries.length >= MAX_SUB_QUERIES}
+				disabled={searchStore.subQueries.length >= MAX_SUB_QUERIES}
 				onclick={addSubQuery}
 			>
 				+ Add sub-query (max {MAX_SUB_QUERIES})
@@ -222,7 +214,7 @@
 			id="directory-input"
 			type="text"
 			placeholder="e.g., src/components"
-			value={$searchState.filters.directory_prefix}
+			value={searchStore.filters.directory_prefix}
 			oninput={handleDirectoryChange}
 		/>
 	</div>
@@ -238,7 +230,7 @@
 				min="0"
 				max="1"
 				step="0.01"
-				value={$searchState.filters.min_score}
+				value={searchStore.filters.min_score}
 				oninput={handleMinScoreRangeChange}
 			/>
 			<input
@@ -248,7 +240,7 @@
 				min="0"
 				max="1"
 				step="0.01"
-				value={$searchState.filters.min_score}
+				value={searchStore.filters.min_score}
 				oninput={handleMinScoreInputChange}
 			/>
 		</div>
@@ -262,7 +254,7 @@
 			id="exclude-types-input"
 			type="text"
 			placeholder="e.g., test, generated, vendor"
-			value={$searchState.filters.exclude_content_types}
+			value={searchStore.filters.exclude_content_types}
 			oninput={handleExcludeTypesChange}
 		/>
 	</div>
@@ -276,7 +268,7 @@
 				id="exclude-cats-input"
 				type="text"
 				placeholder="e.g., test, generated"
-				value={$searchState.filters.exclude_categories}
+				value={searchStore.filters.exclude_categories}
 				oninput={handleExcludeCategoriesChange}
 			/>
 		</div>
@@ -288,7 +280,7 @@
 				id="include-cats-input"
 				type="text"
 				placeholder="e.g., test, config"
-				value={$searchState.filters.include_categories}
+				value={searchStore.filters.include_categories}
 				oninput={handleIncludeCategoriesChange}
 			/>
 		</div>
@@ -302,7 +294,7 @@
 			id="exclude-glob-input"
 			type="text"
 			placeholder="e.g., **/*_test.go, vendor/**"
-			value={$searchState.filters.exclude_patterns}
+			value={searchStore.filters.exclude_patterns}
 			oninput={handleExcludePatternsChange}
 		/>
 	</div>
@@ -315,7 +307,7 @@
 			id="include-glob-input"
 			type="text"
 			placeholder="e.g., src/**/*.rs"
-			value={$searchState.filters.include_patterns}
+			value={searchStore.filters.include_patterns}
 			oninput={handleIncludePatternsChange}
 		/>
 	</div>
@@ -342,7 +334,7 @@
 				type="number"
 				min="1"
 				placeholder="server default"
-				value={$searchState.filters.rerank_max_candidates ?? ''}
+				value={searchStore.filters.rerank_max_candidates ?? ''}
 				oninput={handleRerankMaxChange}
 			/>
 		</div>
@@ -353,7 +345,7 @@
 			<label class="section-label" for="intent-select">Query Intent</label>
 			<select
 				id="intent-select"
-				value={$searchState.filters.query_intent}
+				value={searchStore.filters.query_intent}
 				onchange={handleIntentChange}
 			>
 				{#each INTENT_CHOICES as choice (choice.value)}

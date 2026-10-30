@@ -8,7 +8,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
-	import { storageState, storageActions } from '$lib/stores/storage';
+	import { storageStore } from '$lib/stores/storage.svelte';
 	import { qdrantApi, type QdrantProcessStatus } from '$lib/api/qdrant';
 
 	let showConfirmDialog = $state(false);
@@ -18,7 +18,7 @@
 	let qdrantError = $state<string | null>(null);
 
 	onMount(async () => {
-		storageActions.loadStatus();
+		storageStore.loadStatus();
 		await loadQdrantStatus();
 	});
 
@@ -76,7 +76,7 @@
 
 	async function confirmClear() {
 		showConfirmDialog = false;
-		await storageActions.clearIndex();
+		await storageStore.clearIndex();
 	}
 
 	function cancelClear() {
@@ -95,10 +95,10 @@
 			subtitle="Monitor storage health and manage index data"
 		/>
 
-		{#if $storageState.error}
+		{#if storageStore.error}
 			<ErrorBanner>
-				<span>{$storageState.error}</span>
-				<button type="button" class="dismiss-btn" onclick={storageActions.clearError}
+				<span>{storageStore.error}</span>
+				<button type="button" class="dismiss-btn" onclick={storageStore.clearError}
 					><Icon name="close" /></button
 				>
 			</ErrorBanner>
@@ -112,71 +112,71 @@
 				reindex.
 			</p>
 			<div class="spec-bar">
-				{#if $storageState.status}
+				{#if storageStore.status}
 					<div class="spec-item">
 						<div class="spec-label">
-							Vector DB ({backendName($storageState.status.vector_storage)})
+							Vector DB ({backendName(storageStore.status.vector_storage)})
 						</div>
 						<div class="spec-value">
 							<Badge
-								label={$storageState.status.vector_storage.connected
+								label={storageStore.status.vector_storage.connected
 									? 'Connected'
 									: 'Disconnected'}
-								variant={$storageState.status.vector_storage.connected
+								variant={storageStore.status.vector_storage.connected
 									? 'success'
 									: 'danger'}
 							/>
 						</div>
-						{#if $storageState.status.vector_storage.item_count > 0}
+						{#if storageStore.status.vector_storage.item_count > 0}
 							<div class="spec-detail">
-								{$storageState.status.vector_storage.item_count} items
+								{storageStore.status.vector_storage.item_count} items
 							</div>
 						{/if}
-						{#if $storageState.status.vector_storage.version}
+						{#if storageStore.status.vector_storage.version}
 							<div class="spec-detail version">
-								v{$storageState.status.vector_storage.version}
+								v{storageStore.status.vector_storage.version}
 							</div>
 						{/if}
 					</div>
 
 					<div class="spec-item">
 						<div class="spec-label">
-							BM25 Index ({backendName($storageState.status.bm25_storage)})
+							BM25 Index ({backendName(storageStore.status.bm25_storage)})
 						</div>
 						<div class="spec-value">
 							<Badge
-								label={$storageState.status.bm25_storage.connected
+								label={storageStore.status.bm25_storage.connected
 									? 'Connected'
 									: 'Disconnected'}
-								variant={$storageState.status.bm25_storage.connected
+								variant={storageStore.status.bm25_storage.connected
 									? 'success'
 									: 'danger'}
 							/>
 						</div>
-						{#if $storageState.status.bm25_storage.item_count > 0}
+						{#if storageStore.status.bm25_storage.item_count > 0}
 							<div class="spec-detail">
-								{$storageState.status.bm25_storage.item_count} items
+								{storageStore.status.bm25_storage.item_count} items
 							</div>
 						{/if}
 					</div>
 
 					<div class="spec-item">
 						<div class="spec-label">
-							Relations ({backendName($storageState.status.relation_storage)})
+							Relations ({backendName(storageStore.status.relation_storage)})
 						</div>
 						<div class="spec-value">
 							<Badge
-								label={$storageState.status.relation_storage.connected
+								label={storageStore.status.relation_storage.connected
 									? 'Connected'
 									: 'Disconnected'}
-								variant={$storageState.status.relation_storage.connected
+								variant={storageStore.status.relation_storage.connected
 									? 'success'
 									: 'danger'}
 							/>
 						</div>
-						{#if $storageState.status.relation_storage.item_count > 0}
+						{#if storageStore.status.relation_storage.item_count > 0}
 							<div class="spec-detail">
-								{$storageState.status.relation_storage.item_count} relations
+								{storageStore.status.relation_storage.item_count} relations
 							</div>
 						{/if}
 					</div>
@@ -185,11 +185,11 @@
 				{/if}
 			</div>
 
-			{#if $storageState.status && $storageState.status.total_disk_usage_mb > 0}
+			{#if storageStore.status && storageStore.status.total_disk_usage_mb > 0}
 				<div class="disk-usage">
 					<span class="label">Total Disk Usage:</span>
 					<span class="value"
-						>{$storageState.status.total_disk_usage_mb.toFixed(1)} MB</span
+						>{storageStore.status.total_disk_usage_mb.toFixed(1)} MB</span
 					>
 				</div>
 			{/if}
@@ -252,8 +252,8 @@
 				project. This cannot be undone.
 			</p>
 			<div class="clear-actions">
-				<Button onclick={handleClearIndex} disabled={$storageState.isLoading}>
-					{#if $storageState.isLoading}Clearing...{:else}Clear All Index Data{/if}
+				<Button onclick={handleClearIndex} disabled={storageStore.isLoading}>
+					{#if storageStore.isLoading}Clearing...{:else}Clear All Index Data{/if}
 				</Button>
 			</div>
 		</Card>
@@ -295,8 +295,8 @@
 			</p>
 			<div class="dialog-actions">
 				<Button variant="secondary" onclick={cancelClear}>Cancel</Button>
-				<Button onclick={confirmClear} disabled={$storageState.isLoading}>
-					{#if $storageState.isLoading}Clearing...{:else}Confirm Clear{/if}
+				<Button onclick={confirmClear} disabled={storageStore.isLoading}>
+					{#if storageStore.isLoading}Clearing...{:else}Confirm Clear{/if}
 				</Button>
 			</div>
 		</div>

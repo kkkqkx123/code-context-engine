@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { searchActions } from '$lib/stores/search';
+	import { searchStore } from '$lib/stores/search.svelte';
 	import Button from '../ui/Button.svelte';
 
 	interface Props {
@@ -13,7 +13,7 @@
 	function submit() {
 		const trimmed = query.trim();
 		if (!trimmed) return;
-		searchActions.setQuery(trimmed);
+		searchStore.setQuery(trimmed);
 		onSearch();
 	}
 

@@ -3,11 +3,7 @@
 	import type { Component } from 'svelte';
 	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import { onMount } from 'svelte';
-	import {
-		searchState,
-		searchActions,
-		AGGREGATED_TYPE,
-	} from '$lib/stores/search';
+	import { searchStore, AGGREGATED_TYPE } from '$lib/stores/search.svelte';
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -25,7 +21,7 @@
 	});
 
 	function handleSearch() {
-		void searchActions.executeSearch(1);
+		void searchStore.executeSearch(1);
 	}
 
 	function toggleFilterPanel() {
@@ -37,26 +33,26 @@
 	}
 
 	function prevPage() {
-		if ($searchState.pagination.page > 1) {
-			searchActions.setPage($searchState.pagination.page - 1);
+		if (searchStore.pagination.page > 1) {
+			searchStore.setPage(searchStore.pagination.page - 1);
 		}
 	}
 
 	function nextPage() {
-		searchActions.setPage($searchState.pagination.page + 1);
+		searchStore.setPage(searchStore.pagination.page + 1);
 	}
 
 	// Get paginated results for display
-	let paginatedResults = $derived(searchActions.getPaginatedResults());
-	let totalPages = $derived(searchActions.totalPages());
+	let paginatedResults = $derived(searchStore.getPaginatedResults());
+	let totalPages = $derived(searchStore.totalPages());
 	// Backend returns at most `page * pageSize` rows (top-K, no offset), so a
 	// next page exists only when we already hold that many rows. `total` is the
 	// truncated count; once we've reached it there is nothing more to fetch.
 	let hasMore = $derived(
-		$searchState.results.length >
-			$searchState.pagination.page * $searchState.pagination.pageSize &&
-			$searchState.total >
-				$searchState.pagination.page * $searchState.pagination.pageSize,
+		searchStore.results.length >
+			searchStore.pagination.page * searchStore.pagination.pageSize &&
+			searchStore.total >
+				searchStore.pagination.page * searchStore.pagination.pageSize,
 	);
 </script>
 
@@ -91,55 +87,55 @@
 			{/if}
 		{/if}
 
-		{#if $searchState.error}
-			<div class="error-banner">Search failed: {$searchState.error}</div>
+		{#if searchStore.error}
+			<div class="error-banner">Search failed: {searchStore.error}</div>
 		{/if}
 
-		{#if $searchState.isSearching}
+		{#if searchStore.isSearching}
 			<div class="loading-indicator">
 				<p>Searching...</p>
 			</div>
-		{:else if $searchState.results.length > 0}
+		{:else if searchStore.results.length > 0}
 			<Toolbar>
 				<h2 class="results-title">
-					Results ({$searchState.total} total)
-					{#if $searchState.elapsedMs !== null}
-						<span class="elapsed">· {$searchState.elapsedMs}ms</span>
+					Results ({searchStore.total} total)
+					{#if searchStore.elapsedMs !== null}
+						<span class="elapsed">· {searchStore.elapsedMs}ms</span>
 					{/if}
-					{#if $searchState.mode === AGGREGATED_TYPE && $searchState.sourcesUsed.length > 0}
+					{#if searchStore.mode === AGGREGATED_TYPE && searchStore.sourcesUsed.length > 0}
 						<span class="elapsed"
-							>· sources: {$searchState.sourcesUsed.join(', ')}</span
+							>· sources: {searchStore.sourcesUsed.join(', ')}</span
 						>
 					{/if}
 				</h2>
 			</Toolbar>
 
-			{#if $searchState.failedSubQueries.length > 0}
+			{#if searchStore.failedSubQueries.length > 0}
 				<div class="warn-banner">
-					Sub-queries failed (partial results): {$searchState.failedSubQueries.join(
+					Sub-queries failed (partial results): {searchStore.failedSubQueries.join(
 						', ',
 					)}
 				</div>
 			{/if}
 
-			{#if $searchState.stale}
+			{#if searchStore.stale}
 				<div class="stale-banner">
 					Filters or query mode changed — results may be outdated. Re-run the
 					search to apply.
 				</div>
 			{/if}
 
-			{#if $searchState.relationStale}
+			{#if searchStore.relationStale}
 				<div class="warn-banner">
 					Relation snapshot is stale
-					{#if $searchState.relationEpoch !== null}
-						<span>(epoch {$searchState.relationEpoch})</span>
+					{#if searchStore.relationEpoch !== null}
+						<span>(epoch {searchStore.relationEpoch})</span>
 					{/if}
 					— results may be outdated. Re-run the search after indexing catches
 					up.
 				</div>
-			{:else if $searchState.relationEpoch !== null}
-				<div class="relation-meta">Relation epoch: {$searchState.relationEpoch}</div>
+			{:else if searchStore.relationEpoch !== null}
+				<div class="relation-meta">Relation epoch: {searchStore.relationEpoch}</div>
 			{/if}
 
 			<div class="results-list">
@@ -153,21 +149,21 @@
 					<Button
 						variant="secondary"
 						onclick={prevPage}
-						disabled={$searchState.pagination.page === 1}
+						disabled={searchStore.pagination.page === 1}
 					>
 						Previous
 					</Button>
 					<span class="page-info">
-						Page {$searchState.pagination.page} of {hasMore ? '?' : totalPages}
+						Page {searchStore.pagination.page} of {hasMore ? '?' : totalPages}
 					</span>
 					<Button variant="secondary" onclick={nextPage} disabled={!hasMore}>
 						Next
 					</Button>
 				</div>
 			{/if}
-		{:else if $searchState.query && !$searchState.error}
+		{:else if searchStore.query && !searchStore.error}
 			<div class="no-results">
-				<p>No results found for "{$searchState.query}"</p>
+				<p>No results found for "{searchStore.query}"</p>
 				<p class="hint">Try adjusting your filters or search terms</p>
 			</div>
 		{/if}

@@ -7,10 +7,10 @@
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ProjectSelector from '$lib/components/ui/ProjectSelector.svelte';
-	import { isOnline } from '$lib/stores/network';
-	import { healthActions } from '$lib/stores/health';
-	import { metricsState, metricsActions } from '$lib/stores/metrics';
-	import { loadProjects } from '$lib/stores/project';
+	import { networkStore } from '$lib/stores/network.svelte';
+	import { healthStore } from '$lib/stores/health.svelte';
+	import { metricsStore } from '$lib/stores/metrics.svelte';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	type NavHref =
 		| '/'
@@ -117,7 +117,7 @@
 	let clockTimer: ReturnType<typeof setInterval> | null = null;
 
 	let serverOk = $derived(
-		$metricsState.lastUpdated != null && !$metricsState.error,
+		metricsStore.lastUpdated != null && !metricsStore.error,
 	);
 
 	function toggleMobile() {
@@ -135,9 +135,9 @@
 	}
 
 	onMount(() => {
-		loadProjects();
-		healthActions.startAutoRefresh(15000);
-		metricsActions.startAutoRefresh(30000);
+		projectStore.loadProjects();
+		healthStore.startAutoRefresh(15000);
+		metricsStore.startAutoRefresh(30000);
 		clock = new Date().toLocaleTimeString();
 		clockTimer = setInterval(() => {
 			clock = new Date().toLocaleTimeString();
@@ -145,8 +145,8 @@
 	});
 
 	onDestroy(() => {
-		healthActions.stopAutoRefresh();
-		metricsActions.stopAutoRefresh();
+		healthStore.stopAutoRefresh();
+		metricsStore.stopAutoRefresh();
 		if (clockTimer) {
 			clearInterval(clockTimer);
 		}
@@ -207,7 +207,7 @@
 
 		<div class="sidebar-footer">
 			<span class="version">v0.1.0</span>
-			{#if !isOnline}
+			{#if !networkStore.isOnline}
 				<span class="offline"><Icon name="warning" /> Offline</span>
 			{/if}
 		</div>
@@ -248,8 +248,8 @@
 					<ProjectSelector variant="topbar" />
 				</div>
 				<div class="health-dots" title="Storage component health">
-					{#if $metricsState.storageStatus}
-						{@const s = $metricsState.storageStatus}
+					{#if metricsStore.storageStatus}
+						{@const s = metricsStore.storageStatus}
 						<span
 							class="hdot"
 							class:ok={s.vector_storage.connected}

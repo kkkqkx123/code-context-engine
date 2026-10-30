@@ -8,8 +8,7 @@
 		indexApi,
 		type IndexStatsResponse,
 	} from '$lib/api/index';
-	import { currentProjectId, onProjectChange } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
 	import { onMount } from 'svelte';
 
 	let stats = $state<IndexStatsResponse['statistics'] | null>(null);
@@ -22,7 +21,7 @@
 		statsError = '';
 		stats = null;
 		try {
-			const response = await indexApi.getStats(get(currentProjectId));
+			const response = await indexApi.getStats(projectStore.currentProjectId);
 			stats = response.statistics;
 			statsElapsedMs = response.elapsed_ms;
 		} catch (e) {

@@ -8,11 +8,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
-	import {
-		projects,
-		loadProjects,
-		currentProjectId,
-	} from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import { projectApi, type Project } from '$lib/api/index';
 
 	let loading = $state(false);
@@ -32,7 +28,7 @@
 	let detailProject = $state<Project | null>(null);
 
 	onMount(() => {
-		loadProjects();
+		projectStore.loadProjects();
 	});
 
 	function resetForm() {
@@ -104,7 +100,7 @@
 			}
 
 			resetForm();
-			await loadProjects();
+			await projectStore.loadProjects();
 		} catch (e) {
 			error =
 				errorMessage(e) ||
@@ -127,7 +123,7 @@
 			if (detailProject?.id === project.id) {
 				detailProject = null;
 			}
-			await loadProjects();
+			await projectStore.loadProjects();
 		} catch (e) {
 			error = errorMessage(e) || 'Failed to delete project';
 		} finally {
@@ -163,7 +159,7 @@
 
 	function selectProject(project: Project) {
 		detailProject = project;
-		currentProjectId.set(Number(project.id));
+		projectStore.currentProjectId = (Number(project.id));
 	}
 </script>
 
@@ -187,18 +183,18 @@
 	<div class="layout">
 		<!-- Project List -->
 		<div class="list-column">
-			<Card title="All Projects" subtitle={`${$projects.length} project(s)`}>
+			<Card title="All Projects" subtitle={`${projectStore.projects.length} project(s)`}>
 				<div class="header-actions">
 					<Button onclick={openCreateForm} disabled={showForm}>
 						+ New Project
 					</Button>
 				</div>
 
-				{#if $projects.length === 0}
+				{#if projectStore.projects.length === 0}
 					<EmptyState padded message="No projects found. Create your first project to get started." />
 				{:else}
 					<div class="project-list">
-						{#each $projects as project (project.id)}
+						{#each projectStore.projects as project (project.id)}
 							<button type="button"
 								class="project-item"
 								class:selected={detailProject?.id === project.id}

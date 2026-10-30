@@ -18,7 +18,7 @@
 	import type { Core } from 'cytoscape';
 	import { page } from '$app/state';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { watchState, watchActions } from '$lib/stores/watch';
+	import { watchStore } from '$lib/stores/watch.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 import Button from '$lib/components/ui/Button.svelte';
 	import GraphCanvas, {
@@ -26,9 +26,9 @@ import Button from '$lib/components/ui/Button.svelte';
 		type GraphLayoutName,
 	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
-	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
+	import { graphStore, activeDomains } from '$lib/stores/graph.svelte';
 	import { StaleQuery } from '$lib/stores/stale-query.svelte';
-	import { onProjectChange } from '$lib/stores/project';
+	import { onProjectChange } from '$lib/stores/project.svelte';
 	import type { GraphDirection, GraphModuleResponse } from '$lib/api/graph';
 	import type { SymbolCandidate } from '$lib/api/client';
 	import {
@@ -158,7 +158,7 @@ import Button from '$lib/components/ui/Button.svelte';
 	let queryEntity = $derived(page.url.searchParams.get('entity') ?? '');
 	let queryFile = $derived(page.url.searchParams.get('file') ?? '');
 
-	let store = $derived($graphState);
+	let store = $derived(graphStore);
 	let nodes = $derived(store.nodes);
 	let edges = $derived(store.edges);
 	let availableDomains = $derived([...activeDomains(edges)]);
@@ -200,26 +200,26 @@ import Button from '$lib/components/ui/Button.svelte';
 		}
 		await runSeed();
 		if (queryFile) {
-			await graphActions.loadImpact(queryFile);
+			await graphStore.loadImpact(queryFile);
 		}
 	}
 
 	onMount(async () => {
 		void loadActivePanels();
 		await loadInitialGraph();
-		await watchActions.loadStatus();
-		watchActions.startVersionPoll();
+		await watchStore.loadStatus();
+		watchStore.startVersionPoll();
 	});
 
 	onDestroy(() => {
-		watchActions.stopVersionPoll();
+		watchStore.stopVersionPoll();
 	});
 
 	// The canvas only ever holds one project's nodes: clear the previous working
 	// set and re-run the current seed against the newly selected project.
 	$effect(() =>
 		onProjectChange((projectId) => {
-			graphActions.reset(projectId);
+			graphStore.reset(projectId);
 			void runSeed();
 		}),
 	);
@@ -234,12 +234,12 @@ import Button from '$lib/components/ui/Button.svelte';
 		if (seedMode === 'focus') {
 			if (!id) return;
 			selectedId = id;
-			await graphActions.loadEgo(id, egoDepth, egoDirection, undefined, filter);
+			await graphStore.loadEgo(id, egoDepth, egoDirection, undefined, filter);
 		} else if (seedMode === 'path') {
 			const start = pathStart.trim();
 			const end = pathEnd.trim();
 			if (!start || !end) return;
-			await graphActions.loadPath(
+			await graphStore.loadPath(
 				start,
 				end,
 				clampPositive(pathDepth, 10, 100),
@@ -249,15 +249,15 @@ import Button from '$lib/components/ui/Button.svelte';
 		} else if (seedMode === 'subgraph') {
 			const ids = parseEntityIds(subgraphIds);
 			if (ids.length === 0) return;
-			await graphActions.loadSubgraph(ids, undefined, filter);
+			await graphStore.loadSubgraph(ids, undefined, filter);
 		} else {
-			await graphActions.loadOverview(
+			await graphStore.loadOverview(
 				clampOverviewLimit(overviewLimit),
 				undefined,
 				filter,
 			);
 		}
-		await graphActions.loadComponentsIfStale(undefined, filter);
+		await graphStore.loadComponentsIfStale(undefined, filter);
 	}
 
 	// Disambiguation candidates shown when a symbol-name seed matches multiple
@@ -267,7 +267,7 @@ import Button from '$lib/components/ui/Button.svelte';
 	// The backend advanced past the epoch this working set was built from.
 	// Banner only: reload stays explicit so in-progress expansion is never lost;
 	// reloading rebuilds the current view from the seed and discards expansion.
-	let watchEpoch = $derived($watchState.status?.relation_epoch ?? null);
+	let watchEpoch = $derived(watchStore.status?.relation_epoch ?? null);
 	let isStale = $derived(
 		watchEpoch !== null &&
 			store.meta.epoch !== 0 &&
@@ -294,7 +294,7 @@ import Button from '$lib/components/ui/Button.svelte';
 
 	/** Double click on a node pulls in its immediate neighborhood. */
 	async function handleNodeActivate(nodeId: string) {
-		await graphActions.expand(nodeId, 1, egoDirection, serverFilter());
+		await graphStore.expand(nodeId, 1, egoDirection, serverFilter());
 		cy?.layout(layoutOptions(layout)).run();
 	}
 
@@ -310,18 +310,18 @@ import Button from '$lib/components/ui/Button.svelte';
 			if (impactMode === 'entity') {
 				const entityId = impactEntity.trim();
 				if (!entityId) {
-					graphActions.clearImpact();
+					graphStore.clearImpact();
 					return;
 				}
 				const depth = clampPositive(impactDepth, 10, 50);
-				const result = await graphActions.loadEntityImpact({
+				const result = await graphStore.loadEntityImpact({
 					entityId,
 					maxDepth: depth,
 					scope: impactScope,
 				});
 				if (result.ok) {
-					const direct = $graphState.meta.impactDirect.length;
-					const transitive = $graphState.meta.impactTransitive.length;
+					const direct = graphStore.meta.impactDirect.length;
+					const transitive = graphStore.meta.impactTransitive.length;
 					impactMessage =
 						direct + transitive === 0
 							? `No dependents found for '${entityId}'.`
@@ -330,13 +330,13 @@ import Button from '$lib/components/ui/Button.svelte';
 			} else {
 				const file = impactFile.trim();
 				if (!file) {
-					graphActions.clearImpact();
+					graphStore.clearImpact();
 					return;
 				}
-				const result = await graphActions.loadImpact(file);
+				const result = await graphStore.loadImpact(file);
 				if (result.ok) {
-					const direct = $graphState.meta.impactDirect.length;
-					const transitive = $graphState.meta.impactTransitive.length;
+					const direct = graphStore.meta.impactDirect.length;
+					const transitive = graphStore.meta.impactTransitive.length;
 					impactMessage =
 						direct + transitive === 0
 							? `No dependents found for '${file}'.`
@@ -352,7 +352,7 @@ import Button from '$lib/components/ui/Button.svelte';
 		impactFile = '';
 		impactEntity = '';
 		impactMessage = null;
-		graphActions.clearImpact();
+		graphStore.clearImpact();
 	}
 
 	let communities = $derived.by(() => {
@@ -371,7 +371,7 @@ import Button from '$lib/components/ui/Button.svelte';
 	// Module-level relations for one file. Shares the file input with impact
 	// analysis and stays page-local like cycles and structural results.
 	let moduleQuery = new StaleQuery<GraphModuleResponse>(
-		() => $watchState.status?.relation_epoch ?? null,
+		() => watchStore.status?.relation_epoch ?? null,
 	);
 
 	async function runModule() {
@@ -380,7 +380,7 @@ import Button from '$lib/components/ui/Button.svelte';
 			moduleQuery.error = 'Enter a file path to query module relations.';
 			return;
 		}
-		await moduleQuery.run(() => graphActions.loadModule(file));
+		await moduleQuery.run(() => graphStore.loadModule(file));
 	}
 
 	/** Focus an entity picked anywhere in the UI (module exports, peers). */
@@ -388,14 +388,14 @@ import Button from '$lib/components/ui/Button.svelte';
 		seedMode = 'focus';
 		seedId = entityId;
 		selectedId = entityId;
-		await graphActions.loadEgo(
+		await graphStore.loadEgo(
 			entityId,
 			egoDepth,
 			egoDirection,
 			undefined,
 			serverFilter(),
 		);
-		await graphActions.loadComponentsIfStale(undefined, serverFilter());
+		await graphStore.loadComponentsIfStale(undefined, serverFilter());
 	}
 
 	async function impactCallerFile(file: string) {
@@ -406,8 +406,8 @@ import Button from '$lib/components/ui/Button.svelte';
 
 	/** Load a set of ids as an induced subgraph and re-run the layout. */
 	async function openAsSubgraph(ids: string[]) {
-		await graphActions.loadSubgraph(ids, undefined, serverFilter());
-		await graphActions.loadComponentsIfStale(undefined, serverFilter());
+		await graphStore.loadSubgraph(ids, undefined, serverFilter());
+		await graphStore.loadComponentsIfStale(undefined, serverFilter());
 		cy?.layout(layoutOptions(layout)).run();
 	}
 
@@ -555,9 +555,9 @@ import Button from '$lib/components/ui/Button.svelte';
 						{showEdgeLabels}
 						{searchMatchCount}
 						onToggleDomain={(domain) => {
-							graphActions.toggleDomain(domain);
+							graphStore.toggleDomain(domain);
 						}}
-						onSearch={(value) => graphActions.setSearch(value)}
+						onSearch={(value) => graphStore.setSearch(value)}
 						onToggleEdgeLabels={() => (showEdgeLabels = !showEdgeLabels)}
 						onFocusMatches={focusSearchMatches}
 					/>
@@ -580,7 +580,7 @@ import Button from '$lib/components/ui/Button.svelte';
 				/>
 				<GraphCanvas
 					bind:cy
-					elements={$graphState.elements}
+					elements={graphStore.elements}
 					{layout}
 					loading={store.loading}
 					focusId={store.meta.focusId}

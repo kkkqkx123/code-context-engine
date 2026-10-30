@@ -9,7 +9,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
-	import { apiToken } from '$lib/stores/auth';
+	import { authStore } from '$lib/stores/auth.svelte';
 
 	interface Props {
 		tokenDraft?: string;
@@ -48,11 +48,11 @@
 		<Button
 			variant="secondary"
 			onclick={onClear}
-			disabled={tokenSaving || (!tokenDraft && !$apiToken)}
+			disabled={tokenSaving || (!tokenDraft && !authStore.token)}
 		>
 			Clear
 		</Button>
-		{#if $apiToken}
+		{#if authStore.token}
 			<Badge label="Token set" variant="active" />
 		{:else}
 			<Badge label="Local mode" variant="inactive" />

@@ -8,8 +8,7 @@
 		indexApi,
 		type DeleteFileResponse,
 	} from '$lib/api/index';
-	import { currentProjectId } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	interface Props {
 		/** Called after any successful deletion so stats can be refreshed. */
@@ -35,7 +34,7 @@
 		deleteFileBusy = true;
 		deleteFileError = '';
 		try {
-			deleteFileResult = await indexApi.deleteFile(path, get(currentProjectId));
+			deleteFileResult = await indexApi.deleteFile(path, projectStore.currentProjectId);
 			deleteFileArmed = false;
 			deleteFilePath = '';
 			await onDeleted?.();
@@ -66,7 +65,7 @@
 		deleteEntityBusy = true;
 		deleteEntityError = '';
 		try {
-			const response = await indexApi.deleteEntity(id, get(currentProjectId));
+			const response = await indexApi.deleteEntity(id, projectStore.currentProjectId);
 			deleteEntityMessage = response.message || `Entity ${id} deleted`;
 			deleteEntityArmed = false;
 			deleteEntityId = '';
@@ -109,7 +108,7 @@
 		batchBusy = true;
 		batchError = '';
 		try {
-			const response = await indexApi.batchDelete(get(currentProjectId), {
+			const response = await indexApi.batchDelete(projectStore.currentProjectId, {
 				file_paths: filePaths.length > 0 ? filePaths : undefined,
 				entity_ids: entityIds.length > 0 ? entityIds : undefined,
 			});

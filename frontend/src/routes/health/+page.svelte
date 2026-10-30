@@ -6,15 +6,15 @@
 	import ServiceDiagnostics from '$lib/components/health/ServiceDiagnostics.svelte';
 	import RetryQueueCard from '$lib/components/health/RetryQueueCard.svelte';
 	import { onMount } from 'svelte';
-	import { healthState, healthActions } from '$lib/stores/health';
+	import { healthStore } from '$lib/stores/health.svelte';
 
 	onMount(() => {
 		// loadAll is refreshed globally by the layout; also fetch per-service
 		// diagnostics so the page shows details beyond the unified summary.
-		healthActions.loadAll();
-		healthActions.loadQdrantHealth();
-		healthActions.loadEmbeddingHealth();
-		healthActions.loadBm25Health();
+		healthStore.loadAll();
+		healthStore.loadQdrantHealth();
+		healthStore.loadEmbeddingHealth();
+		healthStore.loadBm25Health();
 	});
 </script>
 
@@ -30,15 +30,15 @@
 		>
 			<Button
 				variant="secondary"
-				onclick={() => healthActions.loadAll()}
-				disabled={$healthState.isLoading}
+				onclick={() => healthStore.loadAll()}
+				disabled={healthStore.isLoading}
 			>
 				Refresh
 			</Button>
 		</PageHeader>
 
-		{#if $healthState.error}
-			<ErrorBanner message={$healthState.error} />
+		{#if healthStore.error}
+			<ErrorBanner message={healthStore.error} />
 		{/if}
 
 		<UnifiedStatusCard />

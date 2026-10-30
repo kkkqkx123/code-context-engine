@@ -3,7 +3,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
-	import { healthState } from '$lib/stores/health';
+	import { healthStore } from '$lib/stores/health.svelte';
 	import { serviceBadge } from '$lib/utils/health-badge';
 </script>
 
@@ -14,53 +14,53 @@
 -->
 <div class="detail-grid">
 	<Card title="Qdrant Diagnostics" subtitle="Vector store detailed state">
-		{#if $healthState.qdrant}
+		{#if healthStore.qdrant}
 			<div class="kv-list">
 				<div class="kv-row">
 					<span class="kv-label">Reachable</span>
 					<Badge
-						label={serviceBadge($healthState.qdrant.diagnostic?.reachable).label}
-						variant={serviceBadge($healthState.qdrant.diagnostic?.reachable)
+						label={serviceBadge(healthStore.qdrant.diagnostic?.reachable).label}
+						variant={serviceBadge(healthStore.qdrant.diagnostic?.reachable)
 							.variant}
 					/>
 				</div>
-				{#if $healthState.qdrant.diagnostic?.version}
+				{#if healthStore.qdrant.diagnostic?.version}
 					<div class="kv-row">
 						<span class="kv-label">Version</span>
 						<span class="kv-value"
-							>{$healthState.qdrant.diagnostic.version}</span
+							>{healthStore.qdrant.diagnostic.version}</span
 						>
 					</div>
 				{/if}
-				{#if $healthState.qdrant.diagnostic?.collection_exists !== undefined}
+				{#if healthStore.qdrant.diagnostic?.collection_exists !== undefined}
 					<div class="kv-row">
 						<span class="kv-label">Collection</span>
 						<Badge
-							label={$healthState.qdrant.diagnostic.collection_exists
+							label={healthStore.qdrant.diagnostic.collection_exists
 								? 'Present'
 								: 'Missing'}
-							variant={$healthState.qdrant.diagnostic.collection_exists
+							variant={healthStore.qdrant.diagnostic.collection_exists
 								? 'success'
 								: 'warning'}
 						/>
 					</div>
 				{/if}
-				{#if $healthState.qdrant.diagnostic?.points_count !== undefined}
+				{#if healthStore.qdrant.diagnostic?.points_count !== undefined}
 					<div class="kv-row">
 						<span class="kv-label">Points</span>
 						<span class="kv-value"
-							>{$healthState.qdrant.diagnostic.points_count.toLocaleString()}</span
+							>{healthStore.qdrant.diagnostic.points_count.toLocaleString()}</span
 						>
 					</div>
 				{/if}
 				<div class="kv-row">
 					<span class="kv-label">Circuit breaker</span>
 					<span class="kv-value"
-						>{$healthState.qdrant.circuit_breaker ?? 'unknown'}</span
+						>{healthStore.qdrant.circuit_breaker ?? 'unknown'}</span
 					>
 				</div>
-				{#if $healthState.qdrant.diagnostic?.error}
-					<InlineError message={$healthState.qdrant.diagnostic.error} />
+				{#if healthStore.qdrant.diagnostic?.error}
+					<InlineError message={healthStore.qdrant.diagnostic.error} />
 				{/if}
 			</div>
 		{:else}
@@ -69,25 +69,25 @@
 	</Card>
 
 	<Card title="Embedding Service" subtitle="Model serving state">
-		{#if $healthState.embedding}
+		{#if healthStore.embedding}
 			<div class="kv-list">
 				<div class="kv-row">
 					<span class="kv-label">Healthy</span>
 					<Badge
-						label={serviceBadge($healthState.embedding.healthy).label}
-						variant={serviceBadge($healthState.embedding.healthy).variant}
+						label={serviceBadge(healthStore.embedding.healthy).label}
+						variant={serviceBadge(healthStore.embedding.healthy).variant}
 					/>
 				</div>
-				{#if $healthState.embedding.model_name}
+				{#if healthStore.embedding.model_name}
 					<div class="kv-row">
 						<span class="kv-label">Model</span>
-						<span class="kv-value">{$healthState.embedding.model_name}</span>
+						<span class="kv-value">{healthStore.embedding.model_name}</span>
 					</div>
 				{/if}
-				{#if $healthState.embedding.message}
+				{#if healthStore.embedding.message}
 					<div class="kv-row">
 						<span class="kv-label">Message</span>
-						<span class="kv-value">{$healthState.embedding.message}</span>
+						<span class="kv-value">{healthStore.embedding.message}</span>
 					</div>
 				{/if}
 			</div>
@@ -97,28 +97,28 @@
 	</Card>
 
 	<Card title="BM25 Index" subtitle="Keyword index state">
-		{#if $healthState.bm25}
+		{#if healthStore.bm25}
 			<div class="kv-list">
 				<div class="kv-row">
 					<span class="kv-label">Connected</span>
 					<Badge
-						label={$healthState.bm25.connected ? 'Connected' : 'Disconnected'}
-						variant={$healthState.bm25.connected ? 'success' : 'danger'}
+						label={healthStore.bm25.connected ? 'Connected' : 'Disconnected'}
+						variant={healthStore.bm25.connected ? 'success' : 'danger'}
 					/>
 				</div>
-				{#if $healthState.bm25.enabled !== undefined}
+				{#if healthStore.bm25.enabled !== undefined}
 					<div class="kv-row">
 						<span class="kv-label">Enabled</span>
 						<Badge
-							label={$healthState.bm25.enabled ? 'Yes' : 'No'}
-							variant={$healthState.bm25.enabled ? 'success' : 'inactive'}
+							label={healthStore.bm25.enabled ? 'Yes' : 'No'}
+							variant={healthStore.bm25.enabled ? 'success' : 'inactive'}
 						/>
 					</div>
 				{/if}
-				{#if $healthState.bm25.index_path}
+				{#if healthStore.bm25.index_path}
 					<div class="kv-row">
 						<span class="kv-label">Index path</span>
-						<span class="kv-value mono">{$healthState.bm25.index_path}</span>
+						<span class="kv-value mono">{healthStore.bm25.index_path}</span>
 					</div>
 				{/if}
 			</div>

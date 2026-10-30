@@ -1,12 +1,7 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { errorMessage } from '$lib/utils/errors';
-	import {
-		projects,
-		currentProject,
-		currentProjectId,
-		loadProjects,
-	} from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import { projectApi, type Project } from '$lib/api/index';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
@@ -57,7 +52,7 @@
 					: undefined,
 			});
 			resetForm();
-			await loadProjects();
+			await projectStore.loadProjects();
 		} catch (error) {
 			alert(`Failed to create project: ${errorMessage(error)}`);
 		}
@@ -95,7 +90,7 @@
 					: undefined,
 			});
 			resetForm();
-			await loadProjects();
+			await projectStore.loadProjects();
 		} catch (error) {
 			alert(`Failed to update project: ${errorMessage(error)}`);
 		}
@@ -108,7 +103,7 @@
 
 		try {
 			await projectApi.deleteProject(id);
-			await loadProjects();
+			await projectStore.loadProjects();
 		} catch (error) {
 			alert(`Failed to delete project: ${errorMessage(error)}`);
 		}
@@ -124,7 +119,7 @@
 	}
 
 	function selectProject(project: Project) {
-		currentProjectId.set(Number(project.id));
+		projectStore.currentProjectId = (Number(project.id));
 	}
 </script>
 
@@ -194,14 +189,14 @@
 		</div>
 	{/if}
 
-	{#if $projects.length === 0}
+	{#if projectStore.projects.length === 0}
 		<EmptyState padded message="No projects found. Create your first project above." />
 	{:else}
 		<div class="project-list">
-			{#each $projects as project (project.id)}
+			{#each projectStore.projects as project (project.id)}
 				<div
 					class="project-item"
-					class:selected={$currentProject?.id === project.id}
+					class:selected={projectStore.currentProject?.id === project.id}
 					onclick={() => selectProject(project)}
 					role="button"
 					tabindex="0"

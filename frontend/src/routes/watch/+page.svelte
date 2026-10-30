@@ -9,7 +9,7 @@
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
-	import { watchState, watchActions } from '$lib/stores/watch';
+	import { watchStore } from '$lib/stores/watch.svelte';
 
 	// Lazy load LogViewer component
 	let LogViewer: Component | null = $state(null);
@@ -21,14 +21,14 @@
 	let isPaused = $state(false);
 
 	onMount(() => {
-		watchActions.loadStatus();
-		watchActions.startVersionPoll();
+		watchStore.loadStatus();
+		watchStore.startVersionPoll();
 		// Preload LogViewer component
 		loadLogViewerComponent();
 	});
 
 	onDestroy(() => {
-		watchActions.stopVersionPoll();
+		watchStore.stopVersionPoll();
 	});
 
 	async function handleStartWatch() {
@@ -37,11 +37,11 @@
 			.split(',')
 			.map((e) => e.trim())
 			.filter((e) => e);
-		await watchActions.startWatch(watchPath, extArray, debounceMs);
+		await watchStore.startWatch(watchPath, extArray, debounceMs);
 	}
 
 	async function handleStopWatch() {
-		await watchActions.stopWatch();
+		await watchStore.stopWatch();
 	}
 
 	function togglePause() {
@@ -49,7 +49,7 @@
 	}
 
 	function clearEvents() {
-		watchActions.clearEvents();
+		watchStore.clearEvents();
 	}
 
 	async function loadLogViewerComponent() {
@@ -72,18 +72,18 @@
 			subtitle="Server-side local watching only. Remote projects use gateway push from the machine where files live; this page cannot start gateway supply."
 		/>
 
-		{#if $watchState.error}
+		{#if watchStore.error}
 			<ErrorBanner>
-				<span>{$watchState.error}</span>
+				<span>{watchStore.error}</span>
 				<button type="button"
 					class="dismiss-btn"
-					onclick={() => watchState.update((s) => ({ ...s, error: null }))}
+					onclick={() => (watchStore.error = null)}
 					><Icon name="close" /></button
 				>
 			</ErrorBanner>
 		{/if}
 
-		{#if $watchState.error && $watchState.error.includes('gateway-supplied')}
+		{#if watchStore.error && watchStore.error.includes('gateway-supplied')}
 			<div class="gateway-hint">
 				<span
 					>This project is gateway-supplied; local watching is disabled. Push changes
@@ -105,7 +105,7 @@
 						type="text"
 						bind:value={watchPath}
 						placeholder="/path/to/project"
-						disabled={$watchState.isWatching}
+						disabled={watchStore.isWatching}
 					/>
 				</div>
 
@@ -118,7 +118,7 @@
 						type="text"
 						bind:value={extensions}
 						placeholder="ts,js,rs,py"
-						disabled={$watchState.isWatching}
+						disabled={watchStore.isWatching}
 					/>
 				</div>
 
@@ -134,63 +134,63 @@
 						max="5000"
 						step="100"
 						class="debounce-input"
-						disabled={$watchState.isWatching}
+						disabled={watchStore.isWatching}
 					/>
 				</div>
 
 				<div class="control-group control-actions">
-					{#if $watchState.isWatching}
+					{#if watchStore.isWatching}
 						<Button
 							variant="secondary"
 							onclick={handleStopWatch}
-							disabled={$watchState.isLoading}
+							disabled={watchStore.isLoading}
 						>
-							{#if $watchState.isLoading}Stopping...{:else}Stop Watching{/if}
+							{#if watchStore.isLoading}Stopping...{:else}Stop Watching{/if}
 						</Button>
 					{:else}
 						<Button
 							onclick={handleStartWatch}
-							disabled={!watchPath || $watchState.isLoading}
+							disabled={!watchPath || watchStore.isLoading}
 						>
-							{#if $watchState.isLoading}Starting...{:else}Start Watching{/if}
+							{#if watchStore.isLoading}Starting...{:else}Start Watching{/if}
 						</Button>
 					{/if}
 				</div>
 			</div>
 
-			{#if $watchState.status}
+			{#if watchStore.status}
 				<div class="status-bar">
 					<div class="status-indicator">
-						<span class="live-dot" class:active={$watchState.isWatching}></span>
+						<span class="live-dot" class:active={watchStore.isWatching}></span>
 						<Badge
-							label={$watchState.isWatching ? 'Active' : 'Inactive'}
-							variant={$watchState.isWatching ? 'success' : 'inactive'}
+							label={watchStore.isWatching ? 'Active' : 'Inactive'}
+							variant={watchStore.isWatching ? 'success' : 'inactive'}
 						/>
 					</div>
 					<div class="status-info">
 						<span class="info-item"
-							>Events: {$watchState.status.events_processed}</span
+							>Events: {watchStore.status.events_processed}</span
 						>
-						{#if $watchState.status.watched_dirs && $watchState.status.watched_dirs.length > 0}
+						{#if watchStore.status.watched_dirs && watchStore.status.watched_dirs.length > 0}
 							<span class="info-item"
-								>Watching: {$watchState.status.watched_dirs.length} dir(s)</span
+								>Watching: {watchStore.status.watched_dirs.length} dir(s)</span
 							>
 						{/if}
-						{#if $watchState.status.started_at}
+						{#if watchStore.status.started_at}
 							<span class="info-item"
 								>Started: {new Date(
-									$watchState.status.started_at,
+									watchStore.status.started_at,
 								).toLocaleString()}</span
 							>
 						{/if}
-						{#if $watchState.status.relation_epoch !== undefined && $watchState.status.relation_epoch !== null}
+						{#if watchStore.status.relation_epoch !== undefined && watchStore.status.relation_epoch !== null}
 							<span class="info-item"
-								>Relation epoch: {$watchState.status.relation_epoch}</span
+								>Relation epoch: {watchStore.status.relation_epoch}</span
 							>
 						{/if}
-						{#if ($watchState.status as unknown as { data_epoch?: number | null }).data_epoch !== undefined && ($watchState.status as unknown as { data_epoch?: number | null }).data_epoch !== null}
+						{#if (watchStore.status as unknown as { data_epoch?: number | null }).data_epoch !== undefined && (watchStore.status as unknown as { data_epoch?: number | null }).data_epoch !== null}
 							<span class="info-item"
-								>Data epoch: {($watchState.status as unknown as { data_epoch?: number | null }).data_epoch}</span
+								>Data epoch: {(watchStore.status as unknown as { data_epoch?: number | null }).data_epoch}</span
 							>
 						{/if}
 					</div>
@@ -208,11 +208,11 @@
 					{isPaused ? 'Resume' : 'Pause'}
 				</Button>
 				<Button variant="secondary" onclick={clearEvents}>Clear</Button>
-				<span class="event-count">{$watchState.events.length} events</span>
+				<span class="event-count">{watchStore.events.length} events</span>
 			</div>
 
 			{#if LogViewer}
-				<LogViewer events={$watchState.events} paused={isPaused} />
+				<LogViewer events={watchStore.events} paused={isPaused} />
 			{:else}
 				<LoadingState message="Loading log viewer..." />
 			{/if}

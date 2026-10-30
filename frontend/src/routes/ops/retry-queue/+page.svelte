@@ -8,10 +8,10 @@
 		type RetryQueueStatus,
 		type RetryQueueDeadEntry,
 	} from '$lib/api/dead-letters';
-	import { toastActions } from '$lib/stores/toast';
+	import { toastStore } from '$lib/stores/toast.svelte';
 	import { ApiError } from '$lib/api/client';
 	import { onMount } from 'svelte';
-	import { projects, loadProjects } from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	const REFRESH_MS = 30_000;
 
@@ -41,11 +41,11 @@
 		busy = true;
 		try {
 			const res = await retryQueueApi.clearDead(selectedProjectId);
-			toastActions.show(res.message, 'success');
+			toastStore.show(res.message, 'success');
 			clearConfirmOpen = false;
 			await load();
 		} catch (e) {
-			toastActions.show(e instanceof ApiError ? e.message : String(e), 'error');
+			toastStore.show(e instanceof ApiError ? e.message : String(e), 'error');
 		} finally {
 			busy = false;
 		}
@@ -59,7 +59,7 @@
 	}
 
 	onMount(() => {
-		loadProjects();
+		projectStore.loadProjects();
 		load();
 		const timer = setInterval(load, REFRESH_MS);
 		return () => clearInterval(timer);
@@ -94,7 +94,7 @@
 				}}
 			>
 				<option value="all" selected={selectedProjectId === null}>All projects</option>
-				{#each $projects as project (project.id)}
+				{#each projectStore.projects as project (project.id)}
 					<option
 						value={Number(project.id)}
 						selected={selectedProjectId === Number(project.id)}

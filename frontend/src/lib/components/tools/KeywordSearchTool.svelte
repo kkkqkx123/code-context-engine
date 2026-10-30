@@ -4,8 +4,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import { toolsApi, type KeywordSearchResult } from '$lib/api/tools';
-	import { currentProjectId } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	let query = $state('');
 	let termOperator = $state<'or' | 'and'>('or');
@@ -31,7 +30,7 @@
 		}
 		try {
 			result = await toolsApi.keywordSearch({
-				project_id: get(currentProjectId),
+				project_id: projectStore.currentProjectId,
 				query: q,
 				term_operator: termOperator,
 				top_n: topN,

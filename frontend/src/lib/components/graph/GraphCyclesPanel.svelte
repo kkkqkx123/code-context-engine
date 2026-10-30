@@ -4,8 +4,8 @@
 	 * the canvas working set. Query state (loading / error / epoch / stale)
 	 * is owned by the shared StaleQuery helper.
 	 */
-	import { graphActions } from '$lib/stores/graph';
-	import { watchState } from '$lib/stores/watch';
+	import { graphStore } from '$lib/stores/graph.svelte';
+	import { watchStore } from '$lib/stores/watch.svelte';
 	import { StaleQuery } from '$lib/stores/stale-query.svelte';
 	import { clampPositive } from '$lib/utils/graph-params';
 
@@ -20,7 +20,7 @@
 	let cyclesLimit = $state(100);
 	type GraphCyclesResponseData = import('$lib/api/graph').GraphCyclesResponse;
 	let query = new StaleQuery<GraphCyclesResponseData>(
-		() => $watchState.status?.relation_epoch ?? null,
+		() => watchStore.status?.relation_epoch ?? null,
 	);
 
 	let sortedCycles = $derived.by(() => {
@@ -31,7 +31,7 @@
 
 	async function runCycles() {
 		const limit = clampPositive(cyclesLimit, 100, 5000);
-		await query.run(() => graphActions.loadCycles(cyclesLevel, limit));
+		await query.run(() => graphStore.loadCycles(cyclesLevel, limit));
 	}
 </script>
 
@@ -40,7 +40,7 @@
 		<h4 class="communities-title">Dependency cycles</h4>
 		{#if query.stale}
 			<span class="stale-tag"
-				>Stale — index advanced to {$watchState.status?.relation_epoch}</span
+				>Stale — index advanced to {watchStore.status?.relation_epoch}</span
 			>
 		{/if}
 	</div>

@@ -7,9 +7,8 @@
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import { onMount } from 'svelte';
-	import { get } from 'svelte/store';
 	import { metricsApi, type AggregatedMetric } from '$lib/api/metrics';
-	import { currentProjectId, onProjectChange } from '$lib/stores/project';
+	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
 
 	// ─── History query state ──────────────────────────────────────
 	function toLocalInput(date: Date): string {
@@ -34,7 +33,7 @@
 				from: new Date(historyFrom).toISOString(),
 				to: new Date(historyTo).toISOString(),
 				metric: metricFilter.trim() || undefined,
-				project_id: scopeProject ? get(currentProjectId) : undefined,
+				project_id: scopeProject ? projectStore.currentProjectId : undefined,
 			});
 			historyLoaded = true;
 		} catch (e) {

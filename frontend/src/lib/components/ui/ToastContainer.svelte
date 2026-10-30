@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { toasts, toastActions } from '$lib/stores/toast';
+	import { toastStore } from '$lib/stores/toast.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 
 	type ToastIcon = 'success' | 'error' | 'warning' | 'info';
@@ -19,7 +19,7 @@
 </script>
 
 <div class="toast-container" aria-live="polite" aria-atomic="true">
-	{#each $toasts as toast (toast.id)}
+	{#each toastStore.toasts as toast (toast.id)}
 		<div class="toast toast-{toast.type}" role="alert">
 			<span class="toast-icon" aria-hidden="true">
 				<Icon name={getIcon(toast.type)} />
@@ -27,7 +27,7 @@
 			<span class="toast-message">{toast.message}</span>
 			<button type="button"
 				class="toast-dismiss"
-				onclick={() => toastActions.dismiss(toast.id)}
+				onclick={() => toastStore.dismiss(toast.id)}
 				aria-label="Dismiss notification"
 			>
 				<Icon name="close" />

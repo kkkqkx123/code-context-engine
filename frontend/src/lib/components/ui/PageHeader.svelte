@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { currentProject } from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 	/**
 	 * Consistent page header: title + one-line description on the left,
 	 * optional action slot on the right. Replaces the legacy giant hero.
@@ -24,11 +24,11 @@
 		{#if subtitle}
 			<p class="page-header-subtitle">{subtitle}</p>
 		{/if}
-		{#if $currentProject}
-			<p class="page-header-project" title={$currentProject.root_path}>
-				<span class="page-header-project-name">{$currentProject.name}</span>
+		{#if projectStore.currentProject}
+			<p class="page-header-project" title={projectStore.currentProject.root_path}>
+				<span class="page-header-project-name">{projectStore.currentProject.name}</span>
 				<span class="page-header-project-sep">·</span>
-				<span class="page-header-project-path">{$currentProject.root_path}</span
+				<span class="page-header-project-path">{projectStore.currentProject.root_path}</span
 				>
 			</p>
 		{/if}

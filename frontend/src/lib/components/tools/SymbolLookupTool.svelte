@@ -5,9 +5,8 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import { get } from 'svelte/store';
 	import { toolsApi } from '$lib/api/tools';
-	import { currentProjectId } from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import type { GetSymbolsResult, FileSymbolResult } from '$lib/api/tools';
 
 	interface Props {
@@ -31,7 +30,7 @@
 
 		try {
 			result = await toolsApi.getSymbols({
-				project_id: get(currentProjectId),
+				project_id: projectStore.currentProjectId,
 				paths: [filePath],
 			});
 		} catch (err) {

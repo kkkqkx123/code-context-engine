@@ -5,9 +5,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import { searchApi, type EntitySearchResultItem } from '$lib/api/search';
-	import { entityState, entityActions } from '$lib/stores/entities';
-	import { currentProjectId, onProjectChange } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { entityStore } from '$lib/stores/entities.svelte';
+	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
 	import { errorMessage } from '$lib/utils/errors';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -45,7 +44,7 @@
 		try {
 			const response = await searchApi.entitySearch({
 				query: trimmed,
-				project_id: get(currentProjectId),
+				project_id: projectStore.currentProjectId,
 				kind_filter: kindFilter || undefined,
 				limit,
 			});
@@ -66,7 +65,7 @@
 			results = [];
 			searched = false;
 			error = null;
-			entityActions.clear();
+			entityStore.clear();
 			if (query.trim()) void runSearch();
 		}),
 	);
@@ -74,7 +73,7 @@
 	async function runClassificationStats() {
 		classificationBusy = true;
 		try {
-			await entityActions.loadClassificationStats();
+			await entityStore.loadClassificationStats();
 		} finally {
 			classificationBusy = false;
 		}
@@ -83,7 +82,7 @@
 	async function runClassificationDetail(category: string) {
 		classificationBusy = true;
 		try {
-			await entityActions.loadRelationsByClassification(
+			await entityStore.loadRelationsByClassification(
 				category,
 				classificationLimit,
 			);
@@ -247,7 +246,7 @@
 				</Button>
 			</div>
 
-			{#if $entityState.classificationStats}
+			{#if entityStore.classificationStats}
 				<div class="table-wrap">
 					<table>
 						<thead>
@@ -258,7 +257,7 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each Object.entries($entityState.classificationStats.stats) as [category, count] (category)}
+							{#each Object.entries(entityStore.classificationStats.stats) as [category, count] (category)}
 								<tr>
 									<td class="cell-mono">{category}</td>
 									<td class="cell-mono">{count}</td>
@@ -277,10 +276,10 @@
 					</table>
 				</div>
 				<div class="result-meta">
-					{$entityState.classificationStats.total} classified relations
-					{#if $entityState.classificationCategory}
-						· showing {$entityState.classificationRelations.length} in
-						{$entityState.classificationCategory}
+					{entityStore.classificationStats.total} classified relations
+					{#if entityStore.classificationCategory}
+						· showing {entityStore.classificationRelations.length} in
+						{entityStore.classificationCategory}
 					{/if}
 				</div>
 			{:else}

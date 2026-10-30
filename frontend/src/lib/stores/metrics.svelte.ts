@@ -1,11 +1,9 @@
-import { errorMessage } from '../utils/errors';
-
 /**
- * Metrics State Store
- * Manages system metrics and health status
+ * Metrics State Store.
+ * Rune-based replacement of the previous `writable<MetricsState>` + `metricsActions`
+ * object. State is `$state` fields; actions are methods on the same instance.
  */
-
-import { writable } from 'svelte/store';
+import { errorMessage } from '../utils/errors';
 import { storageApi } from '../api/storage';
 import { metricsApi } from '../api/metrics';
 import type { StorageStatusDetail } from '../api/storage';
@@ -18,25 +16,18 @@ export interface MetricsState {
 	error: string | null;
 }
 
-export const metricsState = writable<MetricsState>({
-	storageStatus: null,
-	systemMetrics: null,
-	lastUpdated: null,
-	isLoading: false,
-	error: null,
-});
-
-// Auto-refresh interval (30 seconds)
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-// Actions
-export const metricsActions = {
+class MetricsStore {
+	storageStatus = $state<StorageStatusDetail | null>(null);
+	systemMetrics = $state<Record<string, unknown> | null>(null);
+	lastUpdated = $state<Date | null>(null);
+	isLoading = $state(false);
+	error = $state<string | null>(null);
+
 	async loadMetrics() {
-		metricsState.update((state) => ({
-			...state,
-			isLoading: true,
-			error: null,
-		}));
+		this.isLoading = true;
+		this.error = null;
 
 		try {
 			const [storageResponse, systemMetrics] = await Promise.all([
@@ -44,38 +35,34 @@ export const metricsActions = {
 				metricsApi.getJsonMetrics().catch(() => null),
 			]);
 
-			metricsState.update((state) => ({
-				...state,
-				storageStatus: storageResponse.status,
-				systemMetrics,
-				lastUpdated: new Date(),
-				isLoading: false,
-			}));
+			this.storageStatus = storageResponse.status;
+			this.systemMetrics = systemMetrics;
+			this.lastUpdated = new Date();
+			this.isLoading = false;
 		} catch (error) {
-			metricsState.update((state) => ({
-				...state,
-				isLoading: false,
-				error: errorMessage(error),
-			}));
+			this.isLoading = false;
+			this.error = errorMessage(error);
 		}
-	},
+	}
 
 	startAutoRefresh(intervalMs: number = 30000) {
 		if (refreshInterval) {
 			clearInterval(refreshInterval);
 		}
 
-		metricsActions.loadMetrics();
+		this.loadMetrics();
 
 		refreshInterval = setInterval(() => {
-			metricsActions.loadMetrics();
+			this.loadMetrics();
 		}, intervalMs);
-	},
+	}
 
 	stopAutoRefresh() {
 		if (refreshInterval) {
 			clearInterval(refreshInterval);
 			refreshInterval = null;
 		}
-	},
-};
+	}
+}
+
+export const metricsStore = new MetricsStore();

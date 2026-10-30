@@ -9,8 +9,8 @@
 	 * helper and talks to the graph store directly.
 	 */
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import { graphActions } from '$lib/stores/graph';
-	import { watchState } from '$lib/stores/watch';
+	import { graphStore } from '$lib/stores/graph.svelte';
+	import { watchStore } from '$lib/stores/watch.svelte';
 	import { StaleQuery } from '$lib/stores/stale-query.svelte';
 	import {
 		CONFIDENCE_META,
@@ -58,7 +58,7 @@
 	let structuralLimit = $state(200);
 	let structuralFor = $state<string | null>(null);
 	let query = new StaleQuery<GraphStructuralResponse>(
-		() => $watchState.status?.relation_epoch ?? null,
+		() => watchStore.status?.relation_epoch ?? null,
 	);
 
 	// A new selection invalidates the previous structural answer.
@@ -73,7 +73,7 @@
 		const subject = node;
 		const limit = clampPositive(structuralLimit, 200, 2000);
 		const ok = await query.run(() =>
-			graphActions.loadStructural({
+			graphStore.loadStructural({
 				entityId: subject.id,
 				kind: structuralKind,
 				direction: structuralDirection,

@@ -4,8 +4,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import { toolsApi, type GotoDefinitionResult } from '$lib/api/tools';
-	import { currentProjectId } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 
@@ -25,7 +24,7 @@
 		result = null;
 		try {
 			result = await toolsApi.getDefinition({
-				project_id: get(currentProjectId),
+				project_id: projectStore.currentProjectId,
 				path,
 				line,
 				column,

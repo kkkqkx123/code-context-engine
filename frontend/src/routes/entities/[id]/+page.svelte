@@ -3,9 +3,8 @@
 	import type { Component } from 'svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { get } from 'svelte/store';
-	import { entityState, entityActions } from '$lib/stores/entities';
-	import { onProjectChange } from '$lib/stores/project';
+	import { entityStore } from '$lib/stores/entities.svelte';
+	import { onProjectChange } from '$lib/stores/project.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -48,9 +47,9 @@
 
 	async function loadEntity() {
 		if (!entityId) return;
-		await entityActions.loadFunction(entityId, relationFilter());
-		if (!get(entityState).currentEntity) {
-			await entityActions.loadClass(entityId);
+		await entityStore.loadFunction(entityId, relationFilter());
+		if (!entityStore.currentEntity) {
+			await entityStore.loadClass(entityId);
 		}
 	}
 
@@ -62,7 +61,7 @@
 	// previous project may stay on screen, so clear first and reload.
 	$effect(() =>
 		onProjectChange(() => {
-			entityActions.clear();
+			entityStore.clear();
 			void loadEntity();
 		}),
 	);
@@ -87,7 +86,7 @@
 
 	function loadCallChain(direction: 'up' | 'down') {
 		if (entityId) {
-			entityActions.loadCallChain(entityId, direction, relationFilter());
+			entityStore.loadCallChain(entityId, direction, relationFilter());
 		}
 	}
 
@@ -101,7 +100,7 @@
 		const to = pathTo.trim();
 		if (!from || !to) return;
 		const depth = Number.isInteger(pathDepth) && pathDepth > 0 ? pathDepth : 10;
-		entityActions.loadCallPath(from, to, depth);
+		entityStore.loadCallPath(from, to, depth);
 	}
 
 	async function loadCallGraphComponent() {
@@ -128,18 +127,18 @@
 
 <div class="page">
 	<div class="container">
-		{#if $entityState.isLoading}
+		{#if entityStore.isLoading}
 			<div class="loading-state">
 				<p>Loading entity...</p>
 			</div>
-		{:else if $entityState.error}
+		{:else if entityStore.error}
 			<div class="error-state">
-				<p>{$entityState.error}</p>
+				<p>{entityStore.error}</p>
 			</div>
-		{:else if $entityState.currentEntity}
+		{:else if entityStore.currentEntity}
 			<PageHeader
 				title="Entity Details"
-				subtitle="Viewing entity: {$entityState.currentEntity.name}"
+				subtitle="Viewing entity: {entityStore.currentEntity.name}"
 			/>
 
 			<!-- Relation traversal filter: every control maps onto RelationFilter -->
@@ -272,9 +271,9 @@
 			{#if currentTab === 'details'}
 				{#if entityDetailLoaded && EntityDetail}
 					<EntityDetail
-						func={$entityState.currentEntity}
-						calls={$entityState.calls?.callees ?? []}
-						callers={$entityState.callers?.callers ?? []}
+						func={entityStore.currentEntity}
+						calls={entityStore.calls?.callees ?? []}
+						callers={entityStore.callers?.callers ?? []}
 						onNavigate={handleNavigate}
 					/>
 				{:else}
@@ -299,7 +298,7 @@
 					</div>
 					{#if CallGraph}
 						<CallGraph
-							nodes={$entityState.callChain}
+							nodes={entityStore.callChain}
 							focusId={String(entityId)}
 							onNavigate={handleNavigate}
 						/>
@@ -311,10 +310,10 @@
 				<Card title="Inheritance Tree" subtitle="Class hierarchy">
 					{#if InheritanceTree}
 						<InheritanceTree
-							inheritance={$entityState.inheritance}
-							implementations={$entityState.implementations}
+							inheritance={entityStore.inheritance}
+							implementations={entityStore.implementations}
 							focusId={String(entityId)}
-							fallbackName={$entityState.currentEntity?.name ?? null}
+							fallbackName={entityStore.currentEntity?.name ?? null}
 							onNavigate={handleNavigate}
 						/>
 					{:else}
@@ -323,8 +322,8 @@
 				</Card>
 			{:else if currentTab === 'call-chain'}
 				<Card title="Call Chain" subtitle="Linear execution path">
-					{#if $entityState.callChain.length > 0}
-						<CallChainList nodes={$entityState.callChain} />
+					{#if entityStore.callChain.length > 0}
+						<CallChainList nodes={entityStore.callChain} />
 					{:else}
 						<p class="placeholder-text">No call chain data available</p>
 					{/if}
@@ -362,20 +361,20 @@
 							type="button"
 							class="graph-action-btn"
 							onclick={runCallPath}
-							disabled={$entityState.isLoading}
+							disabled={entityStore.isLoading}
 						>
-							{$entityState.isLoading ? 'Searching...' : 'Find Path'}
+							{entityStore.isLoading ? 'Searching...' : 'Find Path'}
 						</button>
 					</div>
 
-					{#if $entityState.error}
-						<p class="path-error">{$entityState.error}</p>
+					{#if entityStore.error}
+						<p class="path-error">{entityStore.error}</p>
 					{/if}
 
-					{#if $entityState.callPath.length > 0}
-						<CallChainList nodes={$entityState.callPath} />
-						<p class="path-meta">{$entityState.callPathLength} hop(s)</p>
-					{:else if !$entityState.callPathFound && !$entityState.isLoading}
+					{#if entityStore.callPath.length > 0}
+						<CallChainList nodes={entityStore.callPath} />
+						<p class="path-meta">{entityStore.callPathLength} hop(s)</p>
+					{:else if !entityStore.callPathFound && !entityStore.isLoading}
 						<p class="placeholder-text">
 							No call path found between the two functions.
 						</p>

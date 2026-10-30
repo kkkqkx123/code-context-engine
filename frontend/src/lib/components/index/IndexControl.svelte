@@ -1,7 +1,7 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import { indexState, indexActions } from '$lib/stores/index';
-	import { currentProject } from '$lib/stores/project';
+	import { indexStore } from '$lib/stores/index.svelte';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Card from '../ui/Card.svelte';
@@ -24,48 +24,48 @@
 	}
 
 	async function handleIndex() {
-		const project = $currentProject;
+		const project = projectStore.currentProject;
 		if (!project) return;
 
 		if (incremental) {
-			await indexActions.startIncrementalIndex({
+			await indexStore.startIncrementalIndex({
 				project_id: Number(project.id),
 				force_reindex: forceReindex,
 			});
 		} else {
-			await indexActions.startProjectIndex(project.id);
+			await indexStore.startProjectIndex(project.id);
 		}
 	}
 </script>
 
 <Card title="Index Control" subtitle="Start and monitor indexing operations">
-	{#if $indexState.isIndexing}
+	{#if indexStore.isIndexing}
 		<div class="progress-section">
 			<div class="progress-header">
 				<h3>Indexing in Progress</h3>
-				<Badge variant="info">{$indexState.phase || 'Processing'}</Badge>
+				<Badge variant="info">{indexStore.phase || 'Processing'}</Badge>
 			</div>
 
-			<ProgressBar progress={$indexState.progress} showLabel={true} />
+			<ProgressBar progress={indexStore.progress} showLabel={true} />
 
-			{#if $indexState.currentFile}
+			{#if indexStore.currentFile}
 				<div class="current-file">
 					<span class="file-label">Current File:</span>
-					<span class="file-path">{$indexState.currentFile}</span>
+					<span class="file-path">{indexStore.currentFile}</span>
 				</div>
 			{/if}
 
-			{#if $indexState.errorCount > 0}
+			{#if indexStore.errorCount > 0}
 				<div class="error-info">
-					<span class="error-count">Errors: {$indexState.errorCount}</span>
-					{#if $indexState.lastError}
-						<InlineError message={$indexState.lastError} />
+					<span class="error-count">Errors: {indexStore.errorCount}</span>
+					{#if indexStore.lastError}
+						<InlineError message={indexStore.lastError} />
 					{/if}
 				</div>
 			{/if}
 
 			<div class="progress-actions">
-				<Button variant="danger" onclick={indexActions.stopIndex}>
+				<Button variant="danger" onclick={indexStore.stopIndex}>
 					Cancel Indexing
 				</Button>
 			</div>
@@ -76,12 +76,12 @@
 				<h3>Configure Index Operation</h3>
 			</div>
 
-			{#if $currentProject}
+			{#if projectStore.currentProject}
 				<div class="target-project">
 					<span class="target-label">Target</span>
-					<span class="target-name">{$currentProject.name}</span>
-					<span class="target-path" title={$currentProject.root_path}
-						>{$currentProject.root_path}</span
+					<span class="target-name">{projectStore.currentProject.name}</span>
+					<span class="target-path" title={projectStore.currentProject.root_path}
+						>{projectStore.currentProject.root_path}</span
 					>
 				</div>
 

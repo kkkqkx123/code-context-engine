@@ -1,9 +1,9 @@
 /**
- * Entity State Store
- * Manages entity details and relationship exploration
+ * Entity State Store.
+ * Rune-based replacement of the previous `writable<EntityState>` + `entityActions`
+ * object. State is `$state` fields; actions are methods on the same instance.
  */
-
-import { writable, get } from 'svelte/store';
+import { errorMessage } from '../utils/errors';
 import {
 	entityApi,
 	type FunctionInfo,
@@ -15,7 +15,7 @@ import {
 	type RelationFilter,
 } from '../api/entities';
 import { type CallChainNode } from '../api/search';
-import { currentProjectId } from './project';
+import { projectStore } from './project.svelte';
 
 export interface EntityState {
 	currentEntity: FunctionInfo | null;
@@ -37,30 +37,28 @@ export interface EntityState {
 	error: string | null;
 }
 
-export const entityState = writable<EntityState>({
-	currentEntity: null,
-	calls: null,
-	callers: null,
-	callChain: [],
-	callPathFound: false,
-	callPath: [],
-	callPathLength: 0,
-	inheritance: null,
-	implementations: null,
-	classificationStats: null,
-	classificationRelations: [],
-	classificationCategory: '',
-	isLoading: false,
-	error: null,
-});
+class EntityStore {
+	currentEntity = $state<FunctionInfo | null>(null);
+	calls = $state<FunctionCallsResponse | null>(null);
+	callers = $state<FunctionCallersResponse | null>(null);
+	callChain = $state<CallChainNode[]>([]);
+	callPathFound = $state(false);
+	callPath = $state<CallChainNode[]>([]);
+	callPathLength = $state(0);
+	inheritance = $state<ClassInheritanceResponse | null>(null);
+	implementations = $state<ClassImplementationsResponse | null>(null);
+	classificationStats = $state<ClassificationStatsResponse | null>(null);
+	classificationRelations = $state<unknown[]>([]);
+	classificationCategory = $state('');
+	isLoading = $state(false);
+	error = $state<string | null>(null);
 
-// Actions
-export const entityActions = {
 	async loadFunction(id: string, filter?: RelationFilter) {
-		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
+		this.isLoading = true;
+		this.error = null;
 
 		try {
-			const projId = get(currentProjectId);
+			const projId = projectStore.currentProjectId;
 
 			const [func, calls, callers] = await Promise.all([
 				entityApi.getFunction(projId, id),
@@ -68,50 +66,39 @@ export const entityActions = {
 				entityApi.getCallers(projId, id, filter),
 			]);
 
-			entityState.update((s) => ({
-				...s,
-				currentEntity: func.function,
-				calls,
-				callers,
-				isLoading: false,
-			}));
+			this.currentEntity = func.function;
+			this.calls = calls;
+			this.callers = callers;
+			this.isLoading = false;
 		} catch (error) {
 			console.error('Failed to load function:', error);
-			entityState.update((s) => ({
-				...s,
-				isLoading: false,
-				error: 'Failed to load function details',
-			}));
+			this.isLoading = false;
+			this.error = 'Failed to load function details';
 		}
-	},
+	}
 
 	async loadClass(id: string) {
-		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
+		this.isLoading = true;
+		this.error = null;
 
 		try {
-			const projId = get(currentProjectId);
+			const projId = projectStore.currentProjectId;
 
 			const [inheritance, implementations] = await Promise.all([
 				entityApi.getInheritance(projId, id),
 				entityApi.getImplementations(projId, id),
 			]);
 
-			entityState.update((s) => ({
-				...s,
-				currentEntity: null,
-				inheritance,
-				implementations,
-				isLoading: false,
-			}));
+			this.currentEntity = null;
+			this.inheritance = inheritance;
+			this.implementations = implementations;
+			this.isLoading = false;
 		} catch (error) {
 			console.error('Failed to load class:', error);
-			entityState.update((s) => ({
-				...s,
-				isLoading: false,
-				error: 'Failed to load class details',
-			}));
+			this.isLoading = false;
+			this.error = 'Failed to load class details';
 		}
-	},
+	}
 
 	async loadCallChain(
 		id: string,
@@ -119,7 +106,7 @@ export const entityActions = {
 		filter?: RelationFilter,
 	) {
 		try {
-			const projId = get(currentProjectId);
+			const projId = projectStore.currentProjectId;
 
 			const response = await entityApi.getCallChain(
 				projId,
@@ -127,11 +114,11 @@ export const entityActions = {
 				direction,
 				filter,
 			);
-			entityState.update((s) => ({ ...s, callChain: response.call_chain }));
+			this.callChain = response.call_chain;
 		} catch (error) {
 			console.error('Failed to load call chain:', error);
 		}
-	},
+	}
 
 	/**
 	 * Query the shortest call path between two functions. `path_found` is
@@ -139,17 +126,14 @@ export const entityActions = {
 	 * a previous path is cleared either way.
 	 */
 	async loadCallPath(fromId: string, toId: string, maxDepth = 10) {
-		entityState.update((s) => ({
-			...s,
-			isLoading: true,
-			error: null,
-			callPath: [],
-			callPathFound: false,
-			callPathLength: 0,
-		}));
+		this.isLoading = true;
+		this.error = null;
+		this.callPath = [];
+		this.callPathFound = false;
+		this.callPathLength = 0;
 
 		try {
-			const projId = get(currentProjectId);
+			const projId = projectStore.currentProjectId;
 
 			const response = await entityApi.getCallPath(
 				projId,
@@ -157,99 +141,78 @@ export const entityActions = {
 				toId,
 				maxDepth,
 			);
-			entityState.update((s) => ({
-				...s,
-				callPathFound: response.path_found,
-				callPath: response.path ?? [],
-				callPathLength: response.path_length ?? 0,
-				isLoading: false,
-				error: response.path_found
-					? null
-					: 'No call path found between the given functions',
-			}));
+			this.callPathFound = response.path_found;
+			this.callPath = response.path ?? [];
+			this.callPathLength = response.path_length ?? 0;
+			this.isLoading = false;
+			this.error = response.path_found
+				? null
+				: 'No call path found between the given functions';
 			return response;
 		} catch (error) {
 			console.error('Failed to load call path:', error);
-			entityState.update((s) => ({
-				...s,
-				isLoading: false,
-				error: 'Failed to load call path',
-			}));
+			this.isLoading = false;
+			this.error = 'Failed to load call path';
 			return null;
 		}
-	},
+	}
 
 	clear() {
-		entityState.update((s) => ({
-			...s,
-			currentEntity: null,
-			calls: null,
-			callers: null,
-			callChain: [],
-			callPathFound: false,
-			callPath: [],
-			callPathLength: 0,
-			inheritance: null,
-			implementations: null,
-			classificationStats: null,
-			classificationRelations: [],
-			classificationCategory: '',
-			error: null,
-		}));
-	},
+		this.currentEntity = null;
+		this.calls = null;
+		this.callers = null;
+		this.callChain = [];
+		this.callPathFound = false;
+		this.callPath = [];
+		this.callPathLength = 0;
+		this.inheritance = null;
+		this.implementations = null;
+		this.classificationStats = null;
+		this.classificationRelations = [];
+		this.classificationCategory = '';
+		this.error = null;
+	}
 
 	/** Project-level external-call classification counts. */
 	async loadClassificationStats() {
-		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
+		this.isLoading = true;
+		this.error = null;
 		try {
-			const projId = get(currentProjectId);
+			const projId = projectStore.currentProjectId;
 			const stats = await entityApi.getClassificationStats(projId);
-			entityState.update((s) => ({
-				...s,
-				classificationStats: stats,
-				isLoading: false,
-			}));
+			this.classificationStats = stats;
+			this.isLoading = false;
 			return stats;
 		} catch (error) {
 			console.error('Failed to load classification stats:', error);
-			entityState.update((s) => ({
-				...s,
-				isLoading: false,
-				error: 'Failed to load classification stats',
-			}));
+			this.isLoading = false;
+			this.error = 'Failed to load classification stats';
 			return null;
 		}
-	},
+	}
 
 	/** Relations in one external-call classification category. */
 	async loadRelationsByClassification(classification: string, limit?: number) {
-		entityState.update((s) => ({
-			...s,
-			isLoading: true,
-			error: null,
-			classificationCategory: classification,
-		}));
+		this.isLoading = true;
+		this.error = null;
+		this.classificationCategory = classification;
 		try {
-			const projId = get(currentProjectId);
+			const projId = projectStore.currentProjectId;
 			const relations = await entityApi.getRelationsByClassification(
 				projId,
 				classification,
 				limit,
 			);
-			entityState.update((s) => ({
-				...s,
-				classificationRelations: relations,
-				isLoading: false,
-			}));
+			this.classificationRelations = relations;
+			this.isLoading = false;
 			return relations;
 		} catch (error) {
 			console.error('Failed to load classification relations:', error);
-			entityState.update((s) => ({
-				...s,
-				isLoading: false,
-				error: 'Failed to load classification relations',
-			}));
+			this.isLoading = false;
+			this.error = 'Failed to load classification relations';
 			return null;
 		}
-	},
-};
+	}
+}
+
+export const entityStore = new EntityStore();

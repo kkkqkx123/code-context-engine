@@ -2,31 +2,31 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { metricsState, metricsActions } from '$lib/stores/metrics';
-	import { projects } from '$lib/stores/project';
+	import { metricsStore } from '$lib/stores/metrics.svelte';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 
 	onMount(() => {
-		metricsActions.startAutoRefresh(30000);
+		metricsStore.startAutoRefresh(30000);
 	});
 
 	onDestroy(() => {
-		metricsActions.stopAutoRefresh();
+		metricsStore.stopAutoRefresh();
 	});
 
 	let vectorCount = $derived(
-		$metricsState.storageStatus?.vector_storage.item_count ?? 0,
+		metricsStore.storageStatus?.vector_storage.item_count ?? 0,
 	);
 	let bm25Count = $derived(
-		$metricsState.storageStatus?.bm25_storage.item_count ?? 0,
+		metricsStore.storageStatus?.bm25_storage.item_count ?? 0,
 	);
 	let serverOk = $derived(
-		$metricsState.lastUpdated != null && !$metricsState.error,
+		metricsStore.lastUpdated != null && !metricsStore.error,
 	);
 	let lastUpdatedText = $derived(
-		$metricsState.lastUpdated
-			? $metricsState.lastUpdated.toLocaleTimeString()
+		metricsStore.lastUpdated
+			? metricsStore.lastUpdated.toLocaleTimeString()
 			: '—',
 	);
 </script>
@@ -44,7 +44,7 @@
 	<div class="kpi-grid">
 		<div class="kpi-card">
 			<span class="kpi-label">Projects</span>
-			<span class="kpi-value">{$projects.length}</span>
+			<span class="kpi-value">{projectStore.projects.length}</span>
 			<span class="kpi-meta">indexed codebases</span>
 		</div>
 		<div class="kpi-card">

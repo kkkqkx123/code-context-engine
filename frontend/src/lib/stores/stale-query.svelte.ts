@@ -9,7 +9,7 @@
  * This class centralizes that state machine so panels only supply the
  * loader function.
  */
-import type { GraphActionResult } from '$lib/stores/graph';
+import type { GraphActionResult } from '$lib/stores/graph.svelte';
 
 export class StaleQuery<T extends { relation_epoch: number }> {
 	data = $state<T | null>(null);

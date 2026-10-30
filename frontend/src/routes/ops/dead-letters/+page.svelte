@@ -10,9 +10,9 @@
 		type DeadLetterFileEntry,
 	} from '$lib/api/dead-letters';
 	import { deadLetterGuidance } from '$lib/dead-letter-actions';
-	import { toastActions } from '$lib/stores/toast';
+	import { toastStore } from '$lib/stores/toast.svelte';
 	import { ApiError } from '$lib/api/client';
-	import { currentProjectId } from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	const REFRESH_MS = 30_000;
 
@@ -29,7 +29,7 @@
 	// Follow the global project selection (sidebar/topbar ProjectSelector).
 	let lastLoadedProject: number | null = null;
 	$effect(() => {
-		const id = $currentProjectId;
+		const id = projectStore.currentProjectId;
 		if (id !== lastLoadedProject) {
 			lastLoadedProject = id;
 			projectId = id;
@@ -97,10 +97,10 @@
 		busy = true;
 		try {
 			const res = await deadLetterApi.retry(projectId, paths);
-			toastActions.show(res.message, 'success');
+			toastStore.show(res.message, 'success');
 			await load();
 		} catch (e) {
-			toastActions.show(e instanceof ApiError ? e.message : String(e), 'error');
+			toastStore.show(e instanceof ApiError ? e.message : String(e), 'error');
 		} finally {
 			busy = false;
 		}
@@ -111,10 +111,10 @@
 		busy = true;
 		try {
 			const res = await deadLetterApi.acknowledge(projectId, path, module);
-			toastActions.show(res.message, 'success');
+			toastStore.show(res.message, 'success');
 			await load();
 		} catch (e) {
-			toastActions.show(e instanceof ApiError ? e.message : String(e), 'error');
+			toastStore.show(e instanceof ApiError ? e.message : String(e), 'error');
 		} finally {
 			busy = false;
 			ackTarget = null;
@@ -136,9 +136,9 @@
 		}
 		busy = false;
 		if (failures.length === 0) {
-			toastActions.show(`Acknowledged ${selected.size} file(s)`, 'success');
+			toastStore.show(`Acknowledged ${selected.size} file(s)`, 'success');
 		} else {
-			toastActions.show(
+			toastStore.show(
 				`Acknowledged ${selected.size - failures.length}, failed ${failures.length}: ${failures.join('; ')}`,
 				'warning',
 				10_000,

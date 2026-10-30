@@ -4,8 +4,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import { toolsApi, type FindReferencesResult } from '$lib/api/tools';
-	import { currentProjectId } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	let filePath = $state('');
 	let line = $state(1);
@@ -26,7 +25,7 @@
 		result = null;
 		try {
 			result = await toolsApi.findReferences({
-				project_id: get(currentProjectId),
+				project_id: projectStore.currentProjectId,
 				path,
 				line,
 				column,

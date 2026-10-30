@@ -31,13 +31,8 @@
 		indexApi,
 		type ProjectConfigUpdateResponse,
 	} from '$lib/api';
-	import { currentProjectId, onProjectChange } from '$lib/stores/project';
-	import {
-		apiToken,
-		setApiToken,
-		clearApiToken,
-	} from '$lib/stores/auth';
-	import { get } from 'svelte/store';
+	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import { errorMessage } from '$lib/utils/errors';
 	import { parseList } from '$lib/utils/text';
 
@@ -129,7 +124,7 @@
 		basicLoading = true;
 		basicError = null;
 		try {
-			const detail = await projectApi.getProject(String(get(currentProjectId)));
+			const detail = await projectApi.getProject(String(projectStore.currentProjectId));
 			const project = detail.project;
 			rootPath = project.root_path;
 			basicName = project.name;
@@ -151,7 +146,7 @@
 		runtimeError = null;
 		try {
 			const response = await projectApi.getProjectConfig(
-				String(get(currentProjectId)),
+				String(projectStore.currentProjectId),
 			);
 			runtimeText = JSON.stringify(response.config, null, 2);
 			runtimeVersion = response.config_version;
@@ -174,7 +169,7 @@
 		llmLoading = true;
 		llmLoadError = null;
 		try {
-			const response = await llmApi.getOverview(String(get(currentProjectId)));
+			const response = await llmApi.getOverview(String(projectStore.currentProjectId));
 			llmOverview = response;
 			llmLoaded = true;
 			llmDefaultChat = response.default_chat ?? '';
@@ -254,7 +249,7 @@
 				: undefined;
 		llmSaving = true;
 		try {
-			llmSaveResult = await llmApi.updateConfig(String($currentProjectId), {
+			llmSaveResult = await llmApi.updateConfig(String(projectStore.currentProjectId), {
 				default_chat: trimmedChat ? trimmedChat : null,
 				default_rerank: trimmedRerank ? trimmedRerank : null,
 				rerank_enabled: llmRerankEnabled,
@@ -275,7 +270,7 @@
 		llmTestError = null;
 		llmTestResult = null;
 		try {
-			llmTestResult = await llmApi.testModel(String(get(currentProjectId)), {
+			llmTestResult = await llmApi.testModel(String(projectStore.currentProjectId), {
 				service,
 				model_key: modelKey,
 			});
@@ -290,7 +285,7 @@
 		reindexBusy = true;
 		reindexMessage = null;
 		try {
-			const response = await indexApi.clearIndex(Number(get(currentProjectId)));
+			const response = await indexApi.clearIndex(Number(projectStore.currentProjectId));
 			reindexMessage = response.message ?? `Clear finished (success=${response.success})`;
 		} catch (e) {
 			reindexMessage = errorMessage(e);
@@ -303,8 +298,8 @@
 		reindexBusy = true;
 		reindexMessage = null;
 		try {
-			const response = await projectApi.indexProject(String(get(currentProjectId)));
-			reindexMessage = `Reindex started for project ${response.project_id ?? get(currentProjectId)}`;
+			const response = await projectApi.indexProject(String(projectStore.currentProjectId));
+			reindexMessage = `Reindex started for project ${response.project_id ?? projectStore.currentProjectId}`;
 		} catch (e) {
 			reindexMessage = errorMessage(e);
 		} finally {
@@ -321,7 +316,7 @@
 		}
 		basicSaving = true;
 		try {
-			await projectApi.updateProject(String($currentProjectId), {
+			await projectApi.updateProject(String(projectStore.currentProjectId), {
 				name: basicName.trim(),
 				extensions: parseList(basicExtensions),
 				exclude_dirs: parseList(basicExcludeDirs),
@@ -351,7 +346,7 @@
 		runtimeSaving = true;
 		try {
 			runtimeResult = await projectApi.updateProjectConfig(
-				String($currentProjectId),
+				String(projectStore.currentProjectId),
 				parsed,
 			);
 			// Refresh the version stamp and the global validation summary next
@@ -368,7 +363,7 @@
 	async function loadProjectRuntimeVersion() {
 		try {
 			const response = await projectApi.getProjectConfig(
-				String(get(currentProjectId)),
+				String(projectStore.currentProjectId),
 			);
 			runtimeVersion = response.config_version;
 		} catch {
@@ -382,7 +377,7 @@
 		reloadMessage = null;
 		try {
 			const response = await projectApi.reloadProject(
-				String(get(currentProjectId)),
+				String(projectStore.currentProjectId),
 			);
 			runtimeVersion = response.config_version;
 			reloadMessage = response.message;
@@ -401,10 +396,10 @@
 		tokenMessage = null;
 		tokenSaving = true;
 		try {
-			setApiToken(tokenDraft);
-			tokenDraft = get(apiToken);
+			authStore.setApiToken(tokenDraft);
+			tokenDraft = authStore.token;
 			await loadInfo();
-			tokenMessage = get(apiToken)
+			tokenMessage = authStore.token
 				? 'Access token saved; requests now carry it.'
 				: 'Access token cleared; requests go token-free.';
 		} catch (e) {
@@ -417,12 +412,12 @@
 	function clearAccessToken() {
 		tokenDraft = '';
 		tokenMessage = null;
-		clearApiToken();
+		authStore.clearApiToken();
 		void loadInfo();
 	}
 
 	onMount(async () => {
-		tokenDraft = get(apiToken);
+		tokenDraft = authStore.token;
 		await loadInfo();
 		await loadValidate();
 	});
@@ -472,7 +467,7 @@
 					ensureProjectLoaded();
 				}}
 			>
-				Project #{ $currentProjectId }
+				Project #{ projectStore.currentProjectId }
 			</button>
 		</div>
 
@@ -527,7 +522,7 @@
 				testError={llmTestError}
 				{reindexBusy}
 				{reindexMessage}
-				projectId={$currentProjectId}
+				projectId={projectStore.currentProjectId}
 				onReload={() => void loadLlmOverview()}
 				onSave={() => void saveLlmConfig()}
 				onTest={(service, modelKey) => void testLlmModel(service, modelKey)}
@@ -547,7 +542,7 @@
 				{reloading}
 				{validateResult}
 				{validating}
-				projectId={$currentProjectId}
+				projectId={projectStore.currentProjectId}
 				onValidate={loadValidate}
 				onReloadFromFile={handleReloadFromFile}
 				onSave={saveProjectRuntime}

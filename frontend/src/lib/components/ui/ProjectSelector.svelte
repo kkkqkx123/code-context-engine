@@ -6,11 +6,7 @@
 	 */
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import {
-		projects,
-		currentProject,
-		currentProjectId,
-	} from '$lib/stores/project';
+	import { projectStore } from '$lib/stores/project.svelte';
 
 	let { variant = 'sidebar' }: { variant?: 'sidebar' | 'topbar' } = $props();
 
@@ -20,7 +16,7 @@
 
 	function handleChange(event: Event) {
 		const target = event.currentTarget as HTMLSelectElement;
-		currentProjectId.set(Number(target.value));
+		projectStore.currentProjectId = (Number(target.value));
 	}
 
 	function goToProjects(event: MouseEvent) {
@@ -34,7 +30,7 @@
 		<label class="project-label" for={selectId}>Current Project</label>
 	{/if}
 
-	{#if $projects.length === 0}
+	{#if projectStore.projects.length === 0}
 		<a class="empty-link" href={resolve('/projects')} onclick={goToProjects}>
 			Create a project
 		</a>
@@ -43,21 +39,21 @@
 			id={selectId}
 			class="project-select"
 			aria-label="Current Project"
-			title={$currentProject?.root_path ?? ''}
+			title={projectStore.currentProject?.root_path ?? ''}
 			onchange={handleChange}
 		>
-			{#each $projects as project (project.id)}
+			{#each projectStore.projects as project (project.id)}
 				<option
 					value={Number(project.id)}
-					selected={Number(project.id) === $currentProjectId}
+					selected={Number(project.id) === projectStore.currentProjectId}
 				>
 					{project.name || `#${project.id}`}
 				</option>
 			{/each}
 		</select>
-		{#if variant === 'sidebar' && $currentProject}
-			<p class="project-path" title={$currentProject.root_path}>
-				{$currentProject.root_path}
+		{#if variant === 'sidebar' && projectStore.currentProject}
+			<p class="project-path" title={projectStore.currentProject.root_path}>
+				{projectStore.currentProject.root_path}
 			</p>
 		{/if}
 	{/if}
