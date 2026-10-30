@@ -157,7 +157,7 @@ impl ScriptedEmbeddingServer {
                 retry_delay_ms: 0,
                 rate_limit: 0,
                 ..Default::default()
-},
+            },
         );
         config.llm.providers = providers;
         let mut models = HashMap::new();

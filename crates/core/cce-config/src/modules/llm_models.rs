@@ -495,7 +495,6 @@ fn default_max_input_tokens() -> usize {
     8192
 }
 
-
 /// Compatibility opinions for an OpenAI-compatible provider.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderCompatConfig {
@@ -562,11 +561,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-                    compat: None,
+            compat: None,
             identity: None,
             transport: None,
             env: None,
-};
+        };
 
         assert!(provider.validate_structured().is_ok());
     }
@@ -590,11 +589,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-                    compat: None,
+            compat: None,
             identity: None,
             transport: None,
             env: None,
-};
+        };
 
         assert!(provider.validate_structured().is_err());
     }
@@ -634,11 +633,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-                    compat: None,
+            compat: None,
             identity: None,
             transport: None,
             env: None,
-};
+        };
 
         assert!(provider.validate_structured().is_err());
     }
@@ -671,11 +670,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-                    compat: None,
+            compat: None,
             identity: None,
             transport: None,
             env: None,
-};
+        };
 
         assert_eq!(
             provider.get_endpoint_path(ServiceType::Embedding),

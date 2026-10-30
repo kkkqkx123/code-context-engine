@@ -166,6 +166,7 @@ impl PreprocessingPipeline {
         let mut result = result;
         if drop_import_only_groups(&mut result.groups) > 0 {
             result.stats.output_groups = result.groups.len();
+            result.stats.record_test_partition(&result.groups);
         }
         result
     }
@@ -193,6 +194,7 @@ impl PreprocessingPipeline {
             group.generate_combined_source(file_source);
         }
         stats.output_groups = groups.len();
+        stats.record_test_partition(&groups);
         ProcessingResult {
             groups,
             entity_meta: HashMap::new(),
@@ -635,6 +637,7 @@ impl PreprocessingPipeline {
             .iter()
             .filter(|g| g.group_type == GroupType::Standalone)
             .count();
+        stats.record_test_partition(&groups);
 
         ProcessingResult {
             groups,
@@ -744,6 +747,7 @@ impl PreprocessingPipeline {
             .iter()
             .filter(|g| g.group_type == GroupType::Standalone)
             .count();
+        stats.record_test_partition(&groups);
 
         let mut result = ProcessingResult {
             groups,
@@ -754,6 +758,7 @@ impl PreprocessingPipeline {
         };
         if drop_import_only_groups(&mut result.groups) > 0 {
             result.stats.output_groups = result.groups.len();
+            result.stats.record_test_partition(&result.groups);
         }
         result
     }
@@ -966,8 +971,7 @@ impl PreprocessingPipeline {
             | GroupType::InterfaceWithImpls
             | GroupType::TraitWithImpls
             | GroupType::ModuleWithContents => {
-                header_granularity
-                    == Some(cce_types::test_info::TestGranularity::Group)
+                header_granularity == Some(cce_types::test_info::TestGranularity::Group)
             }
             _ => false,
         }
@@ -993,18 +997,20 @@ impl PreprocessingPipeline {
         // Scaffolding headers (impl blocks, type declarations) carry no test
         // semantics of their own: members all test means the group is test.
         if !group.member_ids.is_empty()
-            && group.member_ids.iter().all(|id| {
-                entity_infos
-                    .get(id)
-                    .is_some_and(|info| info.is_test())
-            })
+            && group
+                .member_ids
+                .iter()
+                .all(|id| entity_infos.get(id).is_some_and(|info| info.is_test()))
         {
             return TestInfo::merge_with_entities(file_info, entity_infos, &owned);
         }
         let mut has_test = false;
         let mut has_prod = false;
         for entity_id in &owned {
-            if entity_infos.get(entity_id).is_some_and(|info| info.is_test()) {
+            if entity_infos
+                .get(entity_id)
+                .is_some_and(|info| info.is_test())
+            {
                 has_test = true;
             } else {
                 has_prod = true;

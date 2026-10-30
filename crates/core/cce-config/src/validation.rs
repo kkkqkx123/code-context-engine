@@ -653,7 +653,7 @@ mod tests {
                 base_url: "https://api.openai.com/v1".to_string(),
                 rate_limit: 60,
                 ..Default::default()
-},
+            },
         );
         providers.insert(
             "openai-b".to_string(),
@@ -663,7 +663,7 @@ mod tests {
                 base_url: "https://api.openai.com/v1".to_string(),
                 rate_limit: 60,
                 ..Default::default()
-},
+            },
         );
 
         assert!(validate_provider_rate_limit_conflicts(&providers).is_empty());
@@ -682,7 +682,7 @@ mod tests {
                 base_url: "https://api.openai.com/v1".to_string(),
                 rate_limit: 120,
                 ..Default::default()
-},
+            },
         );
         providers.insert(
             "openai-slow".to_string(),
@@ -692,7 +692,7 @@ mod tests {
                 base_url: "https://api.openai.com/v1".to_string(),
                 rate_limit: 30,
                 ..Default::default()
-},
+            },
         );
 
         let warnings = validate_provider_rate_limit_conflicts(&providers);
@@ -719,7 +719,7 @@ mod tests {
                 base_url: "https://api.example.com".to_string(),
                 rate_limit: 60,
                 ..Default::default()
-},
+            },
         );
         // Unlimited (0) does not participate in the min computation and thus
         // does not trigger the conflict warning on its own.
@@ -731,7 +731,7 @@ mod tests {
                 base_url: "https://api.example.com".to_string(),
                 rate_limit: 0,
                 ..Default::default()
-},
+            },
         );
 
         assert!(validate_provider_rate_limit_conflicts(&providers).is_empty());
@@ -787,14 +787,14 @@ mod tests {
             enabled: true,
             base_url: "https://api.example.com".to_string(),
             ..Default::default()
-};
+        };
         assert!(config.validate_structured().is_ok());
 
         // Disabled providers skip validation
         let disabled = ProviderConfig {
             enabled: false,
             ..Default::default()
-};
+        };
         assert!(disabled.validate_structured().is_ok());
     }
 

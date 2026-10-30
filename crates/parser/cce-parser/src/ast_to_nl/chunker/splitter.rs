@@ -11,6 +11,7 @@ use crate::grouper::EntityGroup;
 use super::boundary::{
     ChunkBoundary, ChunkSegment, NlEntityBoundary, can_merge_with_ceiling, cost,
 };
+use super::chunk_builder::ChunkBuilder;
 use super::result::ChunkPath;
 use super::strategies;
 use super::strategy::SplitStrategy;
@@ -176,7 +177,7 @@ impl TextSplitter {
         let boundaries =
             self.try_split_range(text, group, strategy, path, nl_boundaries, 0..text.len())?;
         let segments = self.boundaries_to_segments(boundaries, text)?;
-        Ok(self.maybe_merge_segments(segments, path))
+        Ok(self.maybe_merge_segments(group, segments, path))
     }
 
     /// Split `text[range]` by a single data-driven recursion over boundary
@@ -387,11 +388,12 @@ impl TextSplitter {
 
     fn maybe_merge_segments(
         &self,
+        group: &EntityGroup,
         segments: Vec<ChunkSegment>,
         path: ChunkPath,
     ) -> Vec<ChunkSegment> {
         if self.config.respect_boundaries {
-            self.merge_small_segments(segments, path)
+            self.merge_small_segments(group, segments, path)
         } else {
             segments
         }
@@ -453,8 +455,17 @@ impl TextSplitter {
     /// one entity are instead packed up to the ceiling, so a long method
     /// does not stay fragmented at the min threshold. A single
     /// left-to-right greedy pass fully determines the result.
+    ///
+    /// Test boundary: a production segment must never absorb (or be
+    /// absorbed by) a test segment. Merging them would attribute test
+    /// status to production content and hide it from test-filtered
+    /// retrieval, the same invariant enforced by `TestInfo::can_merge` in
+    /// the grouper small-fragment merger and the cross-group chunk merge.
+    /// Fragments of one entity always share one marker, so the check
+    /// never blocks the same-unit packing path.
     fn merge_small_segments(
         &self,
+        group: &EntityGroup,
         segments: Vec<ChunkSegment>,
         path: ChunkPath,
     ) -> Vec<ChunkSegment> {
@@ -467,6 +478,13 @@ impl TextSplitter {
                 // of them is still undersized.
                 let same_unit = !last.boundary.entity_ids.is_empty()
                     && last.boundary.entity_ids == segment.boundary.entity_ids;
+                let last_test = ChunkBuilder::fragment_test_info(group, &last.boundary.entity_ids);
+                let next_test =
+                    ChunkBuilder::fragment_test_info(group, &segment.boundary.entity_ids);
+                if !cce_types::TestInfo::can_merge(&last_test, &next_test) {
+                    merged.push(segment);
+                    continue;
+                }
                 let mergeable = can_merge_with_ceiling(
                     &last.text,
                     &segment.text,
@@ -617,7 +635,7 @@ mod tests {
         let segments = splitter
             .boundaries_to_segments(boundaries, text)
             .expect("test partition must be valid");
-        splitter.maybe_merge_segments(segments, path)
+        splitter.maybe_merge_segments(&EntityGroup::default(), segments, path)
     }
 
     fn assert_partition(text: &str, boundaries: &[ChunkBoundary]) {
@@ -1168,7 +1186,8 @@ mod tests {
 
         let segments = vec![segment(&words(30), 0, 60), segment(&words(30), 60, 120)];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Bm25);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].boundary.token_count, 60);
@@ -1187,7 +1206,8 @@ mod tests {
         // into the adjacent 150-word chunk.
         let segments = vec![segment(&words(50), 0, 100), segment(&words(150), 100, 300)];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Bm25);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].boundary.token_count, 200);
@@ -1211,7 +1231,8 @@ mod tests {
             segment(&words(30), 250, 300),
         ];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Bm25);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 270);
@@ -1234,7 +1255,8 @@ mod tests {
             segment(&words(30), 100, 150),
         ];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Bm25);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 90);
@@ -1249,7 +1271,8 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
         let segments = vec![segment(&words(5), 0, 10), segment(&words(5), 10, 20)];
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Embedding);
         assert_eq!(merged.len(), 1);
     }
 
@@ -1262,7 +1285,8 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
         let segments = vec![segment(&words(20), 0, 30), segment(&words(100), 30, 200)];
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Embedding);
         assert_eq!(merged.len(), 1);
     }
 
@@ -1287,7 +1311,8 @@ mod tests {
             })
             .collect();
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Embedding);
 
         let piece = cost(&words(60), ChunkPath::Embedding);
         assert_eq!(merged.len(), 2);
@@ -1328,7 +1353,8 @@ mod tests {
             ),
         ];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Embedding);
 
         assert_eq!(merged.len(), 2);
     }
@@ -1344,8 +1370,68 @@ mod tests {
         // Bidirectional merge: the trailing small fragment is absorbed by
         // its large left neighbor.
         let segments = vec![segment(&words(100), 0, 150), segment(&words(20), 150, 180)];
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Embedding);
         assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn test_merge_small_segments_respects_test_boundary() {
+        use cce_types::entity::{EntityKind, GroupedEntity};
+        use cce_types::language::Language;
+        use smallvec::smallvec;
+
+        use crate::grouper::types::GroupType;
+
+        let config = ChunkingConfig {
+            max_tokens: 512,
+            min_chunk_tokens: 50,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        // Mixed group: a production method next to a test helper. Both
+        // fragments sit far below the min threshold, so the cost rule
+        // alone would glue them; the test boundary must keep them apart
+        // or the merged chunk would hide production content from
+        // test-filtered retrieval.
+        let mut prod = GroupedEntity::new(
+            EntityId(11),
+            EntityKind::Function,
+            "new".to_string(),
+            "new".to_string(),
+        );
+        prod.test_info = cce_types::TestInfo::unknown();
+        let mut helper = GroupedEntity::new(
+            EntityId(12),
+            EntityKind::Function,
+            "check".to_string(),
+            "check".to_string(),
+        );
+        helper.test_info = cce_types::TestInfo::test_ast();
+        let mut group = EntityGroup {
+            group_type: GroupType::ClassWithMethods,
+            language: Language::Rust,
+            ..EntityGroup::default()
+        };
+        group.members = smallvec![prod, helper];
+        group.member_ids = smallvec![EntityId(11), EntityId(12)];
+        let mixed = |ids: Vec<EntityId>| {
+            ChunkSegment::new(
+                ChunkBoundary::new(0, 30, SplitReason::MemberBoundary).with_entity_ids(ids),
+                words(20),
+            )
+        };
+        let segments = vec![mixed(vec![EntityId(11)]), mixed(vec![EntityId(12)])];
+        let merged = splitter.merge_small_segments(&group, segments, ChunkPath::Embedding);
+        assert_eq!(
+            merged.len(),
+            2,
+            "production and test fragments must never merge"
+        );
+        // Same-side fragments still merge: two production pieces collapse.
+        let prod_only = vec![mixed(vec![EntityId(11)]), mixed(vec![EntityId(11)])];
+        let merged = splitter.merge_small_segments(&group, prod_only, ChunkPath::Embedding);
+        assert_eq!(merged.len(), 1, "same-side fragments must still merge");
     }
 
     #[test]
@@ -1387,7 +1473,8 @@ mod tests {
         // small fragment when the combined cost fits the ceiling.
         let segments = vec![segment(&words(150), 0, 200), segment(&words(40), 200, 250)];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Bm25);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 190);
@@ -1407,7 +1494,8 @@ mod tests {
         // the neighbor's size.
         let segments = vec![segment(&words(40), 0, 50), segment(&words(200), 50, 250)];
 
-        let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
+        let merged =
+            splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Bm25);
 
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].boundary.token_count, 240);

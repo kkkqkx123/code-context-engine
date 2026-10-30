@@ -228,8 +228,10 @@ pub(crate) fn merge_two_chunks(
     let (source_span, source_ranges, source_span_kind) =
         merge_source_coverage(&a.metadata, &b.metadata);
 
-    // Any source group marked `Test` makes the merged chunk `Test`
-    // (High confidence overrides Medium).
+    // Merges only run between same-side chunks (`should_merge` enforces the
+    // `TestInfo::can_merge` boundary), so the merge preserves that side.
+    // `merge` keeps `Test` over `Unknown` and `Ast` over `Path` for the
+    // residual granularity difference within one side.
     let test_info = a.metadata.test_info.merge(&b.metadata.test_info);
 
     let mut bm25_keywords = a.bm25_keywords.clone();

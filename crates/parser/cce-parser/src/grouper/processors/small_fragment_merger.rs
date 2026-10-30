@@ -280,10 +280,8 @@ impl SmallFragmentMerger {
 
                 // Check test boundary via the centralized rule.
                 if let Some(prev) = current_batch.last() {
-                    if !cce_types::test_info::TestInfo::can_merge(
-                        &prev.test_info,
-                        &group.test_info,
-                    ) && !current_batch.is_empty()
+                    if !cce_types::test_info::TestInfo::can_merge(&prev.test_info, &group.test_info)
+                        && !current_batch.is_empty()
                     {
                         if let Some(merged) = self.flush_batch(&mut current_batch) {
                             merged_groups.push(merged);
@@ -433,6 +431,17 @@ impl SmallFragmentMerger {
         // Concatenating all fragment names (e.g. "process_user_process_user_name_etc")
         // breaks BM25 lookup by original entity name. The first fragment is the
         // primary entity; additional fragments are merged into it as members.
+        // The batch is same-side by construction (the caller enforces the
+        // `TestInfo::can_merge` boundary), so every fragment shares one
+        // test side and carrying the first fragment's marker is exact. The
+        // pipeline re-runs test-info annotation after merging, which
+        // recomputes this authoritatively from the entity signals.
+        let test_info = fragments
+            .iter()
+            .fold(cce_types::TestInfo::unknown(), |acc, fragment| {
+                acc.merge(&fragment.test_info)
+            });
+
         let name = first.name.as_str();
 
         Some(EntityGroup {
@@ -456,7 +465,7 @@ impl SmallFragmentMerger {
             parent_group_id: first.parent_group_id.clone(),
             has_significant_nested: false,
             metadata: std::collections::HashMap::new(),
-            test_info: cce_types::TestInfo::unknown(),
+            test_info,
         })
     }
 }

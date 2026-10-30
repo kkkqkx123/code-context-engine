@@ -562,7 +562,7 @@ mod tests {
                 base_url: "http://localhost:0".to_string(),
                 api_keys: vec!["test-key".to_string()],
                 ..ProviderConfig::default()
-},
+            },
         );
         config.llm.providers = providers;
 

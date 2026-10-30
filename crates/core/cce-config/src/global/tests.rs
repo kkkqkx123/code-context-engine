@@ -68,11 +68,11 @@ fn test_validate_allows_remote_provider_without_api_key() {
             no_proxy: Vec::new(),
             extra_headers: std::collections::HashMap::new(),
             api_key_file: None,
-                    compat: None,
+            compat: None,
             identity: None,
             transport: None,
             env: None,
-},
+        },
     );
 
     assert!(config.validate_structured().is_ok());
@@ -101,11 +101,11 @@ fn test_validate_rejects_provider_with_empty_base_url() {
             no_proxy: Vec::new(),
             extra_headers: std::collections::HashMap::new(),
             api_key_file: None,
-                    compat: None,
+            compat: None,
             identity: None,
             transport: None,
             env: None,
-},
+        },
     );
 
     let err = config
@@ -263,7 +263,7 @@ fn test_merge_with_project_preserves_sensitive() {
             base_url: "https://api.example.com".to_string(),
             api_keys: vec!["secret-key".to_string()],
             ..Default::default()
-},
+        },
     );
     global.llm.providers = providers;
 
@@ -296,7 +296,7 @@ fn test_merge_with_project_embedder_model() {
             base_url: "https://api.example.com".to_string(),
             api_keys: vec![],
             ..Default::default()
-},
+        },
     );
     global.llm.providers = providers;
 
@@ -523,7 +523,7 @@ fn config_with_provider_and_models() -> AppConfig {
                 (ServiceType::Rerank, "custom/rerank".to_string()),
             ]),
             ..ProviderConfig::default()
-},
+        },
     );
 
     config.llm.embedding_models.insert(

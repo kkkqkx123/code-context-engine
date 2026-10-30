@@ -184,7 +184,7 @@ mod tests {
                 base_url: "http://127.0.0.1:9".to_string(),
                 api_keys: vec!["test-key".to_string()],
                 ..ProviderConfig::default()
-},
+            },
         );
         let mut rerank_models = HashMap::new();
         rerank_models.insert(
@@ -363,7 +363,7 @@ mod tests {
                 base_url: "https://api.mock.example.com/v1".to_string(),
                 api_keys: vec!["test-key".to_string()],
                 ..ProviderConfig::default()
-},
+            },
         );
         config.llm.chat_models.insert(
             "chat-model".to_string(),

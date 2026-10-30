@@ -187,7 +187,7 @@ pub async fn test_env() -> TestEnv {
             base_url: spawn_llm_stub(384),
             api_keys: vec!["test-key".to_string()],
             ..ProviderConfig::default()
-},
+        },
     );
     config.llm.providers = providers;
     let mut models = HashMap::new();

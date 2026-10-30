@@ -988,6 +988,26 @@ pub struct ProcessingStats {
     pub merged_calls: usize,
     pub standalone_entities: usize,
     pub impl_associations: usize,
+    /// Groups whose `test_info` is `Test` (filter-critical marker).
+    #[serde(default)]
+    pub test_marked_groups: usize,
+    /// Groups mixing test and production entities (read-only diagnostic
+    /// companion to `test_info`; never used for filtering).
+    #[serde(default)]
+    pub mixed_test_groups: usize,
+}
+
+impl ProcessingStats {
+    /// Record the test partition of the final groups.
+    ///
+    /// Counts test-marked groups (filter signal) and mixed groups
+    /// (diagnostic: production recall preserved while per-entity markers
+    /// carry the precise attribution). Call after the final test-info
+    /// annotation so merged groups are covered.
+    pub fn record_test_partition(&mut self, groups: &[EntityGroup]) {
+        self.test_marked_groups = groups.iter().filter(|g| g.test_info.is_test()).count();
+        self.mixed_test_groups = groups.iter().filter(|g| g.is_mixed_test()).count();
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1145,5 +1165,17 @@ mod tests {
         assert_eq!(prod.test_counts(), (0, 2));
         assert!(!prod.is_pure_test());
         assert!(!prod.is_mixed_test());
+    }
+
+    #[test]
+    fn test_record_test_partition_counts() {
+        let mut mixed = group_with(false, &[false, true]);
+        mixed.test_info = crate::types::TestInfo::unknown();
+        let mut pure = group_with(true, &[true]);
+        pure.test_info = crate::types::TestInfo::test_ast();
+        let mut stats = ProcessingStats::default();
+        stats.record_test_partition(&[mixed, pure]);
+        assert_eq!(stats.test_marked_groups, 1);
+        assert_eq!(stats.mixed_test_groups, 1);
     }
 }

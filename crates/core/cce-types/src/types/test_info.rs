@@ -16,10 +16,12 @@
 //!
 //! # Merge rule
 //!
-//! A `Test` signal wins (`Ast` source overrides `Path`; a group is `Test` when
-//! any member is `Test`). With no signal at either level the chunk stays
-//! `Unknown` — callers must never default it to `Test`. A merge result always
-//! carries `Group` granularity (a merged marker spans multiple source
+//! A `Test` signal wins (`Ast` source overrides `Path`). The group-level
+//! homogeneous rule lives in the grouper (a group is `Test` only when every
+//! owned entity is `Test`; mixed groups stay `Unknown` so production
+//! content remains retrievable). With no signal at either level the chunk
+//! stays `Unknown` — callers must never default it to `Test`. A merge result
+//! always carries `Group` granularity (a merged marker spans multiple source
 //! entities, the original granularity is only meaningful before merging).
 //!
 //! # Invariants
@@ -28,7 +30,10 @@
 //! - `status = Unknown` requires `source = None`.
 //! - Construct via the factory methods; the debug assertions in `new` enforce
 //!   the invariants in debug builds.
-//! - `granularity` is informational only and never influences logic.
+//! - `granularity` records the signal scope. The grouper member-inheritance
+//!   rule is the single behavioral use: only a `Group`-granularity header
+//!   (test-named container) propagates to plain members; `Entity`-granularity
+//!   markers (annotated methods) never trigger inheritance.
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
@@ -274,8 +279,10 @@ impl TestInfo {
 
     /// Merge two markers using the documented priority rules.
     ///
-    /// - `Test` wins over `Unknown` (a group is `Test` when any member is
-    ///   `Test`); within `Test`, the `Ast` source overrides `Path`.
+    /// - `Test` wins over `Unknown`; within `Test`, the `Ast` source
+    ///   overrides `Path`. (Fragment scope: merging the covered entities of
+    ///   one chunk. Group scope uses the homogeneous rule in the grouper
+    ///   instead of a blanket merge.)
     /// - Both `Unknown` → `Unknown`.
     /// - The result always carries `Group` granularity: a merged marker spans
     ///   multiple source entities, so the original granularity is no longer
@@ -764,14 +771,12 @@ mod tests {
         let mut entity_infos = HashMap::new();
         entity_infos.insert(EntityId(1), TestInfo::test_ast());
         entity_infos.insert(EntityId(2), TestInfo::unknown());
-        let prod_only =
-            TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(2)]);
+        let prod_only = TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(2)]);
         assert!(prod_only.is_unknown());
         let mixed =
             TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(1), EntityId(2)]);
         assert!(mixed.is_test());
-        let test_only =
-            TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(1)]);
+        let test_only = TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(1)]);
         assert!(test_only.is_test());
     }
 
