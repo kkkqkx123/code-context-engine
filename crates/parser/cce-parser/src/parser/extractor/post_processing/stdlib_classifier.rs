@@ -48,7 +48,7 @@ pub fn mark_plugin_declared_external(entity: &mut Entity) {
 ///
 /// Accepts the serde variant names (`"Collection"`, `"Io"`, …) and the
 /// lowercase display labels (`"collections"`, `"io"`, `"utilities"`, …).
-fn parse_category(value: &str) -> Option<StdlibCategory> {
+pub fn parse_category(value: &str) -> Option<StdlibCategory> {
     if let Ok(c) = serde_json::from_str::<StdlibCategory>(value) {
         return Some(c);
     }

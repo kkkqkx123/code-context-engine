@@ -277,7 +277,41 @@ pub fn lua_table_to_grouped_entity(
     if let Some(b) = table.get::<Option<bool>>("is_stdlib")? {
         entity.is_stdlib = b;
     }
+    // Round-trip the stdlib category: a plugin that rewrites a group must
+    // not silently drop the external-definition category, otherwise the
+    // StdlibTemplate routing loses its input on the next pass.
+    if let Some(s) = get_string(table, "stdlib_category") {
+        if let Some(cat) = parse_stdlib_category_str(&s) {
+            entity.stdlib_category = Some(cat);
+        }
+    }
     Ok(Some(entity))
+}
+
+/// Parse a stdlib category written by `grouped_entity_to_lua_table`
+/// (`format!("{:?}", category)`) or a lowercase display label.
+fn parse_stdlib_category_str(value: &str) -> Option<cce_types::StdlibCategory> {
+    if let Ok(c) = serde_json::from_value::<cce_types::StdlibCategory>(serde_json::Value::String(
+        value.to_string(),
+    )) {
+        return Some(c);
+    }
+    let lower = value.to_lowercase();
+    match lower.as_str() {
+        "collections" | "collection" | "data_structure" => {
+            Some(cce_types::StdlibCategory::Collection)
+        }
+        "io" => Some(cce_types::StdlibCategory::Io),
+        "concurrency" | "threading" => Some(cce_types::StdlibCategory::Concurrency),
+        "utilities" | "utility" => Some(cce_types::StdlibCategory::Utility),
+        "strings" | "string" => Some(cce_types::StdlibCategory::String),
+        "numerics" | "numeric" | "numbers" | "math" => Some(cce_types::StdlibCategory::Numeric),
+        "errors" | "error" => Some(cce_types::StdlibCategory::Error),
+        "macros" | "macro" => Some(cce_types::StdlibCategory::Macro),
+        "traits" | "trait" | "interfaces" => Some(cce_types::StdlibCategory::Trait),
+        "other_stdlib" | "other" => Some(cce_types::StdlibCategory::Other),
+        _ => None,
+    }
 }
 
 /// Best-effort map from a string (Debug or serde snake_case form) to [`EntityKind`].

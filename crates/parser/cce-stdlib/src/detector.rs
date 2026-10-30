@@ -55,6 +55,9 @@ impl StdlibDetector {
     ///
     /// This is the legacy interface that uses string analysis. For better performance,
     /// use `is_stdlib_by_type` when RelationType information is available.
+    /// Call names never carry extractor shell syntax (quotes/angle brackets),
+    /// so, unlike the import-path and reference entry points, this function
+    /// does not normalize its input.
     pub fn is_stdlib_call(call_name: &str, language: &Language) -> bool {
         // Remapped plugin languages inherit their host grammar's tables.
         let effective = effective_language(language);

@@ -41,6 +41,19 @@ pub fn entity_kind_from_plugin_kind(kind: &str) -> EntityKind {
 
 /// Convert a [`PluginEntity`] to a [`GroupedEntity`].
 pub fn plugin_entity_to_grouped_entity(entity: &PluginEntity, id: EntityId) -> GroupedEntity {
+    // Mirror `post_processing::mark_plugin_declared_external`: a plugin-declared
+    // external definition carries `metadata["is_stdlib"] = "true"` (optionally
+    // with `metadata["stdlib_category"]`). Derive the grouped form here so
+    // plugin-injected entities use the same StdlibTemplate routing as
+    // built-in ones instead of relying on the caller to re-run the marker.
+    let is_stdlib = entity.metadata.get("is_stdlib").map(String::as_str) == Some("true");
+    let stdlib_category = if is_stdlib {
+        entity.metadata.get("stdlib_category").and_then(|c| {
+            crate::parser::extractor::post_processing::stdlib_classifier::parse_category(c)
+        })
+    } else {
+        None
+    };
     GroupedEntity {
         id,
         name: entity.name.clone(),
@@ -48,6 +61,8 @@ pub fn plugin_entity_to_grouped_entity(entity: &PluginEntity, id: EntityId) -> G
         signature: entity.signature.clone().unwrap_or_default(),
         doc_comment: entity.doc_comment.clone(),
         metadata: entity.metadata.clone(),
+        is_stdlib,
+        stdlib_category,
         ..Default::default()
     }
 }
