@@ -12,7 +12,7 @@ mod group;
 pub mod pattern;
 
 pub use group::{
-    EntityGroup, EntityMeta, GroupRole, GroupType, MemberRolesBuilder, ProcessingResult,
-    ProcessingStats, SpanError, ValidationError,
+    EntityGroup, GroupRole, GroupType, MemberRolesBuilder, ProcessingResult, ProcessingStats,
+    SpanError, ValidationError,
 };
 pub use pattern::{GetterSetterSummary, MemberRole, PatternInfo, get_member_role};

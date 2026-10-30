@@ -523,7 +523,7 @@ fn convert_header_with_registry_and_path(
             .with_plugin_registry(Arc::new(registry));
     let processing_result = ProcessingResult {
         groups: vec![group.clone()],
-        entity_meta: Default::default(),
+
         behavior: Default::default(),
         control_flow: Default::default(),
         stats: Default::default(),
@@ -777,7 +777,7 @@ fn test_vocabulary_table_is_reused_across_files() {
     let group = vocabulary_group("parse", "int parse(int)", Language::C);
     let processing_result = ProcessingResult {
         groups: vec![group.clone()],
-        entity_meta: Default::default(),
+
         behavior: Default::default(),
         control_flow: Default::default(),
         stats: Default::default(),
@@ -824,7 +824,7 @@ fn test_vocabulary_reaches_every_chunk_of_a_group() {
     let source = "class Parser {\n    int parse_stts(int v) { return v; }\n};\n";
     let processing_result = ProcessingResult {
         groups: vec![group.clone()],
-        entity_meta: Default::default(),
+
         behavior: Default::default(),
         control_flow: Default::default(),
         stats: Default::default(),
@@ -970,7 +970,7 @@ fn indexed_output_with_registry(
             .with_plugin_registry(registry.clone());
     let processing_result = ProcessingResult {
         groups: vec![group.clone()],
-        entity_meta: Default::default(),
+
         behavior: Default::default(),
         control_flow: Default::default(),
         stats: Default::default(),

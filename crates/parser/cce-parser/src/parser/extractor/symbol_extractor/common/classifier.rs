@@ -86,12 +86,15 @@ impl ImportClassifier {
     /// Order matters: stdlib first (a `java.util.List` import is never
     /// internal, whatever the project's package prefixes say), then C/C++
     /// system headers, then project-local resolution, then the fallback.
+    ///
+    /// The source may still carry extractor shell characters; classification
+    /// works on the stripped form (see `strip_import_shell`).
     pub fn classify(
         import: &StandardizedImport,
         context: &ExtractionContext,
         language: Language,
     ) -> ImportClassification {
-        let path = &import.source;
+        let path = strip_import_shell(&import.source);
 
         // 1. Standard library. The table lookup normalizes quoting, so the
         //    JS family's `'fs'` and Dart's `'dart:async'` arrive as paths.
@@ -180,7 +183,11 @@ impl ImportClassifier {
             }
             Language::Rust => path.split("::").next().map(str::to_string),
             Language::C | Language::Cpp => first('/'),
-            Language::Php | Language::Ruby => first('/').or_else(|| first('\\')),
+            Language::Php | Language::Ruby => path
+                .split(['/', '\\'])
+                .next()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             Language::Dart => {
                 // `package:my_app/main.dart` -> `my_app`; anything else
                 // (`dart:async`, `file:///…`) has no package behind it.
@@ -190,6 +197,19 @@ impl ImportClassifier {
             _ => None,
         }
     }
+}
+
+/// Strip the shell characters an extractor may leave around a specifier.
+///
+/// Mirrors the detector entry normalization (quotes, angle brackets):
+/// `classify` runs the relative-specifier check and the package-name split
+/// on the stripped form, otherwise a quoted third-party specifier reports a
+/// quoted package name. The stored `StandardizedImport.source` keeps its
+/// original spelling; only classification works on the shell-free view.
+fn strip_import_shell(raw: &str) -> &str {
+    raw.trim()
+        .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
+        .trim()
 }
 
 #[cfg(test)]
@@ -469,7 +489,7 @@ mod tests {
             (
                 Language::Php,
                 "Symfony\\Component\\HttpFoundation",
-                "Symfony\\Component\\HttpFoundation",
+                "Symfony",
             ),
             (Language::Python, "requests.api", "requests"),
             (Language::Rust, "serde::Serialize", "serde"),
@@ -484,6 +504,26 @@ mod tests {
                 "{path} in {language:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_quoted_third_party_has_no_shell_in_package() {
+        let context = ExtractionContext::default();
+        let import = StandardizedImport::new(ImportKind::SymbolImport, "'lodash/fp'");
+        let classification = ImportClassifier::classify(&import, &context, Language::TypeScript);
+        assert_eq!(classification.class, ImportClass::ExternalPackage);
+        assert_eq!(
+            classification.metadata.package_name.as_deref(),
+            Some("lodash"),
+        );
+        let quoted_relative = StandardizedImport::new(ImportKind::SymbolImport, "'./helpers'");
+        let classification =
+            ImportClassifier::classify(&quoted_relative, &context, Language::TypeScript);
+        assert_eq!(classification.class, ImportClass::InternalModule);
+        assert_eq!(
+            classification.metadata.resolved_path.as_deref(),
+            Some("./helpers"),
+        );
     }
 
     #[test]

@@ -62,8 +62,8 @@ pub use pipeline::{PipelineBuilder, PreprocessingPipeline};
 
 // Re-export types
 pub use types::{
-    EntityGroup, EntityMeta, GetterSetterSummary, GroupRole, GroupType, MemberRole,
-    MemberRolesBuilder, PatternInfo, ProcessingResult, ProcessingStats, SpanError, ValidationError,
+    EntityGroup, GetterSetterSummary, GroupRole, GroupType, MemberRole, MemberRolesBuilder,
+    PatternInfo, ProcessingResult, ProcessingStats, SpanError, ValidationError,
 };
 
 // Re-export processors

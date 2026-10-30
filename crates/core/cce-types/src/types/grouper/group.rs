@@ -182,26 +182,6 @@ pub enum ValidationError {
     MissingEntityId(EntityId),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EntityMeta {
-    pub entity_id: EntityId,
-    pub name: String,
-    pub is_utility: bool,
-
-    #[serde(default)]
-    pub call_count: usize,
-    #[serde(default)]
-    pub callers: Vec<EntityId>,
-    #[serde(default)]
-    pub callees: Vec<EntityId>,
-    #[serde(default)]
-    pub is_merged: bool,
-    #[serde(default)]
-    pub original_ids: Vec<EntityId>,
-    #[serde(default)]
-    pub group_id: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityGroup {
     pub group_id: CompactString,
@@ -285,6 +265,26 @@ impl EntityGroup {
     /// rule so tracker lookups resolve. Entity names are never group ids.
     pub fn group_id_for_entity(id: EntityId) -> CompactString {
         CompactString::from(format!("group_{}", id.0))
+    }
+
+    /// Name of the NL template that renders this group.
+    ///
+    /// Plugin-visible routing decision: TextGen plugins receive the group
+    /// without the host dispatcher, so reimplementing the rule from
+    /// `header.is_stdlib` alone drifts (a getter/setter group with a stdlib
+    /// header still renders with the pattern template). The priority here —
+    /// pattern outranks stdlib, stdlib outranks regular — mirrors
+    /// `GroupTemplateKind::select` in `cce-parser`; keep the two in sync.
+    /// Since `is_stdlib` now means plugin-declared external definition only,
+    /// builtin imports never report `Stdlib` here.
+    pub fn template_name(&self) -> &'static str {
+        if self.pattern_info.as_getter_setter().is_some() {
+            return "GetterSetter";
+        }
+        if self.header.as_ref().is_some_and(|h| h.is_stdlib) {
+            return "Stdlib";
+        }
+        "Regular"
     }
 
     pub fn from_entity(entity: Entity, language: crate::types::language::Language) -> Self {
@@ -1013,7 +1013,6 @@ impl ProcessingStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessingResult {
     pub groups: Vec<EntityGroup>,
-    pub entity_meta: std::collections::HashMap<String, EntityMeta>,
     #[serde(default)]
     pub behavior: BehaviorStore,
     #[serde(default)]
@@ -1119,6 +1118,7 @@ impl ProcessingResult {
 mod tests {
     use super::*;
     use crate::types::entity::{EntityKind, GroupedEntity};
+    use crate::types::grouper::pattern::GetterSetterSummary;
 
     fn entity(id: u64, test: bool) -> GroupedEntity {
         let mut e = GroupedEntity::new(
@@ -1150,6 +1150,18 @@ mod tests {
             group.members.push(e);
         }
         group
+    }
+
+    #[test]
+    fn test_template_name_pattern_outranks_stdlib() {
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        assert_eq!(group.template_name(), "Regular");
+        let mut header = entity(1, false);
+        header.is_stdlib = true;
+        group.header = Some(header);
+        assert_eq!(group.template_name(), "Stdlib");
+        group.pattern_info = PatternInfo::GetterSetter(GetterSetterSummary::empty());
+        assert_eq!(group.template_name(), "GetterSetter");
     }
 
     #[test]

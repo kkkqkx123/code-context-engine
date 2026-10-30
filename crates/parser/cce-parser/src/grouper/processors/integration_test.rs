@@ -84,9 +84,8 @@ fn test_test_suite_processor_workflow() {
     let entities = vec![suite, case1, case2, regular_func];
     let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-    let (groups, assoc_count) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
-    assert_eq!(assoc_count, 1, "Should have 1 test suite association");
     assert!(
         groups.len() == 1,
         "Should have 1 group (suite only, non-test entities handled by later pipeline stages)"
@@ -135,9 +134,8 @@ fn test_test_suite_disabled_workflow() {
     let entities = vec![suite, case];
     let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-    let (groups, count) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
-    assert_eq!(count, 0, "No associations when disabled");
     assert_eq!(groups.len(), 2, "Both entities become standalone");
     assert!(groups.iter().all(|g| g.group_type == GroupType::Standalone));
 }
@@ -149,10 +147,9 @@ fn test_test_suite_empty_entities() {
     let parsed_file = ParsedFile::new(Language::Rust, "test.rs".to_string(), "");
 
     let ctx = FileProcessingContext::new(&[], &parsed_file, &config);
-    let (groups, count) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
     assert_eq!(groups.len(), 0);
-    assert_eq!(count, 0);
 }
 
 #[test]
@@ -195,7 +192,7 @@ fn test_test_suite_with_nested_suite() {
     let entities = vec![outer_suite, inner_suite, inner_case, outer_case];
     let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-    let (groups, _) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
     // Should create groups for both suites
     let outer_groups: Vec<&EntityGroup> = groups
@@ -400,7 +397,7 @@ fn test_test_suite_and_class_mixed_workflow() {
     let entities = vec![suite, case, helper_struct, helper_method, standalone_func];
     let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-    let (groups, assoc_count) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
     assert!(
         groups
@@ -408,7 +405,6 @@ fn test_test_suite_and_class_mixed_workflow() {
             .any(|g| g.group_type == GroupType::TestSuiteWithCases),
         "Should have test suite group"
     );
-    assert_eq!(assoc_count, 1, "Should have one association");
 
     // Only test entities are accounted for (non-test entities handled by later pipeline stages)
     let total_entities_in_groups: usize = groups.iter().map(|g| 1 + g.members.len()).sum();
@@ -457,9 +453,9 @@ fn test_processor_with_multiple_test_suites() {
     let entities = vec![auth_suite, user_suite, auth_case, user_case];
     let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-    let (groups, assoc_count) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
-    assert_eq!(assoc_count, 2, "Should have 2 suite associations");
+    assert_eq!(groups.len(), 2, "Should have 2 suite groups");
     let suite_groups: Vec<&EntityGroup> = groups
         .iter()
         .filter(|g| g.group_type == GroupType::TestSuiteWithCases)
@@ -479,9 +475,8 @@ fn test_processor_standalone_function() {
     let entities = vec![func1, func2];
     let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-    let (groups, count) = processor.process(ctx);
+    let groups = processor.process(ctx);
 
-    assert_eq!(count, 0, "No test suite associations");
     assert_eq!(
         groups.len(),
         0,

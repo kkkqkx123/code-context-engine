@@ -317,7 +317,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats::default(),
@@ -333,7 +333,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats::default(),
@@ -359,7 +359,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats::default(),

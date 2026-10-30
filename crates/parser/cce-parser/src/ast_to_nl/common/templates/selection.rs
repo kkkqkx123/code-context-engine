@@ -24,9 +24,10 @@ pub enum GroupTemplateKind<'a> {
 impl<'a> GroupTemplateKind<'a> {
     /// Route a group the way every dispatcher must route it.
     ///
-    /// A detected pattern outranks the stdlib check: a getter/setter class is
-    /// still a class, and the pattern template carries the accessor summary
-    /// that the stdlib template would drop.
+    /// Shares its priority with `EntityGroup::template_name` (the plugin-visible
+    /// name): a detected pattern outranks the stdlib check, since a getter/setter
+    /// class is still a class, and the pattern template carries the accessor
+    /// summary that the stdlib template would drop. Keep the two in sync.
     pub fn select(group: &'a EntityGroup) -> Self {
         if let Some(summary) = group.pattern_info.as_getter_setter() {
             return Self::GetterSetter(summary);
@@ -89,5 +90,29 @@ mod tests {
     fn missing_header_is_regular() {
         let group = EntityGroup::default();
         assert_eq!(GroupTemplateKind::select(&group).name(), "Regular");
+    }
+
+    #[test]
+    fn select_agrees_with_plugin_visible_template_name() {
+        let pattern = group(
+            PatternInfo::GetterSetter(GetterSetterSummary::empty()),
+            true,
+        );
+        assert_eq!(
+            GroupTemplateKind::select(&pattern).name(),
+            pattern.template_name()
+        );
+        for is_stdlib in [true, false] {
+            let group = group(PatternInfo::None, is_stdlib);
+            assert_eq!(
+                GroupTemplateKind::select(&group).name(),
+                group.template_name()
+            );
+        }
+        let bare = EntityGroup::default();
+        assert_eq!(
+            GroupTemplateKind::select(&bare).name(),
+            bare.template_name()
+        );
     }
 }

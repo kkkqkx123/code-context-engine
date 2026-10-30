@@ -312,7 +312,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: bf_store,
             control_flow: cf_store,
             stats: Default::default(),
@@ -343,7 +343,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: bf_store,
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),
@@ -380,7 +380,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: bf_store,
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),
@@ -416,7 +416,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: BehaviorStore::default(),
             control_flow: cf_store,
             stats: Default::default(),
@@ -466,7 +466,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: bf_store,
             control_flow: cf_store,
             stats: Default::default(),
@@ -487,7 +487,7 @@ mod tests {
     fn test_build_extra_text_empty_returns_none() {
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: BehaviorStore::default(),
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),
@@ -514,7 +514,7 @@ mod tests {
         });
         let processing_result = ProcessingResult {
             groups: vec![doc_group],
-            entity_meta: Default::default(),
+
             behavior: BehaviorStore::default(),
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),
@@ -561,7 +561,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: BehaviorStore::default(),
             control_flow: cf_store,
             stats: Default::default(),
@@ -597,7 +597,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![],
-            entity_meta: Default::default(),
+
             behavior: bf_store,
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),

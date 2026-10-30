@@ -548,7 +548,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![group.clone()],
-            entity_meta: HashMap::new(),
+
             behavior,
             control_flow,
             stats: Default::default(),
@@ -631,7 +631,7 @@ mod tests {
         let source = "fn empty() {}";
         let processing_result = ProcessingResult {
             groups: vec![group.clone()],
-            entity_meta: HashMap::new(),
+
             behavior: BehaviorStore::default(),
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),
@@ -704,7 +704,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![group.clone()],
-            entity_meta: HashMap::new(),
+
             behavior,
             control_flow: ControlFlowStore::default(),
             stats: Default::default(),
@@ -777,7 +777,7 @@ mod tests {
 
         let processing_result = ProcessingResult {
             groups: vec![group.clone()],
-            entity_meta: HashMap::new(),
+
             behavior: BehaviorStore::default(),
             control_flow,
             stats: Default::default(),

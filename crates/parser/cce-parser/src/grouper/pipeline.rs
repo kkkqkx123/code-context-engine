@@ -197,7 +197,7 @@ impl PreprocessingPipeline {
         stats.record_test_partition(&groups);
         ProcessingResult {
             groups,
-            entity_meta: HashMap::new(),
+
             behavior: parsed_file.behavior.clone(),
             control_flow: parsed_file.control_flow.clone(),
             stats,
@@ -248,9 +248,7 @@ impl PreprocessingPipeline {
         // Test suite processing happens before class-method to ensure test entities
         // are properly grouped even if they contain class definitions
         if self.config.enable_test_entity_grouping {
-            let (test_groups, test_assoc_count) = self.process_test_suites(&entities, parsed_file);
-            let _ = test_assoc_count;
-            groups = test_groups;
+            groups = self.process_test_suites(&entities, parsed_file);
         }
 
         // Stage 3: Process class-methods for remaining entities (if enabled)
@@ -641,7 +639,7 @@ impl PreprocessingPipeline {
 
         ProcessingResult {
             groups,
-            entity_meta: HashMap::new(),
+
             behavior: parsed_file.behavior.clone(),
             control_flow: parsed_file.control_flow.clone(),
             stats,
@@ -651,7 +649,7 @@ impl PreprocessingPipeline {
     /// Process a parsed file and return only the entity groups
     ///
     /// This is a convenience method that discards processing metadata
-    /// (statistics, entity_meta) and returns only the groups.
+    /// (statistics) and returns only the groups.
     /// Use this when you only need the grouped entities for downstream processing.
     ///
     /// # Example
@@ -693,9 +691,7 @@ impl PreprocessingPipeline {
 
         // Step 1: Process test suites (test entity grouping works)
         let mut groups = if self.config.enable_test_entity_grouping {
-            let (groups, test_assoc_count) = self.process_test_suites(&entities, &temp_parsed_file);
-            let _ = test_assoc_count;
-            groups
+            self.process_test_suites(&entities, &temp_parsed_file)
         } else {
             Vec::new()
         };
@@ -751,7 +747,7 @@ impl PreprocessingPipeline {
 
         let mut result = ProcessingResult {
             groups,
-            entity_meta: HashMap::new(),
+
             behavior: temp_parsed_file.behavior.clone(),
             control_flow: temp_parsed_file.control_flow.clone(),
             stats,
@@ -790,7 +786,7 @@ impl PreprocessingPipeline {
         &self,
         entities: &[Entity],
         parsed_file: &ParsedFile,
-    ) -> (Vec<EntityGroup>, usize) {
+    ) -> Vec<EntityGroup> {
         use crate::grouper::context::FileProcessingContext;
         let ctx = FileProcessingContext::new(entities, parsed_file, &self.config);
         self.test_suite_processor.process(ctx)

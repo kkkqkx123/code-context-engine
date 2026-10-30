@@ -1034,7 +1034,7 @@ mod tests {
         let parsed_file = create_test_parsed_file();
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: crate::grouper::ProcessingStats::default(),
@@ -1096,7 +1096,7 @@ mod tests {
         let parsed_file = create_test_parsed_file();
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: crate::grouper::ProcessingStats {
@@ -1124,7 +1124,7 @@ mod tests {
         let parsed_file = create_test_parsed_file();
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: crate::grouper::ProcessingStats {
@@ -1182,7 +1182,7 @@ mod tests {
 
         let processing_result1 = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: crate::grouper::ProcessingStats {
@@ -1193,7 +1193,7 @@ mod tests {
 
         let processing_result2 = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: crate::grouper::ProcessingStats {

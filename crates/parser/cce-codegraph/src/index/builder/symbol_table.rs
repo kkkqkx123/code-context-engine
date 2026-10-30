@@ -98,33 +98,41 @@ impl SymbolTableBuilder {
                 .and_then(|path| path.rsplit("::").next())
                 .map(|segment| segment.to_string());
 
-            // Classify import source type. Two shape-only cases come first
-            // because they are not import classes at all, then the shared
-            // classifier answers stdlib / project-local / third-party.
-            let (source_type, condition) =
-                if import.kind == cce_types::import::ImportKind::DynamicImport {
+            // Classify import source type. A parser-flagged system header
+            // keeps its stdlib identity even when it sits in conditional
+            // context: the condition travels in the separate `condition`
+            // field so neither fact is lost. Dynamic shape comes next
+            // because it is not an import class at all, then the
+            // conditional heuristic, then the shared classifier answers
+            // stdlib / project-local / third-party.
+            let (source_type, condition) = if import.is_system_header {
+                (
+                    Self::classify_import(import, file, project),
+                    Self::detect_import_condition(file, &import.source, import.span.as_ref()),
+                )
+            } else if import.kind == cce_types::import::ImportKind::DynamicImport {
+                (
+                    ImportSourceType::Dynamic {
+                        expression: import.source.clone(),
+                    },
+                    None,
+                )
+            } else {
+                // Heuristic: detect conditional imports by checking common patterns
+                // in the import context (e.g., Python try/except, Rust cfg attributes)
+                let condition =
+                    Self::detect_import_condition(file, &import.source, import.span.as_ref());
+                if let Some(ref cond) = condition {
                     (
-                        ImportSourceType::Dynamic {
-                            expression: import.source.clone(),
+                        ImportSourceType::Conditional {
+                            condition: cond.clone(),
                         },
-                        None,
+                        Some(cond.clone()),
                     )
                 } else {
-                    // Heuristic: detect conditional imports by checking common patterns
-                    // in the import context (e.g., Python try/except, Rust cfg attributes)
-                    let condition =
-                        Self::detect_import_condition(file, &import.source, import.span.as_ref());
-                    if let Some(ref cond) = condition {
-                        (
-                            ImportSourceType::Conditional {
-                                condition: cond.clone(),
-                            },
-                            Some(cond.clone()),
-                        )
-                    } else {
-                        (Self::classify_import(import, file, project), None)
-                    }
-                };
+                    (Self::classify_import(import, file, project), None)
+                }
+            };
 
             module_table.add_import(ImportBinding {
                 local_name,

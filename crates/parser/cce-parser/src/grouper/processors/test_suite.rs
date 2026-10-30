@@ -36,11 +36,10 @@ impl TestSuiteProcessor {
 impl TestSuiteProcessor {
     /// Process test suites and their test cases
     ///
-    /// Returns a tuple of (groups, association_count)
-    pub fn process(&self, ctx: FileProcessingContext) -> (Vec<EntityGroup>, usize) {
+    /// Returns the grouped entities.
+    pub fn process(&self, ctx: FileProcessingContext) -> Vec<EntityGroup> {
         let mut groups = Vec::new();
         let mut processed_ids = std::collections::HashSet::new();
-        let mut association_count = 0;
         // Check if test entity grouping is enabled
         if !ctx.config.enable_test_entity_grouping {
             // Return all entities as standalone groups
@@ -49,7 +48,7 @@ impl TestSuiteProcessor {
                 groups.push(EntityGroup::from_entity(entity.clone(), language));
                 processed_ids.insert(entity.id);
             }
-            return (groups, 0);
+            return groups;
         }
 
         // Step 1: Find all test suites
@@ -111,7 +110,6 @@ impl TestSuiteProcessor {
                     suite_language,
                 );
                 groups.push(group);
-                association_count += 1;
 
                 // Mark test cases as processed
                 for case in &test_cases {
@@ -136,7 +134,7 @@ impl TestSuiteProcessor {
         // Previously this code created standalone groups for all non-test entities,
         // which prevented the ClassMethodProcessor from merging classes with methods.
 
-        (groups, association_count)
+        groups
     }
 
     /// Find test cases that belong to a test suite
@@ -250,10 +248,9 @@ mod tests {
         let entities: Vec<Entity> = Vec::new();
         let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-        let (groups, count) = processor.process(ctx);
+        let groups = processor.process(ctx);
 
         assert_eq!(groups.len(), 0);
-        assert_eq!(count, 0);
     }
 
     #[test]
@@ -291,10 +288,9 @@ mod tests {
         let entities = vec![suite, case1, case2];
         let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-        let (groups, count) = processor.process(ctx);
+        let groups = processor.process(ctx);
 
         assert_eq!(groups.len(), 1);
-        assert_eq!(count, 1);
         assert_eq!(groups[0].group_type, GroupType::TestSuiteWithCases);
         assert_eq!(groups[0].members.len(), 2);
     }
@@ -328,11 +324,10 @@ mod tests {
         let entities = vec![suite, case];
         let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
 
-        let (groups, count) = processor.process(ctx);
+        let groups = processor.process(ctx);
 
         // When disabled, each entity should be standalone
         assert_eq!(groups.len(), 2);
-        assert_eq!(count, 0);
         assert!(groups.iter().all(|g| g.group_type == GroupType::Standalone));
     }
 }

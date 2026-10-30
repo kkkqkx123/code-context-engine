@@ -7,7 +7,6 @@
 pub use cce_types::StdlibCategory;
 pub use cce_types::grouper::pattern;
 pub use cce_types::grouper::{
-    EntityGroup, EntityMeta, GetterSetterSummary, GroupRole, GroupType, MemberRole,
-    MemberRolesBuilder, PatternInfo, ProcessingResult, ProcessingStats, SpanError, ValidationError,
-    get_member_role,
+    EntityGroup, GetterSetterSummary, GroupRole, GroupType, MemberRole, MemberRolesBuilder,
+    PatternInfo, ProcessingResult, ProcessingStats, SpanError, ValidationError, get_member_role,
 };

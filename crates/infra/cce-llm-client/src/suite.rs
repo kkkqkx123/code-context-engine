@@ -418,7 +418,7 @@ pub fn provider_definition(
         proxy: connection.proxy_url.clone(),
         no_proxy: no_proxy_for(&connection.no_proxy),
         rate_limit: rate_limit_for(connection.rate_limit),
-        compat: (|| {
+        compat: {
             if let Some(config) = connection.compat.as_ref() {
                 let converted = compat_from_config(config);
                 if converted.is_empty() {
@@ -437,7 +437,7 @@ pub fn provider_definition(
                     Some(detected)
                 }
             }
-        })(),
+        },
         identity: connection.identity.as_ref().map(identity_from_config),
         transport: connection.transport.as_ref().map(transport_from_config),
         env: connection.env.clone(),

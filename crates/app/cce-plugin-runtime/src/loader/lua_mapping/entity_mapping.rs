@@ -40,6 +40,11 @@ pub fn entity_group_to_lua_table(lua: &Lua, group: &EntityGroup) -> Result<Table
 
     // Pattern info
     table.set("pattern_info", format!("{:?}", group.pattern_info))?;
+    // Routing decision shared with the host dispatchers (`GetterSetter` /
+    // `Stdlib` / `Regular`, pattern outranks stdlib). Plugins route on this
+    // instead of reimplementing the rule from `header.is_stdlib`, which
+    // drifts when a pattern and a stdlib header coincide.
+    table.set("template_name", group.template_name())?;
 
     // Metadata - entity-specific information
     let metadata_table = lua.create_table()?;
@@ -540,6 +545,11 @@ mod tests {
         };
 
         let table = entity_group_to_lua_table(&lua, &group).expect("Failed to convert");
+
+        // Routing decision travels with the group so plugins do not
+        // reimplement the host priority.
+        let template_name: String = table.get("template_name").expect("Missing template_name");
+        assert_eq!(template_name, group.template_name());
 
         // Verify header
         let header_table: Table = table.get("header").expect("Missing header");

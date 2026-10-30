@@ -243,35 +243,62 @@ impl RelationResolver {
         let Some(import_table) = &parsed.import_table else {
             return None;
         };
-        let first_segment = raw_data
-            .dst_name
-            .split([':', '.', '/'])
-            .next()
-            .unwrap_or(&raw_data.dst_name);
+        let dst_norm = Self::normalize_spec(&raw_data.dst_name);
+        let dst_key = Self::root_key(dst_norm);
         let context = cce_parser_core::ExtractionContext::default();
         for import in &import_table.standardized_imports {
-            let import_first = import
-                .source
-                .split([':', '.', '/', '@'])
-                .next()
-                .unwrap_or(&import.source);
-            let matches = import_first == first_segment || import.source == raw_data.dst_name;
+            let src_norm = Self::normalize_spec(&import.source);
+            if src_norm.is_empty() {
+                continue;
+            }
+            let matches = src_norm == dst_norm
+                || Self::root_key(src_norm) == dst_key
+                || dst_norm.starts_with(src_norm);
             if !matches {
                 continue;
             }
             let classification = ImportClassifier::classify(import, &context, parsed.language);
             match classification.class {
                 ImportClass::StandardLibrary | ImportClass::InternalModule => return None,
-                ImportClass::ExternalPackage | ImportClass::Unknown => {
+                ImportClass::ExternalPackage => {
                     let package = classification
                         .metadata
                         .package_name
-                        .unwrap_or_else(|| first_segment.to_string());
+                        .unwrap_or_else(|| dst_key.clone());
                     return Some(ExternalCallType::external_library(package));
                 }
+                ImportClass::Unknown => continue,
             }
         }
         None
+    }
+
+    /// Strip extractor shell characters before comparing specifiers.
+    ///
+    /// Mirrors the detector and classifier normalization so a quoted import
+    /// source matches an unquoted call target.
+    fn normalize_spec(raw: &str) -> &str {
+        raw.trim()
+            .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
+            .trim()
+    }
+
+    /// Root key for import-to-target matching.
+    ///
+    /// Scoped npm packages span two segments (`@scope/name`); splitting them
+    /// at the first separator produced an empty key and made every scoped
+    /// package match every other one. All other specifiers match on their
+    /// first segment.
+    fn root_key(normalized: &str) -> String {
+        if normalized.starts_with('@') {
+            normalized.split('/').take(2).collect::<Vec<_>>().join("/")
+        } else {
+            normalized
+                .split([':', '.', '/', '\\', '@'])
+                .next()
+                .unwrap_or(normalized)
+                .to_string()
+        }
     }
 
     /// Classify an external call

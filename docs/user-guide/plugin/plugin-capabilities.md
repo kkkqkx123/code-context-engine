@@ -18,10 +18,13 @@
 -- group 结构
 {
     group_id = "string",
+    template_name = "Regular",  -- "GetterSetter" / "Stdlib" / "Regular"，与内置分发一致
     header = {
         id = number,
         name = "string",
         kind = "string",  -- function, class, struct, etc.
+        is_stdlib = boolean,  -- 仅表示插件声明的外部定义，内置导入恒为 false
+        stdlib_category = "Collection" / nil,
         modifiers = {"public", "static", ...},
         span = {start_line, end_line}
     },
@@ -35,6 +38,11 @@
     group_type = "string"
 }
 ```
+
+### 路由约定
+
+- 按 `group.template_name` 决定是否接管，不要自己从 `header.is_stdlib` 拼路由：`GetterSetter` 优先于 `Stdlib`，与内置 `GroupTemplateKind::select` 同序，不确定时返回 `nil` 交回内置。
+- `header.is_stdlib` 只有一个含义（插件声明的外部定义），不要用它判断导入：导入指向 stdlib 是关系边的信息，不在实体上。需要压缩外部定义时只认该标记，不要另起名字表。
 
 ### 返回值
 
@@ -337,6 +345,10 @@ function plugin.classify_stdlib(module_path)
     return nil  -- 不确定时返回 nil
 end
 ```
+
+宿主只对引用类实体（import / require / include）查询该钩子；定义类实体
+的外部性只能由插件显式声明（实体 `metadata["is_stdlib"] = "true"`），
+按模块路径猜定义会把自定义语言里形如 `sys.Foo` 的结构体误标并压缩。
 
 ### 测试文件检测
 

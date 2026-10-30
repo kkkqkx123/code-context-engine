@@ -321,27 +321,6 @@ impl RuleBasedGenerator {
                 // Base score
                 let mut score = 1.0;
 
-                // Get call information from entity_meta
-                if let Some(meta) = processing_result.entity_meta.get(&header.name) {
-                    // Higher call count indicates higher importance
-                    score += (meta.call_count as f32).min(5.0) * 0.1;
-
-                    // Being called by multiple callers indicates it's a public interface
-                    if meta.callers.len() > 2 {
-                        score += 0.2;
-                    }
-
-                    // Having many callees indicates it's a complex function
-                    if meta.callees.len() > 3 {
-                        score += 0.15;
-                    }
-
-                    // Merged entities might be more important
-                    if meta.is_merged {
-                        score += 0.1;
-                    }
-                }
-
                 // Adjust score based on group type
                 match group.group_type {
                     GroupType::ClassWithMethods => {
@@ -364,10 +343,7 @@ impl RuleBasedGenerator {
                         // Include all related function names
                         entities_with_score.push((header.name.clone(), score));
                         for member in &group.members {
-                            let mut member_score = score * 0.8; // Members are less important than header
-                            if let Some(meta) = processing_result.entity_meta.get(&member.name) {
-                                member_score += (meta.call_count as f32).min(5.0) * 0.1;
-                            }
+                            let member_score = score * 0.8; // Members are less important than header
                             entities_with_score.push((member.name.clone(), member_score));
                         }
                     }
@@ -482,7 +458,7 @@ mod tests {
         let generator = RuleBasedGenerator::new();
         let processing_result = ProcessingResult {
             groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats::default(),
@@ -752,7 +728,7 @@ mod tests {
                     Language::Rust,
                 ),
             ],
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats {
@@ -784,7 +760,7 @@ mod tests {
             ));
             let processing_result = ProcessingResult {
                 groups,
-                entity_meta: std::collections::HashMap::new(),
+
                 behavior: Default::default(),
                 control_flow: Default::default(),
                 stats: ProcessingStats::default(),
@@ -888,7 +864,7 @@ mod tests {
         let generator = RuleBasedGenerator::new();
         let processing_result = ProcessingResult {
             groups: vec![group],
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats {
@@ -949,7 +925,7 @@ mod improvement_tests {
     fn processing_result(groups: Vec<crate::grouper::EntityGroup>) -> ProcessingResult {
         ProcessingResult {
             groups,
-            entity_meta: std::collections::HashMap::new(),
+
             behavior: Default::default(),
             control_flow: Default::default(),
             stats: ProcessingStats::default(),
