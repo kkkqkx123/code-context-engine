@@ -507,7 +507,6 @@ fn test_import_export_index_operations() {
             is_relative: false,
             span: None,
         }],
-        source_stats: cce_types::import::ImportSourceStats::default(),
     };
 
     index.add_import_table("main.rs".to_string(), import_table.clone());
@@ -1176,7 +1175,6 @@ fn test_index_builder_process_file_with_imports_and_exports() {
             is_relative: false,
             span: None,
         }],
-        source_stats: cce_types::import::ImportSourceStats::default(),
     };
 
     let exports = vec![ExportInfo {

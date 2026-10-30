@@ -111,32 +111,49 @@ impl super::AstToNlConverter {
                     .collect::<Vec<_>>();
 
                 if let (Some(pr), Some(src)) = (processing_result, source) {
+                    let mut prune_stats =
+                        super::index_enrichment::CallsPruneStats::default();
                     for gc in &mut group_conversions {
                         let language = gc.group.language;
                         let vocabulary = self.vocabulary_for(file_path, language);
                         let bare = self.bare_methods_for(file_path, language);
-                        let enricher = IndexTextEnricher::new(&self.bm25_cleaner);
+                        let enricher = IndexTextEnricher::new(
+                            &self.bm25_cleaner,
+                            self.config.enable_calls_prune,
+                        );
+                        let plugin = super::index_enrichment::PluginSupport {
+                            bare: bare.as_deref(),
+                            registry: self.plugin_registry.as_deref(),
+                        };
                         if let Some(header) = gc.header_conversion.as_mut() {
-                            enricher.enrich_conversion(
+                            prune_stats += enricher.enrich_conversion(
                                 header,
                                 pr,
                                 src,
                                 language,
                                 vocabulary.as_deref(),
-                                bare.as_deref(),
+                                plugin,
                             );
                         }
                         for member in &mut gc.member_conversions {
-                            enricher.enrich_conversion(
+                            prune_stats += enricher.enrich_conversion(
                                 member,
                                 pr,
                                 src,
                                 language,
                                 vocabulary.as_deref(),
-                                bare.as_deref(),
+                                plugin,
                             );
                         }
                     }
+                    tracing::debug!(
+                        file_path,
+                        callees_total = prune_stats.callees_total,
+                        callees_pruned = prune_stats.callees_pruned,
+                        lines_removed = prune_stats.lines_removed,
+                        lines_guard_retained = prune_stats.lines_guard_retained,
+                        "calls prune totals for file",
+                    );
                 }
 
                 return group_conversions;
@@ -199,32 +216,48 @@ impl super::AstToNlConverter {
 
         // Phase 3: Enrich with control-flow and behavior sidecars when available.
         if let (Some(pr), Some(src)) = (processing_result, source) {
+            let mut prune_stats = super::index_enrichment::CallsPruneStats::default();
             for gc in &mut group_conversions {
                 let language = gc.group.language;
                 let vocabulary = self.vocabulary_for(file_path, language);
                 let bare = self.bare_methods_for(file_path, language);
-                let enricher = IndexTextEnricher::new(&self.bm25_cleaner);
+                let enricher = IndexTextEnricher::new(
+                    &self.bm25_cleaner,
+                    self.config.enable_calls_prune,
+                );
+                let plugin = super::index_enrichment::PluginSupport {
+                    bare: bare.as_deref(),
+                    registry: self.plugin_registry.as_deref(),
+                };
                 if let Some(header) = gc.header_conversion.as_mut() {
-                    enricher.enrich_conversion(
+                    prune_stats += enricher.enrich_conversion(
                         header,
                         pr,
                         src,
                         language,
                         vocabulary.as_deref(),
-                        bare.as_deref(),
+                        plugin,
                     );
                 }
                 for member in &mut gc.member_conversions {
-                    enricher.enrich_conversion(
+                    prune_stats += enricher.enrich_conversion(
                         member,
                         pr,
                         src,
                         language,
                         vocabulary.as_deref(),
-                        bare.as_deref(),
+                        plugin,
                     );
                 }
             }
+            tracing::debug!(
+                file_path,
+                callees_total = prune_stats.callees_total,
+                callees_pruned = prune_stats.callees_pruned,
+                lines_removed = prune_stats.lines_removed,
+                lines_guard_retained = prune_stats.lines_guard_retained,
+                "calls prune totals for file",
+            );
         }
 
         group_conversions
@@ -428,31 +461,88 @@ impl super::AstToNlConverter {
 
         // Phase 2c: Aggregate call relationships at group level.
         // Collect all call paths from member conversions within each group
-        // and append a summary to the group's embedding text.
+        // and append a summary to the group's embedding text. Member lines
+        // use lowercase `calls:` (plugins may emit legacy `Calls `); header
+        // output normalizes to lowercase so line pruning stays case-stable.
+        // Boilerplate plumbing is filtered during aggregation (name-only,
+        // no body context); curated `internal [..]` aggregates are left
+        // untouched by later line pruning.
         for gc in group_conversions.iter_mut() {
             let mut local_calls: Vec<String> = Vec::new();
             let mut external_calls: Vec<String> = Vec::new();
             let group_name = gc.group.name.to_string();
+            let group_language = gc.group.language;
+            // Same-file resolved targets per entity: kept even when their
+            // spelling collides with stdlib/boilerplate (resolution trumps
+            // every name rule, mirroring the relation layer).
+            let mut resolved_by_id: std::collections::HashMap<EntityId, std::collections::HashSet<String>> =
+                std::collections::HashMap::new();
+            {
+                let mut collect = |id: EntityId, md: &std::collections::HashMap<String, String>| {
+                    if let Some(raw) = md.get(meta_keys::RESOLVED_CALLS) {
+                        let set: std::collections::HashSet<String> = raw
+                            .split(',')
+                            .map(|n| n.trim().to_string())
+                            .filter(|n| !n.is_empty())
+                            .collect();
+                        if !set.is_empty() {
+                            resolved_by_id.insert(id, set);
+                        }
+                    }
+                };
+                if let Some(header) = gc.group.header.as_ref() {
+                    collect(header.id, &header.metadata);
+                }
+                for member in &gc.group.members {
+                    collect(member.id, &member.metadata);
+                }
+            }
 
             for member_conv in &gc.member_conversions {
                 if let Some(ref emb_text) = member_conv.embedding_text {
                     for line in emb_text.lines() {
-                        let line = line.trim();
-                        if line.starts_with("Calls ") {
-                            // Extract call names: "Calls clone, clone_from, get."
-                            let calls_str = line.trim_start_matches("Calls ").trim_end_matches('.');
-                            for call_name in calls_str.split(',').map(|s| s.trim()) {
-                                if call_name.is_empty() {
-                                    continue;
-                                }
-                                // Classify as local (same group prefix) or external
-                                if call_name.contains(&format!("::{}", group_name))
-                                    || call_name.contains(&format!("{}::", group_name))
-                                {
-                                    local_calls.push(call_name.to_string());
-                                } else {
-                                    external_calls.push(call_name.to_string());
-                                }
+                        let trimmed = line.trim();
+                        // Case-insensitive `calls:` with colon; legacy
+                        // `Calls ` without colon from older plugins.
+                        let rest = if trimmed
+                            .get(.."calls:".len())
+                            .is_some_and(|h| h.eq_ignore_ascii_case("calls:"))
+                        {
+                            &trimmed["calls:".len()..]
+                        } else if trimmed
+                            .get(.."calls ".len())
+                            .is_some_and(|h| h.eq_ignore_ascii_case("calls "))
+                        {
+                            &trimmed["calls ".len()..]
+                        } else {
+                            continue;
+                        };
+                        // Skip already-curated aggregates; only plain lists feed aggregation.
+                        if rest.contains('[') {
+                            continue;
+                        }
+                        let calls_str = rest.trim_end_matches('.');
+                        let member_resolved = resolved_by_id.get(&member_conv.entity_id);
+                        for call_name in calls_str.split(',').map(|s| s.trim()) {
+                            if call_name.is_empty() {
+                                continue;
+                            }
+                            if member_resolved.is_some_and(|set| set.contains(call_name)) {
+                                // Resolved internal target: distinctive by
+                                // definition, never filtered as boilerplate.
+                            } else if super::index_enrichment::is_boilerplate_name(
+                                call_name,
+                                group_language,
+                            ) {
+                                continue;
+                            }
+                            // Classify as local (same group prefix) or external
+                            if call_name.contains(&format!("::{}", group_name))
+                                || call_name.contains(&format!("{}::", group_name))
+                            {
+                                local_calls.push(call_name.to_string());
+                            } else {
+                                external_calls.push(call_name.to_string());
                             }
                         }
                     }
@@ -471,7 +561,7 @@ impl super::AstToNlConverter {
                 if let Some(ref mut header) = gc.header_conversion {
                     if let Some(ref mut emb_text) = header.embedding_text {
                         if !emb_text.is_empty() {
-                            emb_text.push_str("\nCalls: ");
+                            emb_text.push_str("\ncalls: ");
                             let mut parts: Vec<String> = Vec::new();
                             if !local_calls.is_empty() {
                                 parts.push(format!("internal [{}]", local_calls.join(", ")));

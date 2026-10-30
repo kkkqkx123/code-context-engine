@@ -12,9 +12,7 @@ pub mod package;
 pub mod project;
 pub mod type_index;
 pub use local::LocalSymbolTable;
-pub use module::{
-    ImportBinding, ImportSourceType, ModuleSymbolTable, ReexportBinding, strip_crate_prefix,
-};
+pub use module::{ImportBinding, ModuleSymbolTable, ReexportBinding, strip_crate_prefix};
 pub use package::PackageSymbolTable;
 pub use project::{ProjectSymbolTable, ResolutionContext};
 pub use type_index::{MemberEntry, TypeEntry, TypeKey, TypeMemberIndex};

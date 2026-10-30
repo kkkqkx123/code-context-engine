@@ -20,9 +20,6 @@ pub struct ImportTable {
     /// Provides a unified representation that works across all supported languages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub standardized_imports: Vec<StandardizedImport>,
-    /// Import source statistics
-    #[serde(default)]
-    pub source_stats: crate::types::import::ImportSourceStats,
 }
 
 impl ImportTable {
@@ -52,7 +49,6 @@ impl ImportTable {
         Self {
             file_id: table.file_id.clone(),
             standardized_imports: table.imports.clone(),
-            source_stats: crate::types::import::ImportSourceStats::default(),
         }
     }
 

@@ -500,6 +500,7 @@ pub struct ProjectAstToNlPatch {
     )]
     pub document_chunking: Option<Option<ProjectChunkingPatch>>,
     pub text_cleaner: Option<ProjectTextCleanerPatch>,
+    pub enable_calls_prune: Option<bool>,
 }
 
 /// Project-level license header patch.

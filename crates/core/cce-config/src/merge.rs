@@ -517,6 +517,9 @@ impl Mergeable for AstToNlConfig {
         if let Some(ref value) = patch.text_cleaner {
             self.text_cleaner.merge(value);
         }
+        if let Some(value) = patch.enable_calls_prune {
+            self.enable_calls_prune = value;
+        }
     }
 }
 

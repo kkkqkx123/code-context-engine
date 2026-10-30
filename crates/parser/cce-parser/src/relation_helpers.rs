@@ -13,10 +13,8 @@ use cce_types::language::Language;
 use cce_types::{ImportTable, ParseError};
 use tree_sitter::Tree;
 
-use crate::parser::extractor::ImportClassifier;
 use crate::parser::extractor::create_extractor;
 use crate::parser::extractor::create_extractor_with_registry;
-use cce_parser_core::ExtractionContext;
 
 mod common;
 mod dart;
@@ -244,12 +242,7 @@ pub fn extract_imports_with_registry(
     for import in standardized_imports {
         std_table.add_import(import);
     }
-    let mut table = ImportTable::from_standardized(&std_table);
-    // No `ExtractionContext` on this path (imports are extracted without
-    // project context), so only relative shapes resolve to project-local —
-    // exactly what the import's own shape can tell.
-    ImportClassifier::fill_source_stats(&mut table, &ExtractionContext::default(), *language);
-    Ok(table)
+    Ok(ImportTable::from_standardized(&std_table))
 }
 
 pub fn extract_reexports(tree: &Tree, source: &str, language: &Language) -> Vec<ReexportRecord> {

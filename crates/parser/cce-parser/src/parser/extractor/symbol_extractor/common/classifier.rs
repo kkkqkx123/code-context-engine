@@ -1,9 +1,9 @@
 //! Unified import classifier
 //!
 //! The single place that answers "what kind of import is this": standard
-//! library, third-party package, or project module. Consumers (symbol table,
-//! import statistics, external-call attribution) read this answer instead of
-//! each carrying their own prefix list or split heuristic.
+//! library, third-party package, or project module. Consumers (external-call
+//! attribution) read this answer instead of each carrying their own prefix
+//! list or split heuristic.
 //!
 //! The classifier deliberately knows nothing about manifests: whether a
 //! package is one the project declared is index-layer knowledge, not a
@@ -11,8 +11,7 @@
 //! [`ImportClass::ExternalPackage`] themselves.
 
 use crate::parser::stdlib::StdlibDetector;
-use cce_types::ImportTable;
-use cce_types::import::ImportSourceStats;
+use cce_types::import::strip_import_shell;
 use cce_types::language::Language;
 
 use super::{
@@ -39,48 +38,6 @@ impl ImportClassifier {
             .collect()
     }
 
-    /// Classify a whole table once and record the counts on it.
-    ///
-    /// `ImportTable::source_stats` has existed since the table type was added
-    /// and has always been zero: four buckets were declared, nothing ever
-    /// filled them, so "how much of this file is standard library" had no
-    /// answer. Both extraction paths call this, so the counts describe the
-    /// same classification the rest of the pipeline reads.
-    pub fn fill_source_stats(
-        table: &mut ImportTable,
-        context: &ExtractionContext,
-        language: Language,
-    ) {
-        // `system_imports` is a C/C++ concept: a header the compiler finds
-        // outside the project. Other extractors reuse `is_system_header` to
-        // carry the stdlib marker (`is_system_header: is_stdlib` in Python,
-        // Go, PHP, Ruby, Lua), so counting it there would report the same
-        // import twice — once as stdlib, once as system.
-        let system_imports = if matches!(language, Language::C | Language::Cpp) {
-            table
-                .standardized_imports
-                .iter()
-                .filter(|import| import.is_system_header)
-                .count()
-        } else {
-            0
-        };
-        let mut stats = ImportSourceStats {
-            total_imports: table.standardized_imports.len(),
-            system_imports,
-            ..Default::default()
-        };
-        for import in &table.standardized_imports {
-            match Self::classify(import, context, language).class {
-                ImportClass::StandardLibrary => stats.stdlib_imports += 1,
-                ImportClass::ExternalPackage => stats.external_imports += 1,
-                ImportClass::InternalModule => stats.internal_imports += 1,
-                ImportClass::Unknown => {}
-            }
-        }
-        table.source_stats = stats;
-    }
-
     /// Classify one import.
     ///
     /// Order matters: stdlib first (a `java.util.List` import is never
@@ -88,7 +45,7 @@ impl ImportClassifier {
     /// system headers, then project-local resolution, then the fallback.
     ///
     /// The source may still carry extractor shell characters; classification
-    /// works on the stripped form (see `strip_import_shell`).
+    /// works on the shared stripped form (`cce_types::import::strip_import_shell`).
     pub fn classify(
         import: &StandardizedImport,
         context: &ExtractionContext,
@@ -197,19 +154,6 @@ impl ImportClassifier {
             _ => None,
         }
     }
-}
-
-/// Strip the shell characters an extractor may leave around a specifier.
-///
-/// Mirrors the detector entry normalization (quotes, angle brackets):
-/// `classify` runs the relative-specifier check and the package-name split
-/// on the stripped form, otherwise a quoted third-party specifier reports a
-/// quoted package name. The stored `StandardizedImport.source` keeps its
-/// original spelling; only classification works on the shell-free view.
-fn strip_import_shell(raw: &str) -> &str {
-    raw.trim()
-        .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
-        .trim()
 }
 
 #[cfg(test)]
@@ -554,41 +498,6 @@ mod tests {
             );
             assert_eq!(classification.metadata.resolved_path.as_deref(), Some(path));
         }
-    }
-
-    #[test]
-    fn test_fill_source_stats() {
-        let context = ExtractionContext::default();
-
-        let mut python = ImportTable {
-            standardized_imports: vec![
-                StandardizedImport::new(ImportKind::ModuleImport, "os"),
-                StandardizedImport::new(ImportKind::ModuleImport, "requests"),
-                StandardizedImport::new(ImportKind::SymbolImport, "."),
-            ],
-            ..Default::default()
-        };
-        ImportClassifier::fill_source_stats(&mut python, &context, Language::Python);
-        let stats = &python.source_stats;
-        assert_eq!(stats.total_imports, 3);
-        assert_eq!(stats.stdlib_imports, 1, "os");
-        assert_eq!(stats.external_imports, 1, "requests");
-        assert_eq!(stats.internal_imports, 1, "relative");
-        assert_eq!(stats.system_imports, 0);
-
-        // A C system header is counted as system, not stdlib: the C tables
-        // answer `false` for import paths by design and the parser flag is the
-        // authority there.
-        let mut header = StandardizedImport::new(ImportKind::Include, "stdio.h");
-        header.is_system_header = true;
-        let mut c_table = ImportTable {
-            standardized_imports: vec![header],
-            ..Default::default()
-        };
-        ImportClassifier::fill_source_stats(&mut c_table, &context, Language::C);
-        assert_eq!(c_table.source_stats.total_imports, 1);
-        assert_eq!(c_table.source_stats.system_imports, 1);
-        assert_eq!(c_table.source_stats.stdlib_imports, 0);
     }
 
     #[test]

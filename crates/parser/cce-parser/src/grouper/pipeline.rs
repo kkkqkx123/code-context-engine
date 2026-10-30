@@ -484,7 +484,14 @@ impl PreprocessingPipeline {
         // groups keep their `group_type` regardless of test status.
         self.annotate_groups_test_info(&mut groups, parsed_file, &entities);
 
-        // Stage 9: Inject call paths from raw_relations into group metadata
+        // Stage 9: Inject call paths from raw_relations into group metadata.
+        // `CALL_PATHS` carries every call target (normalized); `RESOLVED_CALLS`
+        // carries the subset that resolves to an internal same-file entity via
+        // `LocalCallResolver` (same config as `CallMerger`). Pruning keeps
+        // resolved names unconditionally, mirroring the relation layer where
+        // resolution runs before stdlib filtering. The extra resolver run
+        // duplicates `CallMerger`'s work; sharing it is future work (the
+        // merger consumes its context and does not expose the call list).
         if !parsed_file.raw_relations.is_empty() {
             let mut call_paths_map: HashMap<EntityId, Vec<String>> = HashMap::new();
             for rel in &parsed_file.raw_relations {
@@ -500,6 +507,26 @@ impl PreprocessingPipeline {
                 paths.sort();
                 paths.dedup();
             }
+            let resolved_map = {
+                let resolver = cce_parser_core::LocalCallResolver::with_config(
+                    cce_parser_core::LocalCallResolverConfig {
+                        enable_signature_matching: true,
+                        ..Default::default()
+                    },
+                );
+                let mut map: HashMap<EntityId, Vec<String>> = HashMap::new();
+                for call in resolver.resolve_from_parsed_file(parsed_file) {
+                    let Some(name) = call_target_name(&call.callee_name) else {
+                        continue;
+                    };
+                    map.entry(call.caller).or_default().push(name);
+                }
+                for paths in map.values_mut() {
+                    paths.sort();
+                    paths.dedup();
+                }
+                map
+            };
 
             for group in &mut groups {
                 if let Some(header_id) = group.header_id {
@@ -509,6 +536,14 @@ impl PreprocessingPipeline {
                                 header
                                     .metadata
                                     .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
+                                if let Some(resolved) = resolved_map.get(&header_id) {
+                                    if !resolved.is_empty() {
+                                        header.metadata.insert(
+                                            meta_keys::RESOLVED_CALLS.to_string(),
+                                            resolved.join(", "),
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
@@ -519,6 +554,14 @@ impl PreprocessingPipeline {
                             member
                                 .metadata
                                 .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
+                            if let Some(resolved) = resolved_map.get(&member.id) {
+                                if !resolved.is_empty() {
+                                    member.metadata.insert(
+                                        meta_keys::RESOLVED_CALLS.to_string(),
+                                        resolved.join(", "),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -1022,26 +1065,21 @@ impl PreprocessingPipeline {
 
 /// The plain name of a called function.
 ///
-/// A call target may be written as a member access chain (`obj->method`,
-/// `obj.field.method`). The receiver is an arbitrary expression and states
-/// nothing about what is invoked, so only the called name is kept. A
-/// namespace-qualified name (`Type::method`) is kept whole: the qualifier
-/// is part of the name.
+/// Pointer chains (`a->b->c`) strip to the final segment, since the
+/// receiver is an arbitrary expression. Dotted (`a.b.c`) and
+/// namespace-qualified (`Type::method`) names are kept whole: the qualifier
+/// carries stdlib identity (`console.log`, `fmt.Println`, `os.path.join`)
+/// and disambiguates user receivers. Pruning decides redundancy with
+/// head-plus-tail token logic instead of blind suffix stripping, so keeping
+/// the qualifier is strictly more precise than dropping it.
 fn call_target_name(raw: &str) -> Option<String> {
     let name = raw.trim();
     if name.is_empty() {
         return None;
     }
     let arrow = name.rfind("->");
-    let dot = name.rfind('.');
-    let cut = match (arrow, dot) {
-        (Some(arrow), Some(dot)) => Some(arrow.max(dot)),
-        (Some(arrow), None) => Some(arrow),
-        (None, Some(dot)) => Some(dot),
-        (None, None) => None,
-    };
-    let name = match cut {
-        Some(pos) => name[pos..].trim_start_matches(['-', '>', '.']).trim(),
+    let name = match arrow {
+        Some(pos) => name[pos..].trim_start_matches(['-', '>']).trim(),
         None => name,
     };
     let name = name.strip_suffix('!').unwrap_or(name).trim();

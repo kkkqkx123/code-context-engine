@@ -661,14 +661,74 @@ fn test_dart_same_name_constructor_no_nested_group() {
 }
 
 #[test]
+fn test_stage9_injects_resolved_calls_for_internal_callee() {
+    use cce_types::entity::meta_keys;
+    use cce_types::relation::RelationType;
+
+    let source = "def caller():\n    helper()\ndef helper():\n    pass\n";
+    let mut parsed = ParsedFile::new(Language::Python, "app.py".to_string(), source);
+    parsed.entities.push(Entity::new(
+        EntityId(0),
+        EntityKind::Function,
+        "caller".to_string(),
+        Span::new(0, 30, 0, 0, 1, 10),
+    ));
+    parsed.entities.push(Entity::new(
+        EntityId(1),
+        EntityKind::Function,
+        "helper".to_string(),
+        Span::new(31, 60, 2, 0, 3, 8),
+    ));
+    parsed.raw_relations.push(cce_types::RawRelationData {
+        src: EntityId(0),
+        level: cce_types::RelationLevel::Entity,
+        dst_name: "helper".to_string(),
+        relation_type: RelationType::DirectCall,
+        span: Span::default(),
+        stdlib_category: None,
+    });
+
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+
+    let mut found_paths = false;
+    let mut found_resolved = false;
+    for group in &result.groups {
+        let entities = group
+            .header
+            .iter()
+            .chain(group.members.iter());
+        for entity in entities {
+            if let Some(paths) = entity.metadata.get(meta_keys::CALL_PATHS) {
+                if paths.split(',').map(str::trim).any(|n| n == "helper") {
+                    found_paths = true;
+                }
+            }
+            if let Some(resolved) = entity.metadata.get(meta_keys::RESOLVED_CALLS) {
+                if resolved.split(',').map(str::trim).any(|n| n == "helper") {
+                    found_resolved = true;
+                }
+            }
+        }
+    }
+    assert!(found_paths, "CALL_PATHS must name the call target");
+    assert!(
+        found_resolved,
+        "same-file resolved target must be recorded in RESOLVED_CALLS"
+    );
+}
+
+#[test]
 fn test_call_target_name_drops_the_receiver() {
+    // Pointer chains strip to the final dotted segment; dotted and `::`
+    // qualifiers are preserved for stdlib identity (`console.log`).
     assert_eq!(
         call_target_name("rtmp->client.oneof").as_deref(),
-        Some("oneof")
+        Some("client.oneof")
     );
     assert_eq!(
         call_target_name("dash->name.c_str").as_deref(),
-        Some("c_str")
+        Some("name.c_str")
     );
     assert_eq!(
         call_target_name("be_read_uint16").as_deref(),
@@ -680,4 +740,24 @@ fn test_call_target_name_drops_the_receiver() {
     );
     assert_eq!(call_target_name("println!").as_deref(), Some("println"));
     assert_eq!(call_target_name("  ").as_deref(), None);
+}
+
+#[test]
+fn test_call_target_name_preserves_dot_qualified_stdlib() {
+    assert_eq!(
+        call_target_name("console.log").as_deref(),
+        Some("console.log")
+    );
+    assert_eq!(
+        call_target_name("fmt.Println").as_deref(),
+        Some("fmt.Println")
+    );
+    assert_eq!(
+        call_target_name("os.path.join").as_deref(),
+        Some("os.path.join")
+    );
+    assert_eq!(
+        call_target_name("JSON.parse").as_deref(),
+        Some("JSON.parse")
+    );
 }

@@ -81,43 +81,8 @@ pub struct ImportBinding {
     /// Whether this is a wildcard import
     pub is_wildcard: bool,
 
-    /// Import source type
-    pub source_type: ImportSourceType,
-
     /// Optional condition for conditional imports (e.g., "cfg(target_os = \"linux\")")
     pub condition: Option<String>,
-}
-
-/// Import source type classification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ImportSourceType {
-    /// Internal module import (within the same package)
-    InternalModule {
-        /// Module path
-        path: String,
-    },
-    /// External package dependency
-    ExternalDependency {
-        /// Package name
-        package: String,
-    },
-    /// Standard library import
-    StandardLibrary {
-        /// Language
-        lang: Language,
-    },
-    /// Conditional import (e.g., Rust `#[cfg(...)]`, Python `try/except`)
-    Conditional {
-        /// Condition expression (e.g., "target_os = \"linux\"", "ImportError")
-        condition: String,
-    },
-    /// Dynamic import (e.g., JavaScript `import()`, Python `importlib.import_module`)
-    Dynamic {
-        /// The dynamic import expression or module path
-        expression: String,
-    },
-    /// Unknown source
-    Unknown,
 }
 
 /// Reexport binding
@@ -630,9 +595,6 @@ mod tests {
             symbol_name: Some("HashMap".to_string()),
             resolved_symbol: None,
             is_wildcard: false,
-            source_type: ImportSourceType::StandardLibrary {
-                lang: Language::Rust,
-            },
             condition: None,
         };
 

@@ -5,7 +5,7 @@
 
 use crate::symbol::Visibility;
 use crate::{ExportInfo, ExportType};
-use cce_parser::parser::extractor::{ImportClassifier, create_extractor_with_registry};
+use cce_parser::parser::extractor::create_extractor_with_registry;
 use cce_parser_core::ExtractionContext as ImportExtractionContext;
 use cce_plugin::PluginRegistry;
 use cce_types::import::{ReexportRecord, StandardizedImportTable};
@@ -99,22 +99,7 @@ pub fn extract_imports_with_registry(
         std_table.add_import(import);
     }
 
-    let mut table = ImportTable::from_standardized(&std_table);
-    fill_source_stats(&mut table, language, context.as_ref());
-    Ok(table)
-}
-
-/// Classify a file's imports once and record the counts on the table.
-///
-/// Thin adapter over the shared classifier entry so both extraction paths
-/// (this one and `cce_parser::relation_helpers`) write the same numbers.
-fn fill_source_stats(
-    table: &mut ImportTable,
-    language: &Language,
-    context: Option<&ImportExtractionContext>,
-) {
-    let default_context = ImportExtractionContext::default();
-    ImportClassifier::fill_source_stats(table, context.unwrap_or(&default_context), *language);
+    Ok(ImportTable::from_standardized(&std_table))
 }
 
 /// Extract named re-exports from a parsed file's AST.
@@ -227,9 +212,7 @@ pub fn extract_imports_from_plugin(
             }
         }
     }
-    let mut table = ImportTable::from_standardized(&std_table);
-    fill_source_stats(&mut table, language, None);
-    Ok(table)
+    Ok(ImportTable::from_standardized(&std_table))
 }
 
 /// Extract plugin-declared exports for a file.

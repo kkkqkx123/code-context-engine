@@ -10,8 +10,9 @@ use crate::index::core::RelationIndex;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 
-use cce_parser::parser::extractor::{ImportClass, ImportClassifier};
+use cce_parser::parser::extractor::ImportClassifier;
 use cce_types::entity::EntityId;
+use cce_types::import::strip_import_shell;
 use cce_types::relation::{ExternalCallType, RelationSymbolLocation, RelationSymbolRecord};
 use cce_types::{ParsedFile, RawRelationData};
 
@@ -243,11 +244,11 @@ impl RelationResolver {
         let Some(import_table) = &parsed.import_table else {
             return None;
         };
-        let dst_norm = Self::normalize_spec(&raw_data.dst_name);
+        let dst_norm = strip_import_shell(&raw_data.dst_name);
         let dst_key = Self::root_key(dst_norm);
         let context = cce_parser_core::ExtractionContext::default();
         for import in &import_table.standardized_imports {
-            let src_norm = Self::normalize_spec(&import.source);
+            let src_norm = strip_import_shell(&import.source);
             if src_norm.is_empty() {
                 continue;
             }
@@ -258,29 +259,18 @@ impl RelationResolver {
                 continue;
             }
             let classification = ImportClassifier::classify(import, &context, parsed.language);
-            match classification.class {
-                ImportClass::StandardLibrary | ImportClass::InternalModule => return None,
-                ImportClass::ExternalPackage => {
-                    let package = classification
-                        .metadata
-                        .package_name
-                        .unwrap_or_else(|| dst_key.clone());
-                    return Some(ExternalCallType::external_library(package));
-                }
-                ImportClass::Unknown => continue,
+            if classification.is_stdlib() || classification.is_internal() {
+                return None;
+            }
+            if classification.is_external() {
+                let package = classification
+                    .metadata
+                    .package_name
+                    .unwrap_or_else(|| dst_key.clone());
+                return Some(ExternalCallType::external_library(package));
             }
         }
         None
-    }
-
-    /// Strip extractor shell characters before comparing specifiers.
-    ///
-    /// Mirrors the detector and classifier normalization so a quoted import
-    /// source matches an unquoted call target.
-    fn normalize_spec(raw: &str) -> &str {
-        raw.trim()
-            .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
-            .trim()
     }
 
     /// Root key for import-to-target matching.

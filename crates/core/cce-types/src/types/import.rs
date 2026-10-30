@@ -96,23 +96,6 @@ impl Default for ImportSource {
     }
 }
 
-/// Import source statistics
-#[derive(
-    Debug, Clone, Default, Serialize, Deserialize, RkyvSerialize, RkyvDeserialize, Archive,
-)]
-pub struct ImportSourceStats {
-    /// Total number of imports
-    pub total_imports: usize,
-    /// Number of standard library imports
-    pub stdlib_imports: usize,
-    /// Number of external library imports
-    pub external_imports: usize,
-    /// Number of internal module imports
-    pub internal_imports: usize,
-    /// Number of system library imports
-    pub system_imports: usize,
-}
-
 /// Import classification classes
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportClass {
@@ -139,6 +122,20 @@ pub struct ClassificationMetadata {
     pub is_dev_dependency: bool,
     /// Is optional dependency
     pub is_optional: bool,
+}
+
+/// Strip the shell characters an extractor may leave around a specifier.
+///
+/// Single implementation for every layer that compares import text: the JS/TS
+/// family keeps the module specifier's quotes (`'node:fs'`), Dart keeps them
+/// around a URI (`'dart:async'`), C++ keeps the angle brackets of an include
+/// (`<vector>`). Classification, stdlib lookup and import-to-target matching
+/// all work on the stripped view; the stored `StandardizedImport.source`
+/// keeps its original spelling.
+pub fn strip_import_shell(raw: &str) -> &str {
+    raw.trim()
+        .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
+        .trim()
 }
 
 /// Classification result for an import

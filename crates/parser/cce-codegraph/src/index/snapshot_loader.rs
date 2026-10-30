@@ -210,7 +210,6 @@ impl RelationSnapshotLoader {
                 cce_types::ImportTable {
                     file_id: file.path.clone(),
                     standardized_imports: file.imports.clone(),
-                    source_stats: Default::default(),
                 },
             );
         }

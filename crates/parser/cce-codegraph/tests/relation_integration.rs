@@ -238,7 +238,6 @@ fn test_index_builder_process_file_with_imports_and_exports() {
             is_relative: false,
             span: None,
         }],
-        source_stats: cce_types::import::ImportSourceStats::default(),
     };
 
     let exports = vec![ExportInfo {

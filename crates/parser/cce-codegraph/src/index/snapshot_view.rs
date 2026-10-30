@@ -138,7 +138,6 @@ mod tests {
             ImportTable {
                 file_id: "a.rs".to_string(),
                 standardized_imports: vec![import("std::fmt"), import("std::io")],
-                ..Default::default()
             },
         );
         index.add_import_table(
@@ -146,7 +145,6 @@ mod tests {
             ImportTable {
                 file_id: "b.rs".to_string(),
                 standardized_imports: vec![import("std::collections")],
-                ..Default::default()
             },
         );
         index.add_exports("a.rs".to_string(), vec![export(1, "alpha")]);

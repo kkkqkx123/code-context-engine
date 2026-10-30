@@ -8,8 +8,7 @@ use std::sync::Arc;
 use tree_sitter::Tree;
 
 use super::common::{
-    ExtractionContext, ExtractionError, ExtractionResult, ImportClassification, ImportClassifier,
-    StandardizedExport, StandardizedImport,
+    ExtractionContext, ExtractionError, ExtractionResult, StandardizedExport, StandardizedImport,
 };
 
 /// Core symbol extraction trait
@@ -89,22 +88,6 @@ pub trait SymbolExtractor: Send + Sync {
     /// The package declaration string, or None if not present or not applicable
     fn extract_package_declaration(&self, _tree: &Tree, _source: &str) -> Option<String> {
         None
-    }
-
-    /// Classify imports using the unified classifier
-    ///
-    /// # Arguments
-    /// * `imports` - The imports to classify
-    /// * `context` - Extraction context
-    ///
-    /// # Returns
-    /// A vector of import classifications
-    fn classify_imports(
-        &self,
-        imports: &[StandardizedImport],
-        context: &ExtractionContext,
-    ) -> Vec<ImportClassification> {
-        ImportClassifier::classify_batch(imports, context, self.language())
     }
 }
 

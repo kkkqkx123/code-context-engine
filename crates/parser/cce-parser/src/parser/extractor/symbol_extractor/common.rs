@@ -11,5 +11,4 @@ pub use cce_types::import::{
     ClassificationMetadata, ImportClass, ImportClassification, StandardizedExport,
     StandardizedImport,
 };
-pub use classifier::ImportClassifier;
 pub use error::{ExtractionError, ExtractionResult};

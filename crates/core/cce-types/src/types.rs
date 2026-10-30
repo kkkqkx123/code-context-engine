@@ -63,7 +63,7 @@ pub use import::ImportSource;
 pub use import::{
     ClassificationMetadata, ExportKind, ExportTarget, ImportClass, ImportClassification,
     ImportKind, ImportTarget, StandardizedExport, StandardizedExportTable, StandardizedImport,
-    StandardizedImportTable, TargetKind,
+    StandardizedImportTable, TargetKind, strip_import_shell,
 };
 
 pub use relation::{

@@ -12,7 +12,8 @@
 //! - [`syntax_strip`] removes language-specific syntax noise,
 //! - [`source_extract`] re-extracts fact ranges from source.
 
-mod calls_prune;
+pub(crate) mod calls_prune;
+pub(crate) use calls_prune::{CallsPruneStats, is_boilerplate_name};
 mod source_extract;
 mod syntax_strip;
 mod topic_anchor;
@@ -40,11 +41,61 @@ use topic_anchor::{insert_after_first_line, topic_anchor};
 #[derive(Clone, Copy)]
 pub(super) struct IndexTextEnricher<'a> {
     bm25_cleaner: &'a Bm25TextCleaner,
+    calls_prune_enabled: bool,
+}
+
+/// Plugin inputs for call pruning.
+///
+/// Bundled to keep `enrich_conversion` under the argument limit:
+/// `bare` is the pre-resolved per-file bare list (Custom only),
+/// `registry` backs per-call stdlib checks for Custom languages.
+#[derive(Clone, Copy, Default)]
+pub(super) struct PluginSupport<'a> {
+    pub bare: Option<&'a [String]>,
+    pub registry: Option<&'a cce_plugin::PluginRegistry>,
+}
+
+/// Same-file resolved call targets for one entity, if any.
+///
+/// Reads `RESOLVED_CALLS` metadata injected by the grouper (Stage 9).
+/// Linear scan over groups is acceptable: files typically hold tens of
+/// groups and the comparison is a cheap integer match per entity.
+fn resolved_calls_for(
+    processing_result: &ProcessingResult,
+    entity_id: EntityId,
+) -> Option<std::collections::HashSet<String>> {
+    use cce_types::entity::meta_keys;
+    for group in &processing_result.groups {
+        if let Some(header) = group.header.as_ref() {
+            if header.id == entity_id {
+                return header.metadata.get(meta_keys::RESOLVED_CALLS).map(|s| {
+                    s.split(',')
+                        .map(|n| n.trim().to_string())
+                        .filter(|n| !n.is_empty())
+                        .collect()
+                });
+            }
+        }
+        for member in &group.members {
+            if member.id == entity_id {
+                return member.metadata.get(meta_keys::RESOLVED_CALLS).map(|s| {
+                    s.split(',')
+                        .map(|n| n.trim().to_string())
+                        .filter(|n| !n.is_empty())
+                        .collect()
+                });
+            }
+        }
+    }
+    None
 }
 
 impl<'a> IndexTextEnricher<'a> {
-    pub fn new(bm25_cleaner: &'a Bm25TextCleaner) -> Self {
-        Self { bm25_cleaner }
+    pub fn new(bm25_cleaner: &'a Bm25TextCleaner, calls_prune_enabled: bool) -> Self {
+        Self {
+            bm25_cleaner,
+            calls_prune_enabled,
+        }
     }
 
     pub fn enrich_conversion(
@@ -54,8 +105,8 @@ impl<'a> IndexTextEnricher<'a> {
         source: &str,
         language: Language,
         vocabulary: Option<&FileVocabulary>,
-        plugin_bare: Option<&[String]>,
-    ) {
+        plugin: PluginSupport<'_>,
+    ) -> CallsPruneStats {
         // Topic anchor: what the entity branches on. A function that
         // dispatches on protocol constants states its whole subject in
         // those constants, but they sit deep inside a syntax-heavy body.
@@ -97,12 +148,27 @@ impl<'a> IndexTextEnricher<'a> {
         // vectors toward each other. Drop the callees the surrounding text
         // already names; drop the line when nothing distinctive remains.
         // BM25 text is untouched: the keyword index relies on the raw
-        // identifier occurrences.
-        prune_redundant_calls_lines(conversion, language, plugin_bare);
+        // identifier occurrences. A same-file resolved internal target
+        // is never pruned (resolution trumps every name rule); the set is
+        // small per entity, so it is parsed on demand from group metadata.
+        // Disabled via `enable_calls_prune=false` for A/B comparison.
+        let stats = if self.calls_prune_enabled {
+            let resolved = resolved_calls_for(processing_result, conversion.entity_id);
+            prune_redundant_calls_lines(
+                conversion,
+                language,
+                plugin.bare,
+                plugin.registry,
+                resolved.as_ref(),
+            )
+        } else {
+            CallsPruneStats::default()
+        };
 
         if let Some(vocabulary) = vocabulary {
             self.compute_glossary(conversion, processing_result, &extra_text, vocabulary);
         }
+        stats
     }
 
     /// Collect the domain terminology of the entity.
@@ -319,7 +385,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -350,7 +416,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -387,7 +453,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("code facts should still produce text");
@@ -423,7 +489,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -473,7 +539,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -494,7 +560,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher.build_extra_text(EntityId(1), &processing_result, "");
         assert!(result.is_none());
     }
@@ -521,7 +587,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher.build_extra_text(
             EntityId(1),
             &processing_result,
@@ -568,7 +634,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -604,7 +670,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -616,5 +682,54 @@ mod tests {
             result.contains("proceed!()"),
             "macro body should keep invocations, got: {result}"
         );
+    }
+
+    #[test]
+    fn test_enrich_respects_calls_prune_flag() {
+        use cce_types::language::Language;
+        use cce_types::{EntityKind, ast_to_nl::ConversionResult};
+
+        fn convert_with(enabled: bool) -> (String, super::CallsPruneStats) {
+            let mut conversion = ConversionResult::embedding_only(
+                EntityId(1),
+                EntityKind::Function,
+                "demo".to_string(),
+                "demo.rs".to_string(),
+                "function demo.\ncalls: build_from_hir, Ok.\nBuilds.\nOk(output)"
+                    .to_string(),
+            );
+            let processing_result = ProcessingResult {
+                groups: vec![],
+                behavior: BehaviorStore::default(),
+                control_flow: ControlFlowStore::default(),
+                stats: Default::default(),
+            };
+            let bm25_cleaner = Bm25TextCleaner::new();
+            let enricher = IndexTextEnricher::new(&bm25_cleaner, enabled);
+            let stats = enricher.enrich_conversion(
+                &mut conversion,
+                &processing_result,
+                "",
+                Language::Rust,
+                None,
+                super::PluginSupport::default(),
+            );
+            let out = conversion.embedding_text.expect("text survives");
+            (out, stats)
+        }
+
+        let (pruned, stats) = convert_with(true);
+        assert!(
+            pruned.contains("calls: build_from_hir."),
+            "enabled prunes restated Ok: {pruned:?}"
+        );
+        assert_eq!(stats.callees_pruned, 1);
+
+        let (kept, stats_off) = convert_with(false);
+        assert!(
+            kept.contains("calls: build_from_hir, Ok."),
+            "disabled leaves calls line intact: {kept:?}"
+        );
+        assert_eq!(stats_off.callees_pruned, 0);
     }
 }

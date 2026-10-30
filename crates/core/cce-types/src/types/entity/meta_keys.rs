@@ -28,6 +28,17 @@ pub const INHERENT_IMPL_COUNT: &str = "inherent_impl_count";
 
 pub const CALL_PATHS: &str = "call_paths";
 
+/// Same-file resolved call targets (subset of [`CALL_PATHS`]).
+///
+/// Populated by the grouper via `LocalCallResolver`: every name listed here
+/// resolved to an internal entity in the same file, so it is by definition
+/// distinctive even when its spelling collides with stdlib/boilerplate.
+/// Call pruning keeps resolved names unconditionally, mirroring the relation
+/// layer where resolution runs before stdlib filtering. Cross-file
+/// resolution happens later in the codegraph index builder and is not
+/// visible here; that gap is conservative (keeps pruning name-based).
+pub const RESOLVED_CALLS: &str = "resolved_calls";
+
 pub const TYPE_BOUNDS: &str = "type_bounds";
 
 pub const BASE_CLASSES: &str = "base_classes";

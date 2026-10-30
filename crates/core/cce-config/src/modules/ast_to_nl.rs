@@ -39,6 +39,14 @@ pub struct AstToNlConfig {
     /// BM25 text cleaner configuration
     #[serde(default)]
     pub text_cleaner: Bm25TextCleanerConfig,
+
+    /// Enable `calls:` line pruning in index-only embedding text.
+    ///
+    /// When enabled (default), redundant call targets are dropped from the
+    /// embedding text after the behavior sidecar is appended. Disable for
+    /// A/B comparison against unpruned text; BM25 text is never pruned.
+    #[serde(default = "default_true")]
+    pub enable_calls_prune: bool,
 }
 
 impl Default for AstToNlConfig {
@@ -50,6 +58,7 @@ impl Default for AstToNlConfig {
             chunking: ChunkingConfig::default(),
             document_chunking: None,
             text_cleaner: Bm25TextCleanerConfig::default(),
+            enable_calls_prune: true,
         }
     }
 }

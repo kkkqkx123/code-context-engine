@@ -9,12 +9,11 @@
 
 use crate::symbol::{SymbolLocation, SymbolMetadata, Visibility};
 use crate::symbol_table::{
-    ImportBinding, ImportSourceType, LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable,
-    ProjectSymbolTable, ReexportBinding, strip_crate_prefix,
+    ImportBinding, LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable, ProjectSymbolTable,
+    ReexportBinding, strip_crate_prefix,
 };
 use crate::type_inference::{InferenceContext, TypeInferenceEngine};
 use cce_metrics::domain::pipeline::RelationMetrics;
-use cce_parser::parser::extractor::{ImportClass, ImportClassifier};
 use cce_parser_core::determine_module_path;
 use cce_types::language::Language;
 use cce_types::{Entity, ParsedFile, normalize_project_path};
@@ -54,15 +53,7 @@ impl SymbolTableBuilder {
     /// Import bindings are populated lazily: resolution resolves a binding's
     /// source module only when the bound name is actually looked up, which
     /// keeps incremental symbol-table construction cheap.
-    ///
-    /// When `project` is provided (incremental path), external dependency
-    /// names are checked to classify imports as `ExternalDependency`.
-    fn wire_imports(
-        &self,
-        file: &ParsedFile,
-        module_table: &mut ModuleSymbolTable,
-        project: Option<&ProjectSymbolTable>,
-    ) {
+    fn wire_imports(&self, file: &ParsedFile, module_table: &mut ModuleSymbolTable) {
         let Some(import_table) = &file.import_table else {
             return;
         };
@@ -98,40 +89,14 @@ impl SymbolTableBuilder {
                 .and_then(|path| path.rsplit("::").next())
                 .map(|segment| segment.to_string());
 
-            // Classify import source type. A parser-flagged system header
-            // keeps its stdlib identity even when it sits in conditional
-            // context: the condition travels in the separate `condition`
-            // field so neither fact is lost. Dynamic shape comes next
-            // because it is not an import class at all, then the
-            // conditional heuristic, then the shared classifier answers
-            // stdlib / project-local / third-party.
-            let (source_type, condition) = if import.is_system_header {
-                (
-                    Self::classify_import(import, file, project),
-                    Self::detect_import_condition(file, &import.source, import.span.as_ref()),
-                )
-            } else if import.kind == cce_types::import::ImportKind::DynamicImport {
-                (
-                    ImportSourceType::Dynamic {
-                        expression: import.source.clone(),
-                    },
-                    None,
-                )
+            // Conditional imports (Python try/except, Rust cfg) carry the
+            // condition in a separate field. Dynamic imports bind like
+            // regular ones; resolution reads the source path, never a
+            // precomputed source-type label.
+            let condition = if import.kind == cce_types::import::ImportKind::DynamicImport {
+                None
             } else {
-                // Heuristic: detect conditional imports by checking common patterns
-                // in the import context (e.g., Python try/except, Rust cfg attributes)
-                let condition =
-                    Self::detect_import_condition(file, &import.source, import.span.as_ref());
-                if let Some(ref cond) = condition {
-                    (
-                        ImportSourceType::Conditional {
-                            condition: cond.clone(),
-                        },
-                        Some(cond.clone()),
-                    )
-                } else {
-                    (Self::classify_import(import, file, project), None)
-                }
+                Self::detect_import_condition(file, &import.source, import.span.as_ref())
             };
 
             module_table.add_import(ImportBinding {
@@ -140,80 +105,9 @@ impl SymbolTableBuilder {
                 symbol_name,
                 resolved_symbol: None,
                 is_wildcard: false,
-                source_type,
                 condition,
             });
         }
-    }
-
-    /// Map an import to its `ImportSourceType` through the shared classifier.
-    ///
-    /// Stdlib identity, project-locality and the third-party default all come
-    /// from `ImportClassifier`, which owns the per-language import tables and
-    /// the relative-specifier rules. This builder only adds the one thing the
-    /// classifier cannot know: whether the package is declared by the project
-    /// (`is_external_dependency`), which lives in the manifest, not in the
-    /// import's shape.
-    ///
-    /// A C/C++ system header keeps `StandardLibrary`: the classifier reports
-    /// it as an external package (the C/C++ tables answer `false` by design),
-    /// but a header the parser flagged as system is by definition not a
-    /// project dependency.
-    fn classify_import(
-        import: &cce_types::StandardizedImport,
-        file: &ParsedFile,
-        project: Option<&ProjectSymbolTable>,
-    ) -> ImportSourceType {
-        if import.is_system_header {
-            return ImportSourceType::StandardLibrary {
-                lang: file.language,
-            };
-        }
-        let context = cce_parser_core::ExtractionContext::default();
-        let classification = ImportClassifier::classify(import, &context, file.language);
-        match classification.class {
-            ImportClass::StandardLibrary => ImportSourceType::StandardLibrary {
-                lang: file.language,
-            },
-            ImportClass::InternalModule => ImportSourceType::InternalModule {
-                path: import.source.clone(),
-            },
-            ImportClass::ExternalPackage => {
-                if Self::is_external_dependency(&import.source, project) {
-                    ImportSourceType::ExternalDependency {
-                        package: classification
-                            .metadata
-                            .package_name
-                            .unwrap_or_else(|| import.source.clone()),
-                    }
-                } else {
-                    ImportSourceType::Unknown
-                }
-            }
-            ImportClass::Unknown => ImportSourceType::Unknown,
-        }
-    }
-
-    /// Check if an import source matches a known external dependency.
-    ///
-    /// Extracts the top-level package name from the source path and checks
-    /// if it exists in the project's external dependency table. This enables
-    /// proper classification of third-party imports as `ExternalDependency`.
-    fn is_external_dependency(source: &str, project: Option<&ProjectSymbolTable>) -> bool {
-        let Some(project) = project else {
-            return false;
-        };
-        // Extract top-level package name from source path
-        // Rust: "serde::Deserialize" -> "serde"
-        // Python: "requests.api" -> "requests"
-        // JS: "lodash/fp" -> "lodash"
-        let package = source
-            .split("::")
-            .next()
-            .or_else(|| source.split('.').next())
-            .or_else(|| source.split('/').next())
-            .unwrap_or(source);
-        project.get_external_dep(package).is_some()
     }
 
     /// Detect if an import is conditional based on file context.
@@ -415,8 +309,7 @@ impl SymbolTableBuilder {
 
             // wire the file's imports into the module table so Level 2
             // (import-based) resolution is functional.
-            // Pass None for project during build; external deps not yet registered.
-            self.wire_imports(file, &mut module_table, None);
+            self.wire_imports(file, &mut module_table);
 
             // Wire named re-exports so Level 3 (re-export) resolution can
             // resolve them lazily against the package's module tables.
@@ -582,8 +475,7 @@ impl SymbolTableBuilder {
 
         // wire the file's imports into the module table so Level 2
         // (import-based) resolution is functional.
-        // Pass project reference to enable external dependency classification.
-        self.wire_imports(file, &mut module_table, Some(project));
+        self.wire_imports(file, &mut module_table);
 
         // Wire named re-exports so Level 3 (re-export) resolution can
         // resolve them lazily against the package's module tables.

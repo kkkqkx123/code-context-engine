@@ -1,6 +1,7 @@
 // Standard Library Detector
 // Unified interface for standard library call detection across languages
 
+use cce_types::import::strip_import_shell;
 use cce_types::language::{Language, effective_language};
 use cce_types::relation::RelationType;
 use cce_types::stdlib_category::StdlibCategory;
@@ -37,7 +38,13 @@ impl StdlibDetector {
             Language::Dart => DartStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Go => GoStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Java => JavaStdlibDetector::is_stdlib_by_type(call_name, relation_type),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+            Language::JavaScript
+            | Language::TypeScript
+            | Language::Jsx
+            | Language::Tsx
+            | Language::Vue
+            | Language::Svelte
+            | Language::Ejs => {
                 JavaScriptStdlibDetector::is_stdlib_by_type(call_name, relation_type)
             }
             Language::Kotlin => KotlinStdlibDetector::is_stdlib_by_type(call_name, relation_type),
@@ -69,9 +76,13 @@ impl StdlibDetector {
             Language::Dart => DartStdlibDetector::is_stdlib_call(call_name),
             Language::Go => GoStdlibDetector::is_stdlib_call(call_name),
             Language::Java => JavaStdlibDetector::is_stdlib_call(call_name),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                JavaScriptStdlibDetector::is_stdlib_call(call_name)
-            }
+            Language::JavaScript
+            | Language::TypeScript
+            | Language::Jsx
+            | Language::Tsx
+            | Language::Vue
+            | Language::Svelte
+            | Language::Ejs => JavaScriptStdlibDetector::is_stdlib_call(call_name),
             Language::Kotlin => KotlinStdlibDetector::is_stdlib_call(call_name),
             Language::Lua => LuaStdlibDetector::is_stdlib_call(call_name),
             Language::Php => PhpStdlibDetector::is_stdlib_call(call_name),
@@ -101,9 +112,13 @@ impl StdlibDetector {
             Language::Dart => DartStdlibDetector::get_category(name),
             Language::Go => GoStdlibDetector::get_category(name),
             Language::Java => JavaStdlibDetector::get_category(name),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                JavaScriptStdlibDetector::get_category(name)
-            }
+            Language::JavaScript
+            | Language::TypeScript
+            | Language::Jsx
+            | Language::Tsx
+            | Language::Vue
+            | Language::Svelte
+            | Language::Ejs => JavaScriptStdlibDetector::get_category(name),
             Language::Kotlin => KotlinStdlibDetector::get_category(name),
             Language::Lua => LuaStdlibDetector::get_category(name),
             Language::Php => PhpStdlibDetector::get_category(name),
@@ -124,7 +139,7 @@ impl StdlibDetector {
     /// know the shape should prefer the narrower entry so a user definition
     /// that merely shares a name with a stdlib entry is not swallowed.
     pub fn is_stdlib_ref(name: &str, language: &Language) -> bool {
-        let name = normalize_ref(name);
+        let name = strip_import_shell(name);
         if name.is_empty() {
             return false;
         }
@@ -146,7 +161,7 @@ impl StdlibDetector {
     /// (`StandardizedImport::is_system_header`) and those imports keep
     /// classifying as `ExternalPackage`, not `StandardLibrary`.
     pub fn is_stdlib_import_path(path: &str, language: &Language) -> bool {
-        let path = normalize_ref(path);
+        let path = strip_import_shell(path);
         if path.is_empty() {
             return false;
         }
@@ -173,7 +188,13 @@ impl StdlibDetector {
                     || path.starts_with("scala.")
                     || JavaStdlibDetector::is_jdk_path(path)
             }
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+            Language::JavaScript
+            | Language::TypeScript
+            | Language::Jsx
+            | Language::Tsx
+            | Language::Vue
+            | Language::Svelte
+            | Language::Ejs => {
                 // Node specifiers are matched whole (`fs`, `fs/promises`), so a
                 // project module such as `fs/helpers` stays out. The `node:`
                 // protocol prefix is not part of the table.
@@ -209,7 +230,7 @@ impl StdlibDetector {
     /// last segment (`std::collections::HashMap` → `HashMap` → `Collection`)
     /// before settling on `Other`.
     pub fn ref_category(name: &str, language: &Language) -> Option<StdlibCategory> {
-        let name = normalize_ref(name);
+        let name = strip_import_shell(name);
         if !Self::is_stdlib_ref(name, language) {
             return None;
         }
@@ -220,21 +241,6 @@ impl StdlibDetector {
             })
             .or(Some(StdlibCategory::Other))
     }
-}
-
-/// Strip the quoting an extractor leaves around a reference.
-///
-/// An import name reaches the detectors in whatever shape the extractor kept:
-/// the JS/TS family keeps the module specifier's quotes (`'node:fs'`), Dart
-/// keeps them around a URI (`'dart:async'`), C++ keeps the angle brackets of
-/// `#include <vector>`. Normalizing at the entry fixes every language at once;
-/// teaching twelve extractors to trim the same characters would drift, and
-/// "which characters are shell" is knowledge about a reference, not about a
-/// grammar.
-fn normalize_ref(raw: &str) -> &str {
-    raw.trim()
-        .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
-        .trim()
 }
 
 /// First component of a `separator`-delimited path.
@@ -1067,13 +1073,9 @@ mod tests {
     #[test]
     fn test_stdlib_category_covers_all_categorized_languages() {
         use cce_types::StdlibCategory;
-        let template = [
-            Language::Html,
-            Language::Css,
-            Language::Vue,
-            Language::Svelte,
-            Language::Ejs,
-        ];
+        // Only document languages stay template-conservative; Vue/Svelte/Ejs
+        // map to the JavaScript detector (same as call pruning).
+        let template = [Language::Html, Language::Css];
         for language in Language::ast_parsable_languages() {
             if template.contains(language) {
                 continue;
@@ -1092,7 +1094,13 @@ mod tests {
                     "System.out.println",
                     JavaStdlibDetector::get_category("System.out.println"),
                 ),
-                Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => (
+                Language::JavaScript
+                | Language::TypeScript
+                | Language::Jsx
+                | Language::Tsx
+                | Language::Vue
+                | Language::Svelte
+                | Language::Ejs => (
                     "console.log",
                     JavaScriptStdlibDetector::get_category("console.log"),
                 ),
@@ -1124,16 +1132,11 @@ mod tests {
     /// extending `Language::ast_parsable_languages`.
     #[test]
     fn test_stdlib_covers_all_parsable_languages() {
-        // Template languages carry no stdlib calls of their own; their
+        // Document languages carry no stdlib calls of their own; their
         // embedded script/style blocks re-enter every layer as the host
         // language, so `false` here is the intended conservative answer.
-        let template: &[Language] = &[
-            Language::Html,
-            Language::Css,
-            Language::Vue,
-            Language::Svelte,
-            Language::Ejs,
-        ];
+        // Vue/Svelte/Ejs map to the JavaScript detector.
+        let template: &[Language] = &[Language::Html, Language::Css];
         let sentinels: &[(Language, &str)] = &[
             (Language::Bash, "echo"),
             (Language::C, "printf"),
@@ -1146,6 +1149,9 @@ mod tests {
             (Language::TypeScript, "console.log"),
             (Language::Jsx, "console.log"),
             (Language::Tsx, "console.log"),
+            (Language::Vue, "console.log"),
+            (Language::Svelte, "console.log"),
+            (Language::Ejs, "console.log"),
             (Language::Kotlin, "listOf"),
             (Language::Lua, "string.format"),
             (Language::Php, "strlen"),
@@ -1194,6 +1200,9 @@ mod tests {
             (Language::Java, "System.out.println"),
             (Language::JavaScript, "console.log"),
             (Language::TypeScript, "console.log"),
+            (Language::Vue, "console.log"),
+            (Language::Svelte, "console.log"),
+            (Language::Ejs, "console.log"),
             (Language::Kotlin, "listOf"),
             (Language::Lua, "string.format"),
             (Language::Php, "strlen"),
@@ -1210,12 +1219,7 @@ mod tests {
             );
         }
 
-        for language in [
-            Language::Html,
-            Language::Css,
-            Language::Vue,
-            Language::Unknown,
-        ] {
+        for language in [Language::Html, Language::Css, Language::Unknown] {
             assert_eq!(
                 StdlibDetector::category("something", &language),
                 None,

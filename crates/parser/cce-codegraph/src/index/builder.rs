@@ -897,7 +897,6 @@ mod tests {
         file.import_table = Some(ImportTable {
             file_id: "file.rs".to_string(),
             standardized_imports: Vec::new(),
-            source_stats: Default::default(),
         });
 
         builder.register_file_entities(&file);
@@ -1103,7 +1102,6 @@ mod tests {
 
         let import_table = ImportTable {
             file_id: "file_1".to_string(),
-            source_stats: cce_types::import::ImportSourceStats::default(),
             standardized_imports: vec![
                 cce_types::import::StandardizedImport::new(ImportKind::SymbolImport, "./utils")
                     .with_target(ImportTarget::new("foo", TargetKind::Function)),

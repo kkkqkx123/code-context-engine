@@ -507,7 +507,6 @@ fn layered_snapshot_query_file_query_methods_use_final_state() {
         ImportTable {
             file_id: "src/file.rs".to_string(),
             standardized_imports: vec![base_import.clone()],
-            source_stats: Default::default(),
         },
     );
     base.add_exports(
