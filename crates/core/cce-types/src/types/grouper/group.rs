@@ -664,6 +664,37 @@ impl EntityGroup {
         ids
     }
 
+    /// Read-only test partition of the owned entities.
+    ///
+    /// Diagnostic companion to the filter-critical `test_info`: reports how
+    /// many owned entities are test versus production without influencing
+    /// retrieval. Callers must keep filtering on `test_info` and fragment
+    /// markers, never on these counts.
+    pub fn test_counts(&self) -> (usize, usize) {
+        let mut test = 0usize;
+        let mut prod = 0usize;
+        for entity in self.header.iter().chain(self.members.iter()) {
+            if entity.test_info.is_test() {
+                test += 1;
+            } else {
+                prod += 1;
+            }
+        }
+        (test, prod)
+    }
+
+    /// Whether the group mixes test and production entities.
+    pub fn is_mixed_test(&self) -> bool {
+        let (test, prod) = self.test_counts();
+        test > 0 && prod > 0
+    }
+
+    /// Whether the group holds test entities and no production ones.
+    pub fn is_pure_test(&self) -> bool {
+        let (test, prod) = self.test_counts();
+        test > 0 && prod == 0
+    }
+
     /// Resolve a display name for each of the given entity IDs.
     ///
     /// Names come from the group header and members; unknown IDs (e.g. the
@@ -1061,5 +1092,58 @@ impl ProcessingResult {
         self.groups
             .iter()
             .find(|g| g.header_id == Some(entity_id) || g.member_ids.contains(&entity_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::entity::{EntityKind, GroupedEntity};
+
+    fn entity(id: u64, test: bool) -> GroupedEntity {
+        let mut e = GroupedEntity::new(
+            EntityId(id),
+            EntityKind::Function,
+            format!("fn_{id}"),
+            format!("fn_{id}"),
+        );
+        if test {
+            e.test_info = crate::types::TestInfo::test_ast();
+        }
+        e
+    }
+
+    fn group_with(header_test: bool, member_tests: &[bool]) -> EntityGroup {
+        let mut header = entity(1, header_test);
+        let mut group = EntityGroup::new("group_1", GroupType::Standalone);
+        group.header = Some(header.clone());
+        group.header_id = Some(header.id);
+        header.test_info = if header_test {
+            crate::types::TestInfo::test_ast()
+        } else {
+            crate::types::TestInfo::unknown()
+        };
+        group.header = Some(header);
+        for (i, test) in member_tests.iter().enumerate() {
+            let e = entity(i as u64 + 2, *test);
+            group.member_ids.push(e.id);
+            group.members.push(e);
+        }
+        group
+    }
+
+    #[test]
+    fn test_partition_counts_mixed_and_pure() {
+        let mixed = group_with(false, &[false, true]);
+        assert_eq!(mixed.test_counts(), (1, 2));
+        assert!(mixed.is_mixed_test());
+        assert!(!mixed.is_pure_test());
+        let pure = group_with(true, &[true]);
+        assert!(pure.is_pure_test());
+        assert!(!pure.is_mixed_test());
+        let prod = group_with(false, &[false]);
+        assert_eq!(prod.test_counts(), (0, 2));
+        assert!(!prod.is_pure_test());
+        assert!(!prod.is_mixed_test());
     }
 }

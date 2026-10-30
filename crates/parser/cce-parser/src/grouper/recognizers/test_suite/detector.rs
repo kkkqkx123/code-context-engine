@@ -134,13 +134,16 @@ impl TestSuiteDetector {
     ///
     /// This is the primary entry point used by the preprocessing pipeline.
     /// The returned map is keyed by `EntityId`; entities without any signal
-    /// are omitted (callers treat a missing entry as `Unknown`).
+    /// are omitted (callers treat a missing entry as `Unknown`). After direct
+    /// signals, test scope propagates down parent chains: entities inside a
+    /// test-marked container share its scope even without their own markers.
     pub fn detect_test_info(&self, ctx: &FileProcessingContext) -> HashMap<EntityId, TestInfo> {
         let annotations = AnnotationIndex::build(ctx.entities);
         let source: &str = ctx.parsed_file.source.as_ref();
         let file_path = ctx.parsed_file.path.as_str();
 
-        ctx.entities
+        let mut infos: HashMap<EntityId, TestInfo> = ctx
+            .entities
             .iter()
             .filter(|e| !e.kind.is_annotation_like())
             .filter_map(|e| {
@@ -152,7 +155,40 @@ impl TestSuiteDetector {
                     Some((e.id, info))
                 }
             })
-            .collect()
+            .collect();
+        Self::propagate_scope(ctx.entities, &mut infos);
+        infos
+    }
+
+    /// Propagate test scope from containers to descendants without signals.
+    ///
+    /// A test-marked ancestor (test module, test class, test function) scopes
+    /// everything inside it: helpers there are test-scoped. Only `Test`
+    /// propagates, never `Unknown`, so production siblings stay visible. The
+    /// inherited marker carries group granularity to record scope origin.
+    fn propagate_scope(entities: &[Entity], infos: &mut HashMap<EntityId, TestInfo>) {
+        let parent_of: HashMap<EntityId, EntityId> = entities
+            .iter()
+            .filter_map(|e| e.parent.map(|parent| (e.id, parent)))
+            .collect();
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for entity in entities {
+                if entity.kind.is_annotation_like() || infos.contains_key(&entity.id) {
+                    continue;
+                }
+                let mut ancestor = parent_of.get(&entity.id).copied();
+                while let Some(id) = ancestor {
+                    if infos.get(&id).is_some_and(|info| info.is_test()) {
+                        infos.insert(entity.id, TestInfo::test_ast_block());
+                        changed = true;
+                        break;
+                    }
+                    ancestor = parent_of.get(&id).copied();
+                }
+            }
+        }
     }
 
     /// Detect the `TestInfo` for a single entity.

@@ -67,6 +67,10 @@ pub struct GroupedEntity {
     /// Extension metadata (framework-specific info, annotations, etc.)
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+
+    /// Per-entity test marker populated by the grouper.
+    #[serde(default)]
+    pub test_info: crate::types::TestInfo,
 }
 
 impl GroupedEntity {
@@ -98,6 +102,7 @@ impl GroupedEntity {
             is_stdlib: entity.is_stdlib,
             stdlib_category: entity.stdlib_category,
             metadata: entity.metadata.clone(),
+            test_info: crate::types::TestInfo::unknown(),
         }
     }
 
@@ -117,6 +122,7 @@ impl GroupedEntity {
             is_stdlib: false,
             stdlib_category: None,
             metadata: HashMap::new(),
+            test_info: crate::types::TestInfo::unknown(),
         }
     }
 

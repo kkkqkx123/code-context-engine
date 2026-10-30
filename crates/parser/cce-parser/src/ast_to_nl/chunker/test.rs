@@ -37,6 +37,7 @@ mod tests {
                 is_stdlib: false,
                 stdlib_category: None,
                 metadata: Default::default(),
+                test_info: cce_types::TestInfo::unknown(),
             }),
             header_id: Some(EntityId(1)),
             members: Default::default(),
@@ -139,6 +140,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let member_entity = GroupedEntity {
@@ -155,6 +157,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let group = EntityGroup {

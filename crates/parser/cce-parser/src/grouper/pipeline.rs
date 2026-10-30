@@ -814,10 +814,16 @@ impl PreprocessingPipeline {
 
     /// Annotate `test_info` on every group (including nested groups).
     ///
-    /// Merge order:
-    /// 1. File-level path rule (Medium) applies to all groups of the file.
-    /// 2. Entity-level AST detection (High) overrides path signals.
-    /// 3. Any member marked `Test` makes the whole group `Test`.
+    /// Merge order (centralized in `TestInfo` helpers to avoid scattered logic):
+    /// 1. File-level path rule applies to all groups of the file.
+    /// 2. Header `Test` wins immediately (container is test).
+    /// 3. A group is `Test` only when every owned entity is `Test`; mixed
+    ///    production/test impls stay `Unknown` so production methods remain
+    ///    retrievable while test-only helpers are handled as separate
+    ///    fragments. File-level summaries use the same homogeneous rule.
+    /// 4. Every header and member carries its own per-entity marker so the
+    ///    chunker can attribute fragments precisely without re-running
+    ///    detection.
     fn annotate_groups_test_info(
         &self,
         groups: &mut [EntityGroup],
@@ -845,9 +851,11 @@ impl PreprocessingPipeline {
                 annotated += 1;
             }
             group.test_info = info;
+            Self::populate_group_entity_test_info(group, &file_info, &entity_infos);
             for nested in group.nested_groups.iter_mut() {
                 let nested_info = Self::merged_group_test_info(nested, &file_info, &entity_infos);
                 nested.test_info = nested_info;
+                Self::populate_group_entity_test_info(nested, &file_info, &entity_infos);
             }
         }
 
@@ -867,7 +875,9 @@ impl PreprocessingPipeline {
             }
         }
 
-        // Propagate via entity children
+        // Propagate via entity children using the same homogeneous rule:
+        // a container is `Test` only when every child belongs to a
+        // test-marked group. Mixed containers stay `Unknown`.
         for group in groups.iter_mut() {
             if !group.test_info.is_unknown() {
                 continue;
@@ -878,33 +888,133 @@ impl PreprocessingPipeline {
             let Some(entity) = entity_map.get(&header_id) else {
                 continue;
             };
-
-            // Check if any child entity belongs to a test-marked group
-            for child_id in &entity.children {
-                if test_group_by_entity.contains_key(child_id) {
-                    group.test_info = TestInfo::test_ast();
-                    annotated += 1;
-                    break;
+            if entity.children.is_empty() {
+                continue;
+            }
+            let all_children_test = entity
+                .children
+                .iter()
+                .all(|child_id| test_group_by_entity.contains_key(child_id));
+            if all_children_test {
+                group.test_info = TestInfo::test_ast();
+                if let Some(header) = group.header.as_mut() {
+                    header.test_info = TestInfo::test_ast();
                 }
+                annotated += 1;
             }
         }
 
         if annotated > 0 {}
     }
 
-    /// Merge file-level info with every entity-level marker of a group.
+    /// Populate per-entity markers for one group.
+    ///
+    /// Each header and member merges the file-level path rule with its own
+    /// AST signal. Missing entries mean `Unknown`. Members inherit the header
+    /// marker only inside test-scoped containers (suites, test functions,
+    /// test-named types): a plain helper there is test-scoped. Everywhere
+    /// else members keep their own signal so production code stays visible.
+    fn populate_group_entity_test_info(
+        group: &mut EntityGroup,
+        file_info: &TestInfo,
+        entity_infos: &std::collections::HashMap<EntityId, TestInfo>,
+    ) {
+        let unknown = TestInfo::unknown();
+        if let Some(header) = group.header.as_mut() {
+            if let Some(header_id) = group.header_id {
+                let entity_info = entity_infos.get(&header_id).unwrap_or(&unknown);
+                header.test_info = file_info.merge(entity_info);
+            } else {
+                header.test_info = *file_info;
+            }
+        }
+        let header_granularity = group
+            .header_id
+            .and_then(|id| entity_infos.get(&id))
+            .map(|info| info.granularity);
+        let inherit = file_info.is_unknown()
+            && group
+                .header
+                .as_ref()
+                .is_some_and(|header| header.test_info.is_test())
+            && Self::members_inherit_header(group.group_type, header_granularity);
+        let inherited = group.header.as_ref().map(|header| header.test_info);
+        for member in group.members.iter_mut() {
+            let entity_info = entity_infos.get(&member.id).unwrap_or(&unknown);
+            let base = file_info.merge(entity_info);
+            member.test_info = if base.is_unknown() && inherit {
+                inherited.unwrap_or(base)
+            } else {
+                base
+            };
+        }
+    }
+
+    /// Whether members of a group inherit a test header marker.
+    ///
+    /// Suites and test functions are scopes: everything inside is test.
+    /// Test-named types are containers: the naming signal carries group
+    /// granularity, so plain helpers inside share it. Any other group keeps
+    /// members independent to protect production recall.
+    fn members_inherit_header(
+        group_type: GroupType,
+        header_granularity: Option<cce_types::test_info::TestGranularity>,
+    ) -> bool {
+        match group_type {
+            GroupType::TestSuiteWithCases | GroupType::FunctionWithMembers => true,
+            GroupType::ClassWithMethods
+            | GroupType::InterfaceWithImpls
+            | GroupType::TraitWithImpls
+            | GroupType::ModuleWithContents => {
+                header_granularity
+                    == Some(cce_types::test_info::TestGranularity::Group)
+            }
+            _ => false,
+        }
+    }
+
+    /// Merge file-level info with entity markers using the homogeneous rule.
     fn merged_group_test_info(
         group: &EntityGroup,
         file_info: &TestInfo,
         entity_infos: &std::collections::HashMap<EntityId, TestInfo>,
     ) -> TestInfo {
-        let mut info = *file_info;
-        for entity_id in group.all_entity_ids() {
-            if let Some(entity_info) = entity_infos.get(&entity_id) {
-                info = info.merge(entity_info);
+        let owned = group.all_entity_ids();
+        if owned.is_empty() {
+            return *file_info;
+        }
+        if let Some(header_id) = group.header_id {
+            if let Some(header_info) = entity_infos.get(&header_id) {
+                if header_info.is_test() {
+                    return *header_info;
+                }
             }
         }
-        info
+        // Scaffolding headers (impl blocks, type declarations) carry no test
+        // semantics of their own: members all test means the group is test.
+        if !group.member_ids.is_empty()
+            && group.member_ids.iter().all(|id| {
+                entity_infos
+                    .get(id)
+                    .is_some_and(|info| info.is_test())
+            })
+        {
+            return TestInfo::merge_with_entities(file_info, entity_infos, &owned);
+        }
+        let mut has_test = false;
+        let mut has_prod = false;
+        for entity_id in &owned {
+            if entity_infos.get(entity_id).is_some_and(|info| info.is_test()) {
+                has_test = true;
+            } else {
+                has_prod = true;
+            }
+        }
+        if (has_test && !has_prod) || file_info.is_test() {
+            TestInfo::merge_with_entities(file_info, entity_infos, &owned)
+        } else {
+            TestInfo::unknown()
+        }
     }
 }
 

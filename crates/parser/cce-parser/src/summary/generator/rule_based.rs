@@ -810,6 +810,21 @@ mod tests {
         // Ordinary file with no test signal stays unknown.
         let summary = summary_for("src/lib.rs", vec![]);
         assert!(summary.test_info.is_unknown());
+
+        // Mixed production and test groups stay unknown so production chunks
+        // remain retrievable; per-fragment markers carry the precise signal.
+        let mut prod_group = crate::grouper::EntityGroup::from_entity(
+            parsed_entity("adder", "src/lib.rs"),
+            Language::Rust,
+        );
+        prod_group.test_info = TestInfo::unknown();
+        let mut mixed_test_group = crate::grouper::EntityGroup::from_entity(
+            parsed_entity("adder", "src/lib.rs"),
+            Language::Rust,
+        );
+        mixed_test_group.test_info = TestInfo::test_ast();
+        let summary = summary_for("src/lib.rs", vec![prod_group, mixed_test_group]);
+        assert!(summary.test_info.is_unknown());
     }
 
     fn parsed_entity(name: &str, path: &str) -> Entity {

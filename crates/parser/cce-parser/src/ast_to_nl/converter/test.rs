@@ -33,6 +33,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         }
     }
 
@@ -56,6 +57,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         }
     }
 

@@ -17,6 +17,11 @@ pub use super::chunk_contexts::{SegmentHeaderContext, SingleChunkContext, Unspli
 
 pub struct ChunkBuilder;
 
+// Per-fragment test attribution from covered entities. Each grouped entity
+// already merges the file path rule with its own AST signal, so merging the
+// covered set is sufficient. The header counts only when it is content,
+// never when carried as context. Empty coverage falls back to the group.
+
 /// Prefixes of the text lines that state an entity's subject.
 const TOPIC_LINE_PREFIXES: [&str; 3] = ["branches on: ", "control flow: ", "calls: "];
 
@@ -243,6 +248,33 @@ impl Default for ChunkBuilder {
 impl ChunkBuilder {
     pub fn new() -> Self {
         Self
+    }
+
+    pub(crate) fn fragment_test_info(
+        group: &EntityGroup,
+        content_entity_ids: &[EntityId],
+    ) -> cce_types::TestInfo {
+        if content_entity_ids.is_empty() {
+            return group.test_info;
+        }
+        let mut info = cce_types::TestInfo::unknown();
+        let mut matched = false;
+        for id in content_entity_ids {
+            let marker = if Some(*id) == group.header_id {
+                group.header.as_ref().map(|header| header.test_info)
+            } else {
+                group
+                    .members
+                    .iter()
+                    .find(|member| member.id == *id)
+                    .map(|member| member.test_info)
+            };
+            if let Some(marker) = marker {
+                matched = true;
+                info = info.merge(&marker);
+            }
+        }
+        if matched { info } else { group.test_info }
     }
 
     fn entity_name_by_id(group: &EntityGroup, id: EntityId) -> Option<String> {
@@ -638,6 +670,7 @@ impl ChunkBuilder {
         let text_len = text.len();
         let word_count = cost(&text, ChunkPath::Bm25);
         let token_count = cost(&text, ctx.path);
+        let fragment_info = Self::fragment_test_info(ctx.group, &content_entity_ids);
 
         ChunkedResult {
             chunk_id,
@@ -685,7 +718,7 @@ impl ChunkBuilder {
                     None
                 };
                 meta.segment_id = ctx.group.group_id.to_string();
-                meta.test_info = ctx.group.test_info;
+                meta.test_info = fragment_info;
                 meta
             },
         }
@@ -955,6 +988,7 @@ impl ChunkBuilder {
                         keywords.to_vec(),
                     )
                 };
+                let fragment_info = Self::fragment_test_info(group, &content_entity_ids);
 
                 ChunkedResult {
                     chunk_id,
@@ -1016,7 +1050,7 @@ impl ChunkBuilder {
                             None
                         };
                         meta.segment_id = group.group_id.to_string();
-                        meta.test_info = group.test_info;
+                        meta.test_info = fragment_info;
                         meta
                     },
                 }
@@ -1082,6 +1116,7 @@ impl ChunkBuilder {
                 ctx.keywords,
             )
         };
+        let fragment_info = Self::fragment_test_info(ctx.group, &content_entity_ids);
 
         ChunkedResult {
             chunk_id: ctx.chunk_id,
@@ -1141,7 +1176,7 @@ impl ChunkBuilder {
                     None
                 };
                 meta.segment_id = ctx.group.group_id.to_string();
-                meta.test_info = ctx.group.test_info;
+                meta.test_info = fragment_info;
                 meta
             },
         }
@@ -1519,5 +1554,76 @@ mod tests {
         assert!(!ChunkBuilder::states_own_topic(
             "function handler.\nint depth = 0;\nreturn depth;"
         ));
+    }
+}
+
+#[cfg(test)]
+mod fragment_test_info_tests {
+    use super::*;
+    use crate::grouper::types::GroupType;
+    use cce_types::entity::GroupedEntity;
+    use cce_types::language::Language;
+    use compact_str::CompactString;
+    use smallvec::SmallVec;
+    use std::collections::HashMap;
+
+    fn mixed_group() -> EntityGroup {
+        let mut header = GroupedEntity::new(
+            EntityId(10),
+            EntityKind::Function,
+            "impl".to_string(),
+            "impl".to_string(),
+        );
+        header.test_info = cce_types::TestInfo::unknown();
+        let mut prod = GroupedEntity::new(
+            EntityId(11),
+            EntityKind::Function,
+            "new".to_string(),
+            "new".to_string(),
+        );
+        prod.test_info = cce_types::TestInfo::unknown();
+        let mut helper = GroupedEntity::new(
+            EntityId(12),
+            EntityKind::Function,
+            "add_str".to_string(),
+            "add_str".to_string(),
+        );
+        helper.test_info = cce_types::TestInfo::test_ast();
+        EntityGroup {
+            group_id: CompactString::from("group_10"),
+            group_type: GroupType::ClassWithMethods,
+            header: Some(header),
+            header_id: Some(EntityId(10)),
+            members: smallvec::smallvec![prod, helper],
+            member_ids: smallvec::smallvec![EntityId(11), EntityId(12)],
+            entity_spans: HashMap::new(),
+            combined_source: None,
+            combined_source_lazy: std::sync::OnceLock::new(),
+            span: cce_types::Span::default(),
+            kind: EntityKind::Function,
+            name: CompactString::from("Builder"),
+            language: Language::Rust,
+            pattern_info: crate::grouper::types::PatternInfo::None,
+            member_roles: SmallVec::new(),
+            nested_groups: Box::new([]),
+            nesting_level: 0,
+            parent_group_id: None,
+            has_significant_nested: false,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+        }
+    }
+
+    #[test]
+    fn test_fragment_info_separates_prod_and_test() {
+        let group = mixed_group();
+        let prod = ChunkBuilder::fragment_test_info(&group, &[EntityId(11)]);
+        assert!(!prod.is_test());
+        let helper = ChunkBuilder::fragment_test_info(&group, &[EntityId(12)]);
+        assert!(helper.is_test());
+        let mixed = ChunkBuilder::fragment_test_info(&group, &[EntityId(11), EntityId(12)]);
+        assert!(mixed.is_test());
+        let empty = ChunkBuilder::fragment_test_info(&group, &[]);
+        assert_eq!(empty, group.test_info);
     }
 }

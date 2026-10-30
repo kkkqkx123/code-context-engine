@@ -208,6 +208,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata,
+            test_info: cce_types::TestInfo::unknown(),
         }
     }
 

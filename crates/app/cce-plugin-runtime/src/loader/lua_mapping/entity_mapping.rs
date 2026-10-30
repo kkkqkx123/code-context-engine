@@ -336,6 +336,7 @@ mod tests {
                 m.insert("methods".to_string(), "GET,POST".to_string());
                 m
             },
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let table = grouped_entity_to_lua_table(&lua, &entity).expect("Failed to convert");
@@ -459,6 +460,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: HashMap::new(),
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let table = grouped_entity_to_lua_table(&lua, &entity).expect("Failed to convert");
@@ -495,6 +497,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: HashMap::new(),
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let table = grouped_entity_to_lua_table(&lua, &entity).expect("Failed to convert");

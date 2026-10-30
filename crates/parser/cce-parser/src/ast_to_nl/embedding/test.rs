@@ -24,6 +24,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         }
     }
 
@@ -95,6 +96,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
         let group = create_standalone_group(entity);
         let descriptions = generator.generate_for_group(&group);
@@ -119,6 +121,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
         let member1 = GroupedEntity {
             id: EntityId(11),
@@ -134,6 +137,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
         let member2 = GroupedEntity {
             id: EntityId(12),
@@ -149,6 +153,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let group = EntityGroup {
@@ -228,6 +233,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
         let member = GroupedEntity {
             id: EntityId(21),
@@ -243,6 +249,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
         };
 
         let group = EntityGroup {

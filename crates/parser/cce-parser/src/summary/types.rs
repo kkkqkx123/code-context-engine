@@ -152,11 +152,13 @@ impl FileSummary {
         self
     }
 
-    /// Compute the file-level test marker: the per-language path rule as the
-    /// baseline, enhanced by merging every group-level marker (Test wins,
-    /// `Ast` overrides `Path`). A file is a test file when the path rules
-    /// match or any group carries a test signal. `groups = None` applies the
-    /// path rule only (specialized and document summaries).
+    /// Compute the file-level test marker.
+    ///
+    /// Path rule is the baseline. A file with mixed production and test
+    /// groups stays `Unknown` so production chunks remain retrievable;
+    /// per-fragment markers carry the precise signal. A file is `Test` only
+    /// when the path rule matches or every group is `Test`.
+    /// `groups = None` applies the path rule only.
     pub fn with_file_level_test_info(
         mut self,
         language: &Language,
@@ -165,9 +167,17 @@ impl FileSummary {
     ) -> Self {
         let path_info = TestInfo::from_path(Some(language), path);
         self.test_info = match groups {
-            Some(groups) => groups
-                .iter()
-                .fold(path_info, |acc, g| acc.merge(&g.test_info)),
+            Some(groups) => {
+                if path_info.is_test() {
+                    path_info
+                } else if !groups.is_empty() && groups.iter().all(|g| g.test_info.is_test()) {
+                    groups
+                        .iter()
+                        .fold(path_info, |acc, g| acc.merge(&g.test_info))
+                } else {
+                    path_info
+                }
+            }
             None => path_info,
         };
         self

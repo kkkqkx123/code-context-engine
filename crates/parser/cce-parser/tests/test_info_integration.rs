@@ -921,3 +921,245 @@ fn test_kotlin_path_rule_detects_spec_file() {
         "all groups in a `*Spec.kt` file must be path-marked test"
     );
 }
+
+#[test]
+fn test_mixed_impl_keeps_per_entity_separation() {
+    // Production impl with one cfg(test) helper: the group stays Unknown for
+    // recall while the entities carry precise markers for fragment attribution.
+    let code = r#"
+pub struct Builder {
+    value: u32,
+}
+
+impl Builder {
+    pub fn new() -> Self {
+        Self { value: 0 }
+    }
+
+    pub fn build(&self) -> u32 {
+        self.value
+    }
+
+    #[cfg(test)]
+    fn add_str(&mut self, s: &str) {
+    }
+}
+"#;
+    let parsed = parse_entities(code, Language::Rust, "src/lib.rs");
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    let group = result
+        .groups
+        .iter()
+        .find(|g| g.all_entity_ids().len() >= 3)
+        .expect("impl group should exist");
+    assert!(
+        !group.test_info.is_test(),
+        "mixed impl group must stay Unknown for production recall"
+    );
+    let prod = group
+        .members
+        .iter()
+        .find(|m| m.name == "new")
+        .expect("prod method should exist");
+    assert!(
+        !prod.test_info.is_test(),
+        "production method must stay Unknown"
+    );
+    let helper = group
+        .members
+        .iter()
+        .find(|m| m.name == "add_str")
+        .expect("test helper should exist");
+    assert!(
+        helper.test_info.is_test(),
+        "cfg(test) helper must stay Test for precise filtering"
+    );
+}
+
+#[test]
+fn test_test_named_class_helper_inherits_container() {
+    // A plain helper inside a Test-named class inherits the container marker.
+    // The naming signal carries group granularity, so helpers there are
+    // test-scoped. Sibling top-level types never inherit across groups.
+    let code = r#"
+import org.junit.jupiter.api.Test;
+
+class CalculatorTests {
+    @Test
+    void shouldAdd() {
+    }
+
+    void helper() {
+    }
+}
+"#;
+    let parsed = parse_entities(
+        code,
+        Language::Java,
+        "src/main/java/com/acme/UserService.java",
+    );
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    let group = result
+        .groups
+        .iter()
+        .find(|g| g.name == "CalculatorTests")
+        .expect("test class group should exist");
+    let helper = group
+        .members
+        .iter()
+        .find(|m| m.name == "helper")
+        .expect("helper should exist");
+    assert!(
+        helper.test_info.is_test(),
+        "plain helper in Test-named class inherits the container marker"
+    );
+    assert!(
+        group.test_info.is_test(),
+        "test-named class group stays Test"
+    );
+    assert!(
+        group.is_pure_test(),
+        "group partition reports pure test, got {:?}",
+        group.test_counts()
+    );
+}
+
+#[test]
+fn test_prod_class_test_method_does_not_pollute_sibling() {
+    // The annotated method is extracted as a standalone test case while its
+    // plain sibling stays in the production class group. Neither direction
+    // pollutes the other and the class group stays mixed-free Unknown.
+    let code = r#"
+import org.junit.jupiter.api.Test;
+
+class UserService {
+    @Test
+    void shouldLogin() {
+    }
+
+    void helper() {
+    }
+}
+"#;
+    let parsed = parse_entities(
+        code,
+        Language::Java,
+        "src/main/java/com/acme/UserService.java",
+    );
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    let case = result
+        .groups
+        .iter()
+        .find(|g| g.name == "shouldLogin")
+        .expect("annotated method group should exist");
+    assert!(
+        case.test_info.is_test(),
+        "annotated method group must be Test"
+    );
+    let group = result
+        .groups
+        .iter()
+        .find(|g| g.name == "UserService")
+        .expect("prod class group should exist");
+    let helper = group
+        .members
+        .iter()
+        .find(|m| m.name == "helper")
+        .expect("sibling helper should exist");
+    assert!(
+        !helper.test_info.is_test(),
+        "sibling helper must stay Unknown without container signal"
+    );
+    assert!(
+        !group.test_info.is_test(),
+        "production class group must stay Unknown for recall"
+    );
+    assert!(
+        !group.is_mixed_test(),
+        "class group holds only production entities, got {:?}",
+        group.test_counts()
+    );
+}
+
+#[test]
+fn test_suite_helper_inherits_suite_scope() {
+    // Helpers inside a cfg(test) module share the suite scope through parent
+    // chains even when grouped standalone without their own annotations.
+    let code = r#"
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_a() {
+    }
+
+    fn helper() {
+    }
+}
+"#;
+    let parsed = parse_entities(code, Language::Rust, "src/lib.rs");
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    let group = result
+        .groups
+        .iter()
+        .find(|g| g.group_type == GroupType::TestSuiteWithCases)
+        .expect("suite group should exist");
+    assert!(group.test_info.is_test(), "suite group stays Test");
+    let helper_group = result
+        .groups
+        .iter()
+        .find(|g| g.name == "helper")
+        .expect("suite helper group should exist");
+    assert!(
+        helper_group.test_info.is_test(),
+        "suite helper inherits the suite scope, got {:?}",
+        helper_group.test_info
+    );
+}
+
+#[test]
+fn test_all_test_members_mark_group_despite_scaffolding_header() {
+    // An impl header is scaffolding: all-test members mark the group Test
+    // while the header declaration itself stays an ordinary span.
+    let code = r#"
+pub struct Fixture {
+    value: u32,
+}
+
+impl Fixture {
+    #[cfg(test)]
+    fn setup() -> Self {
+        Self { value: 0 }
+    }
+
+    #[cfg(test)]
+    fn check(&self) -> u32 {
+        self.value
+    }
+}
+"#;
+    let parsed = parse_entities(code, Language::Rust, "src/lib.rs");
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    let group = result
+        .groups
+        .iter()
+        .find(|g| g.name == "Fixture" && !g.members.is_empty())
+        .expect("impl group should exist");
+    assert!(
+        group.test_info.is_test(),
+        "all-test members mark the group despite scaffolding header"
+    );
+    assert!(
+        group.members.iter().all(|m| m.test_info.is_test()),
+        "every member carries Test, got {:?}",
+        group
+            .members
+            .iter()
+            .map(|m| (m.name.clone(), m.test_info))
+            .collect::<Vec<_>>()
+    );
+}

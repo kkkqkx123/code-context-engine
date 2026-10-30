@@ -380,7 +380,9 @@ fn compat_from_config(
     }
 }
 
-fn identity_from_config(config: &cce_config::modules::LlmIdentityConfig) -> llm_suite_types::llm::LlmIdentity {
+fn identity_from_config(
+    config: &cce_config::modules::LlmIdentityConfig,
+) -> llm_suite_types::llm::LlmIdentity {
     llm_suite_types::llm::LlmIdentity {
         user_agent: config.user_agent.clone(),
         app_name: config.app_name.clone(),
@@ -484,6 +486,7 @@ pub fn chat_profile(
         query_params: metadata_from_params(&connection.extra_params),
         stream_options: None,
         context_window_size: None,
+        max_output_tokens: None,
         prompt_caching: None,
         proxy: connection.proxy_url.clone(),
         no_proxy: no_proxy_for(&connection.no_proxy),

@@ -303,6 +303,37 @@ impl TestInfo {
         }
     }
 
+    /// Whether two test markers may share one chunk or merged group.
+    ///
+    /// Single source of truth for the test boundary enforced by the grouper
+    /// small-fragment merger and the chunker cross-group merge. Test and
+    /// production content must never merge, otherwise the merged chunk
+    /// inherits `Test` and production code becomes unretrievable under
+    /// test-filtered evaluation.
+    pub fn can_merge(a: &TestInfo, b: &TestInfo) -> bool {
+        a.is_test() == b.is_test()
+    }
+
+    /// Merge a file-level marker with an entity subset.
+    ///
+    /// Single source of truth for group-level and fragment-level attribution:
+    /// callers pass all entity ids for group scope or only the covered ids
+    /// for fragment scope. Missing entries mean `Unknown`. `Test` wins, `Ast`
+    /// overrides `Path`.
+    pub fn merge_with_entities<'a>(
+        file_info: &TestInfo,
+        entity_infos: &std::collections::HashMap<crate::types::entity::EntityId, TestInfo>,
+        entity_ids: impl IntoIterator<Item = &'a crate::types::entity::EntityId>,
+    ) -> TestInfo {
+        let mut info = *file_info;
+        for entity_id in entity_ids {
+            if let Some(entity_info) = entity_infos.get(entity_id) {
+                info = info.merge(entity_info);
+            }
+        }
+        info
+    }
+
     /// Two-level path determination for a file, dispatched per language.
     ///
     /// Every language shares one unified test-directory rule set (exact
@@ -713,6 +744,35 @@ mod tests {
         assert_eq!(TestInfo::test_path().granularity, TestGranularity::File);
         assert_eq!(TestInfo::test_ast().source, TestSource::Ast);
         assert_eq!(TestInfo::test_path().source, TestSource::Path);
+    }
+
+    #[test]
+    fn test_can_merge_enforces_test_boundary() {
+        let prod = TestInfo::unknown();
+        let test = TestInfo::test_ast();
+        assert!(TestInfo::can_merge(&prod, &TestInfo::unknown()));
+        assert!(TestInfo::can_merge(&test, &TestInfo::test_path()));
+        assert!(!TestInfo::can_merge(&prod, &test));
+        assert!(!TestInfo::can_merge(&test, &prod));
+    }
+
+    #[test]
+    fn test_merge_with_entities_scopes_to_subset() {
+        use crate::types::entity::EntityId;
+        use std::collections::HashMap;
+        let file_info = TestInfo::unknown();
+        let mut entity_infos = HashMap::new();
+        entity_infos.insert(EntityId(1), TestInfo::test_ast());
+        entity_infos.insert(EntityId(2), TestInfo::unknown());
+        let prod_only =
+            TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(2)]);
+        assert!(prod_only.is_unknown());
+        let mixed =
+            TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(1), EntityId(2)]);
+        assert!(mixed.is_test());
+        let test_only =
+            TestInfo::merge_with_entities(&file_info, &entity_infos, &[EntityId(1)]);
+        assert!(test_only.is_test());
     }
 
     #[test]

@@ -301,6 +301,7 @@ mod tests {
             is_stdlib: false,
             stdlib_category: None,
             metadata: HashMap::new(),
+            test_info: cce_types::TestInfo::unknown(),
         }
     }
 

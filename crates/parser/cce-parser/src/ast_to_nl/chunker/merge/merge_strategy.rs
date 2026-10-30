@@ -74,7 +74,10 @@ pub(crate) fn should_merge(
             return false;
         }
     }
-    if prev.metadata.test_info.is_test() != next.metadata.test_info.is_test() {
+    if !cce_types::test_info::TestInfo::can_merge(
+        &prev.metadata.test_info,
+        &next.metadata.test_info,
+    ) {
         return false;
     }
     // Tiny-rescue (Embedding-only): a residue far below the min threshold

@@ -278,13 +278,12 @@ impl SmallFragmentMerger {
                     }
                 }
 
-                // Check test boundary: a test fragment must never be merged
-                // into a production fragment group (and vice versa). Merging
-                // would mark the production chunk as `Test` and cause the
-                // no-test evaluation variant to drop production content.
+                // Check test boundary via the centralized rule.
                 if let Some(prev) = current_batch.last() {
-                    if prev.test_info.is_test() != group.test_info.is_test()
-                        && !current_batch.is_empty()
+                    if !cce_types::test_info::TestInfo::can_merge(
+                        &prev.test_info,
+                        &group.test_info,
+                    ) && !current_batch.is_empty()
                     {
                         if let Some(merged) = self.flush_batch(&mut current_batch) {
                             merged_groups.push(merged);
