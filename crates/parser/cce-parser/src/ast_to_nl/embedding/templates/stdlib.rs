@@ -38,8 +38,7 @@ impl GroupTemplate for StdlibTemplate {
                 // the embedding path.
                 let profile = NoiseProfile::for_language(group.language);
                 let cleaned = Self::clean_doc_text(doc);
-                let cleaned =
-                    crate::ast_to_nl::embedding::filter_embedding_noise(&cleaned, profile);
+                let cleaned = crate::ast_to_nl::common::filter_nl_noise(&cleaned, profile);
                 let cleaned = cleaned.trim();
                 if !cleaned.is_empty() {
                     desc.push_str(". ");

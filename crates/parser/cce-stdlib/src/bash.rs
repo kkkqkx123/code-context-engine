@@ -204,21 +204,10 @@ impl BashStdlibDetector {
     pub fn is_stdlib_call(call_name: &str) -> bool {
         Self::is_builtin_command(call_name) || Self::is_standard_utility(call_name)
     }
-
-    /// Check if a call is to stdlib using relation type (optimized)
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            // Only direct calls are relevant for command detection
-            RelationType::DirectCall => Self::is_stdlib_call(call_name),
-            _ => false,
-        }
-    }
 }
+
+// Shell call sites carry no relation-type nuance worth refining on.
+impl_stdlib_by_type_name_only!(BashStdlibDetector);
 
 impl_stdlib_categorizer!(
     BashStdlibDetector,

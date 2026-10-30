@@ -948,38 +948,12 @@ impl JavaStdlibDetector {
 
         false
     }
-
-    /// Check if a call is to stdlib using relation type (optimized)
-    ///
-    /// This is the optimized interface that uses static dispatch based on RelationType
-    /// for O(1) performance. This method should be preferred over `is_stdlib_call`
-    /// when RelationType information is available.
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            // Most call types in Java use the same detection logic
-            RelationType::DirectCall
-            | RelationType::InstanceMethodCall
-            | RelationType::StaticMethodCall
-            | RelationType::ChainedMethodCall
-            | RelationType::ConstructorCall
-            | RelationType::CallbackCall
-            | RelationType::GenericCall => {
-                // For Java, use the legacy detection logic
-                Self::is_stdlib_call(call_name)
-            }
-
-            // Other relation types are not relevant for stdlib detection
-            _ => false,
-        }
-    }
 }
 
 // Generate get_category using macro
+// Detection keys off the call name, so the relation type adds nothing to it.
+impl_stdlib_by_type_name_only!(JavaStdlibDetector);
+
 impl_stdlib_categorizer!(
     JavaStdlibDetector,
     [

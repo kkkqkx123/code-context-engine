@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::ast_to_nl::ConversionRequest;
 use crate::ast_to_nl::common::{NameNormalizer, create_standalone_group};
 use crate::grouper::EntityGroup;
-use cce_types::{ConversionResult, EntityKind, GroupedEntity, OutputMode};
+use cce_types::{ConversionResult, EntityKind, GroupedEntity, Language, OutputMode};
 
 /// Prefix a module-level `function <name>` head with the file's module stem.
 ///
@@ -124,11 +124,12 @@ impl super::AstToNlConverter {
         entity: &GroupedEntity,
         file_path: &str,
         request: Option<&ConversionRequest>,
+        language: Language,
     ) -> ConversionResult {
         match self.resolve_mode(request) {
-            OutputMode::Bm25 => self.convert_bm25_grouped(entity, file_path),
-            OutputMode::Embedding => self.convert_embedding_grouped(entity, file_path),
-            OutputMode::Both => self.convert_both_grouped(entity, file_path),
+            OutputMode::Bm25 => self.convert_bm25_grouped(entity, file_path, language),
+            OutputMode::Embedding => self.convert_embedding_grouped(entity, file_path, language),
+            OutputMode::Both => self.convert_both_grouped(entity, file_path, language),
         }
     }
 
@@ -142,8 +143,13 @@ impl super::AstToNlConverter {
         qualify_function_text(&entity.name, file_path, text)
     }
 
-    fn convert_bm25_grouped(&self, entity: &GroupedEntity, file_path: &str) -> ConversionResult {
-        let bm25_text = self.bm25_generator.generate(entity);
+    fn convert_bm25_grouped(
+        &self,
+        entity: &GroupedEntity,
+        file_path: &str,
+        language: Language,
+    ) -> ConversionResult {
+        let bm25_text = self.bm25_generator.generate(entity, language);
         let keywords = self.bm25_generator.extract_keywords(entity);
 
         ConversionResult::bm25_only(
@@ -160,8 +166,9 @@ impl super::AstToNlConverter {
         &self,
         entity: &GroupedEntity,
         file_path: &str,
+        language: Language,
     ) -> ConversionResult {
-        let embedding_text = self.embedding_generator.generate(entity);
+        let embedding_text = self.embedding_generator.generate(entity, language);
         let embedding_text = Self::qualify_module_level(entity, file_path, &embedding_text);
 
         ConversionResult::embedding_only(
@@ -173,12 +180,17 @@ impl super::AstToNlConverter {
         )
     }
 
-    fn convert_both_grouped(&self, entity: &GroupedEntity, file_path: &str) -> ConversionResult {
+    fn convert_both_grouped(
+        &self,
+        entity: &GroupedEntity,
+        file_path: &str,
+        language: Language,
+    ) -> ConversionResult {
         // Both paths describe the same entity: build the standalone group
         // once and share it between the BM25 and embedding renderers instead
         // of cloning the entity per path. Keyword extraction runs once on the
         // shared entity. Output text is unchanged.
-        let shared_group = create_standalone_group(entity);
+        let shared_group = create_standalone_group(entity, language);
         let bm25_text = self.bm25_generator.generate_for_group(&shared_group);
         let embedding_text = if entity.kind == EntityKind::Module
             && entity.doc_comment.is_none()

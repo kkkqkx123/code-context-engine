@@ -506,7 +506,7 @@ impl RegularGroupTemplate {
         let cleaned = Self::clean_doc_text(doc);
         // Remove empty markdown section markers and, when enabled by the
         // profile, safety boilerplate.
-        let cleaned = crate::ast_to_nl::embedding::filter_embedding_noise(&cleaned, profile);
+        let cleaned = crate::ast_to_nl::common::filter_nl_noise(&cleaned, profile);
         let cleaned = cleaned.trim();
 
         if cleaned.is_empty() {

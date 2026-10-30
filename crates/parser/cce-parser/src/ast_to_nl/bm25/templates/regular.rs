@@ -4,7 +4,7 @@
 
 use super::group_trait::GroupTemplate;
 use crate::ast_to_nl::common::GroupTemplateBase;
-use crate::ast_to_nl::embedding::filter_embedding_noise;
+use crate::ast_to_nl::common::filter_nl_noise;
 use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::types::EntityGroup;
 use cce_types::entity::EntityKind;
@@ -99,7 +99,7 @@ impl RegularGroupTemplate {
                 // only for that language so rich docstrings elsewhere keep
                 // their recall terms.
                 let profile = NoiseProfile::for_language(language);
-                let filtered = filter_embedding_noise(&clean_doc, profile);
+                let filtered = filter_nl_noise(&clean_doc, profile);
                 if !filtered.trim().is_empty() {
                     all_parts.push(filtered);
                 }

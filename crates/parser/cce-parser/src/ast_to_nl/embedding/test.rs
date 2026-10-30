@@ -29,30 +29,7 @@ mod tests {
     }
 
     fn create_standalone_group(entity: GroupedEntity) -> EntityGroup {
-        let name = entity.name.clone();
-        EntityGroup {
-            group_id: CompactString::from(format!("group_{}", entity.id.0)),
-            group_type: GroupType::Standalone,
-            header: Some(entity.clone()),
-            header_id: Some(entity.id),
-            members: Default::default(),
-            member_ids: Default::default(),
-            entity_spans: Default::default(),
-            combined_source: None,
-            combined_source_lazy: Default::default(),
-            span: Default::default(),
-            kind: entity.kind,
-            name: CompactString::from(name),
-            language: Language::Rust,
-            pattern_info: Default::default(),
-            member_roles: Default::default(),
-            nested_groups: Box::new([]),
-            nesting_level: 0,
-            parent_group_id: None,
-            has_significant_nested: false,
-            metadata: Default::default(),
-            test_info: cce_types::TestInfo::unknown(),
-        }
+        crate::ast_to_nl::common::create_standalone_group(&entity, Language::Rust)
     }
 
     #[test]
@@ -210,7 +187,7 @@ mod tests {
             "validate_email",
             Some("/// Validates an email address format."),
         );
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
 
         assert!(!text.is_empty());
         assert!(text.contains("email") || text.contains("valid"));
@@ -284,7 +261,7 @@ mod tests {
     fn test_default_config_creation() {
         let generator = EmbeddingGenerator::default();
         let entity = create_func_entity(6, "test_default", Some("/// Default test."));
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
         assert!(!text.is_empty());
     }
 }

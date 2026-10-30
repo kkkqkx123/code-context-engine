@@ -9,7 +9,7 @@ use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
 use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::types::{EntityGroup, GroupType};
 use cce_config::EmbeddingGeneratorConfig;
-use cce_types::{EntityKind, GroupedEntity};
+use cce_types::{EntityKind, GroupedEntity, Language};
 use cce_utils::token_estimation::estimate_tokens;
 
 /// Minimum token count for a docstring to be split into a separate description segment.
@@ -61,8 +61,7 @@ impl EmbeddingGenerator {
                     let summary = self.file_doc_summary(&cleaned);
                     if !summary.is_empty() {
                         let profile = NoiseProfile::for_language(group.language);
-                        let summary =
-                            crate::ast_to_nl::embedding::filter_embedding_noise(&summary, profile);
+                        let summary = crate::ast_to_nl::common::filter_nl_noise(&summary, profile);
                         return vec![self.truncate_to_word_limit(&summary)];
                     }
                 }
@@ -168,8 +167,9 @@ impl EmbeddingGenerator {
     /// Generate embedding semantic summary for a single entity
     ///
     /// This is a compatibility method for standalone entities.
-    /// For grouped entities, prefer `generate_for_group`.
-    pub fn generate(&self, entity: &GroupedEntity) -> String {
+    /// For grouped entities, prefer `generate_for_group`. The language comes
+    /// from the owning group because `GroupedEntity` does not carry one.
+    pub fn generate(&self, entity: &GroupedEntity, language: Language) -> String {
         // Suppress pure module declarations (no doc comment, no annotations)
         // These forward declarations have no informational content — the module's
         // actual content lives in its own file.
@@ -181,7 +181,7 @@ impl EmbeddingGenerator {
         }
 
         // Create a standalone group from the entity
-        let group = create_standalone_group(entity);
+        let group = create_standalone_group(entity, language);
         let descriptions = self.generate_for_group(&group);
 
         // Return the first description (group description)
@@ -232,7 +232,7 @@ impl EmbeddingGenerator {
         use cce_utils::normalize_whitespace_preserving_newlines;
         let cleaned =
             normalize_whitespace_preserving_newlines(&crate::ast_to_nl::clean_comment_content(doc));
-        let cleaned = crate::ast_to_nl::embedding::filter_embedding_noise(&cleaned, profile);
+        let cleaned = crate::ast_to_nl::common::filter_nl_noise(&cleaned, profile);
         let cleaned = cleaned.trim();
         if cleaned.is_empty() {
             None
@@ -282,7 +282,7 @@ mod tests {
     fn test_generate_function_summary() {
         let generator = EmbeddingGenerator::new();
         let entity = create_test_function();
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
 
         // Should not be empty
         assert!(!text.is_empty());
@@ -310,7 +310,7 @@ mod tests {
             metadata: Default::default(),
             test_info: cce_types::TestInfo::unknown(),
         };
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
 
         // Should not be empty
         assert!(!text.is_empty());
@@ -338,7 +338,7 @@ mod tests {
             metadata: Default::default(),
             test_info: cce_types::TestInfo::unknown(),
         };
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
 
         // Should not be empty
         assert!(!text.is_empty());

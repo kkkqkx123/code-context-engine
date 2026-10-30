@@ -718,19 +718,9 @@ impl GoStdlibDetector {
     }
 }
 
-// Generate is_stdlib_by_type using simple macro
-impl_stdlib_by_type_simple!(
-    GoStdlibDetector,
-    [
-        DirectCall,
-        InstanceMethodCall,
-        StaticMethodCall,
-        ChainedMethodCall,
-        ConstructorCall,
-        CallbackCall,
-        GenericCall,
-    ]
-);
+// Generate is_stdlib_by_type using the name-only macro: Go stdlib detection
+// keys off the package prefix, so the relation type adds no information.
+impl_stdlib_by_type_name_only!(GoStdlibDetector);
 
 // Generate get_category using macro
 impl_stdlib_categorizer!(

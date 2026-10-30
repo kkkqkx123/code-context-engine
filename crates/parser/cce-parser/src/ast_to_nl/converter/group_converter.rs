@@ -726,7 +726,7 @@ impl super::AstToNlConverter {
                 if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
                     let descriptions = self.embedding_generator.generate_for_group(group);
                     if descriptions.is_empty() {
-                        let text = self.embedding_generator.generate(header);
+                        let text = self.embedding_generator.generate(header, group.language);
                         let text = qualify(group, &text);
                         (text, Vec::new())
                     } else {
@@ -824,7 +824,8 @@ impl super::AstToNlConverter {
 
         for member in &group.members {
             if self.should_convert_member(group, member, header_only_ids) {
-                let mut member_result = self.convert_grouped(member, file_path, request);
+                let mut member_result =
+                    self.convert_grouped(member, file_path, request, group.language);
                 // Member conversion runs without group context; re-attach the
                 // owner so chunk bodies carry `Group.member` for disambiguation.
                 // MergedFragments groups are named after their first fragment,

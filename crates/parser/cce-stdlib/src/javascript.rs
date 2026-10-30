@@ -353,51 +353,33 @@ impl JavaScriptStdlibDetector {
         use cce_types::relation::RelationType;
         Self::is_stdlib_by_type(call_name, &RelationType::DirectCall)
     }
-
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            RelationType::DirectCall
-            | RelationType::InstanceMethodCall
-            | RelationType::StaticMethodCall
-            | RelationType::ChainedMethodCall
-            | RelationType::ConstructorCall
-            | RelationType::CallbackCall
-            | RelationType::GenericCall => {
-                // For JavaScript, check builtin functions and object.method calls
-                if Self::is_builtin_function(call_name) {
-                    return true;
-                }
-                if call_name.contains('.') {
-                    let parts: Vec<&str> = call_name.split('.').collect();
-                    if parts.len() >= 2 {
-                        let obj = parts[0];
-                        let method = parts[1];
-
-                        match obj {
-                            "console" => Self::is_console_method(method),
-                            "Math" => Self::is_math_method(method),
-                            "JSON" => Self::is_json_method(method),
-                            _ if Self::is_builtin_object(obj) => true,
-                            _ => false,
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    Self::is_builtin_object(call_name) || Self::is_global_object(call_name)
-                }
-            }
-
-            // Other relation types are not relevant for stdlib detection
-            _ => false,
-        }
-    }
 }
+
+// JavaScript resolves stdlib status from the receiver object, so the call
+// shape decides which list is consulted.
+impl_stdlib_by_type_calls!(JavaScriptStdlibDetector, |name, _relation| {
+    if Self::is_builtin_function(name) {
+        return true;
+    }
+    if name.contains('.') {
+        let parts: Vec<&str> = name.split('.').collect();
+        if parts.len() >= 2 {
+            let obj = parts[0];
+            let method = parts[1];
+            match obj {
+                "console" => Self::is_console_method(method),
+                "Math" => Self::is_math_method(method),
+                "JSON" => Self::is_json_method(method),
+                _ if Self::is_builtin_object(obj) => true,
+                _ => false,
+            }
+        } else {
+            false
+        }
+    } else {
+        Self::is_builtin_object(name) || Self::is_global_object(name)
+    }
+});
 
 #[cfg(test)]
 mod tests {

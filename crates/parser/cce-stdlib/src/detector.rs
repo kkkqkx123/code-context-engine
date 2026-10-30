@@ -3,6 +3,7 @@
 
 use cce_types::language::{Language, effective_language};
 use cce_types::relation::RelationType;
+use cce_types::stdlib_category::StdlibCategory;
 
 use super::{
     bash::BashStdlibDetector, c::CStdlibDetector, cpp::CppStdlibDetector,
@@ -76,6 +77,38 @@ impl StdlibDetector {
             Language::Rust => RustStdlibDetector::is_stdlib_call(call_name),
             Language::Scala => ScalaStdlibDetector::is_stdlib_call(call_name),
             _ => false,
+        }
+    }
+
+    /// Look up the standard library category of a name.
+    ///
+    /// This is the single dispatch every layer shares: the entity layer caches
+    /// the result on the entity, the relation layer attaches it to call edges
+    /// and the grouper derives its semantic description from it. Languages
+    /// without a category table (template languages, unregistered plugin
+    /// languages) return `None` instead of a placeholder category.
+    pub fn category(name: &str, language: &Language) -> Option<StdlibCategory> {
+        // Remapped plugin languages inherit their host grammar's tables.
+        let effective = effective_language(language);
+        match &effective {
+            Language::Bash => BashStdlibDetector::get_category(name),
+            Language::C => CStdlibDetector::get_category(name),
+            Language::Cpp => CppStdlibDetector::get_category(name),
+            Language::CSharp => CSharpStdlibDetector::get_category(name),
+            Language::Dart => DartStdlibDetector::get_category(name),
+            Language::Go => GoStdlibDetector::get_category(name),
+            Language::Java => JavaStdlibDetector::get_category(name),
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+                JavaScriptStdlibDetector::get_category(name)
+            }
+            Language::Kotlin => KotlinStdlibDetector::get_category(name),
+            Language::Lua => LuaStdlibDetector::get_category(name),
+            Language::Php => PhpStdlibDetector::get_category(name),
+            Language::Python => PythonStdlibDetector::get_category(name),
+            Language::Ruby => RubyStdlibDetector::get_category(name),
+            Language::Rust => RustStdlibDetector::get_category(name),
+            Language::Scala => ScalaStdlibDetector::get_category(name),
+            _ => None,
         }
     }
 
@@ -1180,5 +1213,171 @@ mod tests {
                 "sentinel {sentinel} not recognized for {language:?}"
             );
         }
+    }
+
+    /// The unified category entry must answer for every language that ships a
+    /// category table, and must stay empty for languages that do not.
+    #[test]
+    fn test_category_entry_covers_all_detectors() {
+        use cce_types::StdlibCategory;
+
+        let cases: &[(Language, &str)] = &[
+            (Language::Bash, "echo"),
+            (Language::C, "printf"),
+            (Language::Cpp, "cout"),
+            (Language::CSharp, "Console.WriteLine"),
+            (Language::Dart, "print"),
+            (Language::Go, "fmt.Println"),
+            (Language::Java, "System.out.println"),
+            (Language::JavaScript, "console.log"),
+            (Language::TypeScript, "console.log"),
+            (Language::Kotlin, "listOf"),
+            (Language::Lua, "string.format"),
+            (Language::Php, "strlen"),
+            (Language::Python, "print"),
+            (Language::Ruby, "puts"),
+            (Language::Rust, "Vec::new"),
+            (Language::Scala, "println"),
+        ];
+        for (language, name) in cases {
+            let category = StdlibDetector::category(name, language);
+            assert!(
+                matches!(category, Some(c) if c != StdlibCategory::Other),
+                "category for {name} in {language:?} must be a real category, got {category:?}"
+            );
+        }
+
+        for language in [
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Unknown,
+        ] {
+            assert_eq!(
+                StdlibDetector::category("something", &language),
+                None,
+                "{language:?} has no category table"
+            );
+        }
+    }
+
+    /// Every call relation must reach the name check. A relation type that a
+    /// detector does not special-case used to answer `false` even when the
+    /// name was stdlib, so the same call disagreed between the entity layer
+    /// (name only) and the relation layer.
+    #[test]
+    fn test_stdlib_by_type_agrees_with_call_on_call_relations() {
+        use cce_types::relation::RelationType;
+
+        let call_relations = [
+            RelationType::DirectCall,
+            RelationType::InstanceMethodCall,
+            RelationType::StaticMethodCall,
+            RelationType::ChainedMethodCall,
+            RelationType::ConstructorCall,
+            RelationType::PointerCall,
+            RelationType::CallbackCall,
+            RelationType::GenericCall,
+            RelationType::MacroCall,
+            RelationType::GoroutineCall,
+            RelationType::DeferredCall,
+            RelationType::AsyncCall,
+            RelationType::HigherOrderCall,
+        ];
+        // Languages whose answer does not depend on the call shape.
+        let cases: &[(Language, &[&str])] = &[
+            (Language::Bash, &["echo", "my_script"]),
+            (Language::C, &["printf", "my_function"]),
+            (Language::CSharp, &["Console.WriteLine", "MyClass"]),
+            (Language::Dart, &["print", "MyClass"]),
+            (Language::Go, &["fmt.Println", "mypackage.MyFunction"]),
+            (Language::Java, &["System.out.println", "MyClass"]),
+            (Language::Lua, &["string.format", "my_function"]),
+            (Language::Php, &["strlen", "my_function"]),
+            (Language::Python, &["os.path.join", "custom_function"]),
+            (Language::Ruby, &["File.open", "MyModule.my_method"]),
+            (Language::Scala, &["println", "MyClass"]),
+        ];
+        for (language, names) in cases {
+            for name in *names {
+                let by_call = StdlibDetector::is_stdlib_call(name, language);
+                for relation in &call_relations {
+                    assert_eq!(
+                        StdlibDetector::is_stdlib_by_type(name, relation, language),
+                        by_call,
+                        "{language:?} {relation} {name}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A non-call relation carries no callee, so it never reports stdlib.
+    #[test]
+    fn test_stdlib_by_type_rejects_non_call_relations() {
+        use cce_types::relation::RelationType;
+
+        let non_call_relations = [
+            RelationType::Use,
+            RelationType::Inheritance,
+            RelationType::TypeReference,
+            RelationType::ElementContains,
+        ];
+        let sentinels: &[(Language, &str)] = &[
+            (Language::Bash, "echo"),
+            (Language::C, "printf"),
+            (Language::Cpp, "std::cout"),
+            (Language::CSharp, "Console.WriteLine"),
+            (Language::Dart, "print"),
+            (Language::Go, "fmt.Println"),
+            (Language::Java, "System.out.println"),
+            (Language::JavaScript, "console.log"),
+            (Language::Kotlin, "listOf"),
+            (Language::Lua, "string.format"),
+            (Language::Php, "strlen"),
+            (Language::Python, "print"),
+            (Language::Ruby, "puts"),
+            (Language::Rust, "Vec::new"),
+            (Language::Scala, "println"),
+        ];
+        for (language, name) in sentinels {
+            for relation in &non_call_relations {
+                assert!(
+                    !StdlibDetector::is_stdlib_by_type(name, relation, language),
+                    "{language:?} {relation} {name} must not classify as a stdlib call"
+                );
+            }
+        }
+    }
+
+    /// Regression cover for the call shapes that used to be silently rejected.
+    #[test]
+    fn test_stdlib_by_type_handles_wrapper_and_higher_order_calls() {
+        use cce_types::relation::RelationType;
+
+        for relation in [
+            RelationType::GoroutineCall,
+            RelationType::DeferredCall,
+            RelationType::DirectCall,
+        ] {
+            assert!(
+                StdlibDetector::is_stdlib_by_type("fmt.Println", &relation, &Language::Go),
+                "Go {relation} must classify fmt.Println as stdlib"
+            );
+        }
+        for relation in [RelationType::AsyncCall, RelationType::DirectCall] {
+            assert!(
+                StdlibDetector::is_stdlib_by_type("asyncio.sleep", &relation, &Language::Python),
+                "Python {relation} must classify asyncio.sleep as stdlib"
+            );
+        }
+        assert!(
+            StdlibDetector::is_stdlib_by_type(
+                "Vec::new",
+                &RelationType::HigherOrderCall,
+                &Language::Rust
+            ),
+            "Rust higher-order calls must consult the stdlib tables"
+        );
     }
 }

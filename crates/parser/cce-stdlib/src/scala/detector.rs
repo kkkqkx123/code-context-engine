@@ -113,60 +113,7 @@ impl ScalaStdlibDetector {
 
         false
     }
-
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            RelationType::DirectCall
-            | RelationType::InstanceMethodCall
-            | RelationType::StaticMethodCall
-            | RelationType::ChainedMethodCall
-            | RelationType::ConstructorCall
-            | RelationType::CallbackCall
-            | RelationType::GenericCall => {
-                if Self::is_builtin_type(call_name) {
-                    return true;
-                }
-
-                if Self::is_builtin_function(call_name) {
-                    return true;
-                }
-
-                if Self::is_common_method(call_name) {
-                    return true;
-                }
-
-                if call_name.contains('.') {
-                    if Self::is_scala_path(call_name) {
-                        return true;
-                    }
-
-                    let parts: Vec<&str> = call_name.split('.').collect();
-                    if parts.len() >= 2 {
-                        let package = parts[0];
-                        if Self::is_scala_package(package) {
-                            return true;
-                        }
-
-                        let receiver = parts[0];
-                        if Self::is_builtin_type(receiver) {
-                            return true;
-                        }
-
-                        if parts.len() == 2 && Self::is_scala_package(receiver) {
-                            return true;
-                        }
-                    }
-                }
-
-                false
-            }
-
-            _ => false,
-        }
-    }
 }
+
+// Detection keys off the call name, so the relation type adds nothing to it.
+impl_stdlib_by_type_name_only!(ScalaStdlibDetector);

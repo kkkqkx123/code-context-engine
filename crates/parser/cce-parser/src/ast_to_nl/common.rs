@@ -1,15 +1,18 @@
 //! Common utilities shared by BM25 and Embedding generators
 //!
 //! This module provides shared functionality for:
+//! - NL text noise filtering shared by both output paths
 //! - Name normalization (snake_case, camelCase, PascalCase -> natural language)
 //! - Utility functions (create_standalone_group, etc.)
 //! - Template components (output strategy, group trait, helpers)
 
+pub mod noise_filter;
 pub mod normalizer;
 pub mod templates;
 pub mod utils;
 
 // Re-export main types
+pub use noise_filter::filter_nl_noise;
 pub use normalizer::NameNormalizer;
 pub use utils::{clean_comment_content, create_standalone_group};
 

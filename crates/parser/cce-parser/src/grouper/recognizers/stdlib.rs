@@ -97,29 +97,10 @@ impl StdlibEntityDetector {
     /// Get the category for a stdlib name
     ///
     /// Returns the category if the name is a recognized standard library entity,
-    /// or None if it's not recognized.
+    /// or None if it's not recognized. The lookup itself lives in `cce-stdlib`
+    /// so every layer shares one language dispatch.
     pub fn get_stdlib_category(&self, name: &str, language: &Language) -> Option<StdlibCategory> {
-        // Remapped plugin languages inherit their host grammar's detectors.
-        match cce_types::language::effective_language(language) {
-            Language::Rust => cce_stdlib::rust::RustStdlibDetector::get_category(name),
-            Language::Python => cce_stdlib::python::PythonStdlibDetector::get_category(name),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                cce_stdlib::javascript::JavaScriptStdlibDetector::get_category(name)
-            }
-            Language::Go => cce_stdlib::go::GoStdlibDetector::get_category(name),
-            Language::Java => cce_stdlib::java::JavaStdlibDetector::get_category(name),
-            Language::CSharp => cce_stdlib::csharp::CSharpStdlibDetector::get_category(name),
-            Language::C => cce_stdlib::c::CStdlibDetector::get_category(name),
-            Language::Cpp => cce_stdlib::cpp::CppStdlibDetector::get_category(name),
-            Language::Kotlin => cce_stdlib::kotlin::KotlinStdlibDetector::get_category(name),
-            Language::Scala => cce_stdlib::scala::ScalaStdlibDetector::get_category(name),
-            Language::Dart => cce_stdlib::dart::DartStdlibDetector::get_category(name),
-            Language::Ruby => cce_stdlib::ruby::RubyStdlibDetector::get_category(name),
-            Language::Php => cce_stdlib::php::PhpStdlibDetector::get_category(name),
-            Language::Lua => cce_stdlib::lua::LuaStdlibDetector::get_category(name),
-            Language::Bash => cce_stdlib::bash::BashStdlibDetector::get_category(name),
-            _ => None,
-        }
+        cce_stdlib::StdlibDetector::category(name, language)
     }
 
     /// Generate semantic description for a stdlib name

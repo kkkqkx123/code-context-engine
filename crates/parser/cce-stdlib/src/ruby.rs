@@ -1028,19 +1028,10 @@ impl RubyStdlibDetector {
     }
 }
 
-// Generate is_stdlib_by_type using simple macro
-impl_stdlib_by_type_simple!(
-    RubyStdlibDetector,
-    [
-        DirectCall,
-        InstanceMethodCall,
-        StaticMethodCall,
-        ChainedMethodCall,
-        ConstructorCall,
-        CallbackCall,
-        GenericCall,
-    ]
-);
+// Generate is_stdlib_by_type using the name-only macro: Ruby stdlib detection
+// keys off builtin methods and module prefixes, so the relation type adds no
+// information.
+impl_stdlib_by_type_name_only!(RubyStdlibDetector);
 
 impl_stdlib_categorizer!(
     RubyStdlibDetector,

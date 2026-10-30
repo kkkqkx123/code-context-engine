@@ -17,6 +17,7 @@
 
 use crate::grouper::types::{EntityGroup, GroupType, PatternInfo};
 use cce_types::entity::GroupedEntity;
+use cce_types::language::Language;
 use cce_utils::{normalize_whitespace, normalize_whitespace_preserving_newlines};
 use compact_str::CompactString;
 use once_cell::sync::Lazy;
@@ -451,11 +452,15 @@ fn is_link_definition(line: &str) -> bool {
 /// # Arguments
 ///
 /// * `entity` - The entity to convert into a standalone group
+/// * `language` - Language of the enclosing group. `GroupedEntity` carries no
+///   language of its own, so the caller supplies it; pass the owning group's
+///   language so language-specific noise profiles and template gates still
+///   apply to members.
 ///
 /// # Returns
 ///
 /// An EntityGroup containing the entity as its header with no members
-pub fn create_standalone_group(entity: &GroupedEntity) -> EntityGroup {
+pub fn create_standalone_group(entity: &GroupedEntity, language: Language) -> EntityGroup {
     EntityGroup {
         group_id: CompactString::from(format!("standalone_{}", entity.id.0)),
         group_type: GroupType::Standalone,
@@ -469,7 +474,7 @@ pub fn create_standalone_group(entity: &GroupedEntity) -> EntityGroup {
         span: cce_types::Span::default(),
         kind: entity.kind,
         name: CompactString::from(&entity.name),
-        language: cce_types::language::Language::Unknown,
+        language,
         pattern_info: PatternInfo::None,
         member_roles: smallvec::SmallVec::new(),
         nested_groups: Box::new([]),
@@ -507,9 +512,10 @@ mod tests {
             test_info: cce_types::TestInfo::unknown(),
         };
 
-        let group = create_standalone_group(&entity);
+        let group = create_standalone_group(&entity, Language::Rust);
 
         assert_eq!(group.group_id, "standalone_42");
+        assert_eq!(group.language, Language::Rust);
         assert_eq!(group.group_type, GroupType::Standalone);
         assert!(group.header.is_some());
         assert_eq!(group.header.as_ref().unwrap().name, "test_function");

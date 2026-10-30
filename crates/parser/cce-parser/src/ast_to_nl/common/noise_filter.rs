@@ -1,7 +1,8 @@
-//! Embedding noise filter
+//! NL text noise filter
 //!
-//! Removes low-value text fragments that dilute embedding vectors without
-//! contributing semantic content:
+//! Shared by the BM25 and embedding paths: both feed natural-language text to a
+//! downstream consumer, and both suffer from the same low-value fragments that
+//! carry no semantic content:
 //!
 //! - Empty markdown section markers (`# Example.`, `# Panics.`, `# Safety.`)
 //!   that remain after their fenced code blocks were stripped. Always applied,
@@ -19,11 +20,11 @@
 
 use crate::ast_to_nl::noise::NoiseProfile;
 
-/// Filter embedding noise from NL text.
+/// Filter noise from generated NL text.
 ///
 /// Empty markdown marker filtering always runs; language-specific rules are
 /// governed by the profile.
-pub fn filter_embedding_noise(text: &str, profile: NoiseProfile) -> String {
+pub fn filter_nl_noise(text: &str, profile: NoiseProfile) -> String {
     let mut out = Vec::with_capacity(text.lines().count());
     for line in text.lines() {
         let trimmed = line.trim();
@@ -393,7 +394,7 @@ mod tests {
     fn test_filters_empty_markers() {
         let input =
             "Sets the contents of this cell to `value`.\n\nReturns `Ok(())`.\n# Example.\n# Panics";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::none());
+        let cleaned = filter_nl_noise(input, NoiseProfile::none());
         assert!(!cleaned.contains("# Example"));
         assert!(!cleaned.contains("# Panics"));
         assert!(cleaned.contains("Sets the contents"));
@@ -402,7 +403,7 @@ mod tests {
     #[test]
     fn test_keeps_real_headings_and_marker_content() {
         let input = "# Overview\n# Example\nSome real example prose here.";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::none());
+        let cleaned = filter_nl_noise(input, NoiseProfile::none());
         assert!(cleaned.contains("# Overview"));
         assert!(!cleaned.contains("# Example"));
         assert!(cleaned.contains("Some real example prose here."));
@@ -412,7 +413,7 @@ mod tests {
     fn test_filters_safety_boilerplate() {
         let input =
             "Safe due to `inner`'s invariant of being written to at most once.\nGets a reference.";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::Rust));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::Rust));
         assert!(!cleaned.contains("Safe due to"));
         assert!(cleaned.contains("Gets a reference."));
     }
@@ -421,7 +422,7 @@ mod tests {
     fn test_keeps_safety_contract() {
         let input =
             "SAFETY: Pointer-to-integer transmutes are valid.\nSafety: synchronizes with store.";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::Rust));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::Rust));
         assert!(cleaned.contains("SAFETY:"));
         assert!(cleaned.contains("synchronizes"));
     }
@@ -429,82 +430,80 @@ mod tests {
     #[test]
     fn test_keeps_safety_boilerplate_for_non_rust() {
         let input = "Safe due to the batching guarantees of this library.";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::Python));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::Python));
         assert!(cleaned.contains("Safe due to"));
     }
 
     #[test]
     fn test_batch_one_c_denoise_and_reverse() {
         let input = "#pragma once\nint value;\n#define MAX_SIZE 1024";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::C));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::C));
         assert!(!cleaned.contains("pragma once"), "got: {cleaned}");
         assert!(cleaned.contains("int value;"), "got: {cleaned}");
         assert!(cleaned.contains("MAX_SIZE"), "got: {cleaned}");
 
-        let other = filter_embedding_noise(input, NoiseProfile::for_language(Language::Python));
+        let other = filter_nl_noise(input, NoiseProfile::for_language(Language::Python));
         assert!(other.contains("pragma once"), "got: {other}");
     }
 
     #[test]
     fn test_batch_one_python_denoise_and_reverse() {
         let input = "# coding: utf-8\nfrom __future__ import annotations\ndef foo():";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::Python));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::Python));
         assert!(!cleaned.contains("coding"), "got: {cleaned}");
         assert!(!cleaned.contains("__future__"), "got: {cleaned}");
         assert!(cleaned.contains("def foo():"), "got: {cleaned}");
 
-        let other = filter_embedding_noise(input, NoiseProfile::for_language(Language::Go));
+        let other = filter_nl_noise(input, NoiseProfile::for_language(Language::Go));
         assert!(other.contains("coding"), "got: {other}");
     }
 
     #[test]
     fn test_batch_one_js_denoise_and_reverse() {
         let input = "\"use strict\";\nexport default function foo() {}";
-        let cleaned =
-            filter_embedding_noise(input, NoiseProfile::for_language(Language::JavaScript));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::JavaScript));
         assert!(!cleaned.contains("use strict"), "got: {cleaned}");
         assert!(!cleaned.contains("export default"), "got: {cleaned}");
         assert!(cleaned.contains("function foo()"), "got: {cleaned}");
 
-        let other = filter_embedding_noise(input, NoiseProfile::for_language(Language::Python));
+        let other = filter_nl_noise(input, NoiseProfile::for_language(Language::Python));
         assert!(other.contains("use strict"), "got: {other}");
     }
 
     #[test]
     fn test_batch_one_go_and_bash_denoise() {
         let go = "_ = x\nprocess()\nif err != nil";
-        let cleaned = filter_embedding_noise(go, NoiseProfile::for_language(Language::Go));
+        let cleaned = filter_nl_noise(go, NoiseProfile::for_language(Language::Go));
         assert!(!cleaned.contains("_ = x"), "got: {cleaned}");
         assert!(cleaned.contains("process()"), "got: {cleaned}");
 
         let bash = "#!/bin/bash\nset -euo pipefail\necho hello";
-        let cleaned_bash = filter_embedding_noise(bash, NoiseProfile::for_language(Language::Bash));
+        let cleaned_bash = filter_nl_noise(bash, NoiseProfile::for_language(Language::Bash));
         assert!(!cleaned_bash.contains("#!/bin/bash"), "got: {cleaned_bash}");
         assert!(cleaned_bash.contains("echo hello"), "got: {cleaned_bash}");
 
-        let other = filter_embedding_noise(bash, NoiseProfile::for_language(Language::Go));
+        let other = filter_nl_noise(bash, NoiseProfile::for_language(Language::Go));
         assert!(other.contains("#!/bin/bash"), "got: {other}");
     }
 
     #[test]
     fn test_batch_two_denoise_and_reverse() {
         let java = "@Override\npublic String getName()";
-        let cleaned = filter_embedding_noise(java, NoiseProfile::for_language(Language::Java));
+        let cleaned = filter_nl_noise(java, NoiseProfile::for_language(Language::Java));
         assert!(!cleaned.contains("@Override"), "got: {cleaned}");
         assert!(cleaned.contains("getName"), "got: {cleaned}");
 
         let csharp = "#region Helpers\nvoid foo() {}";
-        let cleaned_cs =
-            filter_embedding_noise(csharp, NoiseProfile::for_language(Language::CSharp));
+        let cleaned_cs = filter_nl_noise(csharp, NoiseProfile::for_language(Language::CSharp));
         assert!(!cleaned_cs.contains("#region"), "got: {cleaned_cs}");
 
         let php = "<?php\nnamespace App\\Ctrl;\nfunction index() {}";
-        let cleaned_php = filter_embedding_noise(php, NoiseProfile::for_language(Language::Php));
+        let cleaned_php = filter_nl_noise(php, NoiseProfile::for_language(Language::Php));
         assert!(!cleaned_php.contains("<?php"), "got: {cleaned_php}");
         assert!(cleaned_php.contains("App\\Ctrl"), "got: {cleaned_php}");
 
         let ruby = "# frozen_string_literal: true\nprivate\ndef bar; end";
-        let cleaned_ruby = filter_embedding_noise(ruby, NoiseProfile::for_language(Language::Ruby));
+        let cleaned_ruby = filter_nl_noise(ruby, NoiseProfile::for_language(Language::Ruby));
         assert!(
             !cleaned_ruby.contains("frozen_string_literal"),
             "got: {cleaned_ruby}"
@@ -512,19 +511,19 @@ mod tests {
         assert!(cleaned_ruby.contains("def bar"), "got: {cleaned_ruby}");
 
         let lua = "local M = {}\nfunction M.foo() end\nreturn M";
-        let cleaned_lua = filter_embedding_noise(lua, NoiseProfile::for_language(Language::Lua));
+        let cleaned_lua = filter_nl_noise(lua, NoiseProfile::for_language(Language::Lua));
         assert!(!cleaned_lua.contains("local M = {}"), "got: {cleaned_lua}");
         assert!(cleaned_lua.contains("M.foo"), "got: {cleaned_lua}");
 
         // Reverse: other languages must not strip.
-        let other = filter_embedding_noise(java, NoiseProfile::for_language(Language::Go));
+        let other = filter_nl_noise(java, NoiseProfile::for_language(Language::Go));
         assert!(other.contains("@Override"), "got: {other}");
     }
 
     #[test]
     fn test_empty_guard_keeps_original() {
         let input = "#!/bin/bash";
-        let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::Bash));
+        let cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::Bash));
         assert!(!cleaned.trim().is_empty(), "got: {cleaned}");
     }
 
@@ -541,7 +540,7 @@ mod tests {
             Language::Svelte,
             Language::Ejs,
         ] {
-            let cleaned = filter_embedding_noise(input, NoiseProfile::for_language(language));
+            let cleaned = filter_nl_noise(input, NoiseProfile::for_language(language));
             assert_eq!(cleaned, input, "got: {cleaned} for {language:?}");
         }
     }
@@ -563,17 +562,17 @@ mod tests {
         );
         let native = register_plugin_language("filter-native-guard", &["filterng".to_string()]);
         let input = "_ = x\nprocess()";
-        let remapped_cleaned = filter_embedding_noise(
+        let remapped_cleaned = filter_nl_noise(
             input,
             NoiseProfile::for_language(Language::Custom(remapped)),
         );
-        let host_cleaned = filter_embedding_noise(input, NoiseProfile::for_language(Language::Go));
+        let host_cleaned = filter_nl_noise(input, NoiseProfile::for_language(Language::Go));
         assert_eq!(
             remapped_cleaned, host_cleaned,
             "remapped language must inherit host filtering"
         );
         let native_cleaned =
-            filter_embedding_noise(input, NoiseProfile::for_language(Language::Custom(native)));
+            filter_nl_noise(input, NoiseProfile::for_language(Language::Custom(native)));
         assert!(
             native_cleaned.contains("_ = x"),
             "native plugin language must stay conservative, got: {native_cleaned}"

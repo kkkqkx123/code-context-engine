@@ -613,165 +613,24 @@ impl RustStdlibDetector {
             || Self::is_stdlib_crate(name)
             || Self::is_stdlib_module(name)
     }
-
-    /// Check if a call is to stdlib using relation type (optimized)
-    ///
-    /// This is the optimized interface that uses static dispatch based on RelationType
-    /// for O(1) performance. This method should be preferred over `is_stdlib_call`
-    /// when RelationType information is available.
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            // Macro call: check macro list
-            RelationType::MacroCall => {
-                let name = call_name.trim_end_matches('!');
-                Self::STDLIB_MACROS.contains(&name)
-            }
-
-            // Direct function call: check macro list first, then types and paths
-            RelationType::DirectCall => {
-                // First check if it's a macro without the '!'
-                if Self::STDLIB_MACROS.contains(&call_name) {
-                    return true;
-                }
-                // Then check if it's a qualified path starting with a stdlib type
-                if let Some(first_part) = call_name.split("::").next() {
-                    // Check if it's a stdlib type
-                    if Self::STDLIB_TYPES.contains(&first_part) {
-                        return true;
-                    }
-                    // Check if it's a stdlib crate or module
-                    if Self::is_stdlib_crate(first_part) || Self::is_stdlib_module(call_name) {
-                        return true;
-                    }
-                    false
-                } else {
-                    false
-                }
-            }
-
-            // Instance method call: check type name
-            RelationType::InstanceMethodCall => {
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    false
-                }
-            }
-
-            // Static method call: check type name
-            RelationType::StaticMethodCall => {
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    false
-                }
-            }
-
-            // Chained method call: check type name (first part)
-            RelationType::ChainedMethodCall => {
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    false
-                }
-            }
-
-            // Constructor call: check type name
-            RelationType::ConstructorCall => {
-                // Extract type name before '(' using find instead of split
-                // to avoid issues with nested parentheses
-                if let Some(paren_pos) = call_name.find('(') {
-                    let before_paren = &call_name[..paren_pos];
-                    // Extract type name before '::' (e.g., "Vec::new" -> "Vec")
-                    if let Some(type_name) = before_paren.split("::").next() {
-                        Self::STDLIB_TYPES.contains(&type_name.trim())
-                    } else {
-                        Self::STDLIB_TYPES.contains(&before_paren.trim())
-                    }
-                } else {
-                    false
-                }
-            }
-
-            // Pointer call: check if it's a stdlib function
-            RelationType::PointerCall => {
-                // Pointer calls are typically to functions, check macro and function lists
-                if Self::STDLIB_MACROS.contains(&call_name) {
-                    return true;
-                }
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    false
-                }
-            }
-
-            // Generic call: check type name (before '<')
-            RelationType::GenericCall => {
-                if let Some(type_name) = call_name.split('<').next() {
-                    if let Some(base_name) = type_name.split("::").next() {
-                        Self::STDLIB_TYPES.contains(&base_name)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-
-            // Goroutine call: check the underlying call
-            RelationType::GoroutineCall => {
-                // Goroutine calls wrap other calls, check the wrapped call
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    Self::STDLIB_MACROS.contains(&call_name)
-                }
-            }
-
-            // Deferred call: check the underlying call
-            RelationType::DeferredCall => {
-                // Deferred calls wrap other calls, check the wrapped call
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    Self::STDLIB_MACROS.contains(&call_name)
-                }
-            }
-
-            // Async call: check the underlying call
-            RelationType::AsyncCall => {
-                // Async calls wrap other calls, check the wrapped call
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    Self::STDLIB_MACROS.contains(&call_name)
-                }
-            }
-
-            // Callback call: check if it's a stdlib function
-            RelationType::CallbackCall => {
-                // Callbacks can be functions or closures, check macro and function lists
-                if Self::STDLIB_MACROS.contains(&call_name) {
-                    return true;
-                }
-                if let Some(type_name) = call_name.split("::").next() {
-                    Self::STDLIB_TYPES.contains(&type_name)
-                } else {
-                    false
-                }
-            }
-
-            // Other relation types are not relevant for stdlib detection
-            _ => false,
-        }
-    }
 }
+
+// Rust is the one language whose call shape changes the answer: a macro
+// invocation consults the macro table and a generic call consults the base
+// type, while every other call shape resolves through the path/type check.
+impl_stdlib_by_type_calls!(RustStdlibDetector, |name, relation_type| {
+    use cce_types::relation::RelationType;
+
+    match relation_type {
+        RelationType::MacroCall => Self::STDLIB_MACROS.contains(&name.trim_end_matches('!')),
+        RelationType::GenericCall => name
+            .split('<')
+            .next()
+            .and_then(|base| base.split("::").next())
+            .is_some_and(|base| Self::STDLIB_TYPES.contains(&base)),
+        _ => Self::is_stdlib_call(name),
+    }
+});
 
 #[cfg(test)]
 mod tests {

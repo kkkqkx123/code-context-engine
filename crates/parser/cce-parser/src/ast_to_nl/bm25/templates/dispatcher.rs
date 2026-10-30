@@ -54,10 +54,15 @@ impl GroupTemplateDispatcher {
     /// Get the pattern name for a group
     pub fn get_pattern_name(&self, group: &EntityGroup) -> &'static str {
         if !matches!(group.pattern_info, PatternInfo::None) {
-            group.pattern_info.pattern_name()
-        } else {
-            "Regular"
+            return group.pattern_info.pattern_name();
         }
+        // Mirror `dispatch`: the stdlib branch outranks the regular one, so
+        // reporting every pattern-less group as "Regular" would hide whether
+        // the stdlib template ever runs.
+        if group.header.as_ref().is_some_and(|h| h.is_stdlib) {
+            return "Stdlib";
+        }
+        "Regular"
     }
 }
 
@@ -78,6 +83,20 @@ mod tests {
         let text = dispatcher.dispatch(&group);
 
         assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_get_pattern_name_for_stdlib_group() {
+        let group = EntityGroup {
+            header: Some(cce_types::GroupedEntity {
+                is_stdlib: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let dispatcher = GroupTemplateDispatcher::new();
+        assert_eq!(dispatcher.get_pattern_name(&group), "Stdlib");
     }
 
     #[test]

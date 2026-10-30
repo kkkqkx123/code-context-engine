@@ -1068,43 +1068,20 @@ impl KotlinStdlibDetector {
 
         false
     }
-
-    /// Check if a call is to stdlib using relation type (optimized)
-    ///
-    /// This is the optimized interface that uses static dispatch based on RelationType
-    /// for O(1) performance. This method should be preferred over `is_stdlib_call`
-    /// when RelationType information is available.
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            // Most call types in Kotlin use the same detection logic
-            RelationType::DirectCall
-            | RelationType::InstanceMethodCall
-            | RelationType::StaticMethodCall
-            | RelationType::ChainedMethodCall
-            | RelationType::ConstructorCall
-            | RelationType::CallbackCall
-            | RelationType::GenericCall => {
-                // For Kotlin, validate using comprehensive stdlib checks
-                Self::is_builtin_type(call_name)
-                    || Self::is_builtin_function(call_name)
-                    || Self::is_extension_property(call_name)
-                    || call_name
-                        .split('.')
-                        .next()
-                        .map(Self::is_kotlin_package)
-                        .unwrap_or(false)
-            }
-
-            // Other relation types are not relevant for stdlib detection
-            _ => false,
-        }
-    }
 }
+
+// Kotlin refines the answer for call relations: extension properties and
+// package-qualified names carry stdlib meaning that a bare name check misses.
+impl_stdlib_by_type_calls!(KotlinStdlibDetector, |name, _relation| {
+    Self::is_builtin_type(name)
+        || Self::is_builtin_function(name)
+        || Self::is_extension_property(name)
+        || name
+            .split('.')
+            .next()
+            .map(Self::is_kotlin_package)
+            .unwrap_or(false)
+});
 
 impl_stdlib_categorizer!(
     KotlinStdlibDetector,

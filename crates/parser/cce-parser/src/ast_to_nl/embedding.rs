@@ -12,11 +12,8 @@
 //! - No file paths, module names, or code symbols
 
 pub mod generator;
-mod noise_filter;
 pub mod templates;
 pub mod text_cleaner;
-
-pub use noise_filter::filter_embedding_noise;
 
 #[cfg(test)]
 mod test;

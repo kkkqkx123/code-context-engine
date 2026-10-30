@@ -84,8 +84,7 @@ impl<'a> IndexTextEnricher<'a> {
             // splits), maximizing recall for both exact-spelling and fuzzy queries.
             let profile = NoiseProfile::for_language(language);
             let stripped = strip_syntax_noise(&extra_text, profile);
-            let emb_cleaned =
-                crate::ast_to_nl::embedding::filter_embedding_noise(&stripped, profile);
+            let emb_cleaned = crate::ast_to_nl::common::filter_nl_noise(&stripped, profile);
 
             conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
         }

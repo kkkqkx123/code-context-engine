@@ -201,19 +201,10 @@ impl_stdlib_call!(PythonStdlibDetector, {
     module: STDLIB_MODULES,
 });
 
-// Generate is_stdlib_by_type using simple macro
-impl_stdlib_by_type_simple!(
-    PythonStdlibDetector,
-    [
-        DirectCall,
-        InstanceMethodCall,
-        StaticMethodCall,
-        ChainedMethodCall,
-        ConstructorCall,
-        CallbackCall,
-        GenericCall,
-    ]
-);
+// Generate is_stdlib_by_type using the name-only macro: Python stdlib
+// detection keys off builtins and module prefixes, so the relation type adds
+// no information.
+impl_stdlib_by_type_name_only!(PythonStdlibDetector);
 
 impl PythonStdlibDetector {
     /// Standard library constants.

@@ -823,8 +823,11 @@ impl CppStdlibDetector {
                 }
             }
 
-            // Other relation types: use legacy detection
-            _ => Self::is_stdlib_call(call_name),
+            // Call shapes without a dedicated arm fall back to the name check;
+            // non-call relations (imports, structure, references) carry no
+            // callee and stay out.
+            _ if relation_type.is_call() => Self::is_stdlib_call(call_name),
+            _ => false,
         }
     }
 

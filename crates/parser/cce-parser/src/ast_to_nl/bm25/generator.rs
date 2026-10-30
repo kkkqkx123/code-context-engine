@@ -10,6 +10,7 @@ use crate::grouper::types::EntityGroup;
 use cce_config::Bm25GeneratorConfig;
 use cce_text::Bm25TextCleaner;
 use cce_types::GroupedEntity;
+use cce_types::Language;
 
 /// BM25 text generator
 ///
@@ -52,10 +53,11 @@ impl Bm25Generator {
     /// Generate BM25 text for a single entity
     ///
     /// This is a compatibility method for standalone entities.
-    /// For grouped entities, prefer `generate_for_group`.
-    pub fn generate(&self, entity: &GroupedEntity) -> String {
+    /// For grouped entities, prefer `generate_for_group`. The language comes
+    /// from the owning group because `GroupedEntity` does not carry one.
+    pub fn generate(&self, entity: &GroupedEntity, language: Language) -> String {
         // Create a standalone group from the entity
-        let group = create_standalone_group(entity);
+        let group = create_standalone_group(entity, language);
         self.generate_for_group(&group)
     }
 
@@ -116,7 +118,7 @@ mod tests {
     fn test_generate_function() {
         let generator = Bm25Generator::new();
         let entity = create_test_function();
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
 
         // Should not be empty
         assert!(!text.is_empty());
@@ -155,7 +157,7 @@ mod tests {
             test_info: cce_types::TestInfo::unknown(),
         };
 
-        let text = generator.generate(&entity);
+        let text = generator.generate(&entity, Language::Rust);
         // Should not be empty
         assert!(!text.is_empty());
     }

@@ -104,57 +104,6 @@ macro_rules! impl_stdlib_categorizer {
     };
 }
 
-/// Generate standardized is_stdlib_by_type implementation
-///
-/// This macro creates a consistent is_stdlib_by_type method that handles
-/// different RelationType values uniformly.
-///
-/// # Example
-/// ```ignore
-/// impl_stdlib_by_type!(MyDetector, [
-///     (MacroCall, { Self::STDLIB_MACROS.contains(&name.trim_end_matches('!')) }),
-///     (DirectCall, { Self::is_any_stdlib(name) }),
-///     (InstanceMethodCall, { Self::is_type_method(name) }),
-/// ]);
-/// ```
-#[macro_export]
-macro_rules! impl_stdlib_by_type {
-    (
-        $detector:ty,
-        [
-            $(($relation_type:path, $logic:expr)),* $(,)?
-        ]
-    ) => {
-        impl $detector {
-            /// Check if a call is to stdlib using relation type
-            ///
-            /// This uses static dispatch based on RelationType for O(1) performance.
-            pub fn is_stdlib_by_type(
-                call_name: &str,
-                relation_type: &cce_types::relation::RelationType,
-            ) -> bool {
-                use cce_types::relation::RelationType;
-
-                // Helper closures capture $logic expression
-                fn check_macro(name: &str, detector: &str) -> bool {
-                    $logic
-                }
-
-                match relation_type {
-                    $(
-                        $relation_type => {
-                            #[allow(unused_variables)]
-                            let name = call_name;
-                            $logic
-                        }
-                    )*
-                    _ => false,
-                }
-            }
-        }
-    };
-}
-
 /// Generate a simple is_stdlib_call implementation for detectors that follow
 /// the common pattern: check builtin functions, then check module/package prefix
 ///
@@ -194,46 +143,72 @@ macro_rules! impl_stdlib_call {
     };
 }
 
-/// Generate a simplified is_stdlib_by_type implementation for detectors
-/// where most relation types delegate to is_stdlib_call
+/// Generate `is_stdlib_by_type` for detectors that judge a call by its name
+/// only, so the relation type cannot refine the answer.
 ///
-/// This is useful for languages where the detection logic is largely uniform
-/// across different call types.
+/// Every call-domain relation delegates to `is_stdlib_call`; relations outside
+/// the call domain (imports, structure, references, markup) carry no callee and
+/// answer `false`. Deriving the guard from `RelationType::is_call` instead of
+/// listing variants means a newly added call relation inherits the name check,
+/// while a newly added non-call relation stays out by construction.
 ///
 /// # Example
 /// ```ignore
-/// impl_stdlib_by_type_simple!(GoStdlibDetector, [
-///     DirectCall,
-///     InstanceMethodCall,
-///     StaticMethodCall,
-///     ChainedMethodCall,
-///     ConstructorCall,
-///     CallbackCall,
-///     GenericCall,
-/// ]);
+/// impl_stdlib_by_type_name_only!(GoStdlibDetector);
 /// ```
 #[macro_export]
-macro_rules! impl_stdlib_by_type_simple {
-    (
-        $detector:ty,
-        [
-            $($rel_type:ident),* $(,)?
-        ]
-    ) => {
+macro_rules! impl_stdlib_by_type_name_only {
+    ($detector:ty) => {
         impl $detector {
             /// Check if a call is to stdlib using relation type
             ///
-            /// This implementation delegates to is_stdlib_call for most relation types.
+            /// The relation type only decides whether the name is looked up at
+            /// all: stdlib tables describe callables, not imports or structure.
             pub fn is_stdlib_by_type(
                 call_name: &str,
                 relation_type: &cce_types::relation::RelationType,
             ) -> bool {
-                use cce_types::relation::RelationType;
+                relation_type.is_call() && Self::is_stdlib_call(call_name)
+            }
+        }
+    };
+}
 
-                match relation_type {
-                    $(RelationType::$rel_type)|* => Self::is_stdlib_call(call_name),
-                    _ => false,
+/// Generate `is_stdlib_by_type` for detectors that do refine the answer by
+/// relation type.
+///
+/// The supplied body runs only for call-domain relations and receives the call
+/// name and the relation type; non-call relations answer `false` without
+/// running it. Naming both parameters at the call site keeps them visible
+/// inside the body.
+///
+/// # Example
+/// ```ignore
+/// impl_stdlib_by_type_calls!(RustStdlibDetector, |name, relation_type| {
+///     match relation_type {
+///         RelationType::MacroCall => Self::is_stdlib_macro(name),
+///         _ => Self::is_stdlib_call(name),
+///     }
+/// });
+/// ```
+#[macro_export]
+macro_rules! impl_stdlib_by_type_calls {
+    ($detector:ty, |$name:ident, $relation:ident| $logic:expr) => {
+        impl $detector {
+            /// Check if a call is to stdlib using relation type
+            ///
+            /// Only call-domain relations are classified; the rest carry no
+            /// callee and answer `false`.
+            pub fn is_stdlib_by_type(
+                call_name: &str,
+                $relation: &cce_types::relation::RelationType,
+            ) -> bool {
+                if !$relation.is_call() {
+                    return false;
                 }
+                #[allow(unused_variables)]
+                let $name = call_name;
+                $logic
             }
         }
     };

@@ -1,6 +1,6 @@
 use super::group_trait::GroupTemplate;
 use crate::ast_to_nl::common::GroupTemplateBase;
-use crate::ast_to_nl::embedding::filter_embedding_noise;
+use crate::ast_to_nl::common::filter_nl_noise;
 use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::types::EntityGroup;
 
@@ -39,7 +39,7 @@ impl GroupTemplate for StdlibTemplate {
                 // per-language boilerplate drops only for its language.
                 let profile = NoiseProfile::for_language(group.language);
                 let cleaned = Self::clean_doc_text(doc);
-                let filtered = filter_embedding_noise(&cleaned, profile);
+                let filtered = filter_nl_noise(&cleaned, profile);
                 if !filtered.trim().is_empty() {
                     result.push(' ');
                     result.push_str(filtered.trim());

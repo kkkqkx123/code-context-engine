@@ -224,27 +224,10 @@ impl LuaStdlibDetector {
 
         false
     }
-
-    /// Check if a call is to stdlib using relation type (optimized)
-    pub fn is_stdlib_by_type(
-        call_name: &str,
-        relation_type: &cce_types::relation::RelationType,
-    ) -> bool {
-        use cce_types::relation::RelationType;
-
-        match relation_type {
-            // Most call types use the same detection logic
-            RelationType::DirectCall
-            | RelationType::InstanceMethodCall
-            | RelationType::StaticMethodCall
-            | RelationType::ChainedMethodCall
-            | RelationType::ConstructorCall
-            | RelationType::CallbackCall
-            | RelationType::GenericCall => Self::is_stdlib_call(call_name),
-            _ => false,
-        }
-    }
 }
+
+// Detection keys off the call name, so the relation type adds nothing to it.
+impl_stdlib_by_type_name_only!(LuaStdlibDetector);
 
 impl_stdlib_categorizer!(
     LuaStdlibDetector,
