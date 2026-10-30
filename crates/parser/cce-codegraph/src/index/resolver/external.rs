@@ -10,6 +10,7 @@ use crate::index::core::RelationIndex;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 
+use cce_parser::parser::extractor::{ImportClass, ImportClassifier};
 use cce_types::entity::EntityId;
 use cce_types::relation::{ExternalCallType, RelationSymbolLocation, RelationSymbolRecord};
 use cce_types::{ParsedFile, RawRelationData};
@@ -222,6 +223,18 @@ impl RelationResolver {
         external_package.map(ExternalCallType::external_library)
     }
 
+    /// Attribute an unresolved target to the third-party package it came from.
+    ///
+    /// The import that mentions the target is classified with the shared
+    /// `ImportClassifier`, so the package name comes from the language's own
+    /// layout rather than from cutting the target string at the first
+    /// separator. The old cut named `github.com` for
+    /// `github.com/gin-gonic/gin` and the empty string for `@types/node`.
+    ///
+    /// A matched import that is *not* a third-party package yields nothing:
+    /// stdlib targets are decided upstream (`stdlib_category`), and a
+    /// project-local module is not a dependency at all — calling either one
+    /// `ExternalLibrary` invented a package that does not exist.
     fn try_classify_from_imports(
         &self,
         raw_data: &RawRelationData,
@@ -235,23 +248,27 @@ impl RelationResolver {
             .split([':', '.', '/'])
             .next()
             .unwrap_or(&raw_data.dst_name);
+        let context = cce_parser_core::ExtractionContext::default();
         for import in &import_table.standardized_imports {
             let import_first = import
                 .source
                 .split([':', '.', '/', '@'])
                 .next()
                 .unwrap_or(&import.source);
-            if import_first == first_segment {
-                // If import source matches callee prefix, treat as external_library
-                // Use import source's first segment as package name
-                return Some(ExternalCallType::external_library(
-                    first_segment.to_string(),
-                ));
+            let matches = import_first == first_segment || import.source == raw_data.dst_name;
+            if !matches {
+                continue;
             }
-            if import.source == raw_data.dst_name {
-                return Some(ExternalCallType::external_library(
-                    first_segment.to_string(),
-                ));
+            let classification = ImportClassifier::classify(import, &context, parsed.language);
+            match classification.class {
+                ImportClass::StandardLibrary | ImportClass::InternalModule => return None,
+                ImportClass::ExternalPackage | ImportClass::Unknown => {
+                    let package = classification
+                        .metadata
+                        .package_name
+                        .unwrap_or_else(|| first_segment.to_string());
+                    return Some(ExternalCallType::external_library(package));
+                }
             }
         }
         None

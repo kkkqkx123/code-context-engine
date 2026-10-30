@@ -1,59 +1,37 @@
-//! Post-processing: standard library entity classification
+//! Post-processing: plugin-declared external entities
 //!
-//! Sets the `is_stdlib` flag and `stdlib_category` of entities that *reference*
-//! a standard library symbol, so downstream stages do not re-run the lookup.
+//! The single writer of [`Entity::is_stdlib`], and it only ever copies a
+//! plugin's own declaration.
 //!
 //! # Design Note
 //!
-//! A name lookup only answers "does this name exist in the stdlib tables", not
-//! "is this entity a stdlib entity". The two differ exactly where it matters:
-//! `struct Command` written by the project is not `std::process::Command`, yet
-//! a name match used to mark it stdlib and downstream stages then compressed it
-//! away (dropped fields, methods, parameters and return types from the natural
-//! language text). Definitions therefore never match by name; only entities
-//! that pull in someone else's symbol (`import` / `require` / `include`) do.
+//! `is_stdlib` answers one question: *is this definition something other than
+//! the project's own code?* Only the plugin knows. A name lookup cannot answer
+//! it — `struct Command` written by the project is not `std::process::Command`
+//! — and that is how a name match used to mark project types stdlib and, from
+//! there, compress their fields, methods, parameters and return types out of
+//! the natural language text.
+//!
+//! Import *references* are therefore not marked here at all. What an import
+//! points at is a property of the edge, carried by
+//! `Relation::stdlib_category` and by `ImportClassifier`'s per-import class;
+//! storing it on the import entity only produced two answers for one fact (see
+//! `docs/plan/import-classification-and-stdlib-semantics.md`).
 
-use cce_types::EntityKind;
 use cce_types::entity::Entity;
-use cce_types::language::Language;
 
 use crate::grouper::types::StdlibCategory;
-use crate::parser::stdlib::StdlibDetector;
 
-/// Entity kinds that pull in a symbol defined elsewhere.
+/// Copy a plugin's explicit stdlib declaration onto the entity.
 ///
-/// These are the only kinds whose name is a foreign reference, so the only
-/// kinds a stdlib name lookup can answer for. Definitions (`Struct`, `Class`,
-/// `Function`, `Method`, `Constant`, …) are the project's own code and are
-/// never matched by name — otherwise a project type that happens to share a
-/// name with a stdlib one is silently treated as external.
+/// Custom-language plugins set `metadata["is_stdlib"] = "true"` (optionally
+/// with `metadata["stdlib_category"]`) to say that an entity they emitted is
+/// external code rather than project code. Built-in languages never call this
+/// with a marker, so for them the flag keeps its default `false`.
 ///
-/// `Export` stays out on purpose: `export function foo()` is a definition even
-/// though a re-export names a foreign symbol.
-fn is_reference_kind(kind: EntityKind) -> bool {
-    matches!(
-        kind,
-        EntityKind::Import | EntityKind::Require | EntityKind::Include
-    )
-}
-
-/// Mark entity as standard library if it references a stdlib symbol.
-///
-/// # Detection Strategy
-///
-/// 1. An explicit plugin marker (`metadata["is_stdlib"]`) always wins, for any
-///    kind: custom-language plugins supply the knowledge the built-in tables
-///    lack.
-/// 2. Otherwise only reference kinds are looked up, through the shared import
-///    entry in `cce-stdlib` (per-language tables, not local prefixes).
-/// 3. The category is the table's answer for the whole path, else for its last
-///    segment (`std::collections::HashMap` → `HashMap` → `Collection`), else
-///    `Other`.
-pub fn mark_stdlib(entity: &mut Entity, language: &Language) {
-    // 1. Honor an explicit plugin metadata marker first. Custom-language
-    //    plugins set `metadata["is_stdlib"] = "true"` (optionally with
-    //    `metadata["stdlib_category"]`) so entities from custom languages
-    //    can be flagged as stdlib without a built-in detector.
+/// The category defaults to `Other` so consumers can rely on `is_stdlib` and
+/// `stdlib_category` being consistent: a marked entity always has a category.
+pub fn mark_plugin_declared_external(entity: &mut Entity) {
     if let Some("true") = entity.metadata.get("is_stdlib").map(String::as_str) {
         entity.is_stdlib = true;
         entity.stdlib_category = Some(
@@ -63,18 +41,6 @@ pub fn mark_stdlib(entity: &mut Entity, language: &Language) {
                 .and_then(|c| parse_category(c))
                 .unwrap_or(StdlibCategory::Other),
         );
-        return;
-    }
-
-    // 2. A definition is never a stdlib entity, whatever its name says.
-    if !is_reference_kind(entity.kind) {
-        return;
-    }
-
-    // 3. Reference: the shared lookup both decides and categorizes.
-    if let Some(category) = StdlibDetector::ref_category(&entity.name, language) {
-        entity.is_stdlib = true;
-        entity.stdlib_category = Some(category);
     }
 }
 
@@ -107,6 +73,7 @@ fn parse_category(value: &str) -> Option<StdlibCategory> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_types::EntityKind;
 
     #[test]
     fn test_parse_category_serde_variant() {
@@ -128,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_stdlib_from_metadata() {
+    fn test_plugin_marker_is_copied() {
         let mut entity = Entity {
             name: "my_stdlib_fn".to_string(),
             ..Default::default()
@@ -139,13 +106,13 @@ mod tests {
         entity
             .metadata
             .insert("stdlib_category".to_string(), "utility".to_string());
-        mark_stdlib(&mut entity, &Language::Custom(0));
+        mark_plugin_declared_external(&mut entity);
         assert!(entity.is_stdlib);
         assert_eq!(entity.stdlib_category, Some(StdlibCategory::Utility));
     }
 
     #[test]
-    fn test_mark_stdlib_metadata_defaults_to_other() {
+    fn test_plugin_marker_defaults_to_other() {
         let mut entity = Entity {
             name: "fn".to_string(),
             ..Default::default()
@@ -153,16 +120,16 @@ mod tests {
         entity
             .metadata
             .insert("is_stdlib".to_string(), "true".to_string());
-        mark_stdlib(&mut entity, &Language::Custom(0));
+        mark_plugin_declared_external(&mut entity);
         assert!(entity.is_stdlib);
         assert_eq!(entity.stdlib_category, Some(StdlibCategory::Other));
     }
 
     #[test]
-    fn test_mark_stdlib_ignores_project_definitions() {
-        // Regression: `struct Command` shares a name with `std::process::Command`
-        // and used to be marked stdlib, which made every downstream stage drop
-        // its fields, methods and signature from the natural language text.
+    fn test_builtin_languages_never_mark() {
+        // A definition that shares a name with a stdlib symbol is project
+        // code; so is an import statement, which is this project's own line
+        // and only *points at* something external.
         for (name, kind) in [
             ("Command", EntityKind::Struct),
             ("Error", EntityKind::Enum),
@@ -170,55 +137,39 @@ mod tests {
             ("println", EntityKind::Function),
             ("Vec", EntityKind::TypeAlias),
             ("MAX", EntityKind::Constant),
+            ("std::collections::HashMap", EntityKind::Import),
+            ("json", EntityKind::Require),
+            ("stdio.h", EntityKind::Include),
         ] {
             let mut entity = Entity {
                 name: name.to_string(),
                 kind,
                 ..Default::default()
             };
-            mark_stdlib(&mut entity, &Language::Rust);
+            mark_plugin_declared_external(&mut entity);
             assert!(
                 !entity.is_stdlib,
-                "{kind} {name} is a project definition, not a stdlib entity"
+                "{kind} {name} must not be marked by the built-in path"
             );
             assert_eq!(entity.stdlib_category, None);
         }
     }
 
     #[test]
-    fn test_mark_stdlib_marks_reference_entities() {
-        let mut entity = Entity {
-            name: "std::collections::HashMap".to_string(),
-            kind: EntityKind::Import,
-            ..Default::default()
-        };
-        mark_stdlib(&mut entity, &Language::Rust);
-        assert!(entity.is_stdlib);
-        assert_eq!(entity.stdlib_category, Some(StdlibCategory::Collection));
-
-        let mut python = Entity {
-            name: "os".to_string(),
-            kind: EntityKind::Import,
-            ..Default::default()
-        };
-        mark_stdlib(&mut python, &Language::Python);
-        assert!(python.is_stdlib);
-        assert!(python.stdlib_category.is_some());
-
-        let mut ruby = Entity {
-            name: "json".to_string(),
-            kind: EntityKind::Require,
-            ..Default::default()
-        };
-        mark_stdlib(&mut ruby, &Language::Ruby);
-        assert!(ruby.is_stdlib, "require 'json' is a stdlib reference");
-
-        let mut local = Entity {
-            name: "our_internal_module".to_string(),
-            kind: EntityKind::Import,
-            ..Default::default()
-        };
-        mark_stdlib(&mut local, &Language::Python);
-        assert!(!local.is_stdlib);
+    fn test_plugin_marker_wins_for_any_kind() {
+        // A plugin may declare a definition external; that is the only way the
+        // flag is ever set.
+        for kind in [EntityKind::Struct, EntityKind::Function, EntityKind::Import] {
+            let mut entity = Entity {
+                name: "sdk_widget".to_string(),
+                kind,
+                ..Default::default()
+            };
+            entity
+                .metadata
+                .insert("is_stdlib".to_string(), "true".to_string());
+            mark_plugin_declared_external(&mut entity);
+            assert!(entity.is_stdlib, "{kind} declared external by a plugin");
+        }
     }
 }

@@ -54,6 +54,9 @@ pub use cce_types::import::{
     StandardizedImportTable, TargetKind,
 };
 
+// Re-export the import classifier (sole entry for import classification)
+pub use common::classifier::ImportClassifier;
+
 // Re-export traits
 pub use traits::{
     SymbolExtractor, create_context_with_package, create_extractor, create_extractor_with_registry,

@@ -121,6 +121,10 @@ impl StdlibDetector {
     /// know the shape should prefer the narrower entry so a user definition
     /// that merely shares a name with a stdlib entry is not swallowed.
     pub fn is_stdlib_ref(name: &str, language: &Language) -> bool {
+        let name = normalize_ref(name);
+        if name.is_empty() {
+            return false;
+        }
         Self::category(name, language).is_some()
             || Self::is_stdlib_call(name, language)
             || Self::is_stdlib_import_path(name, language)
@@ -139,6 +143,7 @@ impl StdlibDetector {
     /// (`StandardizedImport::is_system_header`) and those imports keep
     /// classifying as `ExternalPackage`, not `StandardLibrary`.
     pub fn is_stdlib_import_path(path: &str, language: &Language) -> bool {
+        let path = normalize_ref(path);
         if path.is_empty() {
             return false;
         }
@@ -201,6 +206,7 @@ impl StdlibDetector {
     /// last segment (`std::collections::HashMap` → `HashMap` → `Collection`)
     /// before settling on `Other`.
     pub fn ref_category(name: &str, language: &Language) -> Option<StdlibCategory> {
+        let name = normalize_ref(name);
         if !Self::is_stdlib_ref(name, language) {
             return None;
         }
@@ -211,67 +217,21 @@ impl StdlibDetector {
             })
             .or(Some(StdlibCategory::Other))
     }
+}
 
-    /// Check if a type is from the standard library (merged from symbol_classifier)
-    ///
-    /// Shell and scripting languages without a static type system conservatively
-    /// return false. Remapped plugin languages inherit their host tables.
-    pub fn is_stdlib_type(name: &str, language: &Language) -> bool {
-        let effective = effective_language(language);
-        match &effective {
-            Language::C => CStdlibDetector::is_stdlib_type(name),
-            Language::Cpp => CppStdlibDetector::is_stdlib_type(name),
-            Language::Go => GoStdlibDetector::is_stdlib_type(name),
-            Language::Rust => RustStdlibDetector::is_stdlib_type(name),
-            Language::Python => PythonStdlibDetector::is_stdlib_type(name),
-            Language::Java => JavaStdlibDetector::is_stdlib_type(name),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                JavaScriptStdlibDetector::is_stdlib_type(name)
-            }
-            Language::Kotlin => KotlinStdlibDetector::is_stdlib_type(name),
-            Language::Dart => DartStdlibDetector::is_stdlib_type(name),
-            Language::Php => PhpStdlibDetector::is_stdlib_type(name),
-            Language::Ruby => RubyStdlibDetector::is_stdlib_type(name),
-            Language::CSharp => CSharpStdlibDetector::is_stdlib_type(name),
-            Language::Scala => ScalaStdlibDetector::is_stdlib_type(name),
-            _ => false,
-        }
-    }
-
-    /// Check if a trait is from the standard library (merged from symbol_classifier)
-    ///
-    /// Only Rust exposes traits as a language concept; other languages
-    /// conservatively return false. Remapped plugin languages inherit host tables.
-    pub fn is_stdlib_trait(name: &str, language: &Language) -> bool {
-        let effective = effective_language(language);
-        match &effective {
-            Language::Rust => RustStdlibDetector::is_stdlib_trait(name),
-            _ => false, // Rust-specific feature
-        }
-    }
-
-    /// Check if a constant is from the standard library
-    ///
-    /// Languages with dedicated constant tables participate; the rest
-    /// conservatively return false. Remapped plugin languages inherit host tables.
-    pub fn is_stdlib_constant(name: &str, language: &Language) -> bool {
-        let effective = effective_language(language);
-        match &effective {
-            Language::C => CStdlibDetector::is_stdlib_constant(name),
-            Language::Cpp => CppStdlibDetector::is_stdlib_constant(name),
-            Language::CSharp => CSharpStdlibDetector::is_stdlib_constant(name),
-            Language::Go => GoStdlibDetector::is_stdlib_constant(name),
-            Language::Php => PhpStdlibDetector::is_stdlib_constant(name),
-            Language::Rust => RustStdlibDetector::is_stdlib_constant(name),
-            Language::Python => PythonStdlibDetector::is_stdlib_constant(name),
-            Language::Java => JavaStdlibDetector::is_stdlib_constant(name),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                JavaScriptStdlibDetector::is_stdlib_constant(name)
-            }
-            Language::Kotlin => KotlinStdlibDetector::is_stdlib_constant(name),
-            _ => false,
-        }
-    }
+/// Strip the quoting an extractor leaves around a reference.
+///
+/// An import name reaches the detectors in whatever shape the extractor kept:
+/// the JS/TS family keeps the module specifier's quotes (`'node:fs'`), Dart
+/// keeps them around a URI (`'dart:async'`), C++ keeps the angle brackets of
+/// `#include <vector>`. Normalizing at the entry fixes every language at once;
+/// teaching twelve extractors to trim the same characters would drift, and
+/// "which characters are shell" is knowledge about a reference, not about a
+/// grammar.
+fn normalize_ref(raw: &str) -> &str {
+    raw.trim()
+        .trim_matches(|c| matches!(c, '\'' | '"' | '<' | '>'))
+        .trim()
 }
 
 /// First component of a `separator`-delimited path.
@@ -1013,136 +973,44 @@ mod tests {
     }
 
     #[test]
-    fn test_stdlib_type_extended_languages() {
-        assert!(StdlibDetector::is_stdlib_type("String", &Language::Java));
-        assert!(StdlibDetector::is_stdlib_type(
-            "java.util.ArrayList",
-            &Language::Java
-        ));
-        assert!(!StdlibDetector::is_stdlib_type("MyClass", &Language::Java));
-
-        assert!(StdlibDetector::is_stdlib_type(
-            "Array",
+    fn test_quoting_is_stripped_before_lookup() {
+        // Extractors keep the shell characters they saw: the JS family keeps
+        // the module specifier's quotes, Dart keeps them around a URI, C++
+        // keeps the angle brackets of an include. Without normalization all
+        // three shapes missed every table, so JS/TS/Dart had no stdlib
+        // detection at all.
+        assert!(StdlibDetector::is_stdlib_import_path(
+            "'node:fs'",
             &Language::JavaScript
         ));
-        assert!(StdlibDetector::is_stdlib_type("Array", &Language::Jsx));
-        assert!(StdlibDetector::is_stdlib_type("Promise", &Language::Tsx));
-        assert!(StdlibDetector::is_stdlib_type(
-            "JSON",
+        assert!(StdlibDetector::is_stdlib_import_path(
+            "\"fs\"",
             &Language::TypeScript
         ));
-        assert!(!StdlibDetector::is_stdlib_type(
-            "customFunction",
+        assert!(StdlibDetector::is_stdlib_import_path(
+            "'dart:async'",
+            &Language::Dart
+        ));
+        assert!(StdlibDetector::is_stdlib_import_path(
+            "'json'",
+            &Language::Ruby
+        ));
+        // The same shape through the reference entry, which also covers C++.
+        assert!(StdlibDetector::is_stdlib_ref("<vector>", &Language::Cpp));
+        assert_eq!(
+            StdlibDetector::ref_category("<vector>", &Language::Cpp),
+            Some(StdlibCategory::Collection)
+        );
+        // A project symbol that happens to be quoted is still not stdlib.
+        assert!(!StdlibDetector::is_stdlib_import_path(
+            "'./helpers'",
             &Language::JavaScript
         ));
-
-        assert!(StdlibDetector::is_stdlib_type("String", &Language::Kotlin));
-        assert!(StdlibDetector::is_stdlib_type(
-            "kotlin.collections.List",
-            &Language::Kotlin
+        assert!(!StdlibDetector::is_stdlib_import_path("", &Language::Rust));
+        assert!(!StdlibDetector::is_stdlib_import_path(
+            "''",
+            &Language::Ruby
         ));
-        assert!(!StdlibDetector::is_stdlib_type(
-            "myFunction",
-            &Language::Kotlin
-        ));
-
-        assert!(StdlibDetector::is_stdlib_type("String", &Language::Dart));
-        assert!(!StdlibDetector::is_stdlib_type("MyClass", &Language::Dart));
-
-        assert!(StdlibDetector::is_stdlib_type("DateTime", &Language::Php));
-        assert!(!StdlibDetector::is_stdlib_type(
-            "MyController",
-            &Language::Php
-        ));
-
-        assert!(StdlibDetector::is_stdlib_type("String", &Language::Ruby));
-        assert!(StdlibDetector::is_stdlib_type("File", &Language::Ruby));
-        assert!(!StdlibDetector::is_stdlib_type("MyModule", &Language::Ruby));
-
-        assert!(StdlibDetector::is_stdlib_type("int", &Language::CSharp));
-        assert!(StdlibDetector::is_stdlib_type(
-            "System.String",
-            &Language::CSharp
-        ));
-        assert!(!StdlibDetector::is_stdlib_type(
-            "MyClass",
-            &Language::CSharp
-        ));
-
-        assert!(StdlibDetector::is_stdlib_type("List", &Language::Scala));
-        assert!(StdlibDetector::is_stdlib_type(
-            "scala.collection.immutable.List",
-            &Language::Scala
-        ));
-        assert!(!StdlibDetector::is_stdlib_type(
-            "cats.effect.IO",
-            &Language::Scala
-        ));
-        assert!(!StdlibDetector::is_stdlib_type("MyClass", &Language::Scala));
-    }
-
-    #[test]
-    fn test_stdlib_constant_php() {
-        assert!(StdlibDetector::is_stdlib_constant(
-            "PHP_VERSION",
-            &Language::Php
-        ));
-        assert!(StdlibDetector::is_stdlib_constant(
-            "PHP_EOL",
-            &Language::Php
-        ));
-        assert!(!StdlibDetector::is_stdlib_constant(
-            "MY_CONSTANT",
-            &Language::Php
-        ));
-    }
-
-    #[test]
-    fn test_stdlib_constant_covers_new_tables() {
-        assert!(StdlibDetector::is_stdlib_constant(
-            "u8::MAX",
-            &Language::Rust
-        ));
-        assert!(StdlibDetector::is_stdlib_constant(
-            "math.pi",
-            &Language::Python
-        ));
-        assert!(StdlibDetector::is_stdlib_constant(
-            "Math.PI",
-            &Language::Java
-        ));
-        assert!(StdlibDetector::is_stdlib_constant(
-            "Math.PI",
-            &Language::JavaScript
-        ));
-        assert!(StdlibDetector::is_stdlib_constant(
-            "Int.MAX_VALUE",
-            &Language::Kotlin
-        ));
-        assert!(!StdlibDetector::is_stdlib_constant(
-            "MY_CONSTANT",
-            &Language::Rust
-        ));
-    }
-
-    #[test]
-    fn test_stdlib_constant_conservative_missing() {
-        // C, C++, C#, Go, PHP, Rust, Python, Java, JS family and Kotlin
-        // ship dedicated constant tables; the rest stay conservative.
-        for language in [
-            Language::Jsx,
-            Language::Tsx,
-            Language::Scala,
-            Language::Dart,
-            Language::Ruby,
-            Language::Lua,
-            Language::Bash,
-        ] {
-            assert!(
-                !StdlibDetector::is_stdlib_constant("ANYTHING", &language),
-                "{language:?} has no constant table and must stay conservative"
-            );
-        }
     }
 
     #[test]
@@ -1185,22 +1053,6 @@ mod tests {
         assert!(!StdlibDetector::is_stdlib_call(
             "Vec::new",
             &Language::Custom(u32::MAX)
-        ));
-        assert!(StdlibDetector::is_stdlib_type(
-            "Vec",
-            &Language::Custom(remapped)
-        ));
-        assert!(!StdlibDetector::is_stdlib_type(
-            "Vec",
-            &Language::Custom(native)
-        ));
-        assert!(StdlibDetector::is_stdlib_trait(
-            "Clone",
-            &Language::Custom(remapped)
-        ));
-        assert!(!StdlibDetector::is_stdlib_trait(
-            "Clone",
-            &Language::Custom(native)
         ));
         clear_plugin_languages();
     }

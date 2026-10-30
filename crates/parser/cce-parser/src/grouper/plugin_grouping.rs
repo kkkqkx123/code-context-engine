@@ -256,10 +256,16 @@ fn serialize_parsed_relations(parsed_file: &ParsedFile) -> Vec<PluginRelation> {
 
 /// `LangHeuristics` stdlib classification for custom-language files.
 ///
-/// Entities whose stdlib status is unknown are classified via the
-/// `classify_stdlib(module_path)` hook (module path = entity name),
-/// first non-`None` plugin answer wins. Built-in languages are
-/// untouched (their detectors already ran during extraction).
+/// Only entities that *reference* something else are classified through the
+/// `classify_stdlib(module_path)` hook (module path = entity name); the first
+/// non-`None` plugin answer wins. Built-in languages are untouched.
+///
+/// Definitions are deliberately excluded. The hook answers "does this name
+/// resolve into the standard library", which is a question about a reference;
+/// asking it about a definition lets a custom-language `struct sys.Foo` be
+/// marked external because its name looks like a module path, and downstream
+/// stages then compress the entity. A plugin that knows one of its definitions
+/// is external code says so explicitly with `metadata["is_stdlib"]`.
 pub fn apply_stdlib_heuristics(
     plugin_registry: &Option<std::sync::Arc<PluginRegistry>>,
     parsed_file: &ParsedFile,
@@ -274,6 +280,9 @@ pub fn apply_stdlib_heuristics(
     let language_name = parsed_file.language.to_string();
     for entity in entities.iter_mut() {
         if entity.is_stdlib || entity.stdlib_category.is_some() {
+            continue;
+        }
+        if !entity.kind.is_import_like() {
             continue;
         }
         if let Some(category) = crate::plugin::heuristics::classify_stdlib(

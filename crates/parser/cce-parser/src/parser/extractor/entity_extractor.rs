@@ -616,7 +616,9 @@ impl EntityExtractor {
         if language == &Language::Rust {
             post_processing::extract_rust_attributes(mat, source, &mut entity);
         }
-        post_processing::mark_stdlib(&mut entity, language);
+        // Only a plugin marker sets `is_stdlib`; import references are
+        // annotated on their relations instead (`stdlib_category`).
+        post_processing::mark_plugin_declared_external(&mut entity);
 
         let _guard = super::context::ScopedEntity::new(context, &mut entity);
 

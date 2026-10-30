@@ -1,13 +1,16 @@
 //! Group template dispatcher for embedding templates
 //!
-//! Dispatches entity groups to appropriate templates based on:
-//! - PatternInfo (getter/setter pattern)
-//! - GroupType (regular entities)
+//! Routes entity groups to one of three templates:
+//! - a detected getter/setter pattern
+//! - a standard library header
+//! - the regular template
 //!
 //! # Architecture
 //!
 //! The dispatcher is the central component that routes entity groups
-//! to the appropriate template for description generation.
+//! to the appropriate template for description generation. The routing rule
+//! lives in [`GroupTemplateKind`] so the reported name and the template that
+//! runs stay in sync.
 //!
 //! See docs/ast_to_nl/architecture.md for detailed design.
 
@@ -15,17 +18,19 @@ use super::getter_setter::GetterSetterTemplate;
 use super::group_trait::{GroupTemplate, PatternGroupTemplate};
 use super::regular::RegularGroupTemplate;
 use super::stdlib::StdlibTemplate;
-use crate::grouper::types::{EntityGroup, PatternInfo};
+use crate::ast_to_nl::common::GroupTemplateKind;
+use crate::grouper::types::EntityGroup;
 
 /// Group template dispatcher
 ///
 /// Routes entity groups to appropriate templates based on pattern information
-/// and group characteristics.
+/// and stdlib identity.
 ///
 /// # Dispatch Logic
 ///
-/// 1. If PatternInfo is not None, use pattern-specific template
-/// 2. Otherwise, use regular template
+/// 1. A detected pattern uses its pattern-specific template
+/// 2. Otherwise a stdlib header uses the stdlib template
+/// 3. Otherwise the regular template
 pub struct GroupTemplateDispatcher {
     // Getter/Setter pattern template
     getter_setter_template: GetterSetterTemplate,
@@ -53,36 +58,24 @@ impl GroupTemplateDispatcher {
     /// - First element: Group overall description
     /// - Subsequent elements: Independent member descriptions
     pub fn dispatch(&self, group: &EntityGroup) -> Vec<String> {
-        match &group.pattern_info {
-            PatternInfo::GetterSetter(summary) => self
+        match GroupTemplateKind::select(group) {
+            GroupTemplateKind::GetterSetter(summary) => self
                 .getter_setter_template
                 .generate_with_pattern(group, summary),
-            // No pattern detected — check for stdlib
-            PatternInfo::None => {
-                if group.header.as_ref().is_some_and(|h| h.is_stdlib) {
-                    self.stdlib_template.generate(group)
-                } else {
-                    self.regular_template.generate(group)
-                }
-            }
+            GroupTemplateKind::Stdlib => self.stdlib_template.generate(group),
+            GroupTemplateKind::Regular => self.regular_template.generate(group),
         }
     }
 
-    /// Get the pattern name for a group
+    /// Name the template `dispatch` would pick for this group
     ///
-    /// Returns the pattern name if a pattern is detected,
-    /// or "Regular" otherwise.
-    pub fn get_pattern_name(&self, group: &EntityGroup) -> &'static str {
-        if !matches!(group.pattern_info, PatternInfo::None) {
-            return group.pattern_info.pattern_name();
-        }
-        // Mirror `dispatch`: the stdlib branch outranks the regular one, so
-        // reporting every pattern-less group as "Regular" would hide whether
-        // the stdlib template ever runs.
-        if group.header.as_ref().is_some_and(|h| h.is_stdlib) {
-            return "Stdlib";
-        }
-        "Regular"
+    /// This labels the *template*, not the design pattern: `Stdlib` and
+    /// `Regular` are not `PatternInfo` variants, and pattern identity is
+    /// `PatternInfo::pattern_name`'s job (which can answer `None`). Answering
+    /// "Regular" for every pattern-less group would claim the regular template
+    /// ran when the stdlib one did, which is exactly the case worth counting.
+    pub fn template_name(&self, group: &EntityGroup) -> &'static str {
+        GroupTemplateKind::select(group).name()
     }
 }
 
@@ -95,6 +88,19 @@ impl Default for GroupTemplateDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::grouper::types::{GetterSetterSummary, PatternInfo};
+
+    fn stdlib_group() -> EntityGroup {
+        EntityGroup {
+            name: "std::collections::HashMap".into(),
+            header: Some(cce_types::GroupedEntity {
+                is_stdlib: true,
+                stdlib_category: Some(cce_types::StdlibCategory::Collection),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_dispatcher_regular() {
@@ -103,28 +109,42 @@ mod tests {
         let results = dispatcher.dispatch(&group);
 
         assert!(!results.is_empty());
+        assert_eq!(dispatcher.template_name(&group), "Regular");
     }
 
+    /// The reported name has to name the template that actually produced the
+    /// text, otherwise the label cannot be used to count template coverage.
     #[test]
-    fn test_get_pattern_name_for_stdlib_group() {
-        let group = EntityGroup {
-            header: Some(cce_types::GroupedEntity {
-                is_stdlib: true,
-                ..Default::default()
-            }),
+    fn test_template_name_matches_dispatch() {
+        let group = stdlib_group();
+        let dispatcher = GroupTemplateDispatcher::new();
+
+        assert_eq!(dispatcher.template_name(&group), "Stdlib");
+        assert_eq!(
+            dispatcher.dispatch(&group),
+            StdlibTemplate::new().generate(&group)
+        );
+
+        let regular = EntityGroup::default();
+        assert_eq!(dispatcher.template_name(&regular), "Regular");
+        assert_eq!(
+            dispatcher.dispatch(&regular),
+            RegularGroupTemplate::new().generate(&regular)
+        );
+
+        let pattern = EntityGroup {
+            pattern_info: PatternInfo::GetterSetter(GetterSetterSummary::empty()),
             ..Default::default()
         };
-
-        let dispatcher = GroupTemplateDispatcher::new();
-        assert_eq!(dispatcher.get_pattern_name(&group), "Stdlib");
+        assert_eq!(dispatcher.template_name(&pattern), "GetterSetter");
     }
 
     #[test]
     fn test_dispatcher_getter_setter_pattern() {
         let group = EntityGroup {
-            pattern_info: PatternInfo::GetterSetter(
-                crate::grouper::types::GetterSetterSummary::new(vec!["name".to_string()]),
-            ),
+            pattern_info: PatternInfo::GetterSetter(GetterSetterSummary::new(vec![
+                "name".to_string(),
+            ])),
             ..Default::default()
         };
 
@@ -133,21 +153,5 @@ mod tests {
 
         assert!(!results.is_empty());
         assert!(results[0].contains("data class"));
-    }
-
-    #[test]
-    fn test_get_pattern_name() {
-        let group = EntityGroup {
-            pattern_info: PatternInfo::GetterSetter(
-                crate::grouper::types::GetterSetterSummary::empty(),
-            ),
-            ..Default::default()
-        };
-
-        let dispatcher = GroupTemplateDispatcher::new();
-        assert_eq!(dispatcher.get_pattern_name(&group), "GetterSetter");
-
-        let group = EntityGroup::default();
-        assert_eq!(dispatcher.get_pattern_name(&group), "Regular");
     }
 }

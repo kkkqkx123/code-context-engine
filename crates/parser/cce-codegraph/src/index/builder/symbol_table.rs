@@ -14,6 +14,7 @@ use crate::symbol_table::{
 };
 use crate::type_inference::{InferenceContext, TypeInferenceEngine};
 use cce_metrics::domain::pipeline::RelationMetrics;
+use cce_parser::parser::extractor::{ImportClass, ImportClassifier};
 use cce_parser_core::determine_module_path;
 use cce_types::language::Language;
 use cce_types::{Entity, ParsedFile, normalize_project_path};
@@ -97,54 +98,33 @@ impl SymbolTableBuilder {
                 .and_then(|path| path.rsplit("::").next())
                 .map(|segment| segment.to_string());
 
-            // Classify import source type based on import kind and properties
-            let (source_type, condition) = if import.is_system_header {
-                (
-                    ImportSourceType::StandardLibrary {
-                        lang: file.language,
-                    },
-                    None,
-                )
-            } else if import.kind == cce_types::import::ImportKind::DynamicImport {
-                (
-                    ImportSourceType::Dynamic {
-                        expression: import.source.clone(),
-                    },
-                    None,
-                )
-            } else {
-                // Heuristic: detect conditional imports by checking common patterns
-                // in the import context (e.g., Python try/except, Rust cfg attributes)
-                let condition =
-                    Self::detect_import_condition(file, &import.source, import.span.as_ref());
-                if let Some(ref cond) = condition {
+            // Classify import source type. Two shape-only cases come first
+            // because they are not import classes at all, then the shared
+            // classifier answers stdlib / project-local / third-party.
+            let (source_type, condition) =
+                if import.kind == cce_types::import::ImportKind::DynamicImport {
                     (
-                        ImportSourceType::Conditional {
-                            condition: cond.clone(),
-                        },
-                        Some(cond.clone()),
-                    )
-                } else if Self::is_internal_import(&import.source, file.language) {
-                    (
-                        ImportSourceType::InternalModule {
-                            path: import.source.clone(),
+                        ImportSourceType::Dynamic {
+                            expression: import.source.clone(),
                         },
                         None,
                     )
-                } else if Self::is_external_dependency(&import.source, project) {
-                    // Extract the top-level package name from the source path
-                    let package = import
-                        .source
-                        .split("::")
-                        .next()
-                        .or_else(|| import.source.split('.').next())
-                        .unwrap_or(&import.source)
-                        .to_string();
-                    (ImportSourceType::ExternalDependency { package }, None)
                 } else {
-                    (ImportSourceType::Unknown, None)
-                }
-            };
+                    // Heuristic: detect conditional imports by checking common patterns
+                    // in the import context (e.g., Python try/except, Rust cfg attributes)
+                    let condition =
+                        Self::detect_import_condition(file, &import.source, import.span.as_ref());
+                    if let Some(ref cond) = condition {
+                        (
+                            ImportSourceType::Conditional {
+                                condition: cond.clone(),
+                            },
+                            Some(cond.clone()),
+                        )
+                    } else {
+                        (Self::classify_import(import, file, project), None)
+                    }
+                };
 
             module_table.add_import(ImportBinding {
                 local_name,
@@ -158,45 +138,51 @@ impl SymbolTableBuilder {
         }
     }
 
-    /// Determine if an import source refers to an internal module (same package/project).
+    /// Map an import to its `ImportSourceType` through the shared classifier.
     ///
-    /// This is the context-free relative-specifier check: absolute package
-    /// or namespace imports (Java family, C#) need `package_declaration` or
-    /// `project_packages` and are classified in `ExtractionContext`
-    /// (`cce-parser-core`); here only file- or module-relative specifiers
-    /// resolve to internal by construction. Mirrors
-    /// `ExtractionContext::is_relative_specifier`.
-    fn is_internal_import(source: &str, language: Language) -> bool {
-        match language {
-            Language::Rust => {
-                source.starts_with("crate::")
-                    || source.starts_with("self::")
-                    || source.starts_with("super::")
+    /// Stdlib identity, project-locality and the third-party default all come
+    /// from `ImportClassifier`, which owns the per-language import tables and
+    /// the relative-specifier rules. This builder only adds the one thing the
+    /// classifier cannot know: whether the package is declared by the project
+    /// (`is_external_dependency`), which lives in the manifest, not in the
+    /// import's shape.
+    ///
+    /// A C/C++ system header keeps `StandardLibrary`: the classifier reports
+    /// it as an external package (the C/C++ tables answer `false` by design),
+    /// but a header the parser flagged as system is by definition not a
+    /// project dependency.
+    fn classify_import(
+        import: &cce_types::StandardizedImport,
+        file: &ParsedFile,
+        project: Option<&ProjectSymbolTable>,
+    ) -> ImportSourceType {
+        if import.is_system_header {
+            return ImportSourceType::StandardLibrary {
+                lang: file.language,
+            };
+        }
+        let context = cce_parser_core::ExtractionContext::default();
+        let classification = ImportClassifier::classify(import, &context, file.language);
+        match classification.class {
+            ImportClass::StandardLibrary => ImportSourceType::StandardLibrary {
+                lang: file.language,
+            },
+            ImportClass::InternalModule => ImportSourceType::InternalModule {
+                path: import.source.clone(),
+            },
+            ImportClass::ExternalPackage => {
+                if Self::is_external_dependency(&import.source, project) {
+                    ImportSourceType::ExternalDependency {
+                        package: classification
+                            .metadata
+                            .package_name
+                            .unwrap_or_else(|| import.source.clone()),
+                    }
+                } else {
+                    ImportSourceType::Unknown
+                }
             }
-            Language::Python => source.starts_with('.'),
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                source.starts_with("./") || source.starts_with("../")
-            }
-            Language::Go => source.starts_with('.'),
-            Language::C | Language::Cpp => {
-                // C/C++ quoted includes are typically project-local
-                // Note: is_system_header already handles angle-bracket includes
-                !source.starts_with('<') && !source.starts_with('/')
-            }
-            Language::Dart => source.starts_with("./") || source.starts_with("../"),
-            Language::Php => {
-                source.starts_with("./")
-                    || source.starts_with("../")
-                    || source.ends_with(".php")
-                    || (source.contains('/') && !source.contains('\\'))
-            }
-            Language::Ruby | Language::Lua | Language::Bash => {
-                source.starts_with("./") || source.starts_with("../")
-            }
-            // Java, Kotlin, Scala and C# use absolute package paths only;
-            // package-prefix internal is decided with project context in
-            // `ExtractionContext::is_internal_import`.
-            _ => false,
+            ImportClass::Unknown => ImportSourceType::Unknown,
         }
     }
 

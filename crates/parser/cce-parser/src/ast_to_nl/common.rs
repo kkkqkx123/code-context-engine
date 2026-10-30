@@ -17,4 +17,4 @@ pub use normalizer::NameNormalizer;
 pub use utils::{clean_comment_content, create_standalone_group};
 
 // Re-export template types
-pub use templates::{GroupTemplateBase, TemplateHelpers};
+pub use templates::{GroupTemplateBase, GroupTemplateKind, TemplateHelpers};

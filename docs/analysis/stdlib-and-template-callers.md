@@ -243,9 +243,13 @@ Rust 没有 goroutine / defer。同时 Rust 漏了 `HigherOrderCall`（落到 `_
 
 同目录 `group_templates.md`、`architecture.md` 是否同步未逐条核对，建议一并校。
 
-### D9 `get_pattern_name` 对 stdlib 组报 "Regular"
+### D9 `get_pattern_name` 对 stdlib 组报 "Regular"（已解决，但结论与初判不同）
 
 `bm25/templates/dispatcher.rs:55-61` 与 `embedding/templates/dispatcher.rs:75-81`：只有 `pattern_info` 参与命名，stdlib 分支返回 `"Regular"`。若该值进入日志或统计（`PatternInfo::pattern_name()` 同名方法在 `pattern.rs:60-65`），stdlib 模板命中率会被统计成 Regular，无法从指标上验证 stdlib 模板是否生效。
+
+> **最终落地**：先按本文结论加 stdlib 分支返回 `"Stdlib"`，后续复核发现真正的问题是方法名——它承诺「模式名」，实际返回「模板名」。`PatternInfo::pattern_name` 已经是模式名的唯一答案，一个只做转发的 `get_pattern_name` 没有存在理由；而模板名只有 dispatcher 能答。因此改名为 `template_name`（保留 `Stdlib`，`Regular` 会与实跑模板不符），三路判定下沉到 `common/templates/selection.rs:GroupTemplateKind::select`，`dispatch` 与 `template_name` 共用它，两者因此不可能漂移。当前状态见 `docs/parser/ast_to_nl/templates.md` 第 5 节。
+
+> **附带实测**：收窄 `mark_stdlib` 之后，`import` 类实体仍被正确标注 stdlib，但纯 import 组会被 `drop_import_only_groups` 丢弃（`grouper/builtin_stages.rs:152-170`），所以内置路径下已经没有 `header.is_stdlib == true` 的组——stdlib 模板退出内置路径，只剩插件 `metadata["is_stdlib"]` 一条触发路径。
 
 ### D10 category 字符串无法回读
 

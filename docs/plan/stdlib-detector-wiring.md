@@ -131,6 +131,31 @@ TypeReference std::io::Error           None  →  Some(Error)
 
 `Export` 故意不在引用类里：`export function foo()` 是定义，只有 re-export 才是引用，两者在 `EntityKind::Export` 上无法区分。
 
+### 6.1 副作用：组级 `is_stdlib` 只剩插件路径
+
+收窄的直接后果要写清楚，否则会误判 nl 模板的命中率。实测（同一探针，`use std::collections::HashMap; use std::io::Read;` 单独成文件）：
+
+```
+2 entities -> 0 groups
+Import std::collections::HashMap is_stdlib=true category=Some(Collection)
+Import std::io::Read            is_stdlib=true category=Some(Io)
+```
+
+实体层标注是对的，但纯 import 组会在分组末尾被 `drop_import_only_groups` 删掉（`grouper/builtin_stages.rs:152-170`：header 与全部成员都 `is_import_like()` 即丢弃），所以**内置路径下不存在 `header.is_stdlib == true` 的组**。NL 的 stdlib 模板因此只在插件用 `metadata["is_stdlib"] = "true"` 标注定义类实体时才触发。也就是说：收窄修好了「项目定义被误压缩」，同时让 stdlib 模板从"主要服务内置 import"退回"只服务插件声明"。前者是目标，后者是可接受的连带结果，但意味着不能再拿 stdlib 模板命中率当内置检测的健康度指标。
+
+### 6.2 后续复核：这一刀留下的是存储层问题（已在后续轮次修掉）
+
+> 本节记录的是复核时的问题；修法见 `docs/plan/import-classification-and-stdlib-semantics.md`：`is_stdlib` 收归插件专用、`mark_stdlib` 更名 `mark_plugin_declared_external`、归一化进检测器、`ImportClassifier` 正式集成。下文保留原分析。
+
+收窄改的是判定入口（按 import 形状查表），没改存储位置（仍写 `Entity.is_stdlib`）。`is_stdlib` 这个名字承诺"实体本身是 stdlib"，而 import 实体是**本项目语句**，"外部"的是它指向的目标。四点后果已实测：
+
+1. 同一个布尔在 `Import` 上表示"指向 stdlib"、在插件定义上表示"本身不是项目代码"，消费方只能靠 `|| is_import_like(kind)` 绕开（`bm25/templates/regular.rs:136`）。
+2. 内置路径上完全空转：import 不进组、不做成员，字段只落进 DB 与插件 API。
+3. 覆盖远窄于函数文档：`Require`（Ruby/Lua 不产实体）、`Include`（C/C++ 恒 false）基本是死分支；JS/TS/Dart 因实体名带引号恒为 false；C#/Go 不产 import 实体。
+4. 与关系层分叉：实体层用 `is_stdlib_import_path`、关系层用 `ref_category`，同一条 `from collections import OrderedDict` 得到 false 与 `Some(Other)` 两个答案。
+
+完整分析与正确形态（三个事实、三个归属地、Q1–Q6 待拍板）见 `docs/analysis/mark-stdlib-semantics.md`。
+
 ## 7. 前缀判断与检测表：统一（原 Q3）
 
 **应该统一，已统一**。原来"谁先碰到谁自己判"，同一门语言在导入期和调用期给出不同答案。三处实测证伪：
@@ -234,7 +259,9 @@ cargo check --workspace --all-targets → 通过
 
 1. **NL 类型改写（P3）**：单独文档 `docs/analysis/stdlib-nl-type-rewriting.md`，含三条候选方向、逐语言映射表草案、五个待拍板项。前置条件（P1）已完成，可独立启动。
 2. **非调用域的召回观测**：P2 之后 `filter_stdlib_calls=true` 会开始丢 `Use` / `TypeReference` 边。`relation_stdlib_filtered_non_call_total` 是唯一的观测口，建议在真实仓库上跑一轮，确认量级符合预期再决定是否给非调用域单独开关（当前刻意不拆）。
-3. **`Inheritance` 目标不判 stdlib**：`is_stdlib_ref` 覆盖"类别 ∪ 调用 ∪ 路径"三种形态，不含 trait 表。`impl Display for Foo` 的 `Display` 因此不会被识别，边保留。这是保守选择——trait 名与项目内 trait 无法靠名字区分，误删的代价高于保留噪声。
+3. **stdlib 模板是否还该存在**：见 6.1，内置路径已不产生 stdlib 组，`StdlibTemplate` 现在只服务插件声明。保留是因为 `metadata["is_stdlib"]` 是插件契约的一部分，删模板等于删能力；若要收，得先决定插件还能不能声明 stdlib。
+4. **`Inheritance` 目标不判 stdlib**：`is_stdlib_ref` 覆盖"类别 ∪ 调用 ∪ 路径"三种形态，不含 trait 表。`impl Display for Foo` 的 `Display` 因此不会被识别，边保留。这是保守选择——trait 名与项目内 trait 无法靠名字区分，误删的代价高于保留噪声。
+5. ~~**`mark_stdlib` 的语义收口**~~ 已落地：`Entity.is_stdlib` 定死为"插件声明的外部定义"，内置不再写；归一化放进 `cce-stdlib` 的 `normalize_ref`；`ImportClassifier` 接上符号表、import 统计与外部调用归属。见 `docs/plan/import-classification-and-stdlib-semantics.md`。
 
 ## 12. 复现
 

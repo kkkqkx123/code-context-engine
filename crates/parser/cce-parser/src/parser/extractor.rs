@@ -62,9 +62,10 @@ pub use structural_extractor::StructuralExtractor;
 // Re-export symbol extractor types
 pub use symbol_extractor::{
     ClassificationMetadata, ExportKind, ExportTarget, ImportClass, ImportClassification,
-    ImportKind, ImportTarget, StandardizedExport, StandardizedExportTable, StandardizedImport,
-    StandardizedImportTable, SymbolExtractor, TargetKind, create_context_with_package,
-    create_extractor, create_extractor_with_registry, extract_from_file, extract_package_from_file,
+    ImportClassifier, ImportKind, ImportTarget, StandardizedExport, StandardizedExportTable,
+    StandardizedImport, StandardizedImportTable, SymbolExtractor, TargetKind,
+    create_context_with_package, create_extractor, create_extractor_with_registry,
+    extract_from_file, extract_package_from_file,
 };
 
 // Re-export utility functions

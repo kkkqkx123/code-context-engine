@@ -1,8 +1,18 @@
 //! Unified import classifier
 //!
-//! Provides a single point for classifying imports across all languages.
+//! The single place that answers "what kind of import is this": standard
+//! library, third-party package, or project module. Consumers (symbol table,
+//! import statistics, external-call attribution) read this answer instead of
+//! each carrying their own prefix list or split heuristic.
+//!
+//! The classifier deliberately knows nothing about manifests: whether a
+//! package is one the project declared is index-layer knowledge, not a
+//! property of the import's shape. Callers that hold that knowledge refine
+//! [`ImportClass::ExternalPackage`] themselves.
 
 use crate::parser::stdlib::StdlibDetector;
+use cce_types::ImportTable;
+use cce_types::import::ImportSourceStats;
 use cce_types::language::Language;
 
 use super::{
@@ -11,63 +21,99 @@ use super::{
 };
 
 /// Unified import classifier
-///
-/// Provides a single point for classifying imports across all languages.
 pub struct ImportClassifier;
 
 impl ImportClassifier {
     /// Classify multiple imports in batch
     ///
-    /// More efficient than individual classification due to:
-    /// - Batch stdlib lookups
-    /// - Reduced allocations
-    /// - Better cache utilization
+    /// Thin loop over [`Self::classify`]: the per-import work is a table
+    /// lookup, so batching used to buy nothing and cost a second code path.
     pub fn classify_batch(
         imports: &[StandardizedImport],
         context: &ExtractionContext,
         language: Language,
     ) -> Vec<ImportClassification> {
-        // Group by source for batch processing
-        let mut results = Vec::with_capacity(imports.len());
-
-        // Batch stdlib detection
-        let sources: Vec<&str> = imports.iter().map(|i| i.source.as_str()).collect();
-        let stdlib_flags = Self::batch_is_stdlib(&sources, language);
-
-        // Classify each import
-        for (import, is_stdlib) in imports.iter().zip(stdlib_flags.iter()) {
-            results.push(Self::classify_single(import, context, language, *is_stdlib));
-        }
-
-        results
+        imports
+            .iter()
+            .map(|import| Self::classify(import, context, language))
+            .collect()
     }
 
-    /// Classify a single import with pre-computed stdlib flag
-    fn classify_single(
+    /// Classify a whole table once and record the counts on it.
+    ///
+    /// `ImportTable::source_stats` has existed since the table type was added
+    /// and has always been zero: four buckets were declared, nothing ever
+    /// filled them, so "how much of this file is standard library" had no
+    /// answer. Both extraction paths call this, so the counts describe the
+    /// same classification the rest of the pipeline reads.
+    pub fn fill_source_stats(
+        table: &mut ImportTable,
+        context: &ExtractionContext,
+        language: Language,
+    ) {
+        // `system_imports` is a C/C++ concept: a header the compiler finds
+        // outside the project. Other extractors reuse `is_system_header` to
+        // carry the stdlib marker (`is_system_header: is_stdlib` in Python,
+        // Go, PHP, Ruby, Lua), so counting it there would report the same
+        // import twice — once as stdlib, once as system.
+        let system_imports = if matches!(language, Language::C | Language::Cpp) {
+            table
+                .standardized_imports
+                .iter()
+                .filter(|import| import.is_system_header)
+                .count()
+        } else {
+            0
+        };
+        let mut stats = ImportSourceStats {
+            total_imports: table.standardized_imports.len(),
+            system_imports,
+            ..Default::default()
+        };
+        for import in &table.standardized_imports {
+            match Self::classify(import, context, language).class {
+                ImportClass::StandardLibrary => stats.stdlib_imports += 1,
+                ImportClass::ExternalPackage => stats.external_imports += 1,
+                ImportClass::InternalModule => stats.internal_imports += 1,
+                ImportClass::Unknown => {}
+            }
+        }
+        table.source_stats = stats;
+    }
+
+    /// Classify one import.
+    ///
+    /// Order matters: stdlib first (a `java.util.List` import is never
+    /// internal, whatever the project's package prefixes say), then C/C++
+    /// system headers, then project-local resolution, then the fallback.
+    pub fn classify(
         import: &StandardizedImport,
         context: &ExtractionContext,
         language: Language,
-        is_stdlib: bool,
     ) -> ImportClassification {
         let path = &import.source;
 
-        // 1. Check if it's a standard library import
-        if is_stdlib {
+        // 1. Standard library. The table lookup normalizes quoting, so the
+        //    JS family's `'fs'` and Dart's `'dart:async'` arrive as paths.
+        if StdlibDetector::is_stdlib_import_path(path, &language) {
             return ImportClassification::new(import.clone(), ImportClass::StandardLibrary)
                 .with_confidence(1.0);
         }
 
-        // 2. Check if it's an internal import
-        // C/C++ system headers (including standard library headers) are
-        // never project-local, even when their cleaned path looks like a
-        // relative specifier; the `is_system_header` flag takes precedence.
-        let is_internal =
-            if matches!(language, Language::C | Language::Cpp) && import.is_system_header {
-                false
-            } else {
-                context.is_internal_import(path, language)
-            };
-        if is_internal {
+        // 2. C/C++ system headers (including standard library headers) are
+        //    never project-local, even when their cleaned path looks like a
+        //    relative specifier; the `is_system_header` flag takes precedence.
+        if matches!(language, Language::C | Language::Cpp) && import.is_system_header {
+            return ImportClassification::new(import.clone(), ImportClass::ExternalPackage)
+                .with_confidence(0.9)
+                .with_metadata(ClassificationMetadata {
+                    package_name: Self::extract_package_name(path, language),
+                    ..Default::default()
+                });
+        }
+
+        // 3. Project-local module.
+        if context.is_internal_import(path, language) {
             return ImportClassification::new(import.clone(), ImportClass::InternalModule)
                 .with_confidence(1.0)
                 .with_metadata(ClassificationMetadata {
@@ -76,66 +122,70 @@ impl ImportClassifier {
                 });
         }
 
-        // 3. Default to external package (including system headers)
-        let package_name = Self::extract_package_name(path, language);
-        ImportClassification::new(import.clone(), ImportClass::ExternalPackage)
-            .with_confidence(0.9)
-            .with_metadata(ClassificationMetadata {
-                package_name,
-                ..Default::default()
-            })
-    }
-
-    /// Check if an import is from the standard library
-    ///
-    /// Delegates to the shared table lookup in `cce-stdlib`. Import-side
-    /// prefix conventions (JDK packages, .NET namespaces, Dart
-    /// `dart:`/`package:` forms, Rust crate roots) live inside those tables,
-    /// so this layer keeps no list of its own — the previous local prefix
-    /// match disagreed with the tables on `using System;`, `dart:async` and
-    /// `require 'json'`.
-    fn is_stdlib_import(path: &str, language: Language) -> bool {
-        StdlibDetector::is_stdlib_import_path(path, &language)
-    }
-
-    /// Batch check if imports are from the standard library
-    fn batch_is_stdlib(paths: &[&str], language: Language) -> Vec<bool> {
-        paths
-            .iter()
-            .map(|&path| Self::is_stdlib_import(path, language))
-            .collect()
-    }
-
-    /// Extract package name from import path
-    fn extract_package_name(path: &str, language: Language) -> Option<String> {
-        match language {
-            Language::Python => path.split('.').next().map(|s| s.to_string()),
-            Language::Java | Language::Kotlin | Language::Scala => {
-                path.split('.').next().map(|s| s.to_string())
+        // 4. Anything else is presumed third-party — the only other place an
+        //    import can resolve to in a language with a package ecosystem.
+        //    Without a package name there is no such ecosystem to speak of
+        //    (`source lib.sh`, unknown plugin languages), so the answer is
+        //    honestly `Unknown` rather than an invented package.
+        match Self::extract_package_name(path, language) {
+            Some(package_name) => {
+                ImportClassification::new(import.clone(), ImportClass::ExternalPackage)
+                    .with_confidence(0.9)
+                    .with_metadata(ClassificationMetadata {
+                        package_name: Some(package_name),
+                        ..Default::default()
+                    })
             }
+            None => {
+                ImportClassification::new(import.clone(), ImportClass::Unknown).with_confidence(0.5)
+            }
+        }
+    }
+
+    /// Extract the distribution/package name an import belongs to.
+    ///
+    /// Language-specific roots: the first dot segment for dotted namespaces
+    /// (Python, JVM, C#, Lua), the first slash segment for slash-separated
+    /// ones (Go, C/C++, PHP, Ruby), `@scope/name` kept whole for npm, and
+    /// Dart's `package:` URI reduced to the package it names.
+    ///
+    /// `None` means the language has no package concept to speak of; the
+    /// caller turns that into [`ImportClass::Unknown`].
+    fn extract_package_name(path: &str, language: Language) -> Option<String> {
+        let first = |sep: char| -> Option<String> {
+            path.split(sep)
+                .next()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        match language {
+            Language::Python
+            | Language::Java
+            | Language::Kotlin
+            | Language::Scala
+            | Language::CSharp
+            | Language::Lua => first('.'),
             Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                // Handle scoped packages: @org/package
+                // Scoped packages (`@org/pkg`) span two segments.
                 if path.starts_with('@') {
                     Some(path.split('/').take(2).collect::<Vec<_>>().join("/"))
                 } else {
-                    path.split('/').next().map(|s| s.to_string())
+                    first('/')
                 }
             }
             Language::Go => {
-                // Handle: github.com/org/repo/pkg
+                // `github.com/org/repo/pkg` — three segments name the module.
                 Some(path.split('/').take(3).collect::<Vec<_>>().join("/"))
+                    .filter(|s| !s.is_empty())
             }
-            Language::Rust => path.split("::").next().map(|s| s.to_string()),
-            Language::C | Language::Cpp => {
-                // Extract package from include path
-                path.split('/').next().map(|s| s.to_string())
-            }
-            Language::CSharp => {
-                // Extract namespace
-                path.split('.').next().map(|s| s.to_string())
-            }
-            Language::Php | Language::Ruby | Language::Dart => {
-                path.split('\\').next().map(|s| s.to_string())
+            Language::Rust => path.split("::").next().map(str::to_string),
+            Language::C | Language::Cpp => first('/'),
+            Language::Php | Language::Ruby => first('/').or_else(|| first('\\')),
+            Language::Dart => {
+                // `package:my_app/main.dart` -> `my_app`; anything else
+                // (`dart:async`, `file:///…`) has no package behind it.
+                let rest = path.strip_prefix("package:")?;
+                rest.split('/').next().map(str::to_string)
             }
             _ => None,
         }
@@ -380,6 +430,125 @@ mod tests {
                 "{path} must classify as stdlib for {language:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_quoted_specifiers_reach_the_tables() {
+        // Extractors keep the quotes they saw; the stdlib lookup strips them.
+        // Before that, the JS family and Dart had no stdlib detection at all.
+        let context = ExtractionContext::default();
+        for (language, kind, path) in [
+            (Language::JavaScript, ImportKind::SymbolImport, "'node:fs'"),
+            (Language::TypeScript, ImportKind::SymbolImport, "\"fs\""),
+            (Language::Dart, ImportKind::SymbolImport, "'dart:async'"),
+            (Language::Ruby, ImportKind::CommonJSRequire, "'json'"),
+        ] {
+            let import = StandardizedImport::new(kind, path);
+            let classification = ImportClassifier::classify(&import, &context, language);
+            assert_eq!(
+                classification.class,
+                ImportClass::StandardLibrary,
+                "{path} in {language:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_package_name_follows_the_language_layout() {
+        let context = ExtractionContext::default();
+        let cases: &[(Language, &str, &str)] = &[
+            (
+                Language::Go,
+                "github.com/gin-gonic/gin/binding",
+                "github.com/gin-gonic/gin",
+            ),
+            (Language::TypeScript, "@types/node", "@types/node"),
+            (Language::TypeScript, "lodash/fp", "lodash"),
+            (Language::Dart, "package:my_app/main.dart", "my_app"),
+            (Language::Ruby, "sinatra/base", "sinatra"),
+            (
+                Language::Php,
+                "Symfony\\Component\\HttpFoundation",
+                "Symfony\\Component\\HttpFoundation",
+            ),
+            (Language::Python, "requests.api", "requests"),
+            (Language::Rust, "serde::Serialize", "serde"),
+        ];
+        for (language, path, expected) in cases {
+            let import = StandardizedImport::new(ImportKind::SymbolImport, *path);
+            let classification = ImportClassifier::classify(&import, &context, *language);
+            assert_eq!(classification.class, ImportClass::ExternalPackage, "{path}");
+            assert_eq!(
+                classification.metadata.package_name.as_deref(),
+                Some(*expected),
+                "{path} in {language:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_package_concept_is_unknown_not_external() {
+        // `source lib.sh` is neither stdlib nor project-local by shape, and
+        // shell has no package to attribute it to. Reporting `ExternalPackage`
+        // would invent a dependency.
+        let context = ExtractionContext::default();
+        let import = StandardizedImport::new(ImportKind::SideEffectImport, "lib.sh");
+        let classification = ImportClassifier::classify(&import, &context, Language::Bash);
+        assert_eq!(classification.class, ImportClass::Unknown);
+    }
+
+    #[test]
+    fn test_relative_import_is_internal_before_package_split() {
+        let context = ExtractionContext::default();
+        for (language, path) in [
+            (Language::TypeScript, "./helpers"),
+            (Language::Python, ".sibling"),
+            (Language::Rust, "crate::core::thing"),
+        ] {
+            let import = StandardizedImport::new(ImportKind::SymbolImport, path);
+            let classification = ImportClassifier::classify(&import, &context, language);
+            assert_eq!(
+                classification.class,
+                ImportClass::InternalModule,
+                "{path} in {language:?}"
+            );
+            assert_eq!(classification.metadata.resolved_path.as_deref(), Some(path));
+        }
+    }
+
+    #[test]
+    fn test_fill_source_stats() {
+        let context = ExtractionContext::default();
+
+        let mut python = ImportTable {
+            standardized_imports: vec![
+                StandardizedImport::new(ImportKind::ModuleImport, "os"),
+                StandardizedImport::new(ImportKind::ModuleImport, "requests"),
+                StandardizedImport::new(ImportKind::SymbolImport, "."),
+            ],
+            ..Default::default()
+        };
+        ImportClassifier::fill_source_stats(&mut python, &context, Language::Python);
+        let stats = &python.source_stats;
+        assert_eq!(stats.total_imports, 3);
+        assert_eq!(stats.stdlib_imports, 1, "os");
+        assert_eq!(stats.external_imports, 1, "requests");
+        assert_eq!(stats.internal_imports, 1, "relative");
+        assert_eq!(stats.system_imports, 0);
+
+        // A C system header is counted as system, not stdlib: the C tables
+        // answer `false` for import paths by design and the parser flag is the
+        // authority there.
+        let mut header = StandardizedImport::new(ImportKind::Include, "stdio.h");
+        header.is_system_header = true;
+        let mut c_table = ImportTable {
+            standardized_imports: vec![header],
+            ..Default::default()
+        };
+        ImportClassifier::fill_source_stats(&mut c_table, &context, Language::C);
+        assert_eq!(c_table.source_stats.total_imports, 1);
+        assert_eq!(c_table.source_stats.system_imports, 1);
+        assert_eq!(c_table.source_stats.stdlib_imports, 0);
     }
 
     #[test]

@@ -28,7 +28,7 @@
 | 编号 | 问题 | 事实依据 | 影响 |
 | --- | --- | --- | --- |
 | D7 | BM25 模板反向依赖 embedding 模块的噪声过滤器 | `bm25/templates/stdlib.rs:3`、`bm25/templates/regular.rs:7` 引用 `embedding/noise_filter.rs:26` | 两条并列路径产生编译期依赖，`common` 目录失去意义 |
-| D9 | stdlib 组在 `get_pattern_name` 里报 `Regular` | 两个 `dispatcher.rs` 的同名方法只读 `pattern_info` | 命中率无法从指标上验证 |
+| D9 | stdlib 组在 `get_pattern_name` 里报 `Regular` | 两个 `dispatcher.rs` 的同名方法只读 `pattern_info` | 命中率无法从指标上验证；后续复核改为更名 `template_name` + 共用 `GroupTemplateKind::select` |
 | D10 | `StdlibCategory::Other` 的显示名无法回读 | `stdlib_category.rs:45` 与 `stdlib_classifier.rs:167` 的断言 | 插件写 `other_stdlib` 会被丢弃，结果相同但语义丢失 |
 | D8 | `docs/parser/ast_to_nl/templates.md` 描述十九种 pattern 与两个不存在的文件 | 实际 `PatternInfo` 只有两个变体 | 文档不可用 |
 
@@ -96,7 +96,7 @@
 
 ## 8. 阶段六：小修
 
-* 两个 dispatcher 的 `get_pattern_name` 在读 `pattern_info` 之前先看 `header.is_stdlib`，stdlib 组返回 `Stdlib`。
+* 两个 dispatcher 的 `get_pattern_name` 在读 `pattern_info` 之前先看 `header.is_stdlib`，stdlib 组返回 `Stdlib`。（后续轮次更名为 `template_name`，判定下沉到 `common/templates/selection.rs`，见第 13 章）
 * `parse_category` 增加 `other_stdlib` 与 `other` 两个别名，与 `StdlibCategory::Other` 的显示名对齐；同步更新那条断言 `None` 的测试。
 
 ## 9. 阶段七：文档同步
@@ -132,7 +132,7 @@
 | 三 | Rust 删除 goroutine/defer 两臂，新增 `HigherOrderCall`，其余形状委托 `is_stdlib_call`；去掉「O(1)」注释 | `cce-stdlib/src/rust.rs` |
 | 四 | `create_standalone_group` 增语言参数；两个 generator 的 `generate`、`convert_grouped` 及三个私有分支全部透传 `group.language` | `common/utils.rs`、`bm25/generator.rs`、`embedding/generator.rs`、`converter/entity_converter.rs`、`converter/group_converter.rs` |
 | 五 | 噪声过滤器移动到 `common/`，更名 `filter_nl_noise`，六处引用改路径，`embedding` 不再导出 | `common/noise_filter.rs`、`common.rs`、`embedding.rs` 等 |
-| 六 | 两个 dispatcher 的 `get_pattern_name` 增加 stdlib 分支返回 `Stdlib`；`parse_category` 接受 `other_stdlib`/`other` 并回读为 `Other` | 两个 `templates/dispatcher.rs`、`stdlib_classifier.rs` |
+| 六 | 两个 dispatcher 的 `get_pattern_name` 增加 stdlib 分支返回 `Stdlib`（后更名为 `template_name`）；`parse_category` 接受 `other_stdlib`/`other` 并回读为 `Other` | 两个 `templates/dispatcher.rs`、`stdlib_classifier.rs` |
 | 七 | 模板文档按代码重写：删除不存在的两个文件与 19 种 pattern，写明三条分发规则、优先级与只看 header 的边界 | `docs/parser/ast_to_nl/templates.md` |
 
 验证结果：
@@ -151,3 +151,5 @@
 ## 13. 后续轮次
 
 本轮（七阶段）之后又做了一轮"检测收口"：`is_stdlib_ref` / `ref_category` / `is_stdlib_import_path` 三个统一入口、`mark_stdlib` 收窄到引用类实体、非调用关系补 `stdlib_category`、删除 `external.rs` 的命名兜底、`pattern_detection` 脱离 stdlib 标记。方案与执行记录见 `docs/plan/stdlib-detector-wiring.md`；NL 类型改写留待下一阶段，见 `docs/analysis/stdlib-nl-type-rewriting.md`。
+
+其后又补了一轮模板路由收口：`get_pattern_name` 更名为 `template_name`，三路判定下沉到 `common/templates/selection.rs` 的 `GroupTemplateKind::select`，`dispatch` 与 `template_name` 共用同一份规则（此前是两份，名字可能描述未执行的模板）。

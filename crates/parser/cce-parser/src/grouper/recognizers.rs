@@ -5,7 +5,8 @@
 //!
 //! Framework, design pattern and standard library detection are intentionally
 //! not built in: stdlib identity is decided once during parsing
-//! (`post_processing::mark_stdlib`) and cached on the entity, and the plugin
+//! (`post_processing::mark_plugin_declared_external`) and cached on the
+//! entity, and the plugin
 //! system provides domain-specific recognition.
 
 pub mod test_suite;

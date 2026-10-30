@@ -8,7 +8,7 @@
 //!
 //! 1. `attribute_extractor` - Rust #[...] attributes from source
 //! 2. `modifier_extractor` - Visibility/keyword modifiers
-//! 3. `stdlib_classifier` - Standard library detection
+//! 3. `stdlib_classifier` - Plugin-declared external entity marking
 //! 4. `impl_metadata` - Impl block metadata
 //! 5. `child_resolver` - Parent-child relationships
 
@@ -31,4 +31,4 @@ pub use import_binding::drop_js_require_bound_variables;
 pub use modifier_extractor::extract_modifiers;
 pub use receiver_extractor::extract_receiver_for_entities;
 pub use receiver_extractor::receiver_from_capture;
-pub use stdlib_classifier::mark_stdlib;
+pub use stdlib_classifier::mark_plugin_declared_external;

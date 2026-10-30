@@ -68,8 +68,11 @@ Embedding 侧 `GroupTemplate::generate` 返回 `Vec<String>`：首个元素是�
 
 * **模式优先于 stdlib**。既是 getter/setter 组、header 又是 stdlib 的组走 getter/setter 模板，stdlib 模板不参与。这是刻意排序：模式信息比「是不是标准库」更能决定文本形态。
 * **只看 header**。组内成员是 stdlib、header 不是的组走 regular 模板；成员级 stdlib 标记不参与组级路由。
+* **stdlib 模板只为插件命中**。内置语言已完全不写 `Entity.is_stdlib`（`post_processing/stdlib_classifier.rs` 只复制 `metadata["is_stdlib"] = "true"`），import 指向 stdlib 这一事实改由关系边的 `stdlib_category` 与 `ImportClassifier::classify` 表达。实测：`use std::collections::HashMap; use std::io::Read;` 两个实体、`is_stdlib=false`、**0 个组**（纯 import 组被 `drop_import_only_groups` 丢掉，`grouper/builtin_stages.rs:152-170`）。因此 stdlib 分支只在插件用 `metadata["is_stdlib"] = "true"` 标注某个实体时才触发（该标记对任意 kind 生效），此时它把整个组压缩成「类别 + 名字」，成员与签名都不进文本。
 
-`get_pattern_name` 与分发保持一致：模式命中返回模式名，无模式时 stdlib 组返回 `Stdlib`，其余返回 `Regular`。日志与统计据此可以区分 stdlib 模板是否命中。
+三路路由的判定写在 `common/templates/selection.rs` 的 `GroupTemplateKind::select`，两个 dispatcher 的 `dispatch` 与 `template_name` 都从它派生——同一份规则，名字不可能与实跑的模板脱节。三个标签是 `GetterSetter` / `Stdlib` / `Regular`。
+
+命名要分清两条正交的轴：`template_name` 回答「哪个模板产出了这段文本」，`PatternInfo::pattern_name` 回答「检测到什么模式」，后者只有 `None` 与 `GetterSetter`。`Stdlib` 与 `Regular` 不是 `PatternInfo` 变体，因此 `template_name` 对无模式的组返回 `Regular`/`Stdlib` 而不是 `None`——把 stdlib 组报成 `Regular` 会让「stdlib 模板是否命中」无法从日志或指标上验证。
 
 ## 6. 插件覆盖
 

@@ -62,8 +62,10 @@ pub(crate) fn process_call_match(
     //    simple name matching
     // 3. This ensures RawRelationData.stdlib_category is always populated
     //
-    // For entities that ARE stdlib (detected in mark_stdlib), this detection
-    // confirms and provides additional categorization based on relation type.
+    // Stdlib identity lives only here for relations: entities no longer carry
+    // a built-in stdlib flag (`mark_plugin_declared_external` copies plugin
+    // declarations only), so `stdlib_category` on the edge is the one place a
+    // reference's stdlib-ness is recorded.
     //
     // See STDLIB_SUMMARY.md for design rationale and architecture.
     let stdlib_category =
