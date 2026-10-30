@@ -32,9 +32,11 @@
 | D10 | `StdlibCategory::Other` 的显示名无法回读 | `stdlib_category.rs:45` 与 `stdlib_classifier.rs:167` 的断言 | 插件写 `other_stdlib` 会被丢弃，结果相同但语义丢失 |
 | D8 | `docs/parser/ast_to_nl/templates.md` 描述十九种 pattern 与两个不存在的文件 | 实际 `PatternInfo` 只有两个变体 | 文档不可用 |
 
-### 1.4 本轮不动的条目
+### 1.4 本轮不动的条目（已在后续轮次处理）
 
-`StdlibEntityDetector` 与 `is_stdlib_name` 是死代码（D5），但删留取决于是否有接入计划；`ImportClassifier` 自带的前缀判断与检测表并存，属于职责边界问题。两者都需要作者判断，列入第 8 章待拍板。
+`StdlibEntityDetector` 与 `is_stdlib_name` 是死代码（D5），但删留取决于是否有接入计划；`ImportClassifier` 自带的前缀判断与检测表并存，属于职责边界问题。
+
+两项都已在后续的"标准库检测收口"轮次落地：`StdlibEntityDetector` / `StdlibEntityInfo` / 三个同名 `is_stdlib_name` 全部删除，`ImportClassifier` 近 50 行的前缀 `match` 换成一行委托。详见 `docs/plan/stdlib-detector-wiring.md`。
 
 ## 2. 方案总览
 
@@ -113,8 +115,8 @@
 
 ## 11. 待拍板
 
-1. `StdlibEntityDetector` / `StdlibEntityInfo` 是遗留还是待接入？本轮保留原样，只在其中一处改为委托新入口。
-2. `ImportClassifier` 的硬编码前缀是否下沉到各检测器的包名表？涉及 Java、Kotlin、Scala、C#、Dart 五个语言，需要先确认导入判定与调用判定是否应共用同一张表。
+1. ~~`StdlibEntityDetector` / `StdlibEntityInfo` 是遗留还是待接入？~~ 已定：删除。检测部分 100% 转发、`full_name` 拼接有误、描述串无消费方。
+2. ~~`ImportClassifier` 的硬编码前缀是否下沉到各检测器的包名表？~~ 已定：全部下沉，导入判定统一走 `StdlibDetector::is_stdlib_import_path`，不再与调用判定共用"同一张表"（导入有导入的表）。
 3. 成员 chunk 是否应改用 `group.language` 之外的信息（例如实体自身在解析期记录的语言）？本轮采用组语言，属于近似。
 4. stdlib 组的判定是否要下沉到组级聚合（成员 stdlib、header 非 stdlib 的组）？本轮维持只看 header。
 
@@ -145,3 +147,7 @@
 
 1. 阶段二的范围比方案多了一个 scala。它的 `is_stdlib_by_type` 手写体是 `is_stdlib_call` 的真子集（缺属性化接收者的兜底），归入同一宏后判定结果只会从「否」变成「是」，方向与 Go/Python 的修复一致，因此没有单列为待拍板项。
 2. 测试里两份重复的 `create_standalone_group` helper 改为委托公共实现，避免测试自己再拼一遍 `EntityGroup` 的 19 个字段。
+
+## 13. 后续轮次
+
+本轮（七阶段）之后又做了一轮"检测收口"：`is_stdlib_ref` / `ref_category` / `is_stdlib_import_path` 三个统一入口、`mark_stdlib` 收窄到引用类实体、非调用关系补 `stdlib_category`、删除 `external.rs` 的命名兜底、`pattern_detection` 脱离 stdlib 标记。方案与执行记录见 `docs/plan/stdlib-detector-wiring.md`；NL 类型改写留待下一阶段，见 `docs/analysis/stdlib-nl-type-rewriting.md`。

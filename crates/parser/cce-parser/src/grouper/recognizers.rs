@@ -1,16 +1,11 @@
-//! Entity recognizers for standard library and test suite detection
+//! Entity recognizers for test suite detection
 //!
-//! This module provides recognizers for identifying:
-//! - Standard library entities (Vec, HashMap, println!, etc.)
-//! - Test suites and test cases (Rust, Java, Go, JS/TS, Python)
+//! This module provides recognizers for identifying test suites and test cases
+//! (Rust, Java, Go, JS/TS, Python).
 //!
-//! Framework and design pattern detection is intentionally not built in;
-//! plugin system provides such domain-specific recognition.
+//! Framework, design pattern and standard library detection are intentionally
+//! not built in: stdlib identity is decided once during parsing
+//! (`post_processing::mark_stdlib`) and cached on the entity, and the plugin
+//! system provides domain-specific recognition.
 
-mod stdlib;
 pub mod test_suite;
-
-#[cfg(test)]
-mod tests;
-
-pub use stdlib::{StdlibEntityDetector, StdlibEntityInfo};

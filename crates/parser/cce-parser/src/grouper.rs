@@ -66,9 +66,6 @@ pub use types::{
     MemberRolesBuilder, PatternInfo, ProcessingResult, ProcessingStats, SpanError, ValidationError,
 };
 
-// Re-export recognizers
-pub use recognizers::{StdlibEntityDetector, StdlibEntityInfo};
-
 // Re-export processors
 pub use processors::{
     CallMerger, ClassMethodProcessor, EntityCallMergeExt, GetterSetterDetectionConfig,

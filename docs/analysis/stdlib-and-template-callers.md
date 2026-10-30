@@ -18,7 +18,9 @@
 
 一句话：**骨架合理，腐蚀点在「重复的 15 路分发」和「模板宏本身不可用」两处**，其余多为漂移与死代码。
 
-> 改造进展：本报告的 D1、D2、D3、D4、D6、D7、D8、D9、D10 已按 `docs/plan/stdlib-and-template-refactor.md` 落地，该文档第 12 章记录了每阶段的落点与验证结果。D5（`StdlibEntityDetector` 等死代码的删留）与 `ImportClassifier` 的职责边界仍待拍板，结论保持原样。
+> 改造进展：本报告的 D1、D2、D3、D4、D6、D7、D8、D9、D10 已按 `docs/plan/stdlib-and-template-refactor.md` 落地，该文档第 12 章记录了每阶段的落点与验证结果。
+>
+> **D5 与「`ImportClassifier` 职责边界」也已在后续轮次落地**：`StdlibEntityDetector` / `StdlibEntityInfo` / 三个同名 `is_stdlib_name` 全部删除，导入分类的前缀判断整体下沉到 `cce-stdlib` 的 `is_stdlib_import_path`。因此本文第 3 章（`StdlibEntityDetector` 现状）、第 4 章（七个判定面）以及所有引用 `grouper/recognizers/stdlib.rs` / `symbol_extractor/common/classifier.rs` 行号的内容**均已过期**，只作历史盘查保留。当前状态见 `docs/plan/stdlib-detector-wiring.md`；下一阶段（NL 类型改写）见 `docs/analysis/stdlib-nl-type-rewriting.md`。
 
 ## 2. 标准库检测的代码地图
 

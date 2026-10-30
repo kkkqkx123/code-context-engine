@@ -3,7 +3,7 @@
 //! Extracts require, require_relative, load statements and module/class definitions.
 
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::RubyStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{
     find_children_by_kind, find_descendants_by_kind, node_text, node_to_span,
 };
@@ -29,7 +29,7 @@ impl RubyExtractor {
 
     /// Check if a module/class is from standard library
     fn is_stdlib(name: &str) -> bool {
-        RubyStdlibDetector::is_core_module(name) || RubyStdlibDetector::is_stdlib_require(name)
+        StdlibDetector::is_stdlib_import_path(name, &Language::Ruby)
     }
 
     /// Extract path from string literal

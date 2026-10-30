@@ -36,22 +36,14 @@ impl ClassMethodProcessor {
             let mut include_method = true;
 
             // Constructors and destructors are structural members: always
-            // keep them, even when name-matched as stdlib (e.g. a Dart
-            // `Point` colliding with a same-named library type). Dropping
-            // them here strands same-named standalone groups that trip the
-            // nesting invariant downstream.
+            // keep them. Dropping them here strands same-named standalone
+            // groups that trip the nesting invariant downstream.
             if matches!(
                 method.kind,
                 EntityKind::Constructor | EntityKind::Destructor
             ) {
                 roles_builder.mark_significant(method.id);
                 filtered_methods.push(method.clone());
-                continue;
-            }
-
-            // Check if this is a standard library entity
-            if method.is_stdlib {
-                roles_builder.mark_boilerplate(method.id);
                 continue;
             }
 

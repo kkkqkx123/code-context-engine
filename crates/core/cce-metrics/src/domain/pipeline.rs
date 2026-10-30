@@ -227,6 +227,12 @@ pub struct RelationMetrics {
     /// Expected drop when the filter is enabled; see `debug_filtered` and
     /// `relation_self_loop_filtered_total` for the other silent drop kinds.
     pub stdlib_filtered: LabeledCounter,
+    /// Total number of unresolved relations dropped because their target is a
+    /// standard library symbol, split out of `stdlib_filtered` for the non-call
+    /// domain (imports and type references). Those edges only started carrying
+    /// a stdlib category once dependency extraction annotated them, so their
+    /// drop volume is new and needs its own counter to audit recall changes.
+    pub stdlib_filtered_non_call: LabeledCounter,
     /// Total number of unresolved standard-library-like relations preserved as external calls
     pub stdlib_preserved_external: LabeledCounter,
     /// Total number of stable symbol key collisions (same key registered to a different entity)
@@ -342,6 +348,10 @@ impl RelationMetrics {
                 .counter("relation_truncated_total", &[("project_id", &proj_val)]),
             stdlib_filtered: registry.counter(
                 "relation_stdlib_filtered_total",
+                &[("project_id", &proj_val)],
+            ),
+            stdlib_filtered_non_call: registry.counter(
+                "relation_stdlib_filtered_non_call_total",
                 &[("project_id", &proj_val)],
             ),
             stdlib_preserved_external: registry.counter(

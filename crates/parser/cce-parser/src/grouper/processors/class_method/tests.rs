@@ -813,8 +813,12 @@ fn test_process_struct_entity() {
 }
 
 #[test]
-fn test_is_stdlib_marked_boilerplate() {
-    // Test that stdlib methods are marked as boilerplate
+fn test_pattern_processing_ignores_stdlib_flag() {
+    // Whether a method is an accessor is decided by its name, its backing field
+    // and its role in the class — never by the stdlib marker. The marker used
+    // to short-circuit the method into `BoilerplateMethod` and drop it from the
+    // group, so a user method that happened to share a stdlib name vanished
+    // from pattern detection altogether.
     let class_id = EntityId(0);
     let mut class = Entity::new(
         class_id,
@@ -872,21 +876,15 @@ fn test_is_stdlib_marked_boilerplate() {
     // The class should be merged with its methods
     assert_eq!(groups.len(), 1, "Should have one group");
 
-    // stdlib method should be marked as boilerplate
-    let stdlib_role = get_member_role(&groups[0].member_roles, &stdlib_method_id);
-    assert_eq!(
-        stdlib_role,
-        Some(&MemberRole::BoilerplateMethod),
-        "Stdlib method should be marked as boilerplate"
-    );
-
-    // regular method should be marked as significant (or at least not boilerplate)
-    let regular_role = get_member_role(&groups[0].member_roles, &regular_method_id);
-    assert_ne!(
-        regular_role,
-        Some(&MemberRole::BoilerplateMethod),
-        "Non-stdlib method should not be boilerplate"
-    );
+    // Neither method is filtered or re-roled by the stdlib flag: with
+    // getter/setter merging off there is nothing else to mark.
+    for id in [stdlib_method_id, regular_method_id] {
+        assert_eq!(
+            get_member_role(&groups[0].member_roles, &id),
+            None,
+            "method {id:?} must not be force-boilerplated by the stdlib flag"
+        );
+    }
 }
 
 #[test]

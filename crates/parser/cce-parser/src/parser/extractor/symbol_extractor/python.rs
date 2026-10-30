@@ -4,7 +4,7 @@
 
 use super::common::helpers::path::{extract_base_module, is_nested_path, is_relative_python};
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::PythonStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{find_children_by_kind, node_text, node_to_span};
 use cce_types::import::{
     ExportKind, ExportTarget, ImportKind, ImportTarget, StandardizedExport, StandardizedImport,
@@ -23,8 +23,7 @@ impl PythonExtractor {
 
     /// Check if an import is from the standard library
     fn is_stdlib_import(path: &str) -> bool {
-        let module = path.split('.').next().unwrap_or(path);
-        PythonStdlibDetector::is_stdlib_module(module)
+        StdlibDetector::is_stdlib_import_path(path, &Language::Python)
     }
 
     /// Process a simple import statement: `import module` or `import module as alias`

@@ -3,7 +3,7 @@
 //! Extracts using directives, namespace declarations, and public type exports.
 
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::csharp::CSharpStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{find_children_by_kind, node_text, node_to_span};
 use cce_types::import::{
     ExportKind, ExportTarget, ImportKind, ImportTarget, StandardizedExport, StandardizedImport,
@@ -72,8 +72,7 @@ impl CSharpExtractor {
 
     /// Check if a namespace is a .NET standard library namespace
     fn is_stdlib_namespace(namespace: &str) -> bool {
-        CSharpStdlibDetector::is_dotnet_namespace(namespace)
-            || CSharpStdlibDetector::is_dotnet_path(namespace)
+        StdlibDetector::is_stdlib_import_path(namespace, &Language::CSharp)
     }
 
     /// Extract namespace declaration from C# source

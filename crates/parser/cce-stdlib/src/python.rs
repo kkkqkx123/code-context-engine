@@ -231,14 +231,6 @@ impl PythonStdlibDetector {
     pub fn is_stdlib_type(name: &str) -> bool {
         Self::is_builtin_type(name)
     }
-
-    /// Check if a name is a Python stdlib entity
-    pub fn is_stdlib_name(name: &str) -> bool {
-        Self::is_stdlib_module(name)
-            || Self::is_builtin_function(name)
-            || Self::is_builtin_type(name)
-            || Self::get_category(name).is_some()
-    }
 }
 
 // Generate get_category using macro

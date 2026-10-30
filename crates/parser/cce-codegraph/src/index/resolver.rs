@@ -469,7 +469,17 @@ impl RelationResolver {
                     self.filtered_count
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(metrics) = &self.metrics {
-                        metrics.stdlib_filtered.increment();
+                        // Call and non-call stdlib edges are dropped by the
+                        // same switch but have different recall consequences:
+                        // a dropped `Vec::new()` is a call nobody queries,
+                        // a dropped `Vec<T>` reference erases a type edge from
+                        // the graph. Count them apart so the non-call volume
+                        // stays auditable.
+                        if raw_data.relation_type.is_call() {
+                            metrics.stdlib_filtered.increment();
+                        } else {
+                            metrics.stdlib_filtered_non_call.increment();
+                        }
                     }
                     return None;
                 }

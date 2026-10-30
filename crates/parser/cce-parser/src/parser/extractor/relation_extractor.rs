@@ -206,7 +206,7 @@ impl RelationExtractor {
                     continue;
                 }
                 if let Some(relation) =
-                    process_dependency_match(dep_capture, file_id, &entity_index)
+                    process_dependency_match(dep_capture, file_id, &entity_index, language)
                 {
                     relations.push(relation);
                 }

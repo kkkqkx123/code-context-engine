@@ -1,320 +1,273 @@
-# 标准库检测的收口：`StdlibEntityDetector` / `is_stdlib_name` 的定位与统一入口设计
+# 标准库检测的收口：单一判定入口与三处传播缺口
 
-> 本文只做判断与方案，不含代码改动。所有结论均给出 `file:line` 与可复现的实测输出。
-> 配套：`docs/analysis/stdlib-and-template-callers.md`（现状盘点）、`docs/plan/stdlib-and-template-refactor.md`（上一轮七阶段改造）。
+> 本文记录"标准库判定应该收口到哪、判定结果应该传到哪"的完整判断与落地结果。所有结论给出 `file:line`；行号以本轮改造后的代码为准，改造前的行号只在与历史结论对照时出现。
+> 配套：`docs/analysis/stdlib-and-template-callers.md`（改造前的现状盘点）、`docs/plan/stdlib-and-template-refactor.md`（上一轮七阶段改造）、`docs/analysis/stdlib-nl-type-rewriting.md`（下一阶段：NL 类型改写）。
 
 ---
 
 ## 0. 结论摘要
 
-1. **`StdlibEntityDetector` / `is_stdlib_name` 目前是死代码**。它只被 `grouper.rs:70`、`recognizers.rs:16` 再导出，以及 `recognizers/tests.rs` 使用；检测部分 100% 转发给 `cce_stdlib::StdlibDetector::category`（`recognizers/stdlib.rs:103`），自身净增量只有 `full_name` 的字符串拼接和一句 `"Standard library {label}: {name}"`。
-2. **"关系解析时排除 stdlib" 这件事已经做了一半**：链路是 `stdlib_category`（提取期）→ `filter_stdlib_calls`（默认 `true`）→ 丢弃边。但它只覆盖**调用**关系，且只对**未解析**（`is_external`）的目标生效（`resolver.rs:443-482`）。
-3. **缺口在非调用关系**：`Use` / `TypeReference` / `Inheritance` / `ImportStandard` 等由 `dependency_extractor.rs:15-48` 构造，**从不写 `stdlib_category`**。实测 `use std::collections::HashMap`、`Vec<T>` 字段类型产出的边 stdlib 一律为空。
-4. **`mark_stdlib` 打在了错误的对象上**：它对**用户自己定义的**实体也按名字查表（`entity_extractor.rs:619` 对所有 `entity.*` 捕获调用）。实测 `pub struct Command` 被判为 `is_stdlib=true / Collection`，NL 输出从 139 字符缩成 72 字符，字段与类型全丢。定义实体在语义上不可能是 stdlib（除非正在解析标准库源码本身）。
-5. **前缀判断与检测表不该并存**，而且现有前缀规则已被实测证伪三处：Dart `dart:async`、C# `using System;`、Ruby `require 'json'` 全判 `false`；另外 `ImportClassifier` 对 PHP/Ruby 复用 `is_stdlib_call`（调用表）去判模块路径，而两门语言各自的 `is_stdlib_path` / `is_stdlib_require` 正躺在 `cce-stdlib` 里无人调用。
+1. **判定收口到两个入口，都在 `cce-stdlib`**：`is_stdlib_import_path`（导入路径）与 `is_stdlib_ref` / `ref_category`（引用类目标的并集 + 类别）。原来散在六个位置的本地前缀判断全部删除，调用方从七个降到零个前缀表。
+2. **`mark_stdlib` 收窄到引用类实体**（`Import` / `Require` / `Include`）。定义类实体不再按名字查表——`struct Command` 与 `std::process::Command` 同名，但前者是项目代码。实测该项目定义的 `is_stdlib` 由 `true` 变 `false`，NL 文本由 72 字恢复到 136 字，字段/方法/参数/返回类型全部回来。
+3. **非调用关系补上了 `stdlib_category`**：`dependency_extractor` 的两条构造路径都标注目标类别，`Use` / `TypeReference` 边从此受 `filter_stdlib_calls` 管辖（此前永久逃逸为 unresolved 边）。
+4. **`external.rs` 的命名约定兜底整段删除**，不做替代。stdlib 身份只剩一个来源：提取期的 `stdlib_category`。
+5. **`StdlibEntityDetector` / `StdlibEntityInfo` / 三个同名 `is_stdlib_name` 全部删除**——检测部分 100% 转发，净增量只有一句错拼的 `std::` 前缀和一个没人用的描述串。
+6. **`pattern_detection` 不再读 `is_stdlib`**。是否为访问器由名字、后备字段与同类方法对决定，与名字来自哪个库无关。
+7. **NL 类型改写不在本轮**，只出分析文档（§11），因为它是检索行为变更，需要单独放量。
 
----
+## 1. 事实基线：同一件事曾散在七个判定面
 
-## 1. 事实基线：同一件事有七个判定面
-
-| # | 位置 | 判定对象 | 依据 |
+| # | 位置 | 判定对象 | 本轮处置 |
 |---|---|---|---|
-| 1 | `cce-stdlib/src/*.rs` | 符号名 / 类型名 / 模块路径 | 唯一权威表 |
-| 2 | `symbol_extractor/common/classifier.rs:93-141` | **导入路径** | 4 类前缀 + 3 张表 + 2 处调错函数 |
-| 3 | `post_processing/stdlib_classifier.rs:33-95` | **实体**（含用户定义） | 按 `EntityKind` 选不同表 |
-| 4 | `relation_extractor/call_extractor.rs:69-91` | **调用关系** | `is_stdlib_by_type` + 插件启发式 |
-| 5 | `codegraph/index/resolver/external.rs:255-291` | **未解析目标的兜底分类** | `java.` / `javax.` / `std::` / `core::` / `alloc::` 前缀 |
-| 6 | `symbol_extractor/ruby.rs:31-33`、`csharp.rs:73-76`、`rust.rs:67` | 各语言提取器自带判断 | 直接调 `is_core_module` / `is_dotnet_namespace` / `is_stdlib_path` |
-| 7 | `ast_to_nl/converter/index_enrichment/calls_prune.rs:200,208` | NL 文本里的调用冗余 | 直接调 `is_stdlib_call` |
+| 1 | `cce-stdlib/src/*.rs` | 符号名 / 类型名 / 模块路径 | 唯一权威表，保留 |
+| 2 | `symbol_extractor/common/classifier.rs:97` | 导入路径 | 近 50 行前缀 `match` → 一行委托 |
+| 3 | `post_processing/stdlib_classifier.rs:52` `mark_stdlib` | 实体 | 收窄到引用类实体（§6） |
+| 4 | `relation_extractor/call_extractor.rs:393` `classify_stdlib_category` | 调用关系 | 上一轮已收口到 `category`，本轮不动 |
+| 5 | `index/resolver/external.rs` `try_classify_from_naming_convention` | 未解析目标兜底 | **整段删除**（§5.2） |
+| 6 | 七个语言提取器各自的前缀/子集判断 | 导入路径 | 全部改为委托入口 2（§8） |
+| 7 | `ast_to_nl/converter/index_enrichment/calls_prune.rs:200,208` | NL 文本里的调用冗余 | 保留（调用域语义正确） |
 
-再加两个开关：索引期 `filter_stdlib_calls`（`cce-config/src/modules/relation.rs:52,61`，默认 `true`）、查询期 `filter_stdlib`（`search.rs:736,776`，默认 `true`，消费点 `annotator.rs:351`）。
+两个开关不变：索引期 `filter_stdlib_calls`（`cce-config/src/modules/relation.rs:52,61`，默认 `true`）、查询期 `filter_stdlib`（消费点 `annotator.rs:351`，默认 `true`）。
 
-七个面里，只有 #1 是权威表；#2/#5 是纯前缀；#3/#4 各自选表；#6 绕开 #2；#7 只看名字。这就是"同一份知识写七遍"的实际形态。
+改造前的形态是"同一份知识写七遍"：`#1` 是表，`#2`/`#5` 是纯前缀，`#3`/`#4` 各自选表，`#6` 绕开 `#2`，`#7` 只看名字。
 
-## 2. 标记的流向：谁在真正消费 `is_stdlib` / `stdlib_category`
+## 2. 标记的流向：谁在消费 `is_stdlib` / `stdlib_category`
 
 | 消费方 | 位置 | 作用 |
 |---|---|---|
 | 分组插件 | `grouper/plugin_grouping.rs:276-285` | stdlib 实体不进分组 |
 | 调用合并 | `grouper/processors/call_merger.rs:234-274,444` | stdlib 调用压成一行摘要 |
-| 模式识别 | `grouper/processors/class_method/pattern_detection.rs:53` | stdlib 方法不参与 getter/setter 识别 |
-| NL 分发 | `bm25/templates/dispatcher.rs:45`、`embedding/templates/dispatcher.rs:62` | 命中即走 `StdlibTemplate` |
-| NL 成员 | `converter/group_converter.rs:945-947`、`bm25/templates/regular.rs:136,157` | stdlib 成员直接跳过 |
-| 索引解析 | `codegraph/index/resolver.rs:299` | `stdlib_category.is_some()` 决定后续是丢弃还是留成 `StandardLibrary` 外链 |
-| 查询扩展 | `orchestrator/query/annotation/annotator.rs:351` | `filter_stdlib` 时剔除扩展单元 |
+| NL 分发 | `bm25/templates/dispatcher.rs:45,62`、`embedding/templates/dispatcher.rs:62` | 命中即走 `StdlibTemplate` |
+| NL 成员 | `converter/group_converter.rs:945`、`bm25/templates/regular.rs:136,157` | stdlib 成员直接跳过 |
+| 索引解析 | `index/resolver.rs:299` | `stdlib_category.is_some()` 决定丢弃还是留成外链 |
+| 查询扩展 | `query/annotation/annotator.rs:351` | `filter_stdlib` 时剔除扩展单元 |
 
-关键点：**除 #4 之外的全部消费方读的都是实体上的 `is_stdlib`**，而实体标记来自 #3 的名字匹配。也就是说，"是否 stdlib"的最终裁判权落在了一个会误伤用户定义的判定上。
+关键点：**除 `#4` 之外的全部消费方读的都是实体上的 `is_stdlib`**，而实体标记曾来自一个会误伤用户定义的判定。收窄之后，这条链上的"误伤"入口关掉了。
 
-## 3. `StdlibEntityDetector` / `is_stdlib_name` 现在做什么
+`pattern_detection.rs:53` 曾在这张表里，本轮移除（§9）。
 
-```rust
-// recognizers/stdlib.rs:71-95
-pub fn detect_stdlib_entity(&self, entity: &Entity, language: &Language) -> Option<StdlibEntityInfo> {
-    let category = self.get_stdlib_category(&entity.name, language)?;   // 纯转发
-    let full_name = match effective_language(language) {
-        Language::Rust => format!("std::{}", entity.name),              // 拼字符串
-        _ => entity.name.clone(),
-    };
-    Some(StdlibEntityInfo::new(entity.id, full_name, entity.name.clone(), category))
-}
+## 3. 删掉的三样东西
 
-pub fn is_stdlib_name(&self, name: &str, language: &Language) -> bool {
-    if self.get_stdlib_category(name, language).is_some() { return true; }
-    cce_stdlib::StdlibDetector::is_stdlib_call(name, language)           // 名字并集
-}
-```
+| 对象 | 原位置 | 为什么删 |
+|---|---|---|
+| `StdlibEntityDetector` / `StdlibEntityInfo` | `grouper/recognizers/stdlib.rs`（整文件） | `detect_stdlib_entity` 100% 转发 `category`；`full_name` 错拼成 `std::HashMap`（真名 `std::collections::HashMap`）；`semantic_description` 无人调用 |
+| `PythonStdlibDetector::is_stdlib_name` | `cce-stdlib/src/python.rs` | 零生产调用，且与 `grouper` 的同名函数语义不同 |
+| `RustStdlibDetector::is_stdlib_name` | `cce-stdlib/src/rust.rs` | 同上 |
 
-- 净增量：`StdlibEntityInfo { entity_id, full_name, short_name, category, semantic_description }`（`recognizers/stdlib.rs:14-25`）。
-- `full_name` 的 `format!("std::{}")` 是错的：`Vec` → `std::Vec`（真名 `std::vec::Vec`），`HashMap` → `std::HashMap`。这大概也是它没人用的原因之一。
-- 与之同名的还有两个语言级 `is_stdlib_name`（`cce-stdlib/python.rs:236`、`rust.rs:611`），同样是零调用。三个同名函数、三种语义、全部死代码。
-- 它唯一有价值但没被使用的东西是 `semantic_description`：`"Standard library collection type: Vec"`（`stdlib_category.rs:52-65` 提供 `description_label`）。这正好是"NL 里把不清晰的类型改写成人话"需要的那块砖。
+三个同名函数、三种语义、全部死代码。若将来需要"名字并集判定"，用 `StdlibDetector::is_stdlib_ref`，别再另起一个同名函数。
 
-## 4. 关系侧：已经生效的排除链路
+## 4. 关系侧：排除链路（改造后的完整形态）
 
 ```
-call_extractor.rs:69   classify_stdlib_category(callee, relation_type, language, heuristics)
-        ↓              （is_stdlib_by_type + 插件 heuristics）
-call_extractor.rs:79/90  Relation::with_stdlib_category(...)
+dependency_extractor.rs:24   process_dependency_match(..., language)
+        ↓                     Use / TypeReference / Inheritance / ImportStandard
+dependency_extractor.rs:46,62  .with_stdlib_category(ref_category(dst, language))
         ↓
 ParsedFile.raw_relations[].stdlib_category
         ↓
 resolver.rs:299        let is_stdlib = raw_data.stdlib_category.is_some();
 resolver.rs:443        let is_external = callee_id.is_none();
-resolver.rs:466-482    if is_external { if is_stdlib { if filter_stdlib_calls { return None } } }
+resolver.rs:466-488    if is_external { if is_stdlib { if filter_stdlib_calls { return None } } }
 ```
 
-三个限定条件缺一不可：**调用关系** / **未解析** / **开关打开**。第三条是配置，默认开；前两条是硬编码。
+三个限定条件缺一不可：**未解析** / **标了 stdlib** / **开关打开**。第三条是配置（默认开），前两条是硬编码。
 
-设计上"解析到项目内实体的同名调用保留"是对的（`resolver.rs:464-465` 注释也这么说），否则自己写的 `fn println` 会被吞掉。
+"解析到项目内实体的同名目标保留"这条设计不变（`resolver.rs:464-465` 注释），否则自己写的 `fn println` 会被吞掉——实测 `ImplAssociation Command` 的目标是项目内定义，`stdlib_category=None`，边保留。
 
-## 5. 关系侧：三个实测缺口
+## 5. 关系侧：三个缺口与本轮修法
 
-### 5.1 非调用关系完全没有标注
+### 5.1 非调用关系没有标注（已修）
 
-`dependency_extractor.rs:26-47` 构造 `Use` / `TypeReference` / `Inheritance` / `ImportStandard` 时没有任何 `with_stdlib_category`。全仓只有两处调用 `with_stdlib_category`，都在 `call_extractor.rs`。
-
-实测（Rust 片段，`ParseCoordinator::parse` 直出）：
+改造前，`dependency_extractor` 构造 `Use` / `TypeReference` / `Inheritance` 时从不写 `stdlib_category`，全仓只有 `call_extractor` 调 `with_stdlib_category`。实测（Rust 片段）：
 
 ```
-DirectCall           HashMap::new                 stdlib_category=Some(Collection)
-DirectCall           String::new                  stdlib_category=Some(String)
-Use                  std::collections::HashMap    stdlib_category=None      ← 应排除
-TypeReference        std::collections             stdlib_category=None      ← 应排除
-TypeReference        String                      stdlib_category=None      ← 应排除
-TypeReference        HashMap::new                 stdlib_category=None      ← 应排除
-ImplAssociation      Command                     stdlib_category=None
+改造前                                    改造后
+Use         std::collections::HashMap  None  →  Some(Collection)
+TypeReference std::collections         None  →  Some(Other)
+TypeReference String                   None  →  Some(String)
+TypeReference std::io::Error           None  →  Some(Error)
 ```
 
-后果：`Vec<T>`、`HashMap<K,V>`、`Result<T, E>` 这类**类型引用**变成永久 unresolved 边，`filter_stdlib_calls` 对它们完全无效。
+修法：`process_dependency_match` 增加 `language` 参数（`relation_extractor.rs:209` 传入），两条构造路径统一走 `StdlibDetector::ref_category`。**不动 resolver，不加新开关**。
 
-### 5.2 命名约定兜底绕过了开关
+### 5.2 命名约定兜底绕过开关（已删）
 
-`external.rs:263-275`：`java.` / `javax.` / `std::` / `core::` / `alloc::` 前缀命中后直接返回 `ExternalCallType::standard_library`，**不看 `filter_stdlib_calls`**。所以同样是 stdlib：`Vec::new()` 的调用边被丢（提取期标了），`std::collections::HashMap` 的类型引用边被留下（兜底期标的），`String` 的边变成 `Unknown`（没人标）。三条边、三种命运。
+`external.rs` 原来的 `try_classify_from_naming_convention` 在 `java.` / `javax.` / `std::` / `core::` / `alloc::` 前缀命中后直接返回 `standard_library`，**不看 `filter_stdlib_calls`**。后果是同一个 stdlib 出现三种命运：`Vec::new()` 的调用边被丢（提取期标了）、`std::collections::HashMap` 的类型引用边被留（兜底期标了）、`String` 的边变 `Unknown`（没人标）。
 
-这也意味着 `stdlib_category` 与 `external_type=StandardLibrary` 是两个平行的"stdlib 真相"，只有前者受开关管辖。
+处置：整段删除，**不保留兜底入口**。理由是两个真相并行本身就是缺陷：兜底判出来的 stdlib 不受配置管辖，用户关掉 `filter_stdlib_calls` 也拿它没办法。删掉之后，未被提取期识别的目标一律 `Unknown`——要修就修提取期的表，而不是在 resolver 里加第二套规则。
 
-### 5.3 缺少"与关系类型无关"的名字级判定
+### 5.3 缺少"与关系类型无关"的名字级判定（已补）
 
-调用域有 `is_stdlib_by_type`，非调用域什么都不该套关系类型——现有的 `is_stdlib_name` 恰是这个形状，却被放在了 grouper 里且没人调。它缺的是**路径形态**：`os`、`fmt`、`json`、`dart:async`、`System` 都不是"符号名"，而是模块/包路径，`is_stdlib_name` 一条都判不出来。
+调用域有 `is_stdlib_by_type`，非调用域不该套关系类型。新增 `is_stdlib_ref` 填这个形状，并补上**路径形态**（`os`、`fmt`、`json`、`dart:async`、`System` 都不是"符号名"，而是模块/包路径）。
 
-## 6. 实体侧：`mark_stdlib` 打击面过大
+## 6. 实体侧：`mark_stdlib` 收窄到引用
 
-`entity_extractor.rs:619` 对**每个**从 `entity.*` 捕获产出的实体调用 `mark_stdlib`，`stdlib_classifier.rs:56-78` 按 `EntityKind` 选表。而 `entity.*` 捕获产出的就是**本文件的定义**。
-
-实测（`pub struct Command` + `enum Error` + `use std::collections::HashMap`）：
+`entity_extractor.rs:619` 对每个 `entity.*` 捕获产出的实体调用 `mark_stdlib`，而这些捕获产出的就是**本文件的定义**。改造前按名字查表，结果：
 
 ```
-Import   std::collections::HashMap  is_stdlib=true   category=Some(Other)       ← 正确
-Struct   Command                    is_stdlib=true   category=Some(Collection)  ← 误判
-Enum     Error                      is_stdlib=false  category=None              ← 侥幸（Enum 走 call 表）
+改造前：Import  std::collections::HashMap  is_stdlib=true   category=Some(Other)
+        Struct  Command                    is_stdlib=true   category=Some(Collection)   ← 误判
+改造后：Import  std::collections::HashMap  is_stdlib=true   category=Some(Collection)
+        Struct  Command                    is_stdlib=false  category=None
 ```
 
-名字撞表的密度并不低：`STDLIB_TYPES`（`rust.rs:11-207`）里有 `Command`、`Error`、`Path`、`Result`、`String`、`File`、`Metadata`；JS 表里有 `Error`、`String`、`Buffer`。实测：
+撞表密度不低：Rust 表里有 `Command`、`Error`、`Path`、`Result`、`String`、`File`、`Metadata`；JS 表里有 `Error`、`String`、`Buffer`。
+
+传播链（`GroupedEntity::from_entity` 原样拷贝）导致同一份源码两种 NL 输出：
 
 ```
-   Command: rust type=true   Path=true   Result=true   String=true
-     Error: rust type=true   js type=true
-    Buffer: js type=true
-```
-
-传播链（`GroupedEntity::from_entity` 原样拷贝，`grouped.rs:102`）：
-
-| 层 | 后果 |
-|---|---|
-| 分组 | `plugin_grouping.rs:276` 当 stdlib 处理 |
-| NL 分发 | `dispatcher.rs:45` 命中 `StdlibTemplate` |
-| NL 成员 | `group_converter.rs:945`、`regular.rs:136` 跳过成员 |
-| 模式 | `pattern_detection.rs:53` 不识别 getter/setter |
-
-实测同一份源码两种输出（Struct `Command` + 2 字段 + 1 方法）：
-
-```
-as parsed  -> "collections Command A CLI command wrapper defined by the project itself."   (72 字符)
-if fixed   -> "Command ... Members: name verbose parse. Types: &[String] Result<Command, std::io::Error>."  (139 字符)
+改造前 -> "collections Command A CLI command wrapper..."                    (72 字符)
+改造后 -> "Command\nA CLI command wrapper...\nMembers: name tags parse.\n
+          Types: &[String] Result<Command, std::io::Error>."               (136 字符)
 ```
 
 丢的不是措辞，是**字段名、方法名、参数与返回类型**——恰是检索最需要的判别信息。
 
-结论：名字判定对"引用"成立，对"定义"不成立。`mark_stdlib` 现在把两件事混在一个开关里。
+新规则（`stdlib_classifier.rs:33-52`）：
 
-## 7. 应该在哪里使用（三个落点）
+1. 插件元数据 `metadata["is_stdlib"]` 最高优先级，任何 kind 都生效；
+2. 其余只对 `Import` / `Require` / `Include` 查表；
+3. 类别由 `ref_category` 一次给出（整路径 → 末段 → `Other`）。
 
-### 落点 A：关系提取的非调用分支（补标注，不改判定）
+`Export` 故意不在引用类里：`export function foo()` 是定义，只有 re-export 才是引用，两者在 `EntityKind::Export` 上无法区分。
 
-在 `dependency_extractor.rs:26-47` 的两条构造路径上，用"目标是否 stdlib + 类别"补 `stdlib_category`：
+## 7. 前缀判断与检测表：统一（原 Q3）
 
-```rust
-let stdlib_category = StdlibDetector::category_or_ref(&dst_name, language); // 新增：见 §9
-Some(Relation::file_relation(caller_id, RelationTarget::unresolved(dst_name),
-                             relation_type, span)
-        .with_stdlib_category(stdlib_category))
-```
-
-补上之后 `resolver.rs:466` 的既有逻辑原样生效：`filter_stdlib_calls=true` 丢边，`false` 留成 `StandardLibrary` 外链。**不需要动 resolver**，也不需要新开关。
-
-注意 `ImportStandard` 的目标是**路径**（`std::collections::HashMap`、`os.path`、`fmt`），判定要用路径形态（§9 的 `is_stdlib_import_path`），不能只查符号表。
-
-### 落点 B：实体标记按"是否为定义"分流（收窄，不扩面）
-
-`mark_stdlib` 应只在**实体本身不是项目定义**时按名字判：
-
-- `EntityKind::Import | Require | Include | Export`（`kind.rs:233,381`）→ 这些是"引用别人"，名字判定成立，继续判。
-- 插件元数据 `metadata["is_stdlib"]`（`stdlib_classifier.rs:38-48`）→ 保持最高优先级。
-- 其余（`Struct` / `Class` / `Function` / `Method` / `Trait` / `Constant` / …）→ 它们是**本文件的定义**，默认 `false`；只有"当前文件属于标准库源码/`vendor` 且被显式配置"时才允许按名字判。
-
-这一步会立刻修掉 `struct Command`、`enum Error`、`class String` 这类误判，且不影响正确路径（导入实体照旧标 stdlib，NL 照旧压缩）。
-
-风险：`grouper/processors/class_method/pattern_detection.rs:53` 依赖"stdlib 方法不参与 getter/setter 识别"，该逻辑只在解析 stdlib 源码时才有意义，收窄后行为不变；但如果有人靠这个开关避免 `impl` 里的 `get_x` 被误判成 getter，需要回归验证（见 §11 Q3）。
-
-### 落点 C：NL 的类型改写（新增能力，`StdlibEntityDetector` 的正当归属）
-
-单一收敛点已经存在：`TemplateHelpers::build_signature_with_defaults`（`common/templates/helpers.rs:32-59`），所有参数类型与返回类型都从这里拼进 NL 文本（`embedding/templates/regular.rs:214,560`）。BM25 侧的类型列表在 `bm25/templates/regular.rs:157-181`。
-
-在这两个位置把不可读的类型替换成短语，键用 `(Language, stdlib 类型名)`：
+**应该统一，已统一**。原来"谁先碰到谁自己判"，同一门语言在导入期和调用期给出不同答案。三处实测证伪：
 
 ```
-Rust   Vec<T>        → "list of T"          HashMap<K,V> → "map from K to V"
-       Box<T>/Arc<T> → "shared T"           Option<T>    → "optional T"
-       Result<T,E>   → "T or E error"
-Go     []T / map[K]V / chan T
-C++    std::vector<T> / std::unique_ptr<T>
-C#     IEnumerable<T> / Task<T>
-JS/TS  Array<T> / Promise<T>
+csharp System                is_dotnet_namespace=true            prefix("System.")=false
+dart   dart:async            is_dart_path=true                   prefix("dart.")=false
+ruby   json                  is_stdlib_require=true              is_stdlib_call=false
 ```
 
-`StdlibCategory::description_label`（`stdlib_category.rs:52-65`）可作为兜底词表，但**类别粒度不够**：`Vec` 和 `HashMap` 都是 `Collection`，"集合类型的 Vec" 对检索没有增益。真正需要的是逐类型的短句表——这张表应该和现有表放在一起（`cce-stdlib`），而不是新开一层。
+逐语言处置：
 
-`StdlibEntityInfo.semantic_description` 可以直接复用为输出格式，但内容要从"Standard library collection: Vec"换成"list of T"，并且只在**生成侧**用，不要回写到实体。
+| 语言 | 改造前（导入期） | 改造后（表） |
+|---|---|---|
+| Python | `is_stdlib_module(首段)` | 同（保留首段切分） |
+| Rust | `STDLIB_CRATES` 前缀 | `is_stdlib_path`（同一张表） |
+| Go | `is_stdlib_package(首段)` | 同 |
+| JS/TS | `is_node_stdlib(整串)` | 同，另剥 `node:` 协议前缀 |
+| Java | `java.`/`javax.`/`jdk.` 前缀 | `is_jdk_path` |
+| Kotlin | `java.`/`javax.`/`kotlin.`/`scala.` 前缀 | `is_kotlin_path ∨ is_jdk_path` |
+| Scala | 同上 | `scala` 根 ∨ `is_jdk_path`（见下） |
+| C# | `System.`/`Microsoft.` 前缀 | `is_dotnet_path` |
+| Dart | `dart.` 前缀 | `is_dart_path`（`dart:` + `package:`） |
+| Ruby | `is_stdlib_call`（**调用表，调错函数**） | `is_stdlib_require ∨ is_stdlib_path` |
+| PHP | `is_stdlib_call` | `is_builtin_class ∨ is_core_extension` |
+| Lua | 无（缺口） | `is_stdlib_module`（含末段切分） |
+| C/C++ | 交给 `is_system_header` | 保持 `false`：系统头是解析器标志，导入分类仍是 `ExternalPackage` |
+| Bash | 无 | 保持 `false`：没有模块表，`source` 的目标是文件 |
 
-## 8. 前缀判断与检测表是否应该统一
+两个刻意的例外，都写进了代码注释：
 
-**应该，而且是 P0。** 现在的分工是"谁先碰到谁自己判"，导致同一门语言在导入期和调用期给出不同答案。逐语言对照：
+* **Scala 不用 `is_scala_package`**：`SCALA_PACKAGES` 里混着 `cats`、`zio`、`akka` 这些第三方框架（`scala/packages.rs`），用它判"是否 stdlib"会把三方库吞进来。导入期只认 `scala` 根 + JDK。
+* **C/C++ 不并入导入入口**：若把 `is_system_header` 折成 `true`，`stdio.h` 会从 `ExternalPackage` 变 `StandardLibrary`，改动面远超本次范围（`classifier.rs` 的 `test_c_system_header` 就是这条边界的锚点）。
 
-| 语言 | 导入期（classifier.rs） | 库内既有能力 | 是否一致 | 实测反例 |
-|---|---|---|---|---|
-| Python | `is_stdlib_module` | 表 | ✅ | — |
-| Rust | `STDLIB_CRATES` 前缀 | 表 | ✅ | — |
-| Go | `is_stdlib_package` | 表 | ✅ | — |
-| JS/TS | `is_node_stdlib` | 表 | ✅ | — |
-| Java | `java.` / `javax.` / `jdk.` 前缀 | 无表 | ⚠️ 只靠前缀 | — |
-| Kotlin/Scala | `java.`/`javax.`/`kotlin.`/`scala.` 前缀 | 有 `is_kotlin_package`/scala 表 | ❌ 双份 | — |
-| C# | `System.` / `Microsoft.` 前缀 | `is_dotnet_namespace` / `is_dotnet_path` | ❌ | `using System;` → 前缀 `false`，表 `true` |
-| Dart | `dart.` 前缀 | `is_dart_path` | ❌ | `dart:async` → 前缀 `false`，表 `true` |
-| Ruby | `is_stdlib_call`（调用表） | `is_stdlib_require` / `is_stdlib_path` | ❌ 调错函数 | `require 'json'` → `false`/`true` |
-| PHP | `is_stdlib_call`（调用表） | 无路径表 | ⚠️ 语义错配 | `require 'vendor/autoload.php'` → 外链 |
-| C/C++ | 交给 `is_system_header` | 由解析器给 | ✅（但需保留特例） | — |
-| Bash/Lua | 无 | 有表 | ❌ 缺口 | `source`/`require` 恒为外链 |
-
-实测输出（复刻 classifier 分支，`cce-stdlib` 公开函数对照）：
-
-```
-csharp System                           is_dotnet_namespace=true   prefix=false
-csharp Microsoft                        is_dotnet_namespace=true   prefix=false
-dart   dart:async                       is_dart_path=true          prefix=false
-dart   package:flutter/material.dart    is_dart_path=true          prefix=false
-ruby   json                             is_stdlib_require=true     is_stdlib_call=false
-```
-
-`is_stdlib_path`（`ruby.rs:962`）、`is_stdlib_require`（`ruby.rs:956` 宏生成）、`is_dart_path`（`dart.rs:967`）目前只有 `cce-stdlib` 自己的测试在调——现成的正确实现，配上错误的调用点。
-
-统一的分界线应该是：**表负责"这个名字/路径属于标准库"，前缀只作为表内的数据而非独立逻辑**。Java 这类纯前缀语义（没有"模块清单"这回事）反过来应该把前缀收进 `cce-stdlib`，暴露成 `is_stdlib_import_path`，而不是留在 `classifier.rs` 里。
-
-## 9. 建议的统一入口（都在 `cce-stdlib`）
+## 8. 统一入口（已实现）
 
 ```rust
 impl StdlibDetector {
-    // 已有（上一轮新增）：符号 → 类别
+    // 符号 → 类别（上一轮新增）
     pub fn category(name: &str, language: &Language) -> Option<StdlibCategory>;
 
-    // 新增 1：符号名或模块路径的并集判定，替代 grouper 里那个 is_stdlib_name
-    //   覆盖 category(name) ∪ is_stdlib_call(name) ∪ is_stdlib_module/package/crate/require(dart path)
-    pub fn is_stdlib_ref(name_or_path: &str, language: &Language) -> bool;
+    // 新增：符号名 ∪ 调用表达式 ∪ 模块路径
+    pub fn is_stdlib_ref(name: &str, language: &Language) -> bool;
 
-    // 新增 2：导入路径专用（不带关系类型，C/C++ 的系统头由调用方显式传入）
-    pub fn is_stdlib_import_path(path: &str, language: &Language, is_system_header: bool) -> bool;
+    // 新增：引用类目标的"是否 + 类别"一次问完（整路径 → 末段 → Other）
+    pub fn ref_category(name: &str, language: &Language) -> Option<StdlibCategory>;
 
-    // 新增 3：NL 改写用（§7 落点 C），返回 None 表示"不是 stdlib 或没有可读短语"
-    pub fn describe_type(name: &str, language: &Language) -> Option<&'static str>;
+    // 新增：导入路径专用，逐语言查表，不含任何调用语义
+    pub fn is_stdlib_import_path(path: &str, language: &Language) -> bool;
 }
 ```
 
-调用方随之收敛：
+调用方收敛结果：
 
-| 调用方 | 改成 |
+| 调用方 | 现在 |
 |---|---|
-| `stdlib_classifier.rs:33` | `is_stdlib_ref`（仅 Import 类实体 + 插件元数据） |
-| `dependency_extractor.rs:26-47` | `category_or_ref` / `is_stdlib_import_path` |
-| `classifier.rs:93-141` | 整段 `match` 换成 `is_stdlib_import_path` |
-| `external.rs:255-291` | 删掉前缀表，换 `is_stdlib_ref`（或整体并入提取期标注，见 §11 Q1） |
-| `calls_prune.rs:200,208` | 已经是 `is_stdlib_call`，保留（调用域语义正确） |
-| `StdlibEntityDetector` | 只保留 `describe` / `semantic_description` 的封装，`detect_stdlib_entity` 删除 |
+| `stdlib_classifier.rs:52` | `ref_category`（仅引用类实体 + 插件元数据） |
+| `dependency_extractor.rs:46,62` | `ref_category` |
+| `common/classifier.rs:97` | `is_stdlib_import_path` |
+| `symbol_extractor/python.rs:25`、`go.rs:50`、`php.rs:31`、`lua.rs:31`、`ruby.rs:31`、`csharp.rs:74`、`rust.rs:282` | 七个语言各自的包装，全部改为一行委托 |
+| `external.rs` | 兜底删除，不再有 stdlib 判定 |
+| `calls_prune.rs:200,208` | 保留 `is_stdlib_call`（调用域语义正确） |
+| `call_extractor.rs:393` | 保留 `is_stdlib_by_type` + 插件启发式 |
 
-`StdlibEntityDetector` 的最终形态建议：一个**纯展示层适配器**（`(name, category) -> 短语`），或者干脆删掉、由 `StdlibDetector::describe_type` + `StdlibCategory::description_label` 取代。它现在既不是检测器（检测全转发），也不是描述器（描述没人用），留着只会让下一个人再写第八个判定面。
+## 9. `pattern_detection` 为什么不再读 stdlib
 
-## 10. 落地顺序
+原代码在识别 getter/setter 之前拦一道：`if method.is_stdlib { mark_boilerplate; continue; }`。这道判断的语义依赖"stdlib 方法不该被当成访问器"，只有正在解析标准库源码时才成立；对项目代码，它唯一的实际效果是把同名方法整条踢出模式识别。
 
-| 阶段 | 内容 | 影响面 | 风险 |
+收窄 `mark_stdlib` 之后，`Method` 类实体的 `is_stdlib` 恒为 `false`（除插件显式标注），这道判断已是死代码，直接删除。`class_method/tests.rs` 里对应的断言改为"stdlib 标记不影响模式处理"。
+
+构造函数/析构函数的早退分支保留，但理由改写为结构性成员必须保留（原来写的"即使被名字匹配成 stdlib"已不成立）。
+
+## 10. 落地记录
+
+| 阶段 | 内容 | 主要文件 | 状态 |
 |---|---|---|---|
-| P0 | `cce-stdlib` 加 `is_stdlib_ref` / `is_stdlib_import_path` / `describe_type`；`classifier.rs` 换实现 | 3 个文件，行为修正集中在 C#/Dart/Ruby | 低：只影响导入分类，有单测锚点 |
-| P1 | `mark_stdlib` 收窄到 Import 类实体（落点 B） | 1 个文件 + 若干 NL 快照 | 中：会改变已有索引里 `is_stdlib` 的分布，需回归 NL 质量 |
-| P2 | `dependency_extractor` 补 `stdlib_category`（落点 A） | 1 个文件，索引体积下降 | 中：`filter_stdlib_calls=true` 时类型引用边会消失，查询侧可能少召回 |
-| P3 | NL 类型改写（落点 C） | `helpers.rs` + `bm25/regular.rs` | 低：纯生成侧，可回滚 |
-| P4 | 删 `StdlibEntityDetector` / 两个语言级 `is_stdlib_name` | 4 个文件 | 低：全死代码 |
+| P0 | `cce-stdlib` 新增 `is_stdlib_ref` / `ref_category` / `is_stdlib_import_path`；`classifier.rs` 与七个语言提取器改为委托 | `cce-stdlib/src/detector.rs`、`symbol_extractor/*.rs` | 完成 |
+| P1 | `mark_stdlib` 收窄到 `Import`/`Require`/`Include` | `post_processing/stdlib_classifier.rs` | 完成 |
+| P2 | `dependency_extractor` 补 `stdlib_category`；非调用域的丢弃单独计数 | `dependency_extractor.rs`、`relation_extractor.rs`、`resolver.rs`、`cce-metrics` | 完成 |
+| Q1 | 删除 `external.rs` 命名约定兜底，不做替代 | `index/resolver/external.rs` | 完成 |
+| Q3 | `pattern_detection` 停止读 `is_stdlib` | `processors/class_method/pattern_detection.rs` | 完成 |
+| P4 | 删 `StdlibEntityDetector` / `StdlibEntityInfo` / 三个 `is_stdlib_name` | `grouper/recognizers/`（删两个文件）、`cce-stdlib/src/{python,rust}.rs` | 完成 |
+| P3 | NL 类型改写 | —— | **不做**，只出文档（§11） |
 
-P2 与 P1 的顺序不能反：先收窄实体标记（P1）再扩大关系标注（P2），否则"用户定义的 `Command`"会同时被 NL 压缩和关系丢弃，问题更难定位。
+新增指标 `relation_stdlib_filtered_non_call_total`：非调用域（导入 / 类型引用）被 `filter_stdlib_calls` 丢弃的边数。它与 `relation_stdlib_filtered_total` 分开计的理由是召回后果不同——丢掉一次 `Vec::new()` 没人会查，丢掉一条 `Vec<T>` 类型引用等于图上少一条类型边。
 
-## 11. 待拍板
+验证：
 
-| 编号 | 问题 | 建议 |
-|---|---|---|
-| Q1 | `external.rs:263-275` 的前缀兜底是删掉（改为提取期标注 + 无兜底），还是保留但补 `filter_stdlib_calls` 判断？ | 删掉前缀，保留兜底入口但只判 `stdlib_category`；理由是 §5.2 的双真相 |
-| Q2 | 非调用关系的 stdlib 边，默认丢还是留？ | 跟随 `filter_stdlib_calls` 现有语义（默认丢），但把 `Use`/`TypeReference` 的丢失计数单列一个 metric，便于确认召回变化 |
-| Q3 | `pattern_detection.rs:53` 依赖 stdlib 实体标记来跳过 getter/setter 识别，收窄后是否需要单独的"stdlib 源码目录"配置？ | 先收窄并回归；若确有业务依赖，再加 `index.stdlib_source_globs` |
-| Q4 | NL 类型改写要不要保真原文？ | 保留原文作为主句、短语作为补充（`Vec<T>` 同时出现），避免损失精确检索；只对嵌套 ≥2 层的泛型做替换 |
+```
+cargo test -p cce-stdlib --lib        → 133 passed
+cargo test -p cce-parser --lib        → 1345 passed
+cargo test -p cce-codegraph --lib     → 1043 passed
+cargo test -p cce-metrics --lib       → 186 passed
+cargo test -p cce-orchestrator --lib  → 643 passed
+cargo check --workspace --all-targets → 通过
+```
+
+探针输出（`/tmp/probe`，见 §12）确认三件事同时成立：`struct Command` 不再被标 stdlib、非调用边带上了类别、NL 走 `Regular` 模板且保留成员与类型。
+
+## 11. 未做与下一步
+
+1. **NL 类型改写（P3）**：单独文档 `docs/analysis/stdlib-nl-type-rewriting.md`，含三条候选方向、逐语言映射表草案、五个待拍板项。前置条件（P1）已完成，可独立启动。
+2. **非调用域的召回观测**：P2 之后 `filter_stdlib_calls=true` 会开始丢 `Use` / `TypeReference` 边。`relation_stdlib_filtered_non_call_total` 是唯一的观测口，建议在真实仓库上跑一轮，确认量级符合预期再决定是否给非调用域单独开关（当前刻意不拆）。
+3. **`Inheritance` 目标不判 stdlib**：`is_stdlib_ref` 覆盖"类别 ∪ 调用 ∪ 路径"三种形态，不含 trait 表。`impl Display for Foo` 的 `Display` 因此不会被识别，边保留。这是保守选择——trait 名与项目内 trait 无法靠名字区分，误删的代价高于保留噪声。
 
 ## 12. 复现
 
 ```shell
-# 1) 探针 crate（/tmp/probe，path 依赖 cce-stdlib + cce-types + cce-parser）
-#    复用仓库 target 目录，避免重复编译
-CARGO_TARGET_DIR=/workspace/code-context-engine/target cargo run -q
-
-# 2) 实体误判 + 关系漏标：解析 Rust 片段并打印
-#    ParseCoordinator::new().parse("src/demo.rs", src)
-#    → Struct Command is_stdlib=true / Collection
-#    → Use/TypeReference of std::collections::HashMap 的 stdlib_category=None
-
-# 3) NL 差异：GroupedEntity::from_entity + GroupTemplateDispatcher::dispatch
-#    → "collections Command ..." (72)  vs  "Command ... Members: ..." (139)
-
-# 4) 前缀 vs 表：
-#    CSharpStdlibDetector::is_dotnet_namespace("System") == true, starts_with("System.") == false
-#    DartStdlibDetector::is_dart_path("dart:async")     == true, starts_with("dart.")   == false
-#    RubyStdlibDetector::is_stdlib_require("json")      == true, is_stdlib_call("json") == false
+# 探针 crate（/tmp/probe，path 依赖 cce-stdlib + cce-types + cce-parser）
+cd /tmp/probe && CARGO_TARGET_DIR=/workspace/code-context-engine/target cargo run -q
 ```
 
----
+预期输出：
 
-## 附：本轮代码改动的 patch
+```
+--- entities ---
+Import         std::collections::HashMap        is_stdlib=true  category=Some(Collection)
+Struct         Command                          is_stdlib=false category=None
+InherentImpl   Command                          is_stdlib=false category=None
+--- relations ---
+Use                  std::collections::HashMap          stdlib_category=Some(Collection)
+TypeReference        std::collections                   stdlib_category=Some(Other)
+TypeReference        String                              stdlib_category=Some(String)
+TypeReference        std::io::Error                      stdlib_category=Some(Error)
+ImplAssociation      Command                             stdlib_category=None
+--- nl ---
+pattern=Regular len=136
+```
 
-见 `/workspace/stdlib-template-refactor.patch`（41 文件，含 1 处重命名与 3 个新文档；`git apply` 校验通过，应用后与工作区逐字节一致）。
+前缀 vs 表的三个反例可直接在 `cce-stdlib` 里复现：
+
+```rust
+CSharpStdlibDetector::is_dotnet_namespace("System") // true
+DartStdlibDetector::is_dart_path("dart:async")      // true
+RubyStdlibDetector::is_stdlib_require("json")       // true
+```
+
+## 13. 变更清单
+
+代码 24 个文件（含 2 个删除、1 个新增指标），文档 4 个（1 个新增分析文档 + 3 个同步更新）。总计 28 文件，`+815 / -955`。刻意排除 `crates/app/cce-e2e-tests`、`crates/infra/llm-suite` 两个子模块指针——它们与本次改造无关，混进 patch 会让本地应用时误改子模块版本。

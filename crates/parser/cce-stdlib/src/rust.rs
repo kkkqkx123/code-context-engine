@@ -606,13 +606,6 @@ impl RustStdlibDetector {
     pub fn is_stdlib_constant(name: &str) -> bool {
         Self::STDLIB_CONSTANTS.contains(&name)
     }
-
-    /// Check if a name is a Rust stdlib entity
-    pub fn is_stdlib_name(name: &str) -> bool {
-        Self::get_category(name).is_some()
-            || Self::is_stdlib_crate(name)
-            || Self::is_stdlib_module(name)
-    }
 }
 
 // Rust is the one language whose call shape changes the answer: a macro

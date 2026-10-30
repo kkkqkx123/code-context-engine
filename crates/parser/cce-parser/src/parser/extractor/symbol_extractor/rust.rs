@@ -4,7 +4,7 @@
 
 use super::common::helpers::path::is_relative_rust;
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::RustStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{
     find_children_by_kind, find_descendants_by_kind, node_text, node_to_span,
 };
@@ -280,9 +280,7 @@ impl RustExtractor {
 
     /// Check if path is a standard library path
     fn is_stdlib_path(&self, path: &str) -> bool {
-        RustStdlibDetector::STDLIB_CRATES
-            .iter()
-            .any(|&prefix| path == prefix || path.starts_with(&format!("{}::", prefix)))
+        StdlibDetector::is_stdlib_import_path(path, &Language::Rust)
     }
 }
 

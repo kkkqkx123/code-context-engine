@@ -2,10 +2,7 @@
 //!
 //! Provides a single point for classifying imports across all languages.
 
-use crate::parser::stdlib::{
-    GoStdlibDetector, JavaScriptStdlibDetector, PythonStdlibDetector, RustStdlibDetector,
-    StdlibDetector,
-};
+use crate::parser::stdlib::StdlibDetector;
 use cce_types::language::Language;
 
 use super::{
@@ -90,54 +87,15 @@ impl ImportClassifier {
     }
 
     /// Check if an import is from the standard library
+    ///
+    /// Delegates to the shared table lookup in `cce-stdlib`. Import-side
+    /// prefix conventions (JDK packages, .NET namespaces, Dart
+    /// `dart:`/`package:` forms, Rust crate roots) live inside those tables,
+    /// so this layer keeps no list of its own — the previous local prefix
+    /// match disagreed with the tables on `using System;`, `dart:async` and
+    /// `require 'json'`.
     fn is_stdlib_import(path: &str, language: Language) -> bool {
-        match language {
-            Language::Python => {
-                let module = path.split('.').next().unwrap_or(path);
-                PythonStdlibDetector::is_stdlib_module(module)
-            }
-            Language::Rust => RustStdlibDetector::STDLIB_CRATES
-                .iter()
-                .any(|&prefix| path == prefix || path.starts_with(&format!("{}::", prefix))),
-            Language::Java => {
-                path.starts_with("java.") || path.starts_with("javax.") || path.starts_with("jdk.")
-            }
-            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
-                JavaScriptStdlibDetector::is_node_stdlib(path)
-            }
-            Language::Go => {
-                let package = path.split('/').next().unwrap_or(path);
-                GoStdlibDetector::is_stdlib_package(package)
-            }
-            Language::C | Language::Cpp => {
-                // C/C++ stdlib is handled by is_system_header flag
-                false
-            }
-            Language::Kotlin | Language::Scala => {
-                // JVM languages use Java stdlib
-                path.starts_with("java.")
-                    || path.starts_with("javax.")
-                    || path.starts_with("kotlin.")
-                    || path.starts_with("scala.")
-            }
-            Language::CSharp => {
-                // C# stdlib detection
-                path.starts_with("System.") || path.starts_with("Microsoft.")
-            }
-            Language::Php => {
-                // PHP stdlib detection
-                StdlibDetector::is_stdlib_call(path, &language)
-            }
-            Language::Ruby => {
-                // Ruby stdlib detection
-                StdlibDetector::is_stdlib_call(path, &language)
-            }
-            Language::Dart => {
-                // Dart stdlib detection
-                path.starts_with("dart.")
-            }
-            _ => false,
-        }
+        StdlibDetector::is_stdlib_import_path(path, &language)
     }
 
     /// Batch check if imports are from the standard library
@@ -389,6 +347,37 @@ mod tests {
                 results[0].metadata.package_name,
                 Some("@types/node".to_string()),
                 "scoped package must parse for {language:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_import_tables_catch_what_prefix_lists_missed() {
+        // Three regressions against the removed local prefix list: a bare
+        // namespace (`using System;`), a `dart:` URI and a Ruby require all
+        // used to fall through to `ExternalPackage`.
+        let cases: &[(Language, ImportKind, &str)] = &[
+            (Language::CSharp, ImportKind::NamespaceImport, "System"),
+            (
+                Language::CSharp,
+                ImportKind::NamespaceImport,
+                "System.Collections.Generic",
+            ),
+            (Language::Dart, ImportKind::SymbolImport, "dart:async"),
+            (Language::Ruby, ImportKind::CommonJSRequire, "json"),
+        ];
+        for (language, kind, path) in cases {
+            let context = ExtractionContext::default();
+            let import = StandardizedImport::new(*kind, *path);
+            let results = ImportClassifier::classify_batch(
+                std::slice::from_ref(&import),
+                &context,
+                *language,
+            );
+            assert_eq!(
+                results[0].class,
+                ImportClass::StandardLibrary,
+                "{path} must classify as stdlib for {language:?}"
             );
         }
     }

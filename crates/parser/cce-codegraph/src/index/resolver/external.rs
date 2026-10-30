@@ -156,8 +156,16 @@ impl RelationResolver {
     /// Implements the degraded fallback chain:
     /// 1. manifest-based lookup via dependency_index / external_packages
     /// 2. import-table lookup
-    /// 3. naming-convention heuristic (java.*, javax.*, std:: etc.)
-    /// 4. Unknown
+    /// 3. Unknown
+    ///
+    /// There is deliberately no naming-convention step (`java.*`, `std::`, …).
+    /// Stdlib identity has exactly one source — `stdlib_category`, attached at
+    /// extraction time — and a second prefix-based source here produced two
+    /// answers for the same symbol: a filtered call edge, a preserved type edge
+    /// and an `Unknown` import edge for three different spellings of one
+    /// stdlib reference. A target that extraction did not recognize stays
+    /// `Unknown`; the fix belongs in the extraction-side tables, not in a
+    /// resolver fallback that no configuration governs.
     pub(crate) fn classify_external_package(
         &self,
         raw_data: &RawRelationData,
@@ -167,9 +175,6 @@ impl RelationResolver {
             return Some(ext);
         }
         if let Some(ext) = self.try_classify_from_imports(raw_data, parsed) {
-            return Some(ext);
-        }
-        if let Some(ext) = self.try_classify_from_naming_convention(raw_data, parsed) {
             return Some(ext);
         }
         Some(ExternalCallType::Unknown {
@@ -247,44 +252,6 @@ impl RelationResolver {
                 return Some(ExternalCallType::external_library(
                     first_segment.to_string(),
                 ));
-            }
-        }
-        None
-    }
-
-    fn try_classify_from_naming_convention(
-        &self,
-        raw_data: &RawRelationData,
-        parsed: &ParsedFile,
-    ) -> Option<ExternalCallType> {
-        let name = raw_data.dst_name.as_str();
-        let lower = name.to_ascii_lowercase();
-        // Java standard library prefixes
-        if lower.starts_with("java.") || lower.starts_with("javax.") || lower.starts_with("java::")
-        {
-            return Some(ExternalCallType::standard_library(
-                self.extract_stdlib_name(&raw_data.dst_name, &parsed.language),
-            ));
-        }
-        // Rust stdlib common crates
-        if lower.starts_with("std::") || lower.starts_with("core::") || lower.starts_with("alloc::")
-        {
-            return Some(ExternalCallType::standard_library(
-                self.extract_stdlib_name(&raw_data.dst_name, &parsed.language),
-            ));
-        }
-        // Go stdlib single-segment imports are often stdlib (fmt, net/http)
-        if parsed.language == cce_types::language::Language::Go {
-            let first = name
-                .split('.')
-                .next()
-                .unwrap_or(name)
-                .split('/')
-                .next()
-                .unwrap_or(name);
-            if first.len() <= 6 && first.chars().all(|c| c.is_ascii_lowercase()) {
-                // heuristic: short lowercase package likely stdlib, but let fallback to unknown
-                return None;
             }
         }
         None

@@ -7,15 +7,25 @@
 use super::entity_index::EntityIndex;
 use super::relation_handlers::{determine_dependency_relation_type, normalize_callee_name};
 use crate::parser::extractor::utils;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::executor::Capture;
+use cce_types::language::Language;
 use cce_types::{Relation, RelationTarget};
 use std::collections::{HashMap, HashSet};
 
 /// Process a dependency capture and extract a relation.
+///
+/// Every dependency target is a *reference* — an import path, a type name or a
+/// supertype — so each edge carries the stdlib category of its target. The
+/// resolver then applies the shared `filter_stdlib_calls` switch to all of
+/// them, which is what makes `use std::collections::HashMap` and `Vec<T>` field
+/// types disappear from the relation graph instead of lingering as permanent
+/// unresolved edges.
 pub(crate) fn process_dependency_match(
     dep_capture: &Capture,
     file_id: Option<i64>,
     index: &EntityIndex,
+    language: &Language,
 ) -> Option<Relation> {
     // Create span from capture
     let span = utils::create_span_from_capture(dep_capture);
@@ -25,12 +35,16 @@ pub(crate) fn process_dependency_match(
 
     if relation_type.is_structural() {
         let caller_id = index.find_structural_owner(dep_capture.start_byte)?;
-        Some(Relation::entity_relation(
-            caller_id.0 as i64,
-            RelationTarget::unresolved(normalize_callee_name(&dep_capture.text)),
-            relation_type,
-            span,
-        ))
+        let dst_name = normalize_callee_name(&dep_capture.text);
+        Some(
+            Relation::entity_relation(
+                caller_id.0 as i64,
+                RelationTarget::unresolved(dst_name.clone()),
+                relation_type,
+                span,
+            )
+            .with_stdlib_category(StdlibDetector::ref_category(&dst_name, language)),
+        )
     } else {
         // For file-level dependencies, the caller is the file itself.
         let caller_id = file_id.unwrap_or(0);
@@ -38,12 +52,15 @@ pub(crate) fn process_dependency_match(
         if dst_name.is_empty() {
             return None;
         }
-        Some(Relation::file_relation(
-            caller_id,
-            RelationTarget::unresolved(dst_name),
-            relation_type,
-            span,
-        ))
+        Some(
+            Relation::file_relation(
+                caller_id,
+                RelationTarget::unresolved(dst_name.clone()),
+                relation_type,
+                span,
+            )
+            .with_stdlib_category(StdlibDetector::ref_category(&dst_name, language)),
+        )
     }
 }
 

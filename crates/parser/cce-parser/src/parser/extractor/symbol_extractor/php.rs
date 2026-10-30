@@ -3,7 +3,7 @@
 //! Extracts use statements, include/require, and namespace declarations.
 
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::PhpStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{
     find_child_by_kind, find_children_by_kind, find_descendants_by_kind, node_text, node_to_span,
 };
@@ -29,7 +29,7 @@ impl PhpExtractor {
 
     /// Check if a namespace/class is from standard library
     fn is_stdlib(name: &str) -> bool {
-        PhpStdlibDetector::is_builtin_class(name) || PhpStdlibDetector::is_core_extension(name)
+        StdlibDetector::is_stdlib_import_path(name, &Language::Php)
     }
 
     /// Extract path from string literal

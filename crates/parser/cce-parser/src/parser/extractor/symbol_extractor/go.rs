@@ -3,7 +3,7 @@
 //! Extracts import declarations and exported symbols.
 
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::GoStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{
     find_children_by_kind, find_descendants_by_kind, node_text, node_to_span,
 };
@@ -48,9 +48,7 @@ impl GoExtractor {
 
     /// Check if an import path is from the standard library
     fn is_stdlib_import(&self, path: &str) -> bool {
-        // Extract the package name (first component of the path)
-        let package = path.split('/').next().unwrap_or(path);
-        GoStdlibDetector::is_stdlib_package(package)
+        StdlibDetector::is_stdlib_import_path(path, &Language::Go)
     }
 
     /// Determine the import kind based on alias

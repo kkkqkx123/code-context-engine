@@ -422,6 +422,10 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "Total number of spool replay passes",
     ),
     (
+        "relation_stdlib_filtered_non_call_total",
+        "Total unresolved non-call relations (imports, type references) dropped because their target is a standard library symbol",
+    ),
+    (
         "relation_stdlib_filtered_total",
         "Total unresolved relations dropped because their callee looked like a standard library name",
     ),

@@ -112,6 +112,106 @@ impl StdlibDetector {
         }
     }
 
+    /// Check whether a name or module path refers to the standard library.
+    ///
+    /// Union of the three authoritative shapes because one target string can
+    /// be any of them depending on where it came from: a bare symbol (`Vec`), a
+    /// call expression (`Vec::new`) or a module/package path
+    /// (`std::collections::HashMap`, `dart:async`, `os.path`). Callers that
+    /// know the shape should prefer the narrower entry so a user definition
+    /// that merely shares a name with a stdlib entry is not swallowed.
+    pub fn is_stdlib_ref(name: &str, language: &Language) -> bool {
+        Self::category(name, language).is_some()
+            || Self::is_stdlib_call(name, language)
+            || Self::is_stdlib_import_path(name, language)
+    }
+
+    /// Check whether an import path belongs to the standard library.
+    ///
+    /// This is the single import-side entry point: every language answers from
+    /// its own table (`is_stdlib_module`, `is_stdlib_package`, `is_dotnet_path`,
+    /// `is_dart_path`, `is_stdlib_require`, …) instead of the ad-hoc prefix
+    /// lists that used to live in the import classifier. Prefix conventions
+    /// survive only as *data* inside those tables (JDK package list, .NET
+    /// namespace list, Dart `dart:`/`package:` forms).
+    ///
+    /// C/C++ deliberately return `false`: a system header is a parser flag
+    /// (`StandardizedImport::is_system_header`) and those imports keep
+    /// classifying as `ExternalPackage`, not `StandardLibrary`.
+    pub fn is_stdlib_import_path(path: &str, language: &Language) -> bool {
+        if path.is_empty() {
+            return false;
+        }
+        // Remapped plugin languages inherit their host grammar's tables.
+        let effective = effective_language(language);
+        match &effective {
+            // No module table of its own: `source lib.sh` targets a file, and
+            // shell builtins are reached through `is_stdlib_call`.
+            Language::Bash => false,
+            // Header stdlib-ness is the parser's `is_system_header` flag.
+            Language::C | Language::Cpp => false,
+            Language::CSharp => CSharpStdlibDetector::is_dotnet_path(path),
+            Language::Dart => DartStdlibDetector::is_dart_path(path),
+            Language::Go => GoStdlibDetector::is_stdlib_package(first_segment(path, '/')),
+            Language::Java => JavaStdlibDetector::is_jdk_path(path),
+            // Kotlin/Scala files import JDK packages as well as their own.
+            Language::Kotlin => {
+                KotlinStdlibDetector::is_kotlin_path(path) || JavaStdlibDetector::is_jdk_path(path)
+            }
+            // `SCALA_PACKAGES` mixes third-party frameworks (cats/zio/akka),
+            // so the import entry sticks to the `scala` root plus JDK imports.
+            Language::Scala => {
+                path == "scala"
+                    || path.starts_with("scala.")
+                    || JavaStdlibDetector::is_jdk_path(path)
+            }
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+                // Node specifiers are matched whole (`fs`, `fs/promises`), so a
+                // project module such as `fs/helpers` stays out. The `node:`
+                // protocol prefix is not part of the table.
+                let specifier = path.strip_prefix("node:").unwrap_or(path);
+                JavaScriptStdlibDetector::is_node_stdlib(specifier)
+            }
+            Language::Lua => {
+                LuaStdlibDetector::is_stdlib_module(path)
+                    || LuaStdlibDetector::is_stdlib_module(first_segment(path, '.'))
+            }
+            Language::Php => {
+                PhpStdlibDetector::is_builtin_class(path)
+                    || PhpStdlibDetector::is_core_extension(path)
+            }
+            Language::Python => PythonStdlibDetector::is_stdlib_module(first_segment(path, '.')),
+            // `require 'json'` is a stdlib require; `Net::HTTP` a core module.
+            Language::Ruby => {
+                RubyStdlibDetector::is_stdlib_require(path)
+                    || RubyStdlibDetector::is_stdlib_path(path)
+            }
+            // `std` / `core` / `alloc` / `proc_macro` crates.
+            Language::Rust => RustStdlibDetector::is_stdlib_path(path),
+            _ => false,
+        }
+    }
+
+    /// Category of a stdlib reference, or `None` when the name is not one.
+    ///
+    /// Answers both halves of the question the reference layers ask: *is* this
+    /// a stdlib reference (see `is_stdlib_ref`) and *which* category does it
+    /// belong to. The category tables are keyed by symbol name while a
+    /// reference carries a full path, so the lookup falls back to the path's
+    /// last segment (`std::collections::HashMap` → `HashMap` → `Collection`)
+    /// before settling on `Other`.
+    pub fn ref_category(name: &str, language: &Language) -> Option<StdlibCategory> {
+        if !Self::is_stdlib_ref(name, language) {
+            return None;
+        }
+        Self::category(name, language)
+            .or_else(|| {
+                let last = name.rsplit([':', '.', '/', '\\']).find(|s| !s.is_empty())?;
+                Self::category(last, language)
+            })
+            .or(Some(StdlibCategory::Other))
+    }
+
     /// Check if a type is from the standard library (merged from symbol_classifier)
     ///
     /// Shell and scripting languages without a static type system conservatively
@@ -172,6 +272,14 @@ impl StdlibDetector {
             _ => false,
         }
     }
+}
+
+/// First component of a `separator`-delimited path.
+///
+/// Returns the whole input when the separator does not occur, so callers can
+/// pass a bare module name without special-casing.
+fn first_segment(path: &str, separator: char) -> &str {
+    path.split(separator).next().unwrap_or(path)
 }
 
 #[cfg(test)]
@@ -1379,5 +1487,103 @@ mod tests {
             ),
             "Rust higher-order calls must consult the stdlib tables"
         );
+    }
+
+    /// The import entry must answer from each language's own table. The three
+    /// cases that used to be prefix-matched by hand (`using System;`,
+    /// `dart:async`, `require 'json'`) are the regression cover: the shared
+    /// prefix list said `false` for all of them while the tables say `true`.
+    #[test]
+    fn test_import_path_entry_uses_tables() {
+        let importable: &[(Language, &str)] = &[
+            (Language::CSharp, "System"),
+            (Language::CSharp, "System.Collections.Generic"),
+            (Language::CSharp, "Microsoft.Extensions.Logging"),
+            (Language::Dart, "dart:async"),
+            (Language::Dart, "package:flutter/material.dart"),
+            (Language::Go, "fmt"),
+            (Language::Go, "net/http"),
+            (Language::Java, "java.util.ArrayList"),
+            (Language::Java, "javax.swing.JFrame"),
+            (Language::Kotlin, "kotlin.collections.List"),
+            (Language::Kotlin, "java.util.List"),
+            (Language::JavaScript, "fs"),
+            (Language::TypeScript, "node:fs"),
+            (Language::Php, "DateTime"),
+            (Language::Python, "os.path"),
+            (Language::Ruby, "json"),
+            (Language::Ruby, "Net::HTTP"),
+            (Language::Rust, "std::collections::HashMap"),
+            (Language::Rust, "proc_macro::TokenStream"),
+            (Language::Scala, "scala.collection.immutable.List"),
+            (Language::Scala, "java.util.List"),
+        ];
+        for (language, path) in importable {
+            assert!(
+                StdlibDetector::is_stdlib_import_path(path, language),
+                "{path} in {language:?} must classify as a stdlib import"
+            );
+        }
+
+        // C/C++ header stdlib-ness is the parser's `is_system_header` flag and
+        // Bash has no module table: both stay out of the import entry.
+        for (language, path) in [
+            (Language::Bash, "echo"),
+            (Language::C, "stdint.h"),
+            (Language::Cpp, "vector"),
+        ] {
+            assert!(
+                !StdlibDetector::is_stdlib_import_path(path, &language),
+                "{path} in {language:?} has no import table"
+            );
+        }
+
+        let foreign: &[(Language, &str)] = &[
+            (Language::CSharp, "MyCompany.MyProject"),
+            (Language::Dart, "package:my_app/main.dart"),
+            (Language::Go, "github.com/gin-gonic/gin"),
+            (Language::Java, "com.example.myapp.Helper"),
+            (Language::JavaScript, "react"),
+            (Language::JavaScript, "fs/helpers"),
+            (Language::Lua, "my_module"),
+            (Language::Php, "Symfony\\Component\\HttpFoundation"),
+            (Language::Python, "numpy.linalg"),
+            (Language::Ruby, "my_gem"),
+            (Language::Rust, "serde::Serialize"),
+            (Language::Scala, "cats.effect.IO"),
+        ];
+        for (language, path) in foreign {
+            assert!(
+                !StdlibDetector::is_stdlib_import_path(path, language),
+                "{path} in {language:?} is not a stdlib import"
+            );
+        }
+    }
+
+    /// `is_stdlib_ref` is the union the relation layer needs: one target
+    /// string can be a symbol, a call expression or a module path.
+    #[test]
+    fn test_is_stdlib_ref_unions_all_shapes() {
+        // symbol name (category table)
+        assert!(StdlibDetector::is_stdlib_ref("HashMap", &Language::Rust));
+        // call expression
+        assert!(StdlibDetector::is_stdlib_ref("Vec::new", &Language::Rust));
+        // module path
+        assert!(StdlibDetector::is_stdlib_ref(
+            "std::collections::HashMap",
+            &Language::Rust
+        ));
+        assert!(StdlibDetector::is_stdlib_ref("dart:async", &Language::Dart));
+
+        // A user definition that merely shares a callable name stays out.
+        assert!(!StdlibDetector::is_stdlib_ref(
+            "myapp.Command",
+            &Language::Rust
+        ));
+        assert!(!StdlibDetector::is_stdlib_ref(
+            "app.User.save",
+            &Language::Java
+        ));
+        assert!(!StdlibDetector::is_stdlib_ref("", &Language::Rust));
     }
 }

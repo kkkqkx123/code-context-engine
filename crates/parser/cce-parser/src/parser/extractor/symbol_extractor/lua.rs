@@ -5,7 +5,7 @@
 
 use super::common::helpers::string::unquote;
 use super::traits::SymbolExtractor;
-use crate::parser::stdlib::LuaStdlibDetector;
+use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::{find_descendants_by_kind, node_text, node_to_span};
 use cce_types::import::{
     ExportKind, ExportTarget, ImportKind, ImportTarget, StandardizedExport, StandardizedImport,
@@ -29,14 +29,7 @@ impl LuaExtractor {
 
     /// Check whether a required module is part of the standard library.
     fn is_stdlib(path: &str) -> bool {
-        if LuaStdlibDetector::is_stdlib_module(path) {
-            return true;
-        }
-        // Dotted requires (`require "pkg.mod"`) resolve against the first
-        // segment for stdlib classification.
-        path.split('.')
-            .next()
-            .is_some_and(LuaStdlibDetector::is_stdlib_module)
+        StdlibDetector::is_stdlib_import_path(path, &Language::Lua)
     }
 
     /// Extract the module path from a string argument node.

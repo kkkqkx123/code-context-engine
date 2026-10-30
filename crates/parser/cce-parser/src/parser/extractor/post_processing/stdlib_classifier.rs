@@ -1,13 +1,17 @@
 //! Post-processing: standard library entity classification
 //!
-//! Detects if an entity is a standard library type/function/trait/constant
-//! and sets the is_stdlib flag and stdlib_category accordingly.
+//! Sets the `is_stdlib` flag and `stdlib_category` of entities that *reference*
+//! a standard library symbol, so downstream stages do not re-run the lookup.
 //!
 //! # Design Note
 //!
-//! This module performs unified stdlib detection for all entity kinds.
-//! The detection result is cached in Entity.stdlib_category to avoid
-//! redundant checks in downstream processing (Grouper, relation resolution).
+//! A name lookup only answers "does this name exist in the stdlib tables", not
+//! "is this entity a stdlib entity". The two differ exactly where it matters:
+//! `struct Command` written by the project is not `std::process::Command`, yet
+//! a name match used to mark it stdlib and downstream stages then compressed it
+//! away (dropped fields, methods, parameters and return types from the natural
+//! language text). Definitions therefore never match by name; only entities
+//! that pull in someone else's symbol (`import` / `require` / `include`) do.
 
 use cce_types::EntityKind;
 use cce_types::entity::Entity;
@@ -16,20 +20,35 @@ use cce_types::language::Language;
 use crate::grouper::types::StdlibCategory;
 use crate::parser::stdlib::StdlibDetector;
 
-/// Mark entity as standard library if it matches known stdlib patterns.
+/// Entity kinds that pull in a symbol defined elsewhere.
 ///
-/// This is the single point where stdlib detection occurs during parsing.
-/// Results are cached in Entity.stdlib_category to avoid redundant detection
-/// in subsequent processing stages (Grouper, relation resolution).
+/// These are the only kinds whose name is a foreign reference, so the only
+/// kinds a stdlib name lookup can answer for. Definitions (`Struct`, `Class`,
+/// `Function`, `Method`, `Constant`, …) are the project's own code and are
+/// never matched by name — otherwise a project type that happens to share a
+/// name with a stdlib one is silently treated as external.
+///
+/// `Export` stays out on purpose: `export function foo()` is a definition even
+/// though a re-export names a foreign symbol.
+fn is_reference_kind(kind: EntityKind) -> bool {
+    matches!(
+        kind,
+        EntityKind::Import | EntityKind::Require | EntityKind::Include
+    )
+}
+
+/// Mark entity as standard library if it references a stdlib symbol.
 ///
 /// # Detection Strategy
 ///
-/// For each entity kind, this uses the most appropriate stdlib detector:
-/// - Struct/Class: is_stdlib_type() for collection types
-/// - Function/Method/Macro: is_stdlib_call() for functions and macros
-/// - Trait: is_stdlib_trait() for trait definitions
-/// - Constant: is_stdlib_constant() for constants
-/// - Other kinds: uses is_stdlib_call() as fallback (general purpose)
+/// 1. An explicit plugin marker (`metadata["is_stdlib"]`) always wins, for any
+///    kind: custom-language plugins supply the knowledge the built-in tables
+///    lack.
+/// 2. Otherwise only reference kinds are looked up, through the shared import
+///    entry in `cce-stdlib` (per-language tables, not local prefixes).
+/// 3. The category is the table's answer for the whole path, else for its last
+///    segment (`std::collections::HashMap` → `HashMap` → `Collection`), else
+///    `Other`.
 pub fn mark_stdlib(entity: &mut Entity, language: &Language) {
     // 1. Honor an explicit plugin metadata marker first. Custom-language
     //    plugins set `metadata["is_stdlib"] = "true"` (optionally with
@@ -47,51 +66,16 @@ pub fn mark_stdlib(entity: &mut Entity, language: &Language) {
         return;
     }
 
-    // 2. Fall back to the built-in detection strategy below.
-    let name = entity.name.as_str();
-    let mut is_stdlib = false;
-    let mut category: Option<StdlibCategory> = None;
-
-    // Determine stdlib detection method based on entity kind
-    let detection_result = match entity.kind {
-        EntityKind::Struct | EntityKind::Class => {
-            // Type-specific detection for collection and built-in types
-            StdlibDetector::is_stdlib_type(name, language)
-        }
-        EntityKind::Function | EntityKind::Method | EntityKind::Macro => {
-            // General call detection for functions, methods, and macros
-            StdlibDetector::is_stdlib_call(name, language)
-        }
-        EntityKind::Trait => {
-            // Trait-specific detection
-            StdlibDetector::is_stdlib_trait(name, language)
-        }
-        EntityKind::Constant => {
-            // Constant-specific detection
-            StdlibDetector::is_stdlib_constant(name, language)
-        }
-        _ => {
-            // Fallback: use general call detection for other entity kinds
-            // This ensures we don't miss stdlib entities with unusual kinds
-            StdlibDetector::is_stdlib_call(name, language)
-        }
-    };
-
-    if detection_result {
-        is_stdlib = true;
-        let coarse = match entity.kind {
-            EntityKind::Struct | EntityKind::Class => StdlibCategory::Collection,
-            EntityKind::Function | EntityKind::Method => StdlibCategory::Utility,
-            EntityKind::Trait => StdlibCategory::Trait,
-            EntityKind::Constant => StdlibCategory::Other,
-            EntityKind::Macro => StdlibCategory::Macro,
-            _ => StdlibCategory::Other,
-        };
-        category = Some(StdlibDetector::category(name, language).unwrap_or(coarse));
+    // 2. A definition is never a stdlib entity, whatever its name says.
+    if !is_reference_kind(entity.kind) {
+        return;
     }
 
-    entity.is_stdlib = is_stdlib;
-    entity.stdlib_category = category;
+    // 3. Reference: the shared lookup both decides and categorizes.
+    if let Some(category) = StdlibDetector::ref_category(&entity.name, language) {
+        entity.is_stdlib = true;
+        entity.stdlib_category = Some(category);
+    }
 }
 
 /// Parse a stdlib category string from plugin metadata.
@@ -175,28 +159,66 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_stdlib_unmarked_falls_back_to_builtin() {
+    fn test_mark_stdlib_ignores_project_definitions() {
+        // Regression: `struct Command` shares a name with `std::process::Command`
+        // and used to be marked stdlib, which made every downstream stage drop
+        // its fields, methods and signature from the natural language text.
+        for (name, kind) in [
+            ("Command", EntityKind::Struct),
+            ("Error", EntityKind::Enum),
+            ("String", EntityKind::Class),
+            ("println", EntityKind::Function),
+            ("Vec", EntityKind::TypeAlias),
+            ("MAX", EntityKind::Constant),
+        ] {
+            let mut entity = Entity {
+                name: name.to_string(),
+                kind,
+                ..Default::default()
+            };
+            mark_stdlib(&mut entity, &Language::Rust);
+            assert!(
+                !entity.is_stdlib,
+                "{kind} {name} is a project definition, not a stdlib entity"
+            );
+            assert_eq!(entity.stdlib_category, None);
+        }
+    }
+
+    #[test]
+    fn test_mark_stdlib_marks_reference_entities() {
         let mut entity = Entity {
-            name: "println".to_string(),
+            name: "std::collections::HashMap".to_string(),
+            kind: EntityKind::Import,
             ..Default::default()
         };
         mark_stdlib(&mut entity, &Language::Rust);
         assert!(entity.is_stdlib);
-    }
+        assert_eq!(entity.stdlib_category, Some(StdlibCategory::Collection));
 
-    #[test]
-    fn test_mark_stdlib_prefers_fine_category() {
-        use cce_types::entity::EntityKind;
-        let mut entity = Entity {
-            name: "print".to_string(),
-            kind: EntityKind::Function,
+        let mut python = Entity {
+            name: "os".to_string(),
+            kind: EntityKind::Import,
             ..Default::default()
         };
-        mark_stdlib(&mut entity, &Language::Python);
-        assert!(entity.is_stdlib);
-        assert_eq!(
-            entity.stdlib_category,
-            Some(crate::grouper::types::StdlibCategory::Io)
-        );
+        mark_stdlib(&mut python, &Language::Python);
+        assert!(python.is_stdlib);
+        assert!(python.stdlib_category.is_some());
+
+        let mut ruby = Entity {
+            name: "json".to_string(),
+            kind: EntityKind::Require,
+            ..Default::default()
+        };
+        mark_stdlib(&mut ruby, &Language::Ruby);
+        assert!(ruby.is_stdlib, "require 'json' is a stdlib reference");
+
+        let mut local = Entity {
+            name: "our_internal_module".to_string(),
+            kind: EntityKind::Import,
+            ..Default::default()
+        };
+        mark_stdlib(&mut local, &Language::Python);
+        assert!(!local.is_stdlib);
     }
 }
