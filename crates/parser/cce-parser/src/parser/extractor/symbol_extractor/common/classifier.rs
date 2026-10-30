@@ -64,11 +64,12 @@ impl ImportClassifier {
         // C/C++ system headers (including standard library headers) are
         // never project-local, even when their cleaned path looks like a
         // relative specifier; the `is_system_header` flag takes precedence.
-        let is_internal = if matches!(language, Language::C | Language::Cpp) && import.is_system_header {
-            false
-        } else {
-            context.is_internal_import(path, language)
-        };
+        let is_internal =
+            if matches!(language, Language::C | Language::Cpp) && import.is_system_header {
+                false
+            } else {
+                context.is_internal_import(path, language)
+            };
         if is_internal {
             return ImportClassification::new(import.clone(), ImportClass::InternalModule)
                 .with_confidence(1.0)
