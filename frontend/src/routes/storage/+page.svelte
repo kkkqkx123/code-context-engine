@@ -98,7 +98,7 @@
 		{#if $storageState.error}
 			<ErrorBanner>
 				<span>{$storageState.error}</span>
-				<button class="dismiss-btn" onclick={storageActions.clearError}
+				<button type="button" class="dismiss-btn" onclick={storageActions.clearError}
 					><Icon name="close" /></button
 				>
 			</ErrorBanner>

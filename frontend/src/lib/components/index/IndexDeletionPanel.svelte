@@ -140,7 +140,7 @@
 >
 	<div class="action-row">
 		<input
-			class="text-input"
+			class="text-input text-input--inline"
 			type="text"
 			bind:value={deleteFilePath}
 			placeholder="/path/to/file.ts"
@@ -181,7 +181,7 @@
 <Card title="Delete Entity" subtitle="Remove a single entity by id">
 	<div class="action-row">
 		<input
-			class="text-input"
+			class="text-input text-input--inline"
 			type="text"
 			bind:value={deleteEntityId}
 			placeholder="Entity id (numeric)"
@@ -225,7 +225,7 @@
 	<label class="field">
 		<span class="field-label">Entity ids (separated by spaces or commas)</span>
 		<input
-			class="text-input"
+			class="text-input text-input--inline"
 			type="text"
 			bind:value={batchEntitiesText}
 			placeholder="12 34 56"
@@ -268,22 +268,8 @@
 		align-items: center;
 	}
 
-	.text-input {
-		flex: 1;
-		min-width: 200px;
-		padding: 0.5rem 0.6rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
-		color: var(--black);
-	}
-
-	.text-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
+	
+	
 	.field {
 		display: flex;
 		flex-direction: column;

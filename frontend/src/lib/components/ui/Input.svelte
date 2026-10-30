@@ -1,13 +1,19 @@
 <script lang="ts">
+	interface Option {
+		value: string;
+		label: string;
+	}
+
 	interface Props {
 		label?: string;
-		type?: string;
+		type?: 'text' | 'number' | 'email' | 'password' | 'search' | 'select';
 		placeholder?: string;
 		value?: string;
 		error?: string;
 		required?: boolean;
 		id?: string;
 		multiline?: boolean;
+		options?: Option[];
 		[key: string]: unknown;
 	}
 
@@ -20,10 +26,12 @@
 		required = false,
 		id = '',
 		multiline = false,
+		options = [],
 		...rest
 	}: Props = $props();
 
-	let inputEl: HTMLInputElement | HTMLTextAreaElement | undefined = $state();
+	let inputEl: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined =
+		$state();
 
 	// Generate unique ID if not provided
 	let inputId = $derived(
@@ -45,7 +53,13 @@
 		</label>
 	{/if}
 
-	{#if multiline}
+	{#if type === 'select'}
+		<select bind:this={inputEl} id={inputId} class="select" {placeholder} bind:value {...rest}>
+			{#each options as opt (opt.value)}
+				<option value={opt.value}>{opt.label}</option>
+			{/each}
+		</select>
+	{:else if multiline}
 		<textarea
 			bind:this={inputEl}
 			id={inputId}
@@ -76,41 +90,8 @@
 		margin-bottom: 1.5rem;
 	}
 
-	.label {
-		display: block;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-		margin-bottom: 0.5rem;
-	}
-
 	.required {
 		color: var(--danger);
-	}
-
-	.input,
-	.textarea {
-		width: 100%;
-		padding: 0.75rem 1rem;
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 1rem;
-		color: var(--black);
-		background: var(--white);
-		border: 1px solid var(--black);
-		outline: none;
-		transition: border-color 0.3s;
-	}
-
-	.input:focus,
-	.textarea:focus {
-		border-color: var(--accent);
-	}
-
-	.textarea {
-		min-height: 150px;
-		resize: vertical;
 	}
 
 	.error-message {

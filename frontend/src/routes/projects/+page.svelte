@@ -180,7 +180,7 @@
 	{#if error}
 		<ErrorBanner>
 			<span>{error}</span>
-			<button class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
+			<button type="button" class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
 		</ErrorBanner>
 	{/if}
 
@@ -199,7 +199,7 @@
 				{:else}
 					<div class="project-list">
 						{#each $projects as project (project.id)}
-							<button
+							<button type="button"
 								class="project-item"
 								class:selected={detailProject?.id === project.id}
 								onclick={() => selectProject(project)}

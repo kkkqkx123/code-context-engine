@@ -509,8 +509,7 @@
 		color: var(--gray-500);
 	}
 
-	.primary-btn,
-	.graph-ghost-btn {
+	.primary-btn {
 		height: 30px;
 		padding: 0 0.85rem;
 		border: 1px solid var(--black);
@@ -532,14 +531,6 @@
 		cursor: wait;
 	}
 
-	.graph-ghost-btn {
-		background: var(--white);
-		color: var(--black);
-	}
-
-	.graph-ghost-btn:hover {
-		background: var(--gray-100);
-	}
 
 	.impact-mode .mode-btn {
 		padding: 0.4rem 0.6rem;

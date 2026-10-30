@@ -142,63 +142,63 @@
 
 		<!-- Tab Navigation -->
 		<div class="tab-nav">
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'compress'}
 				onclick={() => (activeTab = 'compress')}
 			>
 				Code Compression
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'diagnose'}
 				onclick={() => (activeTab = 'diagnose')}
 			>
 				Code Diagnosis
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'fold'}
 				onclick={() => (activeTab = 'fold')}
 			>
 				File Fold
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'fold-batch'}
 				onclick={() => (activeTab = 'fold-batch')}
 			>
 				Batch Fold
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'symbols'}
 				onclick={() => (activeTab = 'symbols')}
 			>
 				Symbol Lookup
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'references'}
 				onclick={() => (activeTab = 'references')}
 			>
 				References
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'definition'}
 				onclick={() => (activeTab = 'definition')}
 			>
 				Definition
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'keyword'}
 				onclick={() => (activeTab = 'keyword')}
 			>
 				Keyword Search
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeTab === 'batch'}
 				onclick={() => (activeTab = 'batch')}

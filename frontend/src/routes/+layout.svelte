@@ -228,7 +228,7 @@
 
 	<div class="main">
 		<header class="topbar">
-			<button
+			<button type="button"
 				class="menu-toggle"
 				onclick={toggleMobile}
 				aria-label="Toggle navigation menu"

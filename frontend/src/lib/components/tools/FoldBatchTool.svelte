@@ -229,16 +229,7 @@
 		color: var(--gray-600);
 	}
 
-	.text-input {
-		padding: 0.5rem 0.6rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
-		color: var(--black);
-		width: 100%;
-	}
-
+	
 	.item {
 		border: 1px solid var(--gray-200);
 		padding: 0.75rem;

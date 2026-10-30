@@ -260,23 +260,6 @@
 		width: 70px;
 	}
 
-	.graph-ghost-btn {
-		height: 30px;
-		padding: 0 0.85rem;
-		border: 1px solid var(--black);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		transition: all 0.15s;
-		background: var(--white);
-		color: var(--black);
-	}
-
-	.graph-ghost-btn:hover {
-		background: var(--gray-100);
-	}
 
 	.mono {
 		font-family: 'Space Mono', monospace;

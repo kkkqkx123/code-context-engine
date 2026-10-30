@@ -216,7 +216,7 @@
 
 			<!-- Tab Navigation -->
 			<div class="tab-navigation">
-				<button
+				<button type="button"
 					class="tab"
 					class:active={currentTab === 'details'}
 					onclick={() => {
@@ -226,7 +226,7 @@
 				>
 					Details
 				</button>
-				<button
+				<button type="button"
 					class="tab"
 					class:active={currentTab === 'call-graph'}
 					onclick={() => {
@@ -237,7 +237,7 @@
 				>
 					Call Graph
 				</button>
-				<button
+				<button type="button"
 					class="tab"
 					class:active={currentTab === 'inheritance'}
 					onclick={() => {
@@ -247,7 +247,7 @@
 				>
 					Inheritance
 				</button>
-				<button
+				<button type="button"
 					class="tab"
 					class:active={currentTab === 'call-chain'}
 					onclick={() => {
@@ -257,7 +257,7 @@
 				>
 					Call Chain
 				</button>
-				<button
+				<button type="button"
 					class="tab"
 					class:active={currentTab === 'call-path'}
 					onclick={() => {
@@ -278,7 +278,7 @@
 						onNavigate={handleNavigate}
 					/>
 				{:else}
-					<button
+					<button type="button"
 						class="loading-spinner-button"
 						onclick={loadEntityDetailComponent}
 						aria-label="Load entity details"

@@ -59,7 +59,7 @@
 	{/if}
 	<div>
 		<label for="log-level" class="block text-sm mb-1">Level</label>
-		<select id="log-level" class="border p-2 w-full" bind:value={level}>
+		<select id="log-level" class="select" bind:value={level}>
 			<option value="trace">trace</option>
 			<option value="debug">debug</option>
 			<option value="info">info</option>
@@ -69,7 +69,7 @@
 	</div>
 	<div>
 		<label for="log-format" class="block text-sm mb-1">Format</label>
-		<select id="log-format" class="border p-2 w-full" bind:value={format}>
+		<select id="log-format" class="select" bind:value={format}>
 			<option value="pretty">pretty</option>
 			<option value="compact">compact</option>
 			<option value="json">json</option>
@@ -77,9 +77,9 @@
 	</div>
 	<div>
 		<label for="log-filter" class="block text-sm mb-1">Filter directives</label>
-		<input id="log-filter" class="border p-2 w-full" bind:value={filter} placeholder="info,cce_server=debug" />
+		<input id="log-filter" class="input" bind:value={filter} placeholder="info,cce_server=debug" />
 	</div>
-	<button class="bg-blue-500 text-white px-4 py-2 rounded" onclick={save} disabled={saving}>
+	<button type="button" class="bg-blue-500 text-white px-4 py-2 rounded" onclick={save} disabled={saving}>
 		{saving ? 'Saving...' : 'Save'}
 	</button>
 </div>

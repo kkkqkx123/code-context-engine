@@ -451,20 +451,20 @@
 		{#if error}
 			<ErrorBanner>
 				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
+				<button type="button" class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
 			</ErrorBanner>
 		{/if}
 
 		<!-- Scope Navigation -->
 		<div class="tab-nav">
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeScope === 'global'}
 				onclick={() => (activeScope = 'global')}
 			>
 				Global
 			</button>
-			<button
+			<button type="button"
 				class="tab-btn"
 				class:active={activeScope === 'project'}
 				onclick={() => {

@@ -98,7 +98,7 @@
 		{#if error}
 			<ErrorBanner>
 				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
+				<button type="button" class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
 			</ErrorBanner>
 		{/if}
 
@@ -109,21 +109,21 @@
 		>
 			<!-- Tab Navigation -->
 			<div class="input-tabs">
-				<button
+				<button type="button"
 					class="input-tab"
 					class:active={activeTab === 'single'}
 					onclick={() => (activeTab = 'single')}
 				>
 					Single File
 				</button>
-				<button
+				<button type="button"
 					class="input-tab"
 					class:active={activeTab === 'batch'}
 					onclick={() => (activeTab = 'batch')}
 				>
 					Batch Files
 				</button>
-				<button
+				<button type="button"
 					class="input-tab"
 					class:active={activeTab === 'directory'}
 					onclick={() => (activeTab = 'directory')}

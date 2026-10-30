@@ -48,10 +48,10 @@
 
 <div class="p-4 space-y-4">
 	<div class="flex gap-2">
-		<button class="bg-blue-500 text-white px-4 py-2 rounded" onclick={refresh} disabled={loading}>
+		<button type="button" class="bg-blue-500 text-white px-4 py-2 rounded" onclick={refresh} disabled={loading}>
 			{loading ? 'Loading...' : 'Refresh'}
 		</button>
-		<button class="bg-yellow-500 text-white px-4 py-2 rounded" onclick={rotate}>Rotate Now</button>
+		<button type="button" class="bg-yellow-500 text-white px-4 py-2 rounded" onclick={rotate}>Rotate Now</button>
 	</div>
 	{#if error}
 		<div class="text-red-600">{error}</div>
@@ -74,7 +74,7 @@
 						<td class="p-2">{f.modified}</td>
 						<td class="p-2 flex gap-2">
 							<a class="text-blue-600 underline" href={logsApi.downloadUrl(f.name)} target="_blank" rel="external">Download</a>
-							<button class="text-red-600" onclick={() => remove(f.name)}>Delete</button>
+							<button type="button" class="text-red-600" onclick={() => remove(f.name)}>Delete</button>
 						</td>
 					</tr>
 				{/each}

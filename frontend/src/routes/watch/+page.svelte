@@ -75,7 +75,7 @@
 		{#if $watchState.error}
 			<ErrorBanner>
 				<span>{$watchState.error}</span>
-				<button
+				<button type="button"
 					class="dismiss-btn"
 					onclick={() => watchState.update((s) => ({ ...s, error: null }))}
 					><Icon name="close" /></button

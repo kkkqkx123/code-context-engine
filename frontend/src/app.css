@@ -1,4 +1,10 @@
 /* Swiss Minimalist / Tech Industrial Design System */
+
+/* Offline font delivery — bundled via @fontsource, no network required at runtime. */
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/space-mono/400.css';
+@import '@fontsource/space-mono/700.css';
 /* Color Palette - Strict Enforcement */
 :root {
 	--black: #0a0a0a;
@@ -141,23 +147,7 @@ pre code {
 	gap: 2rem;
 }
 
-.grid-2 {
-	grid-template-columns: repeat(2, 1fr);
-}
 
-.grid-3 {
-	grid-template-columns: repeat(3, 1fr);
-}
-
-.grid-4 {
-	grid-template-columns: repeat(4, 1fr);
-}
-
-/* Section Spacing */
-.section {
-	padding: 6rem 0;
-	border-bottom: 1px solid var(--black);
-}
 
 /* Borders & Dividers */
 .border-top {
@@ -193,7 +183,7 @@ pre code {
 	width: fit-content;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
 	background: var(--accent);
 	transform: translateX(4px);
 }
@@ -204,7 +194,7 @@ pre code {
 	border: 1px solid var(--black);
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
 	background: var(--black);
 	color: var(--white);
 }
@@ -214,8 +204,55 @@ pre code {
 	color: var(--white);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
 	background: var(--black);
+}
+
+.btn-ghost {
+	background: var(--white);
+	color: var(--black);
+	border: 1px solid var(--black);
+}
+
+.btn-ghost:hover:not(:disabled) {
+	background: var(--gray-100);
+	transform: none;
+}
+
+.btn-tab {
+	flex: 1;
+	height: 32px;
+	padding: 0 0.75rem;
+	border: none;
+	border-right: 1px solid var(--gray-300);
+	background: var(--white);
+	color: var(--gray-600);
+	border-radius: 0;
+}
+
+.btn-tab:hover:not(:disabled) {
+	background: var(--gray-100);
+	transform: none;
+}
+
+.btn-tab.active {
+	background: var(--black);
+	color: var(--white);
+}
+
+.btn-tab:last-child {
+	border-right: none;
+}
+
+.btn-xs {
+	height: 24px;
+	padding: 0 0.5rem;
+	font-size: 0.6rem;
+	border-color: var(--gray-300);
+}
+
+.btn-block {
+	width: 100%;
 }
 
 /* Cards — hover behavior is scoped to .card-clickable in Card.svelte */
@@ -250,6 +287,34 @@ pre code {
 .textarea {
 	min-height: 150px;
 	resize: vertical;
+}
+
+/* Compact monospace input — single source (replaces per-component .text-input copies) */
+.text-input {
+	width: 100%;
+	padding: 0.5rem 0.6rem;
+	border: 1px solid var(--gray-300);
+	background: var(--white);
+	font-family: 'Space Mono', monospace;
+	font-size: 0.78rem;
+	color: var(--black);
+}
+
+.text-input:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+
+.text-input--inline {
+	flex: 1;
+	min-width: 200px;
+}
+
+.text-input--strong {
+	padding: 0.75rem;
+	border-color: var(--black);
+	font-size: 0.9rem;
+	cursor: pointer;
 }
 
 /* Tables */
@@ -320,20 +385,6 @@ pre code {
 	border-color: var(--danger);
 }
 
-/* Progress Bar */
-.progress-bar {
-	width: 100%;
-	height: 4px;
-	background: var(--gray-200);
-	position: relative;
-	overflow: hidden;
-}
-
-.progress-fill {
-	height: 100%;
-	background: var(--black);
-	transition: width 0.3s ease;
-}
 
 /* Navigation Links */
 .nav-link {
@@ -379,18 +430,8 @@ pre code {
 
 /* Responsive Breakpoints */
 @media (max-width: 1024px) {
-	.grid-2,
-	.grid-3,
-	.grid-4 {
-		grid-template-columns: 1fr;
-	}
-
 	.container {
 		padding: 0 1.5rem;
-	}
-
-	.section {
-		padding: 4rem 0;
 	}
 }
 
@@ -437,10 +478,6 @@ pre code {
 @media (max-width: 480px) {
 	.container {
 		padding: 0 0.75rem;
-	}
-
-	.section {
-		padding: 3rem 0;
 	}
 }
 
@@ -518,18 +555,6 @@ pre code {
 	margin: 0;
 }
 
-/* Two-column label + input form grid */
-.form-grid-2 {
-	display: grid;
-	grid-template-columns: repeat(2, 1fr);
-	gap: 1.25rem 1.5rem;
-}
-
-@media (max-width: 768px) {
-	.form-grid-2 {
-		grid-template-columns: 1fr;
-	}
-}
 
 /* Quick-action tile row (overview shortcuts) */
 .quick-grid {

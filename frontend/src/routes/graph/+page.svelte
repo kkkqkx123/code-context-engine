@@ -20,6 +20,7 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { watchState, watchActions } from '$lib/stores/watch';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+import Button from '$lib/components/ui/Button.svelte';
 	import GraphCanvas, {
 		layoutOptions,
 		type GraphLayoutName,
@@ -489,16 +490,10 @@
 						<ul class="impact-list">
 							{#each store.meta.impactDirect as id (id)}
 								<li>
-									<button
-										type="button"
-										class="impact-item-btn"
-										onclick={() => {
+									<Button variant="ghost" size="xs" onclick={() => {
 											selectedId = id;
 											centerGraphOn(cy, id);
-										}}
-									>
-										{id}
-									</button>
+										}}>{id}</Button>
 								</li>
 							{/each}
 						</ul>
@@ -513,16 +508,10 @@
 						<ul class="impact-list">
 							{#each store.meta.impactTransitive as id (id)}
 								<li>
-									<button
-										type="button"
-										class="impact-item-btn"
-										onclick={() => {
+									<Button variant="ghost" size="xs" onclick={() => {
 											selectedId = id;
 											centerGraphOn(cy, id);
-										}}
-									>
-										{id}
-									</button>
+										}}>{id}</Button>
 								</li>
 							{/each}
 						</ul>
@@ -546,8 +535,7 @@
 					>Relation index advanced to epoch {watchEpoch} (showing {store.meta
 						.epoch}). Reload rebuilds the current view from the seed.</span
 				>
-				<button type="button" class="ghost-btn" onclick={runSeed}>Reload</button
-				>
+				<Button variant="ghost" onclick={runSeed}>Reload</Button>
 			</div>
 		{/if}
 
@@ -640,36 +628,33 @@
 		<details class="result-section" open>
 			<summary class="result-section-summary">Results</summary>
 			<div class="result-tabs" role="tablist" aria-label="Graph results">
-				<button
-					type="button"
+				<Button
+					variant="tab"
 					role="tab"
-					class="result-tab"
-					class:active={resultTab === 'communities'}
 					aria-selected={resultTab === 'communities'}
+					class={resultTab === 'communities' ? 'active' : ''}
 					onclick={() => loadResultTab('communities')}
-				>
+					>
 					Communities
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
+					variant="tab"
 					role="tab"
-					class="result-tab"
-					class:active={resultTab === 'cycles'}
 					aria-selected={resultTab === 'cycles'}
+					class={resultTab === 'cycles' ? 'active' : ''}
 					onclick={() => loadResultTab('cycles')}
-				>
+					>
 					Cycles
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
+					variant="tab"
 					role="tab"
-					class="result-tab"
-					class:active={resultTab === 'module'}
 					aria-selected={resultTab === 'module'}
+					class={resultTab === 'module' ? 'active' : ''}
 					onclick={() => loadResultTab('module')}
-				>
+					>
 					Module
-				</button>
+				</Button>
 			</div>
 
 			{#if resultTab === 'communities' && GraphCommunitiesPanel}
@@ -720,23 +705,6 @@
 		color: var(--warning);
 	}
 
-	.ghost-btn {
-		height: 30px;
-		padding: 0 0.85rem;
-		border: 1px solid var(--black);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		transition: all 0.15s;
-		background: var(--white);
-		color: var(--black);
-	}
-
-	.ghost-btn:hover {
-		background: var(--gray-100);
-	}
 
 	.workspace {
 		display: grid;
@@ -781,29 +749,6 @@
 		background: var(--white);
 	}
 
-	.result-tab {
-		flex: 1;
-		height: 32px;
-		padding: 0 0.75rem;
-		border: none;
-		border-right: 1px solid var(--gray-300);
-		background: var(--white);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-	}
-
-	.result-tab:last-child {
-		border-right: none;
-	}
-
-	.result-tab.active {
-		background: var(--black);
-		color: var(--white);
-	}
 
 	.impact-dependents {
 		margin-bottom: 1rem;
@@ -835,22 +780,6 @@
 		padding: 0;
 	}
 
-	.impact-item-btn {
-		height: 24px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		color: var(--black);
-		word-break: break-all;
-	}
-
-	.impact-item-btn:hover {
-		border-color: var(--black);
-		background: var(--gray-100);
-	}
 
 	.canvas-help {
 		margin: 0.5rem 0 0;

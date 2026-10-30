@@ -35,13 +35,8 @@
 </div>
 
 <style>
-	.card {
-		background: var(--white);
-		border: 1px solid var(--black);
-		padding: 2rem;
-		transition: background 0.3s;
-	}
-
+	/* .card base lives in src/app.css (single source) — only component-specific
+	   structure styles are scoped here to avoid drifting from the global token. */
 	.card-clickable {
 		cursor: pointer;
 	}

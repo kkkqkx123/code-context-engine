@@ -63,7 +63,7 @@
 			{connected ? 'Connected' : 'Disconnected'}
 		</span>
 		{#each ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'] as level (level)}
-			<button
+			<button type="button"
 				class="px-2 py-1 text-xs rounded {levelFilter.includes(level) ? 'bg-blue-500 text-white' : 'bg-gray-200'}"
 				onclick={() => toggleLevel(level)}
 			>
@@ -80,8 +80,8 @@
 			placeholder="keyword"
 			bind:value={keyword}
 		/>
-		<button class="px-2 py-1 text-sm bg-gray-200 rounded" onclick={clear}>Clear</button>
-		<button class="px-2 py-1 text-sm bg-gray-200 rounded" onclick={() => (paused = !paused)}>
+		<button type="button" class="px-2 py-1 text-sm bg-gray-200 rounded" onclick={clear}>Clear</button>
+		<button type="button" class="px-2 py-1 text-sm bg-gray-200 rounded" onclick={() => (paused = !paused)}>
 			{paused ? 'Resume' : 'Pause'}
 		</button>
 	</div>

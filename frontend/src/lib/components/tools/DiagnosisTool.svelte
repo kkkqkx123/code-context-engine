@@ -111,7 +111,7 @@
 							type="text"
 							bind:value={fileName}
 							placeholder="e.g., main.ts"
-							class="text-input"
+							class="text-input text-input--strong"
 						/>
 					</div>
 				</div>
@@ -206,21 +206,9 @@
 	}
 
 	.select-input,
-	.text-input {
-		padding: 0.75rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.9rem;
-		background: var(--white);
-		cursor: pointer;
-	}
-
+	
 	.select-input:focus,
-	.text-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
+	
 	.code-textarea {
 		flex: 1;
 		width: 100%;

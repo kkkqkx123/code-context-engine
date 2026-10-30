@@ -259,7 +259,7 @@
 									/>
 								</td>
 								<td>
-									<button
+									<button type="button"
 										class="file-link"
 										onclick={() => toggleExpand(file.file_path)}
 									>

@@ -57,7 +57,7 @@
 
 <div class="p-4 space-y-4">
 	<div class="grid grid-cols-2 gap-2">
-		<select class="border p-2" bind:value={level}>
+		<select class="select" bind:value={level}>
 			<option value="">All levels</option>
 			<option value="TRACE">TRACE</option>
 			<option value="DEBUG">DEBUG</option>
@@ -65,17 +65,17 @@
 			<option value="WARN">WARN</option>
 			<option value="ERROR">ERROR</option>
 		</select>
-		<input class="border p-2" placeholder="module" bind:value={module} />
-		<input class="border p-2" placeholder="keyword" bind:value={query} />
-		<input class="border p-2" placeholder="start time (ISO)" bind:value={startTime} />
-		<input class="border p-2" placeholder="end time (ISO)" bind:value={endTime} />
-		<input class="border p-2" type="number" bind:value={pageSize} />
+		<input class="input" placeholder="module" bind:value={module} />
+		<input class="input" placeholder="keyword" bind:value={query} />
+		<input class="input" placeholder="start time (ISO)" bind:value={startTime} />
+		<input class="input" placeholder="end time (ISO)" bind:value={endTime} />
+		<input class="input" type="number" bind:value={pageSize} />
 	</div>
 	<div class="flex gap-2">
-		<button class="bg-blue-500 text-white px-4 py-2 rounded" onclick={search} disabled={loading}>
+		<button type="button" class="bg-blue-500 text-white px-4 py-2 rounded" onclick={search} disabled={loading}>
 			{loading ? 'Searching...' : 'Search'}
 		</button>
-		<button class="bg-gray-200 px-4 py-2 rounded" onclick={exportCsv}>Export CSV</button>
+		<button type="button" class="bg-gray-200 px-4 py-2 rounded" onclick={exportCsv}>Export CSV</button>
 	</div>
 	{#if error}
 		<div class="text-red-600">{error}</div>
@@ -104,8 +104,8 @@
 		</table>
 	</div>
 	<div class="flex gap-2 items-center">
-		<button class="px-2 py-1 bg-gray-200 rounded" onclick={() => { if (page > 1) { page--; search(); } }}>Prev</button>
+		<button type="button" class="px-2 py-1 bg-gray-200 rounded" onclick={() => { if (page > 1) { page--; search(); } }}>Prev</button>
 		<span>Page {page}</span>
-		<button class="px-2 py-1 bg-gray-200 rounded" onclick={() => { page++; search(); }}>Next</button>
+		<button type="button" class="px-2 py-1 bg-gray-200 rounded" onclick={() => { page++; search(); }}>Next</button>
 	</div>
 </div>

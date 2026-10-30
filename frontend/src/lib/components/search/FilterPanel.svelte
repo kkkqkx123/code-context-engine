@@ -140,7 +140,7 @@
 		<span class="section-label" id="query-mode-label">Query Mode</span>
 		<div class="mode-tabs" role="group" aria-labelledby="query-mode-label">
 			{#each [...QUERY_TYPES, AGGREGATED_TYPE] as mode (mode)}
-				<button
+				<button type="button"
 					class="tab"
 					class:active={$searchState.mode === mode}
 					onclick={() => searchActions.setMode(mode)}

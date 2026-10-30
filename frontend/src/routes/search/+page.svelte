@@ -74,7 +74,7 @@
 		<SearchInput onSearch={handleSearch} />
 
 		<div class="filter-toggle">
-			<button
+			<button type="button"
 				class="filter-toggle-btn"
 				class:active={filterPanelVisible}
 				onclick={toggleFilterPanel}
