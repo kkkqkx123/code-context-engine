@@ -27,8 +27,18 @@ pub fn global_gateway() -> &'static llm_suite_gateway::LlmGateway {
     GATEWAY.get_or_init(|| {
         let gateway = llm_suite_gateway::LlmGateway::new();
         match TOKEN_SINK.get() {
-            Some(sink) => gateway.with_token_metrics(std::sync::Arc::new(sink.clone())),
-            None => gateway,
+            Some(sink) => gateway
+                .with_token_metrics(std::sync::Arc::new(sink.clone()))
+                .with_request_probe(llm_suite_gateway::RequestProbe {
+                    on_request: Some(probe_on_request),
+                    on_response: Some(probe_on_response),
+                    on_stream_start: None,
+                }),
+            None => gateway.with_request_probe(llm_suite_gateway::RequestProbe {
+                on_request: Some(probe_on_request),
+                on_response: Some(probe_on_response),
+                on_stream_start: None,
+            }),
         }
     })
 }
@@ -114,6 +124,72 @@ impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
             .counter("llm_gateway_retries_total", &[("model", model)])
             .increment();
     }
+
+    fn record_stream_stats(
+        &self,
+        stats: &llm_suite_types::llm::StreamStats,
+        completion_tokens: u32,
+        context: &llm_suite_client::LlmCallContext,
+    ) {
+        let model = context.model.as_deref().unwrap_or("unknown");
+        self.registry
+            .histogram(
+                "llm_gateway_stream_first_chunk_latency_ms",
+                GATEWAY_LATENCY_BUCKETS.to_vec(),
+                &[("model", model)],
+            )
+            .observe(stats.time_to_first_chunk as f64);
+        self.registry
+            .histogram(
+                "llm_gateway_stream_duration_ms",
+                GATEWAY_LATENCY_BUCKETS.to_vec(),
+                &[("model", model)],
+            )
+            .observe(stats.stream_duration as f64);
+        self.registry
+            .counter("llm_gateway_stream_chunks_total", &[("model", model)])
+            .add(stats.chunk_count as u64);
+        self.registry
+            .counter(
+                "llm_gateway_stream_completion_tokens_total",
+                &[("model", model)],
+            )
+            .add(u64::from(completion_tokens));
+    }
+}
+
+/// Typed request observation hooks. These are plain function pointers (no
+/// captured state) and forward into `tracing`, complementing the aggregate
+/// metrics recorded by [`GatewayMetricsSink`].
+fn probe_on_request(
+    request: &llm_suite_types::llm::LlmRequest,
+    profile: &llm_suite_types::llm::LlmProfile,
+) {
+    tracing::debug!(
+        profile_id = %request.profile_id,
+        model = %profile.model,
+        "llm gateway request"
+    );
+}
+
+fn probe_on_response(
+    request: &llm_suite_types::llm::LlmRequest,
+    result: &Result<llm_suite_types::llm::LlmResult, llm_suite_codec::error::LlmError>,
+    elapsed_ms: f64,
+) {
+    match result {
+        Ok(_) => tracing::debug!(
+            profile_id = %request.profile_id,
+            elapsed_ms,
+            "llm gateway response"
+        ),
+        Err(error) => tracing::warn!(
+            profile_id = %request.profile_id,
+            elapsed_ms,
+            error = %error,
+            "llm gateway response failed"
+        ),
+    }
 }
 
 /// Constructs the process-wide gateway together with its metrics sink.
@@ -123,8 +199,15 @@ impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
 pub fn init_gateway(registry: &cce_metrics::MetricsRegistry) {
     let sink = GatewayMetricsSink::new(registry);
     let _ = TOKEN_SINK.set(sink.clone());
-    let _ = GATEWAY
-        .set(llm_suite_gateway::LlmGateway::new().with_token_metrics(std::sync::Arc::new(sink)));
+    let _ = GATEWAY.set(
+        llm_suite_gateway::LlmGateway::new()
+            .with_token_metrics(std::sync::Arc::new(sink))
+            .with_request_probe(llm_suite_gateway::RequestProbe {
+                on_request: Some(probe_on_request),
+                on_response: Some(probe_on_response),
+                on_stream_start: None,
+            }),
+    );
 }
 
 /// Installs the process-wide gateway metrics sink.
@@ -278,6 +361,42 @@ fn metadata_from_params(
     Some(params.clone())
 }
 
+fn compat_from_config(
+    config: &cce_config::modules::ProviderCompatConfig,
+) -> llm_suite_types::llm::ProviderCompat {
+    llm_suite_types::llm::ProviderCompat {
+        supports_developer_role: config.supports_developer_role,
+        supports_strict_mode: config.supports_strict_mode,
+        supports_mid_convo_system_messages: config.supports_mid_convo_system_messages,
+        supports_long_cache_retention: config.supports_long_cache_retention,
+        max_tokens_field: config.max_tokens_field.map(|field| match field {
+            cce_config::modules::MaxTokenField::MaxCompletionTokens => {
+                llm_suite_types::llm::LlmMaxTokenField::MaxCompletionTokens
+            }
+            cce_config::modules::MaxTokenField::MaxTokens => {
+                llm_suite_types::llm::LlmMaxTokenField::MaxTokens
+            }
+        }),
+    }
+}
+
+fn identity_from_config(config: &cce_config::modules::LlmIdentityConfig) -> llm_suite_types::llm::LlmIdentity {
+    llm_suite_types::llm::LlmIdentity {
+        user_agent: config.user_agent.clone(),
+        app_name: config.app_name.clone(),
+        app_url: config.app_url.clone(),
+    }
+}
+
+fn transport_from_config(
+    config: &cce_config::modules::LlmHttpTransportConfig,
+) -> llm_suite_types::llm::LlmHttpTransport {
+    llm_suite_types::llm::LlmHttpTransport {
+        connect_timeout_secs: config.connect_timeout_secs,
+        danger_accept_invalid_certs: config.danger_accept_invalid_certs,
+    }
+}
+
 /// Builds the shared provider definition for a resolved connection.
 pub fn provider_definition(
     connection: &ResolvedLlmConnection,
@@ -297,6 +416,29 @@ pub fn provider_definition(
         proxy: connection.proxy_url.clone(),
         no_proxy: no_proxy_for(&connection.no_proxy),
         rate_limit: rate_limit_for(connection.rate_limit),
+        compat: (|| {
+            if let Some(config) = connection.compat.as_ref() {
+                let converted = compat_from_config(config);
+                if converted.is_empty() {
+                    None
+                } else {
+                    Some(converted)
+                }
+            } else {
+                let detected = llm_suite_types::llm::ProviderCompat::detect(
+                    Some(&connection.base_url),
+                    &llm_suite_types::llm::LlmFormat::OpenaiChat,
+                );
+                if detected.is_empty() {
+                    None
+                } else {
+                    Some(detected)
+                }
+            }
+        })(),
+        identity: connection.identity.as_ref().map(identity_from_config),
+        transport: connection.transport.as_ref().map(transport_from_config),
+        env: connection.env.clone(),
     }
 }
 
@@ -346,6 +488,10 @@ pub fn chat_profile(
         proxy: connection.proxy_url.clone(),
         no_proxy: no_proxy_for(&connection.no_proxy),
         circuit_breaker: circuit_breaker_config(&connection.circuit_breaker),
+        compat: None,
+        identity: None,
+        transport: None,
+        env: None,
     }
 }
 
@@ -633,9 +779,12 @@ impl LlmClient for SuiteChatClient {
             stream: None,
             dead_loop_detection: None,
             protocol_auto_converted: None,
-            timeout_ms: None,
+            timeout_ms: config.timeout_ms,
             prompt_caching: None,
             cached_content: None,
+            max_retries: config.max_retries,
+            retry_delay_ms: config.retry_delay_ms,
+            extra_headers: metadata_from_headers(&config.extra_headers),
         };
         let response = global_gateway()
             .generate(&request, None)
@@ -685,6 +834,10 @@ mod tests {
             no_proxy: vec!["localhost".to_string()],
             extra_headers: HashMap::new(),
             extra_params: HashMap::new(),
+            compat: None,
+            identity: None,
+            transport: None,
+            env: None,
         }
     }
 

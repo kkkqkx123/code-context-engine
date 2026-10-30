@@ -135,6 +135,22 @@ pub struct ProviderConfig {
     /// Path to file containing API key (alternative to api_keys)
     #[serde(deserialize_with = "empty_string_as_none", default)]
     pub api_key_file: Option<String>,
+
+    /// Provider compatibility opinions (optional). Overrides auto-detection.
+    #[serde(default)]
+    pub compat: Option<ProviderCompatConfig>,
+
+    /// Client identity headers (optional).
+    #[serde(default)]
+    pub identity: Option<LlmIdentityConfig>,
+
+    /// Connection-level HTTP transport tuning (optional).
+    #[serde(default)]
+    pub transport: Option<LlmHttpTransportConfig>,
+
+    /// Environment overlay used during auth resolution (optional).
+    #[serde(default)]
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Circuit breaker configuration for an LLM provider
@@ -283,6 +299,10 @@ impl Default for ProviderConfig {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
+            compat: None,
+            identity: None,
+            transport: None,
+            env: None,
         }
     }
 }
@@ -475,6 +495,50 @@ fn default_max_input_tokens() -> usize {
     8192
 }
 
+
+/// Compatibility opinions for an OpenAI-compatible provider.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProviderCompatConfig {
+    #[serde(default)]
+    pub supports_developer_role: Option<bool>,
+    #[serde(default)]
+    pub supports_strict_mode: Option<bool>,
+    #[serde(default)]
+    pub supports_mid_convo_system_messages: Option<bool>,
+    #[serde(default)]
+    pub supports_long_cache_retention: Option<bool>,
+    #[serde(default)]
+    pub max_tokens_field: Option<MaxTokenField>,
+}
+
+/// Wire field used for the OpenAI Chat output limit.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MaxTokenField {
+    MaxCompletionTokens,
+    MaxTokens,
+}
+
+/// Client identity headers.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LlmIdentityConfig {
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    #[serde(default)]
+    pub app_name: Option<String>,
+    #[serde(default)]
+    pub app_url: Option<String>,
+}
+
+/// Connection-level HTTP transport tuning.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LlmHttpTransportConfig {
+    #[serde(default)]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub danger_accept_invalid_certs: Option<bool>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,7 +562,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-        };
+                    compat: None,
+            identity: None,
+            transport: None,
+            env: None,
+};
 
         assert!(provider.validate_structured().is_ok());
     }
@@ -522,7 +590,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-        };
+                    compat: None,
+            identity: None,
+            transport: None,
+            env: None,
+};
 
         assert!(provider.validate_structured().is_err());
     }
@@ -562,7 +634,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-        };
+                    compat: None,
+            identity: None,
+            transport: None,
+            env: None,
+};
 
         assert!(provider.validate_structured().is_err());
     }
@@ -595,7 +671,11 @@ mod tests {
             no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
-        };
+                    compat: None,
+            identity: None,
+            transport: None,
+            env: None,
+};
 
         assert_eq!(
             provider.get_endpoint_path(ServiceType::Embedding),

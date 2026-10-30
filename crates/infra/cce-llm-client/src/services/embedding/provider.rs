@@ -231,7 +231,7 @@ mod tests {
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_keys: vec!["sk-test".to_string()],
                 ..ProviderConfig::default()
-            },
+},
         );
         config.llm.providers = providers;
 

@@ -58,6 +58,14 @@ pub struct ResolvedLlmConnection {
     pub extra_headers: std::collections::HashMap<String, String>,
     /// Provider-/model-specific extra parameters (e.g. `extra_params` from a chat model)
     pub extra_params: std::collections::HashMap<String, serde_json::Value>,
+    /// Provider compatibility opinions (optional).
+    pub compat: Option<crate::modules::ProviderCompatConfig>,
+    /// Client identity headers (optional).
+    pub identity: Option<crate::modules::LlmIdentityConfig>,
+    /// Connection-level HTTP transport tuning (optional).
+    pub transport: Option<crate::modules::LlmHttpTransportConfig>,
+    /// Environment overlay used during auth resolution (optional).
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Resolved chat configuration - complete config for initializing a chat client
@@ -186,6 +194,10 @@ impl AppConfig {
             no_proxy: provider.no_proxy.clone(),
             extra_headers: provider.extra_headers.clone(),
             extra_params,
+            compat: provider.compat.clone(),
+            identity: provider.identity.clone(),
+            transport: provider.transport.clone(),
+            env: provider.env.clone(),
         })
     }
 

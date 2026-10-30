@@ -669,7 +669,7 @@ mod tests {
                 api_keys: vec!["${PROVIDER1_API_KEY}".to_string()],
                 base_url: "https://api.provider1.com".to_string(),
                 ..Default::default()
-            },
+},
         );
         providers.insert(
             "provider2".to_string(),
@@ -679,7 +679,7 @@ mod tests {
                 api_keys: vec!["${PROVIDER2_API_KEY}".to_string()],
                 base_url: "https://api.provider2.com".to_string(),
                 ..Default::default()
-            },
+},
         );
 
         config.llm.providers = providers;
@@ -727,7 +727,7 @@ mod tests {
                 api_keys: vec!["${MISSING_VAR_12345}".to_string()],
                 base_url: "https://api.test.com".to_string(),
                 ..Default::default()
-            },
+},
         );
 
         config.llm.providers = providers;
@@ -803,7 +803,7 @@ mod tests {
                 api_key_file: Some(key_file.to_str().unwrap().to_string()),
                 base_url: "https://api.test.com".to_string(),
                 ..Default::default()
-            },
+},
         );
 
         config.llm.providers = providers;
@@ -846,7 +846,7 @@ mod tests {
                 api_keys: vec![],
                 api_key_file: Some(key_file.to_str().unwrap().to_string()),
                 ..Default::default()
-            },
+},
         );
         config.llm.providers = providers;
 

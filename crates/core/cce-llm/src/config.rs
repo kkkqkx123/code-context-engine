@@ -39,6 +39,22 @@ pub struct ChatConfig {
     /// Response format (e.g., "json_object" for JSON mode)
     #[serde(default)]
     pub response_format: Option<ResponseFormat>,
+
+    /// Per-request retry budget override. `None` keeps the profile default.
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+
+    /// Per-request retry base delay in milliseconds. `None` keeps the profile default.
+    #[serde(default)]
+    pub retry_delay_ms: Option<u64>,
+
+    /// Per-request wall-clock bound in milliseconds. `None` keeps the profile timeout.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+
+    /// Per-request extra HTTP headers merged after codec-built headers.
+    #[serde(default)]
+    pub extra_headers: std::collections::HashMap<String, String>,
 }
 
 /// Response format configuration
@@ -61,6 +77,10 @@ impl Default for ChatConfig {
             stop_sequences: Vec::new(),
             seed: None,
             response_format: None,
+            max_retries: None,
+            retry_delay_ms: None,
+            timeout_ms: None,
+            extra_headers: std::collections::HashMap::new(),
         }
     }
 }

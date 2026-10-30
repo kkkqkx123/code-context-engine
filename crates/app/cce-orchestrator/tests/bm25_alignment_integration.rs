@@ -193,7 +193,7 @@ fn mock_embedder() -> OpenAICompatibleProvider {
             base_url: "http://mock.local".to_string(),
             api_keys: vec!["test-key".to_string()],
             ..Default::default()
-        },
+},
     );
     let mut models = std::collections::HashMap::new();
     models.insert(
