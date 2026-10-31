@@ -103,6 +103,9 @@ pub mod annotation;
 // Caller-driven relation expansion for opt-in query requests
 pub mod expansion;
 
+// Pure scoring functions for expansion neighbours
+pub mod expansion_scoring;
+
 // Fuzzy file-path search over project files
 pub mod files;
 

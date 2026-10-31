@@ -118,8 +118,8 @@ pub struct ExpandedUnit {
     /// True when the target has no in-workspace source.
     pub is_external: bool,
     /// True when the unit body is a windowed excerpt rather than the full
-    /// definition (set by report-side expansion builders); rendered as the
-    /// `excerpt="true"` attribute in XML-style output.
+    /// definition; rendered as the `excerpt="true"` attribute in XML-style
+    /// output.
     pub is_excerpt: bool,
 }
 

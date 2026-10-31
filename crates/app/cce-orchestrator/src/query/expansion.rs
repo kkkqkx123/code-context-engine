@@ -20,8 +20,13 @@ use super::annotation::{
     AnnotatedResult, AnnotationMetadata, ExpandedUnit, ExpansionOrigin, RelationAnnotationConfig,
     RelationAnnotator, SearchResultInput,
 };
+use super::expansion_scoring::{expansion_score, seed_weight};
 use super::relation_searcher::{RelationQueryOptions, RelationSearcher};
-use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
+use cce_codegraph::index::snapshot_query::{
+    SnapshotEntityQueryOps, SnapshotRelationQueryOps, SnapshotSymbolQueryOps,
+};
+
+pub use super::expansion_scoring::ExpansionScoring;
 
 /// Maximum seeds taken from one hit's line range.
 const MAX_SEEDS: usize = 4;
@@ -122,6 +127,8 @@ pub struct NeighbourResolver {
     project_root: std::path::PathBuf,
     pub path_filter: ExpansionPathFilter,
     pub domains: Vec<String>,
+    query_terms: Vec<String>,
+    scoring: ExpansionScoring,
 }
 
 impl std::fmt::Debug for NeighbourResolver {
@@ -143,6 +150,8 @@ impl NeighbourResolver {
             project_root,
             path_filter: ExpansionPathFilter::default(),
             domains: vec!["call".to_string()],
+            query_terms: Vec::new(),
+            scoring: ExpansionScoring::default(),
         }
     }
 
@@ -158,31 +167,58 @@ impl NeighbourResolver {
             project_root,
             path_filter,
             domains,
+            query_terms: Vec::new(),
+            scoring: ExpansionScoring::default(),
         }
     }
 
+    /// Attach pre-split query terms for neighbour name matching.
+    pub fn with_query(mut self, query: &str) -> Self {
+        self.query_terms = super::expansion_scoring::split_query_terms(query);
+        self
+    }
+
+    /// Override the scoring switches (defaults follow the annotation config).
+    pub fn with_scoring(mut self, scoring: ExpansionScoring) -> Self {
+        self.scoring = scoring;
+        self
+    }
+
     /// Resolve neighbour units for one hit (see [`resolve_expansion_units`]).
-    pub fn resolve(
-        &self,
-        file_path: &str,
-        start_line: u32,
-        end_line: u32,
-        forward_budget: usize,
-        backward_budget: usize,
-        include_callers: bool,
-    ) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
+    ///
+    /// `primary_score` seeds the neighbour scores so direction-internal
+    /// ordering reflects hit relevance instead of traversal discovery order.
+    pub fn resolve(&self, hit: ResolveHit) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
         let request = ExpansionRequest {
-            file_path: file_path.to_string(),
-            start_line,
-            end_line,
-            forward_budget,
-            backward_budget,
-            include_callers,
+            file_path: hit.file_path,
+            start_line: hit.start_line,
+            end_line: hit.end_line,
+            forward_budget: hit.forward_budget,
+            backward_budget: hit.backward_budget,
+            include_callers: hit.include_callers,
             domains: self.domains.clone(),
             path_filter: self.path_filter.clone(),
+            primary_score: hit.primary_score,
+            query_terms: self.query_terms.clone(),
+            scoring: self.scoring,
         };
         resolve_expansion_units_with_filter(&self.searcher, &self.project_root, request)
     }
+}
+
+/// Per-hit resolve parameters: range, budgets and the primary hit score.
+///
+/// Groups the scalar arguments of [`NeighbourResolver::resolve`] so the
+/// method stays within the argument-count guideline.
+#[derive(Debug, Clone)]
+pub struct ResolveHit {
+    pub file_path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub forward_budget: usize,
+    pub backward_budget: usize,
+    pub include_callers: bool,
+    pub primary_score: f32,
 }
 
 /// Single-hit expansion request grouping range, budgets and filters.
@@ -200,6 +236,9 @@ pub struct ExpansionRequest {
     pub include_callers: bool,
     pub domains: Vec<String>,
     pub path_filter: ExpansionPathFilter,
+    pub primary_score: f32,
+    pub query_terms: Vec<String>,
+    pub scoring: ExpansionScoring,
 }
 
 /// Resolve neighbour units for one search hit with explicit budgets, domains
@@ -222,6 +261,9 @@ pub fn resolve_expansion_units_with_filter(
         include_callers,
         domains,
         path_filter,
+        primary_score,
+        query_terms,
+        scoring,
     } = request;
     if forward_budget == 0 && (!include_callers || backward_budget == 0) {
         return (Vec::new(), Vec::new());
@@ -261,10 +303,15 @@ pub fn resolve_expansion_units_with_filter(
     let mut cache = SourceFileCache::new();
     let mut forward = Vec::new();
     let mut seen_forward = HashSet::new();
-    for entity_id in &seeds {
+    for (seed_rank, entity_id) in seeds.iter().enumerate() {
         if forward.len() >= forward_budget {
             break;
         }
+        let seed = seed_weight(
+            primary_score,
+            seed_overlap_ratio(*entity_id, first_row, last_row, snapshot),
+            seed_rank,
+        );
         for relation in searcher.get_callees_paginated(*entity_id, &options) {
             let Some(callee) = relation.callee_id else {
                 continue;
@@ -280,6 +327,7 @@ pub fn resolve_expansion_units_with_filter(
             {
                 continue;
             }
+            let score = scored_neighbour(searcher, &relation, callee, seed, &query_terms, scoring);
             if let Some(unit) = snippet_unit(
                 searcher,
                 project_root,
@@ -287,7 +335,10 @@ pub fn resolve_expansion_units_with_filter(
                 callee,
                 ExpansionOrigin::Forward,
                 "calls",
-                &relation,
+                ScoredEdge {
+                    relation: &relation,
+                    score,
+                },
             ) {
                 forward.push(unit);
             }
@@ -297,10 +348,15 @@ pub fn resolve_expansion_units_with_filter(
     let mut backward = Vec::new();
     if include_callers && backward_budget > 0 {
         let mut seen_backward = HashSet::new();
-        for entity_id in &seeds {
+        for (seed_rank, entity_id) in seeds.iter().enumerate() {
             if backward.len() >= backward_budget {
                 break;
             }
+            let seed = seed_weight(
+                primary_score,
+                seed_overlap_ratio(*entity_id, first_row, last_row, snapshot),
+                seed_rank,
+            );
             for relation in searcher.get_callers_paginated(*entity_id, &options) {
                 let caller = relation.caller;
                 if seed_set.contains(&caller) {
@@ -320,6 +376,8 @@ pub fn resolve_expansion_units_with_filter(
                 } else {
                     "called by"
                 };
+                let score =
+                    scored_neighbour(searcher, &relation, caller, seed, &query_terms, scoring);
                 if let Some(unit) = snippet_unit(
                     searcher,
                     project_root,
@@ -327,7 +385,10 @@ pub fn resolve_expansion_units_with_filter(
                     caller,
                     ExpansionOrigin::Backward,
                     edge_label,
-                    &relation,
+                    ScoredEdge {
+                        relation: &relation,
+                        score,
+                    },
                 ) {
                     backward.push(unit);
                 }
@@ -335,6 +396,49 @@ pub fn resolve_expansion_units_with_filter(
         }
     }
     (forward, backward)
+}
+
+/// Score one neighbour from its edge metadata, seed weight and query terms.
+///
+/// Fan-in comes from the snapshot reverse index; a missing entry reads as a
+/// leaf (zero callers) rather than an error.
+fn scored_neighbour(
+    searcher: &RelationSearcher,
+    relation: &cce_types::ResolvedRelation,
+    neighbour: cce_types::EntityId,
+    seed: f32,
+    query_terms: &[String],
+    scoring: ExpansionScoring,
+) -> f32 {
+    let name = searcher
+        .query()
+        .index()
+        .get_function_by_entity_id(neighbour)
+        .map(|entity| entity.name)
+        .unwrap_or_default();
+    let fan_in = searcher
+        .query()
+        .index()
+        .get_callers_by_callee_entity(neighbour)
+        .len();
+    expansion_score(relation, seed, &name, query_terms, fan_in, scoring)
+}
+
+/// Overlap ratio between a seed entity span and the hit row range.
+fn seed_overlap_ratio(
+    entity_id: cce_types::EntityId,
+    first_row: usize,
+    last_row: usize,
+    snapshot: &cce_codegraph::LayeredSnapshotIndex,
+) -> f32 {
+    use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
+    let Some(entity) = snapshot.get_function_by_entity_id(entity_id) else {
+        return 0.0;
+    };
+    let start = entity.span.start_position.row;
+    let end = entity.span.end_position.row.max(start);
+    let len = (end - start + 1).max(1) as f32;
+    overlap_len(entity_id, first_row, last_row, snapshot) as f32 / len
 }
 
 /// Overlap length between an entity span and the hit row range.
@@ -381,6 +485,9 @@ pub fn resolve_expansion_units(
         include_callers,
         domains: Vec::new(),
         path_filter: ExpansionPathFilter::default(),
+        primary_score: 1.0,
+        query_terms: Vec::new(),
+        scoring: ExpansionScoring::default(),
     };
     resolve_expansion_units_with_filter(searcher, project_root, request)
 }
@@ -390,6 +497,12 @@ pub fn resolve_expansion_units(
 /// Returns `None` when the entity has no snapshot metadata or its source
 /// cannot be read; vanished files are the annotator's downgrade path, not an
 /// error here.
+/// Edge metadata with its resolved ordering score for snippet construction.
+struct ScoredEdge<'a> {
+    relation: &'a cce_types::ResolvedRelation,
+    score: f32,
+}
+
 fn snippet_unit(
     searcher: &RelationSearcher,
     project_root: &Path,
@@ -397,7 +510,7 @@ fn snippet_unit(
     entity_id: cce_types::EntityId,
     origin: ExpansionOrigin,
     edge_label: &str,
-    relation: &cce_types::ResolvedRelation,
+    edge: ScoredEdge<'_>,
 ) -> Option<ExpandedUnit> {
     let snapshot = searcher.query().index();
     let entity = snapshot.get_function_by_entity_id(entity_id)?;
@@ -414,7 +527,12 @@ fn snippet_unit(
     }
     // Oversized bodies become window excerpts; the whole-body fallback would
     // only crowd out the rest of the expansion budget or degrade entirely.
-    let code = window_excerpt(&code).unwrap_or(code);
+    // Excerpted bodies carry the marker so renderers stay honest about the cut.
+    let ScoredEdge { relation, score } = edge;
+    let (code, excerpt) = match window_excerpt(&code) {
+        Some(excerpt) => (excerpt, true),
+        None => (code, false),
+    };
     Some(
         ExpandedUnit::new(
             code,
@@ -427,7 +545,9 @@ fn snippet_unit(
         .with_entity_id(entity_id)
         .with_relation_type(relation.relation_type)
         .with_external(relation.is_external)
-        .with_stdlib(relation.is_stdlib()),
+        .with_stdlib(relation.is_stdlib())
+        .with_score(score)
+        .with_excerpt(excerpt),
     )
 }
 
@@ -501,14 +621,15 @@ pub async fn annotate_hits_with_resolver(
         {
             continue;
         }
-        let (forward, backward) = resolver.resolve(
-            &item.file_path,
-            item.start_line,
-            item.end_line,
+        let (forward, backward) = resolver.resolve(ResolveHit {
+            file_path: item.file_path.clone(),
+            start_line: item.start_line,
+            end_line: item.end_line,
             forward_budget,
             backward_budget,
-            config.expansion_include_callers,
-        );
+            include_callers: config.expansion_include_callers,
+            primary_score: item.score,
+        });
         if forward.is_empty() && backward.is_empty() {
             continue;
         }

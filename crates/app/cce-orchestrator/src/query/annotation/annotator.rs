@@ -83,12 +83,29 @@ impl RelationAnnotator {
             let (forward, omitted_self_evident) = if self.config.omit_self_evident_edges {
                 let concatenator = StructureConcatenator::new(self.config.clone());
                 if concatenator.primary_renders_fully(&primary_unit).await {
-                    let before = forward.len();
-                    let kept: Vec<ExpandedUnit> = forward
-                        .into_iter()
-                        .filter(|unit| !unit.is_self_evident_from(&primary_unit.code))
-                        .collect();
-                    let omitted = before.saturating_sub(kept.len());
+                    // An evident edge is dropped only when its name is unique
+                    // in the forward set: overloaded names stay ambiguous and
+                    // are kept with a score discount instead of deleted.
+                    let mut name_counts: std::collections::HashMap<String, usize> =
+                        std::collections::HashMap::new();
+                    for unit in &forward {
+                        *name_counts.entry(unit.name.clone()).or_insert(0) += 1;
+                    }
+                    let mut kept = Vec::with_capacity(forward.len());
+                    let mut omitted = 0;
+                    for mut unit in forward {
+                        let evident = unit.is_self_evident_from(&primary_unit.code);
+                        let unique = name_counts.get(&unit.name).is_some_and(|n| *n == 1);
+                        if evident && unique {
+                            omitted += 1;
+                        } else {
+                            if evident {
+                                unit.score *=
+                                    super::super::expansion_scoring::SHARED_EVIDENT_DISCOUNT;
+                            }
+                            kept.push(unit);
+                        }
+                    }
                     (kept, omitted)
                 } else {
                     (forward, 0)
@@ -158,11 +175,15 @@ impl RelationAnnotator {
     ) -> Result<Vec<AnnotatedResult>> {
         let top_n = self.config.annotation_top_n;
 
-        // Split into top-N (to be annotated) and rest (simple results)
-        let (top_results, rest_results): (Vec<_>, Vec<_>) = results
+        // Split into top-N (to be annotated) and rest (simple results).
+        // Top-N are ordered by primary score first (stable) so a shared
+        // neighbour is deterministically won by the higher-scored hit rather
+        // than by input accident.
+        let (mut top_results, rest_results): (Vec<_>, Vec<_>) = results
             .into_iter()
             .enumerate()
             .partition(|(idx, _)| *idx < top_n);
+        top_results.sort_by(|a, b| b.1.0.score.total_cmp(&a.1.0.score));
 
         // Batch-shared dedup: the same entity must not be concatenated twice
         // as an expansion of different hits. The seen state is seeded with
@@ -402,6 +423,20 @@ mod tests {
 
     fn unit(entity: u64, name: &str, origin: ExpansionOrigin) -> ExpandedUnit {
         unit_scored(entity, name, origin, 0.0)
+    }
+
+    fn input_scored(content: &str, entity: u64, score: f32) -> SearchResultInput {
+        SearchResultInput {
+            id: format!("r{entity}"),
+            entity_id: Some(EntityId(entity)),
+            name: "primary".to_string(),
+            kind: "function".to_string(),
+            file_path: "src/main.rs".to_string(),
+            start_line: 1,
+            end_line: 3,
+            content: content.to_string(),
+            score,
+        }
     }
 
     fn unit_scored(entity: u64, name: &str, origin: ExpansionOrigin, score: f32) -> ExpandedUnit {
@@ -941,6 +976,61 @@ mod tests {
             .expect("annotation ok");
         assert_eq!(annotated[0].metadata.forward_nodes, 1);
         assert_eq!(annotated[1].metadata.forward_nodes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_shared_evident_name_kept_with_discount() {
+        use cce_types::RelationType;
+
+        // Both forwards share the name `dup`, so neither is dropped even
+        // though both are evident; the discount demotes them below `other`.
+        let annotator =
+            RelationAnnotator::new(expansion_config(2, true).omit_self_evident_edges(true));
+        let dup_high = unit_scored(2, "dup", ExpansionOrigin::Forward, 0.9)
+            .with_relation_type(RelationType::DirectCall);
+        let dup_low = unit_scored(3, "dup", ExpansionOrigin::Forward, 0.1)
+            .with_relation_type(RelationType::DirectCall);
+        let ghost = unit_scored(4, "ghost", ExpansionOrigin::Forward, 0.8)
+            .with_relation_type(RelationType::DirectCall);
+        let result = annotator
+            .annotate_single(
+                input("fn a() {\n    dup();\n}", 1),
+                vec![dup_high, dup_low, ghost],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 2);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
+        assert!(result.annotated_content.contains("fn ghost()"));
+        assert!(result.annotated_content.contains("fn dup()"));
+    }
+
+    #[tokio::test]
+    async fn test_batch_shared_dedup_higher_score_wins_regardless_of_order() {
+        // The lower-scored hit arrives first, but the shared entity must be
+        // won by the higher-scored hit.
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
+        let results = vec![
+            (
+                input_scored(PRIMARY_CODE, 1, 0.2),
+                vec![unit(9, "shared", ExpansionOrigin::Forward)],
+                Vec::new(),
+            ),
+            (
+                input_scored(PRIMARY_CODE, 2, 0.9),
+                vec![unit(9, "shared", ExpansionOrigin::Forward)],
+                Vec::new(),
+            ),
+        ];
+        let annotated = annotator
+            .annotate_batch(results)
+            .await
+            .expect("annotation ok");
+        assert_eq!(annotated[0].metadata.forward_nodes, 1);
+        assert!(annotated[0].annotated_content.contains("fn shared()"));
+        assert_eq!(annotated[1].metadata.forward_nodes, 0);
+        assert!(!annotated[1].annotated_content.contains("fn shared()"));
     }
 
     #[tokio::test]

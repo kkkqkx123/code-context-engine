@@ -662,6 +662,19 @@ pub struct RelationAnnotationConfig {
     /// concatenated twice as an expansion of different hits.
     #[serde(default = "default_true")]
     pub batch_shared_dedup: bool,
+    /// Score expansion neighbours instead of keeping traversal discovery
+    /// order. Off restores the historical all-zero scores (first-come wins
+    /// every budget). Master switch for the two sub-switches below.
+    #[serde(default = "default_true")]
+    pub expansion_scoring: bool,
+    /// Multiply expansion scores by query-term overlap on the neighbour
+    /// name. Off keeps the factor neutral (1.0).
+    #[serde(default = "default_true")]
+    pub expansion_query_scoring: bool,
+    /// Multiply expansion scores by caller fan-in (lightweight centrality).
+    /// Off keeps the factor neutral (1.0).
+    #[serde(default = "default_true")]
+    pub expansion_fanin_scoring: bool,
     /// Workspace root for file existence checks. Relative segment paths
     /// resolve against it; absolute paths are checked directly. Missing files
     /// are downgraded to references. `None` skips the check entirely.
@@ -693,6 +706,9 @@ impl Default for RelationAnnotationConfig {
             filter_external: true,
             omit_self_evident_edges: true,
             batch_shared_dedup: true,
+            expansion_scoring: true,
+            expansion_query_scoring: true,
+            expansion_fanin_scoring: true,
             workspace_root: None,
         }
     }
@@ -779,6 +795,24 @@ impl RelationAnnotationConfig {
     /// Share or isolate the dedup state across one annotate batch (builder pattern).
     pub fn with_batch_shared_dedup(mut self, share: bool) -> Self {
         self.batch_shared_dedup = share;
+        self
+    }
+
+    /// Enable or disable neighbour scoring during expansion (builder pattern).
+    pub fn with_expansion_scoring(mut self, enable: bool) -> Self {
+        self.expansion_scoring = enable;
+        self
+    }
+
+    /// Enable or disable the query-term bonus in expansion scores (builder pattern).
+    pub fn with_query_scoring(mut self, enable: bool) -> Self {
+        self.expansion_query_scoring = enable;
+        self
+    }
+
+    /// Enable or disable the fan-in bonus in expansion scores (builder pattern).
+    pub fn with_fanin_scoring(mut self, enable: bool) -> Self {
+        self.expansion_fanin_scoring = enable;
         self
     }
 

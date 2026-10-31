@@ -455,12 +455,18 @@ impl<'a> SearchService<'a> {
                     include_patterns: query_opts.include_patterns.clone(),
                     exclude_patterns: query_opts.exclude_patterns.clone(),
                 };
-                Some(NeighbourResolver::with_filter(
-                    searcher,
-                    std::path::PathBuf::from(&entry.metadata.root_path),
-                    path_filter,
-                    annotation.expansion_domains.clone(),
-                ))
+                Some(
+                    NeighbourResolver::with_filter(
+                        searcher,
+                        std::path::PathBuf::from(&entry.metadata.root_path),
+                        path_filter,
+                        annotation.expansion_domains.clone(),
+                    )
+                    .with_query(&query_opts.query)
+                    .with_scoring(
+                        cce_orchestrator::query::expansion::ExpansionScoring::from(&*annotation),
+                    ),
+                )
             }
             Err(error) => {
                 tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
