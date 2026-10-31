@@ -60,7 +60,7 @@ pub const PIPELINE_VERSION: &str = "1";
 
 // Re-export main types
 pub use code_form_converter::{CodeFormContext, CodeFormConverter, CodeFormEntity, CodeFormGroup};
-pub use converter::AstToNlConverter;
+pub use converter::{AstToNlConverter, CallsPruneStats, GroupConvertOutput};
 
 // Re-export internal types
 pub use cce_types::ast_to_nl::EntityMetadata;

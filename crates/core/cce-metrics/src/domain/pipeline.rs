@@ -696,6 +696,47 @@ impl FileProcessingMetrics {
     }
 }
 
+/// `calls:` prune counters for the converter stage.
+///
+/// The converter aggregates per-entity prune decisions per file; these
+/// counters expose the totals in the registry. Field-for-field they mirror
+/// the converter's prune stats (totals, pruned, fully-removed lines,
+/// guard-retained lines) so dashboards can track prune yield over time.
+#[derive(Debug)]
+pub struct CallsPruneMetrics {
+    /// Total callees seen across scanned `calls:` lines
+    pub callees_total: LabeledCounter,
+    /// Callees dropped (restated or boilerplate)
+    pub callees_pruned_total: LabeledCounter,
+    /// `calls:` lines removed entirely
+    pub lines_removed_total: LabeledCounter,
+    /// `calls:` lines retained by the sole-signal guard
+    pub lines_guard_retained_total: LabeledCounter,
+}
+
+impl CallsPruneMetrics {
+    /// Create new prune metrics
+    pub fn new(registry: &MetricsRegistry, project_id: i64) -> Arc<Self> {
+        let proj_val = project_id.to_string();
+        let labels: &[(&str, &str)] = &[("project_id", &proj_val)];
+        Arc::new(Self {
+            callees_total: registry.counter("calls_prune_callees_total", labels),
+            callees_pruned_total: registry.counter("calls_prune_callees_pruned_total", labels),
+            lines_removed_total: registry.counter("calls_prune_lines_removed_total", labels),
+            lines_guard_retained_total: registry
+                .counter("calls_prune_lines_guard_retained_total", labels),
+        })
+    }
+
+    /// Record one file's aggregated prune totals
+    pub fn record(&self, total: u64, pruned: u64, lines_removed: u64, guard_retained: u64) {
+        self.callees_total.add(total);
+        self.callees_pruned_total.add(pruned);
+        self.lines_removed_total.add(lines_removed);
+        self.lines_guard_retained_total.add(guard_retained);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,6 +767,25 @@ mod tests {
         metrics.record_chunk_size(4096);
 
         assert_eq!(metrics.chunk_size_bytes.get_count(), 3);
+    }
+
+    #[test]
+    fn test_calls_prune_metrics_record() {
+        let registry = MetricsRegistry::new();
+        let metrics = CallsPruneMetrics::new(&registry, 1);
+
+        metrics.record(10, 6, 2, 1);
+        assert_eq!(metrics.callees_total.get(), 10);
+        assert_eq!(metrics.callees_pruned_total.get(), 6);
+        assert_eq!(metrics.lines_removed_total.get(), 2);
+        assert_eq!(metrics.lines_guard_retained_total.get(), 1);
+
+        // Counters accumulate across files.
+        metrics.record(4, 1, 0, 1);
+        assert_eq!(metrics.callees_total.get(), 14);
+        assert_eq!(metrics.callees_pruned_total.get(), 7);
+        assert_eq!(metrics.lines_removed_total.get(), 2);
+        assert_eq!(metrics.lines_guard_retained_total.get(), 2);
     }
 
     #[test]

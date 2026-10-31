@@ -43,7 +43,7 @@ use cce_types::entity::{
 };
 use std::collections::{HashMap, HashSet};
 
-use super::index_enrichment::IndexTextEnricher;
+use super::index_enrichment::{CallsPruneStats, IndexTextEnricher};
 
 /// Collected child summary data used to enrich a parent group's description
 struct ParentEnrichment {
@@ -59,6 +59,20 @@ struct ParentEnrichment {
 /// capability can reference it.
 pub use cce_types::ast_to_nl::GroupConversions;
 
+/// Output of [`AstToNlConverter::convert_entity_groups`].
+///
+/// Bundles the converted groups with the per-file `calls:` prune totals so
+/// orchestrators can record them into the metrics registry. Callers that
+/// only need the groups use the [`groups`](Self::groups) field.
+#[derive(Debug, Default)]
+pub struct GroupConvertOutput {
+    /// Converted groups in input order.
+    pub groups: Vec<GroupConversions>,
+    /// Aggregated prune counters for this file (empty when enrichment ran
+    /// without processing data or with pruning disabled).
+    pub prune_stats: CallsPruneStats,
+}
+
 impl super::AstToNlConverter {
     /// Convert entity groups from PreProcessor output.
     ///
@@ -73,7 +87,7 @@ impl super::AstToNlConverter {
         request: Option<&ConversionRequest>,
         processing_result: Option<&ProcessingResult>,
         source: Option<&str>,
-    ) -> Vec<GroupConversions> {
+    ) -> GroupConvertOutput {
         // Try batch plugin processing first if plugins are available
         if let Some(ref registry) = self.plugin_registry {
             let language_str = groups.first().map(|g| g.language.to_string());
@@ -110,9 +124,8 @@ impl super::AstToNlConverter {
                     })
                     .collect::<Vec<_>>();
 
+                let mut prune_stats = CallsPruneStats::default();
                 if let (Some(pr), Some(src)) = (processing_result, source) {
-                    let mut prune_stats =
-                        super::index_enrichment::CallsPruneStats::default();
                     for gc in &mut group_conversions {
                         let language = gc.group.language;
                         let vocabulary = self.vocabulary_for(file_path, language);
@@ -156,7 +169,10 @@ impl super::AstToNlConverter {
                     );
                 }
 
-                return group_conversions;
+                return GroupConvertOutput {
+                    groups: group_conversions,
+                    prune_stats,
+                };
             }
         }
 
@@ -215,16 +231,14 @@ impl super::AstToNlConverter {
         Self::enrich_hierarchy_descriptions(&mut group_conversions);
 
         // Phase 3: Enrich with control-flow and behavior sidecars when available.
+        let mut prune_stats = CallsPruneStats::default();
         if let (Some(pr), Some(src)) = (processing_result, source) {
-            let mut prune_stats = super::index_enrichment::CallsPruneStats::default();
             for gc in &mut group_conversions {
                 let language = gc.group.language;
                 let vocabulary = self.vocabulary_for(file_path, language);
                 let bare = self.bare_methods_for(file_path, language);
-                let enricher = IndexTextEnricher::new(
-                    &self.bm25_cleaner,
-                    self.config.enable_calls_prune,
-                );
+                let enricher =
+                    IndexTextEnricher::new(&self.bm25_cleaner, self.config.enable_calls_prune);
                 let plugin = super::index_enrichment::PluginSupport {
                     bare: bare.as_deref(),
                     registry: self.plugin_registry.as_deref(),
@@ -260,7 +274,10 @@ impl super::AstToNlConverter {
             );
         }
 
-        group_conversions
+        GroupConvertOutput {
+            groups: group_conversions,
+            prune_stats,
+        }
     }
 
     /// Enrich parent/child descriptions based on group hierarchy.
@@ -475,8 +492,10 @@ impl super::AstToNlConverter {
             // Same-file resolved targets per entity: kept even when their
             // spelling collides with stdlib/boilerplate (resolution trumps
             // every name rule, mirroring the relation layer).
-            let mut resolved_by_id: std::collections::HashMap<EntityId, std::collections::HashSet<String>> =
-                std::collections::HashMap::new();
+            let mut resolved_by_id: std::collections::HashMap<
+                EntityId,
+                std::collections::HashSet<String>,
+            > = std::collections::HashMap::new();
             {
                 let mut collect = |id: EntityId, md: &std::collections::HashMap<String, String>| {
                     if let Some(raw) = md.get(meta_keys::RESOLVED_CALLS) {

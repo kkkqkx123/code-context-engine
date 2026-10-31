@@ -49,8 +49,8 @@ use cce_llm::ChatConfig;
 use cce_llm_client::SuiteChatClient;
 use cce_metrics::ProgressTracker;
 use cce_metrics::{
-    FileProcessingMetrics, MetricsRegistry, ParserMetrics, PipelineStage, PipelineStageMetrics,
-    RelationMetrics, SummaryMetrics,
+    CallsPruneMetrics, FileProcessingMetrics, MetricsRegistry, ParserMetrics, PipelineStage,
+    PipelineStageMetrics, RelationMetrics, SummaryMetrics,
 };
 use cce_metrics::{IndexQualityMetrics, ScannerMetrics};
 use cce_parser::summary::{
@@ -430,6 +430,12 @@ impl IndexOrchestrator {
         self.file_processor = self
             .file_processor
             .with_file_processing_metrics(file_processing_metrics);
+
+        // Inject `calls:` prune counters for the converter stage
+        let calls_prune_metrics = CallsPruneMetrics::new(&registry, self.project_id);
+        self.file_processor = self
+            .file_processor
+            .with_calls_prune_metrics(calls_prune_metrics);
 
         self.metrics_registry = Some(registry);
         if let Some(config) = self.summary_config.clone() {

@@ -13,7 +13,7 @@ mod code;
 mod document;
 
 use cce_config::{AstToNlConfig, ChunkingConfig, LicenseHeaderConfig};
-use cce_metrics::{FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
+use cce_metrics::{CallsPruneMetrics, FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
 use cce_parser::ast_to_nl::chunker::{ChunkedResult, GroupChunker};
 use cce_parser::ast_to_nl::{AstToNlConverter, ConversionRequest};
 use cce_parser::document::PipelineRouter;
@@ -135,6 +135,8 @@ pub struct FileProcessor {
     pub(crate) converter_metrics: Option<Arc<PipelineStageMetrics>>,
     /// Pipeline stage metrics for chunker
     pub(crate) chunker_metrics: Option<Arc<PipelineStageMetrics>>,
+    /// `calls:` prune counters for the converter stage
+    pub(crate) calls_prune_metrics: Option<Arc<CallsPruneMetrics>>,
     /// File-level end-to-end processing metrics
     pub(crate) file_processing_metrics: Option<Arc<FileProcessingMetrics>>,
     /// Project ID for cache key isolation
@@ -175,6 +177,7 @@ impl Clone for FileProcessor {
             grouper_metrics: self.grouper_metrics.clone(),
             converter_metrics: self.converter_metrics.clone(),
             chunker_metrics: self.chunker_metrics.clone(),
+            calls_prune_metrics: self.calls_prune_metrics.clone(),
             file_processing_metrics: self.file_processing_metrics.clone(),
             project_id: self.project_id,
             license_header: self.license_header.clone(),
@@ -230,7 +233,7 @@ impl FileProcessor {
         request: Option<&ConversionRequest>,
     ) -> Vec<cce_types::ast_to_nl::GroupConversions> {
         let converter_start = std::time::Instant::now();
-        let group_conversions = self.converter.convert_entity_groups(
+        let output = self.converter.convert_entity_groups(
             groups,
             file_path,
             request,
@@ -241,12 +244,21 @@ impl FileProcessor {
         if let Some(ref metrics) = self.converter_metrics {
             metrics.record(
                 processing_result.stats.output_groups,
-                group_conversions.len(),
+                output.groups.len(),
                 converter_latency,
                 false,
             );
         }
-        group_conversions
+        if let Some(ref metrics) = self.calls_prune_metrics {
+            let stats = &output.prune_stats;
+            metrics.record(
+                stats.callees_total as u64,
+                stats.callees_pruned as u64,
+                stats.lines_removed as u64,
+                stats.lines_guard_retained as u64,
+            );
+        }
+        output.groups
     }
 
     /// Re-chunk one file from its on-disk content for chunking-drift sweeps.

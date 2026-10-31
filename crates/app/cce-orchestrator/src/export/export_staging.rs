@@ -110,13 +110,15 @@ pub async fn stage_file_update_direct(
         return Ok(());
     }
 
-    let conversions = ast_converter.convert_entity_groups(
-        &processing_result.groups,
-        &file_path.to_string_lossy(),
-        None,
-        Some(processing_result),
-        Some(source),
-    );
+    let conversions = ast_converter
+        .convert_entity_groups(
+            &processing_result.groups,
+            &file_path.to_string_lossy(),
+            None,
+            Some(processing_result),
+            Some(source),
+        )
+        .groups;
 
     let (source_path, content) = ctx
         .exporter

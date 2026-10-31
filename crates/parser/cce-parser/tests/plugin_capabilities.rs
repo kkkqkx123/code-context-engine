@@ -528,13 +528,15 @@ fn convert_header_with_registry_and_path(
         control_flow: Default::default(),
         stats: Default::default(),
     };
-    let results = converter.convert_entity_groups(
-        &processing_result.groups,
-        file_path,
-        None,
-        Some(&processing_result),
-        Some(source),
-    );
+    let results = converter
+        .convert_entity_groups(
+            &processing_result.groups,
+            file_path,
+            None,
+            Some(&processing_result),
+            Some(source),
+        )
+        .groups;
     results[0]
         .header_conversion
         .clone()
@@ -784,13 +786,15 @@ fn test_vocabulary_table_is_reused_across_files() {
     };
 
     for path in ["src/a.c", "src/b.c", "src/c.c"] {
-        let results = converter.convert_entity_groups(
-            &processing_result.groups,
-            path,
-            None,
-            Some(&processing_result),
-            Some(source),
-        );
+        let results = converter
+            .convert_entity_groups(
+                &processing_result.groups,
+                path,
+                None,
+                Some(&processing_result),
+                Some(source),
+            )
+            .groups;
         let header = results[0]
             .header_conversion
             .as_ref()
@@ -834,13 +838,15 @@ fn test_vocabulary_reaches_every_chunk_of_a_group() {
     let converter =
         cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
             .with_plugin_registry(registry.clone());
-    let conversions = converter.convert_entity_groups(
-        &processing_result.groups,
-        "src/media.cpp",
-        None,
-        Some(&processing_result),
-        Some(source),
-    );
+    let conversions = converter
+        .convert_entity_groups(
+            &processing_result.groups,
+            "src/media.cpp",
+            None,
+            Some(&processing_result),
+            Some(source),
+        )
+        .groups;
 
     let chunker = cce_parser::ast_to_nl::chunker::GroupChunker::new(ChunkingConfig::default())
         .with_plugin_registry(registry);
@@ -975,13 +981,15 @@ fn indexed_output_with_registry(
         control_flow: Default::default(),
         stats: Default::default(),
     };
-    let conversions = converter.convert_entity_groups(
-        &processing_result.groups,
-        file_path,
-        None,
-        Some(&processing_result),
-        Some(source),
-    );
+    let conversions = converter
+        .convert_entity_groups(
+            &processing_result.groups,
+            file_path,
+            None,
+            Some(&processing_result),
+            Some(source),
+        )
+        .groups;
 
     let chunker = cce_parser::ast_to_nl::chunker::GroupChunker::new(ChunkingConfig::default())
         .with_plugin_registry(registry);

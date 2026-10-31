@@ -141,18 +141,25 @@ fn main() {
             force_mode: Some(OutputMode::Both),
         };
         let bm25_ms = bench_ms(3, || {
-            let _ = bm25_conv.convert_entity_groups(groups, path, Some(&bm25_req), None, None);
+            let _ = bm25_conv
+                .convert_entity_groups(groups, path, Some(&bm25_req), None, None)
+                .groups;
         });
         let embed_ms = bench_ms(3, || {
-            let _ = embed_conv.convert_entity_groups(groups, path, Some(&embed_req), None, None);
+            let _ = embed_conv
+                .convert_entity_groups(groups, path, Some(&embed_req), None, None)
+                .groups;
         });
         let both_ms = bench_ms(3, || {
-            let _ = both_conv.convert_entity_groups(groups, path, Some(&both_req), None, None);
+            let _ = both_conv
+                .convert_entity_groups(groups, path, Some(&both_req), None, None)
+                .groups;
         });
 
         // Chunk the both-path conversions of the first group (or all groups).
-        let conversions =
-            both_conv.convert_entity_groups(groups, path, Some(&both_req), None, None);
+        let conversions = both_conv
+            .convert_entity_groups(groups, path, Some(&both_req), None, None)
+            .groups;
         let config = ChunkingConfig::default();
         let chunk_ms = bench_ms(3, || {
             let chunker = GroupChunker::new(config.clone());

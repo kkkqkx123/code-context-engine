@@ -29,11 +29,11 @@ pub use buckets::{EMBEDDING_BUCKETS, LATENCY_BUCKETS, THROUGHPUT_BUCKETS};
 pub use config::{MetricsLabelConfig, MetricsMemoryConfig, MetricsProbeConfig};
 pub use descriptions::metric_description;
 pub use domain::{
-    BackgroundTaskMetrics, Bm25Metrics, EmbeddingMetrics, FileProcessingMetrics, HotUpdateMetrics,
-    HotUpdateStorageMetrics, HttpMetrics, IndexQualityMetrics, LlmHealthMetrics, LlmRetryMetrics,
-    MetricsSystemMetrics, ParserMetrics, PipelineStageMetrics, PluginMetrics, QdrantMetrics,
-    QueryMetrics, QueueMetrics, RelationMetrics, RerankMetrics, RuntimeMetrics, ScannerMetrics,
-    SearchMetrics, SqliteMetrics, SummaryMetrics, SystemMetrics, WatchMetrics,
+    BackgroundTaskMetrics, Bm25Metrics, CallsPruneMetrics, EmbeddingMetrics, FileProcessingMetrics,
+    HotUpdateMetrics, HotUpdateStorageMetrics, HttpMetrics, IndexQualityMetrics, LlmHealthMetrics,
+    LlmRetryMetrics, MetricsSystemMetrics, ParserMetrics, PipelineStageMetrics, PluginMetrics,
+    QdrantMetrics, QueryMetrics, QueueMetrics, RelationMetrics, RerankMetrics, RuntimeMetrics,
+    ScannerMetrics, SearchMetrics, SqliteMetrics, SummaryMetrics, SystemMetrics, WatchMetrics,
 };
 pub use labels::{Label, Labels, MetricKey};
 pub use serialization::{MetricData, MetricValue, MetricsSnapshot};

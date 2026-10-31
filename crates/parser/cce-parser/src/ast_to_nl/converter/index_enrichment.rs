@@ -13,7 +13,8 @@
 //! - [`source_extract`] re-extracts fact ranges from source.
 
 pub(crate) mod calls_prune;
-pub(crate) use calls_prune::{CallsPruneStats, is_boilerplate_name};
+pub use calls_prune::CallsPruneStats;
+pub(crate) use calls_prune::is_boilerplate_name;
 mod source_extract;
 mod syntax_strip;
 mod topic_anchor;
@@ -695,8 +696,7 @@ mod tests {
                 EntityKind::Function,
                 "demo".to_string(),
                 "demo.rs".to_string(),
-                "function demo.\ncalls: build_from_hir, Ok.\nBuilds.\nOk(output)"
-                    .to_string(),
+                "function demo.\ncalls: build_from_hir, Ok.\nBuilds.\nOk(output)".to_string(),
             );
             let processing_result = ProcessingResult {
                 groups: vec![],

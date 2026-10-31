@@ -32,16 +32,15 @@ const COMMON_BARE_METHODS: &[&str] = &["assert", "panic", "todo", "unimplemented
 ///
 /// The detector resolves `Vec::new` style paths and macros by name, but
 /// bare `Option`/`Result`/iterator plumbing needs this list. Entries already
-/// covered by the detector's macro table (`vec!`, `format!`, `print!`, …)
-/// are intentionally absent: the detector prunes them first, so the table
-/// stays minimal and only covers the detector's blind spot.
+/// covered by the detector (`vec!`, `format!`, `print!`, …, plus the bare
+/// `write`/`writeln` spellings the macro table answers) are intentionally
+/// absent: the detector prunes them first, so the table stays minimal and
+/// only covers the detector's blind spot.
 const RUST_BARE_METHODS: &[&str] = &[
     "Ok",
     "Err",
     "Some",
     "None",
-    "write",
-    "writeln",
     "clone",
     "cloned",
     "to_string",
@@ -67,8 +66,10 @@ const RUST_BARE_METHODS: &[&str] = &[
 ];
 
 /// Python container and attribute methods not resolvable by bare name.
+///
+/// Bare `set` (the builtin type) is answered by the detector and stays out.
 const PYTHON_BARE_METHODS: &[&str] = &[
-    "append", "extend", "get", "set", "items", "keys", "values", "update", "pop", "remove",
+    "append", "extend", "get", "items", "keys", "values", "update", "pop", "remove",
 ];
 
 /// JavaScript family collection and console methods used without qualifier.
@@ -86,21 +87,19 @@ const JAVA_BARE_METHODS: &[&str] = &[
 ];
 
 /// Kotlin scope functions and builders used without qualifier.
-const KOTLIN_BARE_METHODS: &[&str] = &[
-    "let", "run", "with", "apply", "also", "println", "print", "TODO", "require", "check",
-];
+///
+/// Only `print`/`println` remain: the detector answers the scope functions
+/// (`let`/`run`/`with`/`apply`/`also`) and `TODO`/`require`/`check`, which
+/// therefore stay out (see the overlap audit lock below).
+const KOTLIN_BARE_METHODS: &[&str] = &["println", "print"];
 
 /// Scala collection combinators used without qualifier.
-const SCALA_BARE_METHODS: &[&str] = &[
-    "map",
-    "flatMap",
-    "filter",
-    "foreach",
-    "toString",
-    "println",
-    "print",
-    "getOrElse",
-];
+///
+/// Empty: the detector answers every former entry (`map`/`flatMap`/
+/// `filter`/`foreach`/`getOrElse`, `print`/`println`, `toString`), so no
+/// blind spot remains. Kept as an explicit empty table so the sync guard
+/// records the conscious decision.
+const SCALA_BARE_METHODS: &[&str] = &[];
 
 /// C++ container methods not resolvable by bare name.
 const CPP_BARE_METHODS: &[&str] = &["push_back", "emplace_back", "toString"];
@@ -118,24 +117,40 @@ const CSHARP_BARE_METHODS: &[&str] = &[
 ];
 
 /// Ruby kernel and collection methods used without qualifier.
-const RUBY_BARE_METHODS: &[&str] = &["puts", "to_s", "each", "map", "require", "raise"];
+///
+/// Empty: the detector answers every former entry (`puts`, `to_s`, `each`,
+/// `map`, `require`, `raise`), so no blind spot remains. Kept as an
+/// explicit empty table so the sync guard records the conscious decision.
+const RUBY_BARE_METHODS: &[&str] = &[];
 
 /// PHP output and inspection helpers used without qualifier.
-const PHP_BARE_METHODS: &[&str] = &["echo", "count", "isset", "empty", "print_r", "var_dump"];
+///
+/// Empty: the detector answers every former entry (`echo`, `count`,
+/// `isset`, `empty`, `print_r`, `var_dump`), so no blind spot remains.
+/// Kept as an explicit empty table so the sync guard records the
+/// conscious decision.
+const PHP_BARE_METHODS: &[&str] = &[];
 
 /// Lua iteration and conversion helpers used without qualifier.
-const LUA_BARE_METHODS: &[&str] = &[
-    "print", "require", "pairs", "ipairs", "tostring", "tonumber",
-];
+///
+/// Empty: the detector answers every former entry (`print`, `require`,
+/// `pairs`/`ipairs`, `tostring`/`tonumber`), so no blind spot remains.
+/// Kept as an explicit empty table so the sync guard records the
+/// conscious decision.
+const LUA_BARE_METHODS: &[&str] = &[];
 
 /// Shell output and control builtins appearing as call targets.
-const BASH_BARE_METHODS: &[&str] = &["echo", "cd", "exit", "return", "set", "export", "printf"];
+///
+/// Empty: the detector answers every former entry (`echo`, `printf`, `cd`,
+/// `exit`, `return`, `set`, `export`), so no blind spot remains. Kept as
+/// an explicit empty table so the sync guard records the conscious decision.
+const BASH_BARE_METHODS: &[&str] = &[];
 
 /// Bare boilerplate method names for a language.
 ///
 /// Languages whose standard library calls are fully resolvable by name
-/// (C, Dart and document-like languages) use an empty table: the shared
-/// detector already covers them.
+/// (C, Dart, Scala, Ruby, Php, Lua, Bash and document-like languages)
+/// use an empty table: the shared detector already covers them.
 pub(crate) fn bare_boilerplate_methods(language: Language) -> &'static [&'static str] {
     // Remapped plugin languages inherit their host grammar's table.
     match cce_types::language::effective_language(&language) {
@@ -213,7 +228,7 @@ fn is_aggregate_calls_line(rest: &str) -> bool {
 /// orchestrator's registry, so aggregation stops at a `tracing::debug!`
 /// per file in the group converter.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct CallsPruneStats {
+pub struct CallsPruneStats {
     /// Entities visited (one `prune_redundant_calls_lines` call each).
     pub entities_visited: usize,
     /// `calls:` lines scanned (aggregates skipped, not counted).
@@ -293,7 +308,11 @@ fn occurs_verbatim(body_lines: &[&str], callee: &str) -> bool {
 /// must not prune when `Candidate` and an unrelated `new` merely appear
 /// pages apart. The receiver spelling may differ (`self.map` vs `items.map`
 /// both state `map` beside a receiver), but both parts must share a line.
-fn head_tail_same_line(line_tokens: &[std::collections::HashSet<&str>], head: &str, tail: &str) -> bool {
+fn head_tail_same_line(
+    line_tokens: &[std::collections::HashSet<&str>],
+    head: &str,
+    tail: &str,
+) -> bool {
     line_tokens
         .iter()
         .any(|tokens| tokens.contains(head) && tokens.contains(tail))
@@ -334,10 +353,7 @@ fn classify_callee(callee: &str, ctx: &PruneCtx) -> CalleeFate {
     if callee.is_empty() {
         return CalleeFate::PruneRestated;
     }
-    if ctx
-        .resolved
-        .is_some_and(|set| set.contains(callee))
-    {
+    if ctx.resolved.is_some_and(|set| set.contains(callee)) {
         return CalleeFate::Keep;
     }
     let qualified = callee.contains("::") || callee.contains('.');
@@ -347,10 +363,7 @@ fn classify_callee(callee: &str, ctx: &PruneCtx) -> CalleeFate {
         }
         let head = callee.split([':', '.']).next().unwrap_or("").trim();
         let tail = callee.rsplit([':', '.']).next().unwrap_or("").trim();
-        if !head.is_empty()
-            && head != tail
-            && head_tail_same_line(&ctx.line_tokens, head, tail)
-        {
+        if !head.is_empty() && head != tail && head_tail_same_line(&ctx.line_tokens, head, tail) {
             return CalleeFate::PruneRestated;
         }
         if StdlibDetector::is_stdlib_call(callee, &ctx.language) {
@@ -420,8 +433,10 @@ pub(super) fn prune_redundant_calls_lines(
     plugin_registry: Option<&cce_plugin::PluginRegistry>,
     resolved: Option<&std::collections::HashSet<String>>,
 ) -> CallsPruneStats {
-    let mut stats = CallsPruneStats::default();
-    stats.entities_visited = 1;
+    let mut stats = CallsPruneStats {
+        entities_visited: 1,
+        ..Default::default()
+    };
     let Some(text) = conversion.embedding_text.as_mut() else {
         return stats;
     };
@@ -743,16 +758,27 @@ mod tests {
             Language::Go,
             Language::Java,
             Language::Kotlin,
-            Language::Scala,
             Language::Cpp,
             Language::CSharp,
+        ];
+        // C is covered by libc-signature detection; Dart answers bare
+        // receiver-dependent names itself (`is_common_method` covers
+        // `map`/`where`/`toString`); Scala, Ruby, Php, Lua and Bash lost
+        // their last bare entries to the overlap audit below (every former
+        // entry is detector-covered); Kotlin keeps only `print`/`println`
+        // (its scope functions are detector-covered); document languages
+        // carry no prunable bare calls.
+        let expects_empty: &[Language] = &[
+            Language::C,
+            Language::Dart,
+            Language::Scala,
             Language::Ruby,
             Language::Php,
             Language::Lua,
             Language::Bash,
+            Language::Html,
+            Language::Css,
         ];
-        let expects_empty: &[Language] =
-            &[Language::C, Language::Dart, Language::Html, Language::Css];
         for language in Language::ast_parsable_languages() {
             let table = bare_boilerplate_methods(*language);
             if expects_empty.contains(language) {
@@ -769,6 +795,89 @@ mod tests {
                 assert!(
                     !table.is_empty(),
                     "{language:?} listed as covered but its bare table is empty"
+                );
+            }
+        }
+    }
+
+    /// Sync guard: bare tables must cover the detector's blind spot, not
+    /// restate it. `classify_callee` (and `is_boilerplate_name`) consult the
+    /// shared detector before the bare table, so a detector-covered entry is
+    /// unreachable dead weight: removing it changes no fate (`PruneStdlib`
+    /// either way). This test turns red when a table gains — or a detector
+    /// learns — an overlapping spelling; delete the entry instead of
+    /// updating the test. `COMMON_BARE_METHODS` is exempt: it is consulted
+    /// first by design, so overlaps there are harmless either way.
+    #[test]
+    fn prune_bare_tables_have_no_detector_overlap() {
+        for language in Language::ast_parsable_languages() {
+            for entry in bare_boilerplate_methods(*language) {
+                assert!(
+                    !StdlibDetector::is_stdlib_call(entry, language),
+                    "{entry} in {language:?} is already covered by the detector; \
+                     remove it from the bare table"
+                );
+            }
+        }
+    }
+
+    /// Consumer-side lock for the overlap audit above.
+    ///
+    /// These bare spellings were deleted from the per-language tables
+    /// because the detector answers them (same `PruneStdlib` fate either
+    /// way). If a detector ever stops covering one of them, pruning would
+    /// silently flip to `Keep` — this test turns that red instead, forcing
+    /// a conscious decision (re-add to the bare table or accept the keep).
+    /// It mirrors the `cce-stdlib` sentinel tests from the consumer side.
+    #[test]
+    fn prune_detector_covers_audited_spellings() {
+        let cases: &[(Language, &[&str])] = &[
+            (Language::Rust, &["write", "writeln"]),
+            (Language::Python, &["set"]),
+            (
+                Language::Kotlin,
+                &[
+                    "let", "run", "with", "apply", "also", "TODO", "require", "check",
+                ],
+            ),
+            (
+                Language::Scala,
+                &[
+                    "map",
+                    "flatMap",
+                    "filter",
+                    "foreach",
+                    "toString",
+                    "println",
+                    "print",
+                    "getOrElse",
+                ],
+            ),
+            (
+                Language::Ruby,
+                &["puts", "to_s", "each", "map", "require", "raise"],
+            ),
+            (
+                Language::Php,
+                &["echo", "count", "isset", "empty", "print_r", "var_dump"],
+            ),
+            (
+                Language::Lua,
+                &[
+                    "print", "require", "pairs", "ipairs", "tostring", "tonumber",
+                ],
+            ),
+            (
+                Language::Bash,
+                &["echo", "cd", "exit", "return", "set", "export", "printf"],
+            ),
+        ];
+        for (language, names) in cases {
+            for name in *names {
+                assert!(
+                    StdlibDetector::is_stdlib_call(name, language),
+                    "detector lost coverage of {name} in {language:?}; \
+                     re-add it to the bare table or accept the behavior change"
                 );
             }
         }
@@ -963,8 +1072,7 @@ mod tests {
             "demo.rs".to_string(),
             "function demo.\ncalls: build_from_hir, Ok.\nBuilds.\nOk(output)".to_string(),
         );
-        let stats =
-            prune_redundant_calls_lines(&mut conversion, Language::Rust, None, None, None);
+        let stats = prune_redundant_calls_lines(&mut conversion, Language::Rust, None, None, None);
         assert_eq!(stats.entities_visited, 1);
         assert_eq!(stats.lines_scanned, 1);
         assert_eq!(stats.callees_total, 2);

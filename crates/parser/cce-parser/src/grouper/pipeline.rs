@@ -233,13 +233,22 @@ impl PreprocessingPipeline {
         // detectors; plugin answers are in priority order, first wins).
         let mut entities = apply_stdlib_heuristics(&self.plugin_registry, parsed_file);
 
+        // Shared same-file call resolution for Stage 1 (`CallMerger`) and
+        // Stage 9 (`RESOLVED_CALLS` injection). `parsed_file` is immutable
+        // across stages, so one run serves both; previously each stage ran
+        // the resolver independently. Skipped only when neither stage needs it.
+        let local_calls = (self.config.enable_call_merging
+            || !parsed_file.raw_relations.is_empty())
+        .then(|| CallMerger::resolve_calls_for_file(parsed_file));
+
         // Stage 1: Consolidate fragments (merge simple repeated calls + merge small fragments)
         // This stage combines two related optimizations:
         // - CallMerger: merges consecutive identical calls within function bodies
         // - SmallFragmentMerger: merges adjacent small standalone groups
         let mut groups = Vec::new();
         if self.config.enable_call_merging {
-            let (merged, merge_count) = self.merge_simple_calls(&entities, parsed_file);
+            let calls = local_calls.as_deref().unwrap_or(&[]);
+            let (merged, merge_count) = self.merge_simple_calls(&entities, parsed_file, calls);
             stats.merged_calls = merge_count;
             entities = merged;
         }
@@ -487,11 +496,9 @@ impl PreprocessingPipeline {
         // Stage 9: Inject call paths from raw_relations into group metadata.
         // `CALL_PATHS` carries every call target (normalized); `RESOLVED_CALLS`
         // carries the subset that resolves to an internal same-file entity via
-        // `LocalCallResolver` (same config as `CallMerger`). Pruning keeps
-        // resolved names unconditionally, mirroring the relation layer where
-        // resolution runs before stdlib filtering. The extra resolver run
-        // duplicates `CallMerger`'s work; sharing it is future work (the
-        // merger consumes its context and does not expose the call list).
+        // the shared `LocalCallResolver` run (same config as `CallMerger`, see
+        // above). Pruning keeps resolved names unconditionally, mirroring the
+        // relation layer where resolution runs before stdlib filtering.
         if !parsed_file.raw_relations.is_empty() {
             let mut call_paths_map: HashMap<EntityId, Vec<String>> = HashMap::new();
             for rel in &parsed_file.raw_relations {
@@ -508,14 +515,8 @@ impl PreprocessingPipeline {
                 paths.dedup();
             }
             let resolved_map = {
-                let resolver = cce_parser_core::LocalCallResolver::with_config(
-                    cce_parser_core::LocalCallResolverConfig {
-                        enable_signature_matching: true,
-                        ..Default::default()
-                    },
-                );
                 let mut map: HashMap<EntityId, Vec<String>> = HashMap::new();
-                for call in resolver.resolve_from_parsed_file(parsed_file) {
+                for call in local_calls.as_deref().unwrap_or(&[]) {
                     let Some(name) = call_target_name(&call.callee_name) else {
                         continue;
                     };
@@ -802,15 +803,16 @@ impl PreprocessingPipeline {
         result
     }
 
-    /// Merge simple repeated calls
+    /// Merge simple repeated calls against the shared per-file resolution.
     fn merge_simple_calls(
         &self,
         entities: &[Entity],
         parsed_file: &ParsedFile,
+        local_calls: &[cce_parser_core::LocalCall],
     ) -> (Vec<Entity>, usize) {
         use crate::grouper::context::FileProcessingContext;
         let ctx = FileProcessingContext::new(entities, parsed_file, &self.config);
-        self.call_merger.merge(ctx)
+        self.call_merger.merge_with_calls(ctx, local_calls)
     }
 
     /// Process class methods

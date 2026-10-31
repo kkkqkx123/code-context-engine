@@ -694,10 +694,7 @@ fn test_stage9_injects_resolved_calls_for_internal_callee() {
     let mut found_paths = false;
     let mut found_resolved = false;
     for group in &result.groups {
-        let entities = group
-            .header
-            .iter()
-            .chain(group.members.iter());
+        let entities = group.header.iter().chain(group.members.iter());
         for entity in entities {
             if let Some(paths) = entity.metadata.get(meta_keys::CALL_PATHS) {
                 if paths.split(',').map(str::trim).any(|n| n == "helper") {
@@ -712,6 +709,55 @@ fn test_stage9_injects_resolved_calls_for_internal_callee() {
         }
     }
     assert!(found_paths, "CALL_PATHS must name the call target");
+    assert!(
+        found_resolved,
+        "same-file resolved target must be recorded in RESOLVED_CALLS"
+    );
+}
+
+/// Stage 1 (`CallMerger`) and Stage 9 (`RESOLVED_CALLS` injection) share one
+/// `LocalCallResolver` run per file (`parsed_file` is immutable across
+/// stages). A caller with three consecutive calls to an internal helper
+/// exercises both consumers in a single pipeline run: merging must fire
+/// and the resolved name must be injected.
+#[test]
+fn test_shared_resolution_feeds_merger_and_stage9() {
+    use cce_types::entity::meta_keys;
+
+    let source =
+        "def helper():\n    pass\n\n\ndef caller():\n    helper()\n    helper()\n    helper()\n";
+    let mut coordinator = crate::parser::coordinator::ParseCoordinator::new();
+    let parsed = coordinator
+        .parse("app.py", source)
+        .expect("Python fixture should parse");
+    assert!(
+        parsed
+            .raw_relations
+            .iter()
+            .filter(|r| r.relation_type.is_call())
+            .count()
+            >= 3,
+        "fixture must carry three call relations"
+    );
+
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    assert!(
+        result.stats.merged_calls > 0,
+        "consecutive repeated calls must merge via the shared resolution"
+    );
+
+    let mut found_resolved = false;
+    for group in &result.groups {
+        let entities = group.header.iter().chain(group.members.iter());
+        for entity in entities {
+            if let Some(resolved) = entity.metadata.get(meta_keys::RESOLVED_CALLS) {
+                if resolved.split(',').map(str::trim).any(|n| n == "helper") {
+                    found_resolved = true;
+                }
+            }
+        }
+    }
     assert!(
         found_resolved,
         "same-file resolved target must be recorded in RESOLVED_CALLS"

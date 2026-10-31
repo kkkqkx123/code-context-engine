@@ -57,8 +57,9 @@ fn process_file(
     let req = ConversionRequest {
         force_mode: Some(OutputMode::Both),
     };
-    let conversions =
-        converter.convert_entity_groups(&processing.groups, path, Some(&req), None, None);
+    let conversions = converter
+        .convert_entity_groups(&processing.groups, path, Some(&req), None, None)
+        .groups;
     let chunker = GroupChunker::new(chunk_config.clone());
     let mut chunks = 0;
     for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {

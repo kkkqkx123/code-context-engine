@@ -47,8 +47,8 @@ pub use orchestrator::{
     HotUpdateMetrics, HotUpdateStorageMetrics, IndexQualityMetrics, QueryMetrics, WatchMetrics,
 };
 pub use pipeline::{
-    EmbeddingMetrics, FileProcessingMetrics, ParserMetrics, PipelineStageMetrics, RelationMetrics,
-    SummaryMetrics,
+    CallsPruneMetrics, EmbeddingMetrics, FileProcessingMetrics, ParserMetrics,
+    PipelineStageMetrics, RelationMetrics, SummaryMetrics,
 };
 pub use plugin::{BackgroundTaskMetrics, PluginMetrics, RerankMetrics};
 pub use queue::QueueMetrics;

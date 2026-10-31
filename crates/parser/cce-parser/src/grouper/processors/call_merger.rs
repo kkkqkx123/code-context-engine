@@ -145,6 +145,24 @@ impl CallMerger {
         Self {}
     }
 
+    /// Shared same-file call resolution for one file.
+    ///
+    /// Single source of truth for the resolver configuration: the grouper
+    /// runs this once per file and shares the result between merging
+    /// (Stage 1) and resolved-call metadata injection (Stage 9).
+    /// `parsed_file` is immutable across stages, so sharing is identical to
+    /// resolving twice.
+    pub fn resolve_calls_for_file(
+        parsed_file: &cce_types::ParsedFile,
+    ) -> Vec<cce_parser_core::LocalCall> {
+        let config = cce_parser_core::LocalCallResolverConfig {
+            enable_signature_matching: true,
+            ..Default::default()
+        };
+        cce_parser_core::LocalCallResolver::with_config(config)
+            .resolve_from_parsed_file(parsed_file)
+    }
+
     /// Merge simple repeated calls
     ///
     /// Returns a tuple of (merged_entities, merge_count)
@@ -155,19 +173,29 @@ impl CallMerger {
     /// # Returns
     /// * Tuple of (processed entities, number of merge patterns found)
     pub fn merge(&self, ctx: FileProcessingContext) -> (Vec<Entity>, usize) {
+        // Resolve same-file calls, then take the shared path so the grouper
+        // can reuse one resolution for merging and metadata injection.
+        let local_calls = Self::resolve_calls_for_file(ctx.parsed_file);
+        self.merge_with_calls(ctx, &local_calls)
+    }
+
+    /// Merge simple repeated calls against a pre-resolved call list.
+    ///
+    /// The grouper resolves once per file and shares the result between
+    /// merging (Stage 1) and resolved-call metadata injection (Stage 9):
+    /// `parsed_file` is immutable across stages, so sharing is identical to
+    /// resolving twice. Direct callers without a cached resolution use
+    /// [`merge`](Self::merge).
+    pub fn merge_with_calls(
+        &self,
+        ctx: FileProcessingContext,
+        local_calls: &[cce_parser_core::LocalCall],
+    ) -> (Vec<Entity>, usize) {
         let mut merged_entities = Vec::new();
         let mut total_merge_count = 0;
 
         // Get language from parsed file
         let language = ctx.parsed_file.language;
-
-        // Resolve local calls from raw_relations
-        let config = cce_parser_core::LocalCallResolverConfig {
-            enable_signature_matching: true,
-            ..Default::default()
-        };
-        let local_call_resolver = cce_parser_core::LocalCallResolver::with_config(config);
-        let local_calls = local_call_resolver.resolve_from_parsed_file(ctx.parsed_file);
 
         // Iterate through each function
         for entity in ctx.entities {

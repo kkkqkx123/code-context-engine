@@ -101,8 +101,9 @@ fn main() {
         let request = ConversionRequest {
             force_mode: Some(OutputMode::Both),
         };
-        let conversions =
-            converter.convert_entity_groups(&processing.groups, path, Some(&request), None, None);
+        let conversions = converter
+            .convert_entity_groups(&processing.groups, path, Some(&request), None, None)
+            .groups;
         let config = ChunkingConfig::default();
         let chunk_ms = bench_ms(3, || {
             let chunker = GroupChunker::new(config.clone());

@@ -49,7 +49,8 @@ mod index_enrichment;
 #[cfg(test)]
 mod test;
 
-pub use group_converter::GroupConversions;
+pub use group_converter::{GroupConversions, GroupConvertOutput};
+pub use index_enrichment::CallsPruneStats;
 
 use crate::ast_to_nl::ConversionRequest;
 use crate::ast_to_nl::bm25::generator::Bm25Generator;

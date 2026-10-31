@@ -184,13 +184,9 @@ fn main() {
         let req = ConversionRequest {
             force_mode: Some(OutputMode::Both),
         };
-        let conversions = converter.convert_entity_groups(
-            &processing.groups,
-            "src/grow.rs",
-            Some(&req),
-            None,
-            None,
-        );
+        let conversions = converter
+            .convert_entity_groups(&processing.groups, "src/grow.rs", Some(&req), None, None)
+            .groups;
         let chunk_ms = bench_ms(3, || {
             let chunker = GroupChunker::new(chunk_config.clone());
             for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {

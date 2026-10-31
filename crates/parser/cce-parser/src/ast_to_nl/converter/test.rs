@@ -168,7 +168,9 @@ mod tests {
         };
 
         let groups = vec![group];
-        let results = converter.convert_entity_groups(&groups, "src/parser.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/parser.rs", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 1);
         let group_conv = &results[0];
@@ -218,7 +220,9 @@ mod tests {
         };
 
         let groups = vec![group];
-        let results = converter.convert_entity_groups(&groups, "src/auth.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/auth.rs", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 1);
         let conv = results[0].header_conversion.as_ref().unwrap();
@@ -268,13 +272,9 @@ mod tests {
         };
 
         let groups = vec![group];
-        let results = converter.convert_entity_groups(
-            &groups,
-            "src/services/user_service.rs",
-            None,
-            None,
-            None,
-        );
+        let results = converter
+            .convert_entity_groups(&groups, "src/services/user_service.rs", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 1);
         let group_conv = &results[0];
@@ -322,7 +322,9 @@ mod tests {
         };
 
         let groups = vec![group];
-        let results = converter.convert_entity_groups(&groups, "logger.go", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "logger.go", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 1);
         let group_conv = &results[0];
@@ -399,7 +401,9 @@ mod tests {
         };
 
         let groups = vec![group1, group2];
-        let results = converter.convert_entity_groups(&groups, "src/lib.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/lib.rs", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 2);
         assert_eq!(
@@ -449,8 +453,9 @@ mod tests {
         let request = ConversionRequest {
             force_mode: Some(OutputMode::Embedding),
         };
-        let results =
-            converter.convert_entity_groups(&groups, "src/stats.rs", Some(&request), None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/stats.rs", Some(&request), None, None)
+            .groups;
 
         assert_eq!(results.len(), 1);
         let conv = results[0].header_conversion.as_ref().unwrap();
@@ -486,7 +491,9 @@ mod tests {
         };
 
         let groups = vec![group];
-        let results = converter.convert_entity_groups(&groups, "src/empty.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/empty.rs", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 1);
         assert!(results[0].header_conversion.is_none());
@@ -554,15 +561,18 @@ mod tests {
             stats: Default::default(),
         };
 
-        let pure_results =
-            converter.convert_entity_groups(&[group], "src/demo.rs", None, None, None);
-        let enriched_results = converter.convert_entity_groups(
-            &processing_result.groups,
-            "src/demo.rs",
-            None,
-            Some(&processing_result),
-            Some(source),
-        );
+        let pure_results = converter
+            .convert_entity_groups(&[group], "src/demo.rs", None, None, None)
+            .groups;
+        let enriched_results = converter
+            .convert_entity_groups(
+                &processing_result.groups,
+                "src/demo.rs",
+                None,
+                Some(&processing_result),
+                Some(source),
+            )
+            .groups;
 
         let pure_text = pure_results[0]
             .header_conversion
@@ -637,13 +647,15 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enriched_results = converter.convert_entity_groups(
-            &processing_result.groups,
-            "src/empty.rs",
-            None,
-            Some(&processing_result),
-            Some(source),
-        );
+        let enriched_results = converter
+            .convert_entity_groups(
+                &processing_result.groups,
+                "src/empty.rs",
+                None,
+                Some(&processing_result),
+                Some(source),
+            )
+            .groups;
 
         assert_eq!(enriched_results.len(), 1);
         let text = enriched_results[0]
@@ -710,13 +722,15 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enriched_results = converter.convert_entity_groups(
-            &processing_result.groups,
-            "src/behave.rs",
-            None,
-            Some(&processing_result),
-            Some(source),
-        );
+        let enriched_results = converter
+            .convert_entity_groups(
+                &processing_result.groups,
+                "src/behave.rs",
+                None,
+                Some(&processing_result),
+                Some(source),
+            )
+            .groups;
 
         let text = enriched_results[0]
             .header_conversion
@@ -783,13 +797,15 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enriched_results = converter.convert_entity_groups(
-            &processing_result.groups,
-            "src/flow.rs",
-            None,
-            Some(&processing_result),
-            Some(source),
-        );
+        let enriched_results = converter
+            .convert_entity_groups(
+                &processing_result.groups,
+                "src/flow.rs",
+                None,
+                Some(&processing_result),
+                Some(source),
+            )
+            .groups;
 
         let text = enriched_results[0]
             .header_conversion
@@ -827,7 +843,9 @@ mod tests {
         let rs_group = create_test_group(2, "rust_fn", Language::Rust);
 
         let groups = vec![py_group, rs_group];
-        let results = converter.convert_entity_groups(&groups, "src/mixed.py", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/mixed.py", None, None, None)
+            .groups;
 
         assert_eq!(results.len(), 2);
 
@@ -865,7 +883,9 @@ mod tests {
 
         let group = create_test_group(1, "target", Language::Rust);
         let groups = vec![group];
-        let results = converter.convert_entity_groups(&groups, "src/target.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&groups, "src/target.rs", None, None, None)
+            .groups;
 
         let conv = results[0].header_conversion.as_ref().unwrap();
         let bm25 = conv.bm25_text.as_deref().unwrap();
@@ -898,7 +918,9 @@ mod tests {
         // Ordinary function group: the built-in converter handles it, so the
         // fallback plugin stays silent.
         let normal = create_test_group(1, "target", Language::Rust);
-        let results = converter.convert_entity_groups(&[normal], "src/target.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&[normal], "src/target.rs", None, None, None)
+            .groups;
         let conv = results[0].header_conversion.as_ref().unwrap();
         assert!(
             !conv
@@ -915,8 +937,9 @@ mod tests {
         let mut import_group =
             create_test_group(2, "use std::collections::HashMap", Language::Rust);
         import_group.header = Some(import_header);
-        let results =
-            converter.convert_entity_groups(&[import_group], "src/target.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&[import_group], "src/target.rs", None, None, None)
+            .groups;
         let conv = results[0]
             .header_conversion
             .as_ref()
@@ -960,8 +983,9 @@ mod tests {
         let mut import_group =
             create_test_group(1, "use std::collections::HashMap", Language::Rust);
         import_group.header = Some(import_header);
-        let results =
-            converter.convert_entity_groups(&[import_group], "src/t.rs", None, None, None);
+        let results = converter
+            .convert_entity_groups(&[import_group], "src/t.rs", None, None, None)
+            .groups;
         let conv = results[0].header_conversion.as_ref().unwrap();
         let bm25 = conv.bm25_text.as_deref().unwrap();
         assert!(

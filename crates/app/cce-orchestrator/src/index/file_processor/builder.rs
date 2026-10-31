@@ -1,6 +1,6 @@
 use super::*;
 use cce_config::{AstToNlConfig, LicenseHeaderConfig, NestProcessorConfig, Settings};
-use cce_metrics::{FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
+use cce_metrics::{CallsPruneMetrics, FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
 use cce_parser::ast_to_nl::AstToNlConverter;
 use cce_parser::ast_to_nl::chunker::GroupChunker;
 use cce_parser::document::PipelineRouter;
@@ -59,6 +59,7 @@ impl FileProcessor {
             grouper_metrics: None,
             converter_metrics: None,
             chunker_metrics: None,
+            calls_prune_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
             license_header: LicenseHeaderConfig::default(),
@@ -86,6 +87,7 @@ impl FileProcessor {
             grouper_metrics: None,
             converter_metrics: None,
             chunker_metrics: None,
+            calls_prune_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
             license_header: LicenseHeaderConfig::default(),
@@ -112,6 +114,7 @@ impl FileProcessor {
             grouper_metrics: None,
             converter_metrics: None,
             chunker_metrics: None,
+            calls_prune_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
             license_header: LicenseHeaderConfig::default(),
@@ -139,6 +142,7 @@ impl FileProcessor {
             grouper_metrics: None,
             converter_metrics: None,
             chunker_metrics: None,
+            calls_prune_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
             license_header: LicenseHeaderConfig::default(),
@@ -239,6 +243,12 @@ impl FileProcessor {
     /// Inject pipeline stage metrics for chunker
     pub fn with_chunker_metrics(mut self, metrics: Arc<PipelineStageMetrics>) -> Self {
         self.chunker_metrics = Some(metrics);
+        self
+    }
+
+    /// Inject `calls:` prune counters for the converter stage
+    pub fn with_calls_prune_metrics(mut self, metrics: Arc<CallsPruneMetrics>) -> Self {
+        self.calls_prune_metrics = Some(metrics);
         self
     }
 
