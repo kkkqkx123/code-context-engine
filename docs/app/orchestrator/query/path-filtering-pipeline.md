@@ -34,14 +34,13 @@ execute_search_flow()
     │   └─ Bm25Only      → SQLite 回填 file_path
     │
     ├─ Step 2: BM25 Consensus Fusion
-    ├─ Step 3: Summary Score Boost
-    ├─ Step 4: Relation Score Boost
+    ├─ Step 3: Score Normalization
     │
-    └─ Step 5: Post-processing ───────────────────── 应用层过滤
-        ├─ 5.1 Reranking      (LLM reranker)
-        ├─ 5.2 Score Sorting  (ScoreSorter)
-        ├─ 5.3 Threshold      (ThresholdFilter)
-        └─ 5.4 Glob Filter    (GlobFilter) ← include_patterns / exclude_patterns
+    └─ Step 4: Post-processing ───────────────────── 应用层过滤
+        ├─ 4.1 Reranking      (LLM reranker)
+        ├─ 4.2 Score Sorting  (ScoreSorter)
+        ├─ 4.3 Threshold      (ThresholdFilter)
+        └─ 4.4 Glob Filter    (GlobFilter) ← include_patterns / exclude_patterns
 ```
 
 ---

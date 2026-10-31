@@ -108,6 +108,37 @@ pub struct AggregatedQuerySpec {
     pub fields: SharedQueryFields,
 }
 
+/// One file-search request described without transport types.
+#[derive(Debug, Clone)]
+pub struct FileSearchSpec {
+    /// Fuzzy filename query.
+    pub query: String,
+    /// Maximum number of hits.
+    pub limit: usize,
+    /// When true return size and line counts, otherwise paths only.
+    pub detail: bool,
+}
+
+/// One file hit converted for transport rendering.
+#[derive(Debug, Clone)]
+pub struct FileSearchItem {
+    /// Project-relative path with `/` separators.
+    pub path: String,
+    /// File size in bytes, present only for the detailed tier.
+    pub size_bytes: Option<u64>,
+    /// Newline-terminated line count, present only for the detailed tier.
+    pub line_count: Option<u64>,
+}
+
+/// Converted file-search outcome ready for transport rendering.
+#[derive(Debug)]
+pub struct FileSearchOutcome {
+    /// Number of hits returned.
+    pub total: usize,
+    /// Ordered hits, best match first.
+    pub items: Vec<FileSearchItem>,
+}
+
 /// Converted search outcome ready for transport rendering.
 #[derive(Debug)]
 pub struct SearchOutcome {
@@ -461,7 +492,12 @@ impl<'a> SearchService<'a> {
         // request with a fresh cache always starts empty, so identical
         // queries re-run the embedding pipeline and queue behind the shared
         // LLM rate limiter. The clone shares the underlying store.
-        .with_shared_cache(self.state.engine.get_query_cache(project_id).await);
+        .with_shared_cache(self.state.engine.get_query_cache(project_id).await)
+        // The retry queue MUST be shared as well: the default per-coordinator
+        // queue is throwaway and would drop retryable failures with the
+        // coordinator. Sharing the engine-owned per-project queue keeps
+        // live queries and the background retry processor on one path.
+        .with_retry_queue(self.state.engine.get_retry_queue(project_id).await);
         if let Some(store) = self.state.engine.relation_store() {
             if let Ok(project_store) = store.for_project(project_id) {
                 coordinator = coordinator.with_relation_store(project_store);
@@ -552,6 +588,65 @@ impl<'a> SearchService<'a> {
             .search_entities(query, limit)
             .await
             .map_err(|error| SearchServiceError::Execution(error.to_string()))
+    }
+
+    /// Fuzzy file-path search over project files.
+    ///
+    /// Delegates to the coordinator so the local walk and the remote
+    /// unavailable policy stay in one place. The slim tier returns paths
+    /// only, the detailed tier attaches size and line counts.
+    pub async fn run_file_search(
+        &self,
+        project_id: i64,
+        spec: FileSearchSpec,
+    ) -> Result<FileSearchOutcome, SearchServiceError> {
+        if spec.query.trim().is_empty() {
+            return Err(SearchServiceError::InvalidInput(
+                "file search query must not be empty".to_string(),
+            ));
+        }
+        if spec.limit == 0 {
+            return Err(SearchServiceError::InvalidInput(
+                "file search limit must be greater than 0".to_string(),
+            ));
+        }
+        let entry = self.load_entry(project_id).await?;
+        let coordinator = self.build_coordinator(project_id, &entry).await?;
+        if spec.detail {
+            let hits = coordinator
+                .search_files(&spec.query, spec.limit)
+                .await
+                .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
+            let items = hits
+                .into_iter()
+                .map(|hit| FileSearchItem {
+                    path: hit.path,
+                    size_bytes: Some(hit.size_bytes),
+                    line_count: Some(hit.line_count),
+                })
+                .collect::<Vec<_>>();
+            Ok(FileSearchOutcome {
+                total: items.len(),
+                items,
+            })
+        } else {
+            let paths = coordinator
+                .search_file_paths(&spec.query, spec.limit)
+                .await
+                .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
+            let items = paths
+                .into_iter()
+                .map(|path| FileSearchItem {
+                    path,
+                    size_bytes: None,
+                    line_count: None,
+                })
+                .collect::<Vec<_>>();
+            Ok(FileSearchOutcome {
+                total: items.len(),
+                items,
+            })
+        }
     }
 
     /// Best-effort relation version for a project, used to stamp responses

@@ -161,10 +161,9 @@ impl StorageCoordinator {
         let wk_op = self.operation_id.clone();
 
         // Batches rejected by a rate limit (429) or a transient server error
-        // (5xx) are retried once after the whole pass, mirroring the summary
-        // generator's deferred-retry semantics: retries do not add load while
-        // other batches are still embedding, and the inter-batch delay acts as
-        // natural backoff.
+        // (5xx) are retried once after the whole pass: retries do not add
+        // load while other batches are still embedding, and the inter-batch
+        // delay acts as natural backoff.
         type DeferredBatch<'a> = (&'a [&'a ChunkedResult], Option<String>);
         let mut deferred_retries: Vec<DeferredBatch<'_>> = Vec::new();
         let mut deferred_retry_after_ms: u64 = 0;

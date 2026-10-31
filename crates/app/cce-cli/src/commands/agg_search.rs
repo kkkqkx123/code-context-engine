@@ -31,10 +31,6 @@ pub struct AggSearchCommand {
     #[arg(long = "hybrid")]
     pub hybrid_queries: Vec<String>,
 
-    /// Summary queries (append @weight for a per-query override)
-    #[arg(long = "summary")]
-    pub summary_queries: Vec<String>,
-
     /// Weight applied to BM25 sub-query scores
     #[arg(long, default_value_t = 1.2)]
     pub bm25_weight: f32,
@@ -46,10 +42,6 @@ pub struct AggSearchCommand {
     /// Weight applied to hybrid sub-query scores
     #[arg(long, default_value_t = 1.0)]
     pub hybrid_weight: f32,
-
-    /// Weight applied to summary sub-query scores
-    #[arg(long, default_value_t = 1.0)]
-    pub summary_weight: f32,
 
     /// Result limit
     #[arg(short, long, default_value_t = 10)]
@@ -165,17 +157,9 @@ impl AggSearchCommand {
                 weight,
             });
         }
-        for query in &self.summary_queries {
-            let (text, weight) = split_weighted_query(query, self.summary_weight);
-            sub_queries.push(SubQueryRequest {
-                text,
-                query_type: "summary".to_string(),
-                weight,
-            });
-        }
         if sub_queries.is_empty() {
             anyhow::bail!(
-                "at least one sub-query is required (--bm25, --vector, --hybrid or --summary)"
+                "at least one sub-query is required (--bm25, --vector or --hybrid)"
             );
         }
         let exclude_content_types: Vec<String> = self

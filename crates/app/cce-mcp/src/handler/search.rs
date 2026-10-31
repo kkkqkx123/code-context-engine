@@ -7,7 +7,9 @@
 use cce_api::models::KeywordTermOperator;
 use cce_orchestrator::KeywordSearchTool;
 use cce_server_shared::context::SharedContext;
-use cce_server_shared::services::search::{SearchService, SharedQueryFields, SingleQuerySpec};
+use cce_server_shared::services::search::{
+    FileSearchSpec, SearchService, SharedQueryFields, SingleQuerySpec,
+};
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -22,7 +24,7 @@ pub struct SearchArgs {
     /// Maximum number of results to return (default 10).
     #[serde(default)]
     pub limit: Option<usize>,
-    /// Retrieval source: vector, bm25, hybrid (default), or summary.
+    /// Retrieval source: vector, bm25, or hybrid (default).
     #[serde(default)]
     pub query_type: Option<String>,
     /// Minimum unified score; results below are dropped.
@@ -58,6 +60,21 @@ pub struct SearchArgs {
     /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
     #[serde(default)]
     pub expand: Option<bool>,
+}
+
+/// Arguments for fuzzy file-path search.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FileSearchArgs {
+    /// Project ID to search within (required).
+    pub project_id: i64,
+    /// Fuzzy filename query.
+    pub query: String,
+    /// Maximum number of hits (default 10).
+    #[serde(default)]
+    pub limit: Option<usize>,
+    /// When true attach size and line counts, otherwise paths only.
+    #[serde(default)]
+    pub detail: Option<bool>,
 }
 
 /// Arguments for keyword (BM25) search.
@@ -177,6 +194,57 @@ pub async fn search(
     }
 }
 
+/// Run a fuzzy file-path search tool call.
+///
+/// Delegates to the shared query service so MCP and future HTTP callers
+/// share the coordinator policy: the local branch walks the project
+/// directory, the remote branch reports unavailability.
+#[allow(clippy::too_many_lines)]
+pub async fn file_search(
+    state: &Arc<SharedContext>,
+    args: FileSearchArgs,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    if args.project_id <= 0 {
+        return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+            "file search failed: invalid project_id {}",
+            args.project_id
+        ))]));
+    }
+    if args.query.trim().is_empty() {
+        return Ok(CallToolResult::error(vec![ContentBlock::text(
+            "file search failed: invalid query: query must not be empty".to_string(),
+        )]));
+    }
+    let limit = args.limit.unwrap_or(10);
+    if limit == 0 || limit > 100 {
+        return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+            "file search failed: invalid limit {limit}: must be 1..=100"
+        ))]));
+    }
+    let service = SearchService::new(state);
+    let spec = FileSearchSpec {
+        query: args.query.clone(),
+        limit,
+        detail: args.detail.unwrap_or(false),
+    };
+    match service.run_file_search(args.project_id, spec).await {
+        Ok(outcome) => Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({
+                "total": outcome.total,
+                "items": outcome.items.iter().map(|item| json!({
+                    "path": item.path,
+                    "size_bytes": item.size_bytes,
+                    "line_count": item.line_count,
+                })).collect::<Vec<_>>(),
+            })
+            .to_string(),
+        )])),
+        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+            "file search failed: {error}"
+        ))])),
+    }
+}
+
 /// Run a keyword (BM25) search tool call.
 pub async fn keyword_search(
     state: &Arc<SharedContext>,
@@ -267,5 +335,15 @@ mod tests {
         assert!(args.top_n.is_none());
         assert!(args.offset.is_none());
         assert!(args.term_operator.is_none());
+    }
+
+    #[test]
+    fn file_search_args_optionals_default_to_none() {
+        let args: FileSearchArgs =
+            serde_json::from_value(serde_json::json!({"project_id": 3, "query": "main"}))
+                .expect("minimal file search args deserialize");
+        assert_eq!(args.project_id, 3);
+        assert!(args.limit.is_none());
+        assert!(args.detail.is_none());
     }
 }

@@ -84,7 +84,7 @@ Code Context Engine 提供两个搜索 API 端点：
 | 字段 | 类型 | 必填 | 描述 |
 |-----|------|------|------|
 | `text` | string | 是 | 查询文本 |
-| `query_type` | string | 否 | 查询类型（vector, bm25, hybrid, summary），默认hybrid |
+| `query_type` | string | 否 | 查询类型（vector, bm25, hybrid），默认hybrid |
 | `weight` | number | 否 | RRF融合权重，默认1.0 |
 
 ### 响应

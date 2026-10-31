@@ -3,14 +3,16 @@ use std::sync::Arc;
 
 use super::EngineError;
 use super::builders::{build_chat_handle, build_rerank_handler, build_summary_generator};
+use cce_codegraph::CallChainQuery;
 use cce_config::project_registry::{ProjectEntry, ProjectScope};
 use cce_metrics::RelationMetrics;
-use cce_metrics::{PluginMetrics, SearchMetrics, WatchMetrics};
+use cce_metrics::{PluginMetrics, QueryMetrics, SearchMetrics, WatchMetrics};
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
 use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index::RelationStore;
+use cce_orchestrator::query::{IndexCapabilities, QueryCoordinator, RelationSearcher};
 use cce_orchestrator::query::searcher::Searcher;
 use cce_parser::summary::SummaryGenerator;
 use cce_plugin::PluginRegistry;
@@ -530,6 +532,71 @@ impl super::CodeContextEngine {
 
         tracing::info!(project_id, "Created and cached Searcher");
         Ok(searcher)
+    }
+
+    /// Build the per-request query coordinator for a project.
+    ///
+    /// Single source of truth for engine-side query assembly: the same
+    /// searcher, relation searcher, capabilities, shared cache, shared
+    /// retry queue, metrics, and relation store that the shared query
+    /// service uses. Engine entry points delegate here so direct searcher
+    /// calls cannot bypass capability checks, timeouts, retry handling,
+    /// and metrics.
+    pub async fn build_query_coordinator(
+        &self,
+        project_id: i64,
+    ) -> Result<QueryCoordinator, EngineError> {
+        let project_entry = self
+            .project_registry
+            .get_or_load(project_id)
+            .await
+            .map_err(|e| EngineError::Config(format!("Failed to load project config: {e}")))?;
+        let searcher = self.get_searcher(project_id).await?;
+        let searcher = searcher.lock().await.clone();
+        let relation_searcher = self.coordinator_relation_searcher(project_id).await;
+        let capabilities = IndexCapabilities::from(&project_entry.config.orchestrator.indexer)
+            .merge(&IndexCapabilities::from(&project_entry.config.relation))
+            .with_relation_propagation_depth(project_entry.config.relation.max_propagation_depth);
+        let mut coordinator = QueryCoordinator::with_capabilities(
+            Arc::new(searcher),
+            relation_searcher,
+            capabilities,
+            project_id,
+        )
+        .with_metrics(QueryMetrics::new(
+            &self.metrics_registry,
+            project_id,
+        ))
+        .with_shared_cache(self.get_query_cache(project_id).await)
+        .with_retry_queue(self.get_retry_queue(project_id).await);
+        if let Some(store) = self.relation_store() {
+            if let Ok(project_store) = store.for_project(project_id) {
+                coordinator = coordinator.with_relation_store(project_store);
+            }
+        }
+        Ok(coordinator)
+    }
+
+    /// Relation searcher backing coordinator queries.
+    ///
+    /// Built from the active relation snapshot so graph-adjacent query
+    /// paths observe the same epoch as the runtime; an unavailable runtime
+    /// degrades to an empty searcher instead of failing query assembly.
+    async fn coordinator_relation_searcher(&self, project_id: i64) -> Arc<RelationSearcher> {
+        let empty = || Arc::new(RelationSearcher::new(Arc::new(CallChainQuery::new())));
+        let Ok(runtime) = self.get_relation_runtime(project_id).await else {
+            return empty();
+        };
+        if !runtime.can_serve_queries().await {
+            return empty();
+        }
+        match runtime.get_snapshot().await {
+            Some(snapshot) => {
+                let query = CallChainQuery::from_snapshot(Arc::clone(&snapshot.index));
+                Arc::new(RelationSearcher::from_query(query))
+            }
+            None => empty(),
+        }
     }
 }
 

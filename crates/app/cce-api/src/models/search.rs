@@ -141,7 +141,7 @@ pub struct SearchResultItem {
 pub struct SubQueryRequest {
     /// Query text
     pub text: String,
-    /// Query type (vector, bm25, hybrid, summary)
+    /// Query type (vector, bm25, hybrid)
     #[serde(default = "default_subquery_type")]
     pub query_type: String,
     /// Weight applied to this sub-query's candidate scores before the

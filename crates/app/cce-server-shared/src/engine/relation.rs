@@ -524,39 +524,14 @@ impl super::CodeContextEngine {
         cleared
     }
 
-    /// Process the retry queue for a specific project
+    /// Process the retry queue for a specific project.
     ///
-    /// Drains all ready queries and re-executes them using the project's searcher.
+    /// Delegates to the query coordinator so retries run the same
+    /// view-sharing, caching, and re-queue policy as live queries.
     /// Returns the number of queries processed.
     pub async fn process_retry_queue(&self, project_id: i64) -> Result<usize, EngineError> {
-        let queue = self.get_retry_queue(project_id).await;
-        let pending = queue.drain_ready().await;
-        if pending.is_empty() {
-            return Ok(0);
-        }
-
-        let count = pending.len();
-        let searcher = self.get_searcher(project_id).await?;
-        let searcher = searcher.lock().await;
-
-        for options in pending {
-            match searcher.search(&options).await {
-                Ok(_) => {
-                    tracing::info!(
-                        query = %options.query,
-                        "Retry queue query succeeded"
-                    );
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        query = %options.query,
-                        "Retry queue query failed, discarding"
-                    );
-                }
-            }
-        }
-
-        Ok(count)
+        let coordinator = self.build_query_coordinator(project_id).await?;
+        Ok(coordinator.process_retry_queue().await)
     }
 
     /// Get the total number of queued queries across all projects

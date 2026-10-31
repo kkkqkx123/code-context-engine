@@ -261,8 +261,8 @@ mod tests {
             "grp::11::chunk-x"
         );
         assert_eq!(
-            replace_epoch_in_id("grp::1::summary::src/lib.rs", 1, 2),
-            "grp::2::summary::src/lib.rs"
+            replace_epoch_in_id("grp::1::chunk-y", 1, 2),
+            "grp::2::chunk-y"
         );
     }
 

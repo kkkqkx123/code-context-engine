@@ -296,6 +296,17 @@ impl QueryCoordinator {
         self
     }
 
+    /// Replace the retry queue with a shared instance.
+    ///
+    /// Coordinators are built per request, so the default queue is
+    /// throwaway and retryable failures would be lost with it. Sharing the
+    /// engine-owned per-project queue keeps single and aggregated queries
+    /// on one retry path with the background retry processor.
+    pub fn with_retry_queue(mut self, queue: Arc<RetryQueue>) -> Self {
+        self.retry_queue = queue;
+        self
+    }
+
     /// Attach the local relation database for FTS5 entity search.
     ///
     /// Local-only port: FTS5 entity search runs inside the embedded branch.

@@ -446,7 +446,11 @@ impl super::CodeContextEngine {
 
     // --- Query operations ---
 
-    /// Search for code with project-specific configuration
+    /// Search for code with project-specific configuration.
+    ///
+    /// Delegates to the per-request query coordinator so capability checks,
+    /// timeouts, retry handling, shared caching, and metrics match the
+    /// shared query service path. No direct searcher call lives here.
     pub async fn search(
         &self,
         project_id: i64,
@@ -463,15 +467,41 @@ impl super::CodeContextEngine {
                 options.project_id, project_id
             )));
         }
+        let coordinator = self.build_query_coordinator(project_id).await?;
+        coordinator.search(options).await.map_err(EngineError::Query)
+    }
 
-        // Get project-specific searcher.
-        //
-        // Clone the searcher out of the mutex and release it before the
-        // await: `Searcher` holds Arc-backed handles, so the clone is cheap
-        // and concurrent queries no longer serialize on the project-wide
-        // searcher mutex for the whole (embedding-bound) search duration.
-        let searcher = self.get_searcher(project_id).await?;
-        let searcher = searcher.lock().await.clone();
-        searcher.search(options).await.map_err(EngineError::Query)
+    /// Fuzzy file-path search scoped to one project.
+    ///
+    /// Delegates to the query coordinator so local and remote branches
+    /// share one root-resolution and availability policy.
+    pub async fn search_file_paths(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, EngineError> {
+        let coordinator = self.build_query_coordinator(project_id).await?;
+        coordinator
+            .search_file_paths(query, limit)
+            .await
+            .map_err(EngineError::Query)
+    }
+
+    /// File search with size and line-count metadata.
+    ///
+    /// Delegates to the query coordinator; shares the matcher and ordering
+    /// with [`Self::search_file_paths`].
+    pub async fn search_files(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<cce_orchestrator::query::FileHit>, EngineError> {
+        let coordinator = self.build_query_coordinator(project_id).await?;
+        coordinator
+            .search_files(query, limit)
+            .await
+            .map_err(EngineError::Query)
     }
 }

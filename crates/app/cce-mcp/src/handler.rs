@@ -9,15 +9,17 @@
 //! Item shapes reuse the shared API DTO field names so HTTP and MCP callers
 //! observe the same `SearchResultItem`, `KeywordSearchItem`, and fold payloads.
 //! The MCP transport returns tool payloads without the HTTP success envelope.
-//! Covered here: search, keyword search, entity callees/callers, call chain,
-//! project listing, full and incremental indexing, single and batch fold, and
-//! engine health. Graph traversal, storage management, metrics history, watch,
-//! configuration, and ingest entries remain HTTP-only and are not exposed here.
+//! Covered here: search, file search, keyword search, entity callees/callers,
+//! call chain, project listing, full and incremental indexing, single and
+//! batch fold, and engine health. Graph traversal, storage management,
+//! metrics history, watch, configuration, and ingest entries remain HTTP-only
+//! and are not exposed here.
 //!
 //! The tool implementations are grouped by domain in submodules:
-//! `search` (hybrid + keyword search), `relations` (entity callees/callers and
-//! call chains), `project` (project listing, indexing, health), `fold`
-//! (stateless folding), and `support` (shared helpers). This module keeps the
+//! `search` (hybrid, file-path, and keyword search), `relations` (entity
+//! callees/callers and call chains), `project` (project listing, indexing,
+//! health), `fold` (stateless folding), and `support` (shared helpers). This
+//! module keeps the
 //! handler struct, the static tool router, and the thin `#[tool]` wrappers so
 //! the rmcp router codegen stays in one place.
 
@@ -40,7 +42,7 @@ use rmcp::{
 pub use fold::{FoldArgs, FoldBatchArgs, FoldBatchItemArgs};
 pub use project::{IncrementalIndexArgs, IndexProjectArgs, ProjectArgs};
 pub use relations::{CallChainArgs, EntityArgs};
-pub use search::{KeywordSearchArgs, SearchArgs};
+pub use search::{FileSearchArgs, KeywordSearchArgs, SearchArgs};
 
 /// MCP server handler. Cloned per session by the streamable-HTTP transport, so
 /// it only holds cheap `Arc`s.
@@ -88,6 +90,17 @@ impl McpServerHandler {
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("search")?;
         search::search(&self.state, args).await
+    }
+
+    #[tool(
+        description = "Fuzzy file-path search over project files. Returns matching paths, optionally with size and line counts. Remote projects report unavailability."
+    )]
+    async fn file_search(
+        &self,
+        Parameters(args): Parameters<FileSearchArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_enabled("file_search")?;
+        search::file_search(&self.state, args).await
     }
 
     #[tool(
@@ -236,16 +249,17 @@ mod tests {
         let stdio_names = names_of(McpServerHandler::tool_router().list_all());
         let http_names = names_of(McpServerHandler::tool_router().list_all());
         assert_eq!(stdio_names, http_names);
-        assert_eq!(stdio_names.len(), 12);
+        assert_eq!(stdio_names.len(), 13);
     }
 
     #[test]
-    fn tool_router_exposes_twelve_tools_without_http_only_entries() {
+    fn tool_router_exposes_thirteen_tools_without_http_only_entries() {
         let router = McpServerHandler::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 13);
         for name in [
             "search",
+            "file_search",
             "keyword_search",
             "entity_callees",
             "entity_callers",

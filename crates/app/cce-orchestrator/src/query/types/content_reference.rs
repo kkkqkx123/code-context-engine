@@ -15,7 +15,7 @@ pub enum DowngradeReason {
     OverLimit,
     /// The source file no longer exists or is unreadable.
     FileMissing,
-    /// The hit is file-level (e.g. a file summary) and carries no body.
+    /// The hit is file-level and carries no body.
     FileLevel,
     /// No chunk record exists for the hit, so lines and body cannot be resolved.
     ChunkMissing,
