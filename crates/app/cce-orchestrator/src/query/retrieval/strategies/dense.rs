@@ -60,33 +60,45 @@ impl DenseStrategy {
         let mut filter = build_search_filter(options, self.searcher.scope.project_group_id());
         filter = query_filter.apply_to_search_filter(filter);
 
-        // Step 3: Execute core dense search
+        // Step 3: Execute core dense search with over-fetch when glob
+        // patterns are present, then filter locally inside the strategy.
         let config = &options.config.vector;
-        self.dense_retrieval
+        let has_glob = !options.include_patterns.is_empty() || !options.exclude_patterns.is_empty();
+        let fetch_k = if has_glob {
+            (config.top_k.saturating_mul(GLOB_OVER_FETCH_FACTOR)).max(config.top_k + 20)
+        } else {
+            config.top_k
+        };
+        let raw = self
+            .dense_retrieval
             .search(
                 query_embedding,
-                config.top_k,
+                fetch_k,
                 config.min_score,
                 Some(config.hnsw_ef as usize),
                 filter,
             )
-            .await
+            .await?;
+        Ok(apply_strategy_filters(raw, options, config.top_k))
     }
 }
 
 fn build_search_filter(options: &QueryOptions, group_id: &str) -> SearchFilter {
     SearchFilter {
-        // The epoch view is applied by DenseStrategy.retrieve() via QueryFilter.
         epochs: Vec::new(),
         excluded_files: None,
         group_id: Some(group_id.to_string()),
         point_type: Some(PointKind::Chunk),
         file_path: None,
         directory_prefix: options.directory_prefix.clone(),
-        exclude_test: options
-            .exclude_content_types
-            .iter()
-            .any(|t| matches!(t, crate::query::types::ExcludableContentType::Test)),
+        exclude_test: options.exclude_content_types.iter().any(|t| {
+            matches!(
+                t,
+                crate::query::types::ExcludableContentType::Test
+                    | crate::query::types::ExcludableContentType::Generated
+                    | crate::query::types::ExcludableContentType::Dependency
+            )
+        }),
         include_categories: if options.include_categories.is_empty() {
             None
         } else {
@@ -99,4 +111,40 @@ fn build_search_filter(options: &QueryOptions, group_id: &str) -> SearchFilter {
         },
         raw_filter: None,
     }
+}
+
+/// Over-recall factor applied when glob patterns are present.
+///
+/// Storage backends do not evaluate glob patterns, so the strategy fetches
+/// extra candidates, filters them locally, and keeps the configured limit.
+const GLOB_OVER_FETCH_FACTOR: usize = 3;
+
+/// Local glob + generated/dependency filtering for dense candidates.
+///
+/// Runs inside the strategy so the searcher no longer pays a post-fusion
+/// filter pass. Keeps the configured ordering and truncates to `limit`.
+fn apply_strategy_filters(
+    results: Vec<crate::query::types::SearchResult>,
+    options: &QueryOptions,
+    limit: usize,
+) -> Vec<crate::query::types::SearchResult> {
+    use crate::query::retrieval::post_processing::GlobFilter;
+    let filter = GlobFilter::new();
+    let filtered = filter
+        .apply(results, &options.include_patterns, &options.exclude_patterns)
+        .unwrap_or_default();
+    let mut kept = Vec::with_capacity(filtered.len().min(limit));
+    for item in filtered {
+        if crate::query::types::query_options::path_excluded_by_types(
+            &item.file_path,
+            &options.exclude_content_types,
+        ) {
+            continue;
+        }
+        kept.push(item);
+        if kept.len() >= limit {
+            break;
+        }
+    }
+    kept
 }

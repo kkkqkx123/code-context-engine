@@ -6,7 +6,8 @@
 //! # Pipeline invariants
 //!
 //! Every execution strategy runs the same stage contract:
-//! retrieval → (hybrid: entity expansion + weighted fusion) → glob filter →
+//! retrieval (with glob and content-type filtering plus over-fetch refill)
+//! → (hybrid: entity expansion + weighted fusion) →
 //! optional score normalization → SQLite enrichment → post-processing
 //! (rerank, sort, filter, threshold).
 //!
@@ -30,7 +31,6 @@ use crate::query::error::QueryError;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
-use crate::query::retrieval::post_processing::GlobFilter;
 use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchResult};
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
@@ -63,8 +63,6 @@ pub struct Searcher {
     pub(crate) score_sorter: Arc<ScoreSorter>,
     /// Threshold filter for result filtering
     pub(crate) threshold_filter: Arc<ThresholdFilter>,
-    /// Glob filter for include/exclude pattern filtering
-    pub(crate) glob_filter: Arc<GlobFilter>,
     /// Optional search metrics collector
     pub(crate) search_metrics: Option<Arc<SearchMetrics>>,
     /// Shared query result cache. Clones share the underlying store,
@@ -269,7 +267,8 @@ impl Searcher {
             "BM25 recall completed"
         );
 
-        results = self.apply_glob_filter(results, options)?;
+        // Glob and content-type filtering already runs inside the strategy
+        // with over-fetch refill, so no post-retrieval filter here.
         self.apply_score_normalization(&mut results, options);
         self.enrich_results(
             &mut results,
@@ -388,7 +387,6 @@ impl Searcher {
             "Hybrid fusion completed"
         );
 
-        fused_results = self.apply_glob_filter(fused_results, options)?;
         self.enrich_results(
             &mut fused_results,
             options.project_id,
@@ -426,9 +424,7 @@ impl Searcher {
             "Retrieval completed"
         );
 
-        // Glob filter uses the index-carried file path, so it runs before
-        // enrichment to keep the SQLite lookups on the surviving set.
-        results = self.apply_glob_filter(results, options)?;
+        // Strategy-level filtering already refilled filtered slots.
         self.apply_score_normalization(&mut results, options);
         self.enrich_results(
             &mut results,
@@ -440,19 +436,7 @@ impl Searcher {
         self.post_process_results(results, options).await
     }
 
-    /// Apply include/exclude path patterns to a result set.
-    fn apply_glob_filter(
-        &self,
-        results: Vec<SearchResult>,
-        options: &QueryOptions,
-    ) -> Result<Vec<SearchResult>> {
-        self.glob_filter.apply(
-            results,
-            &options.include_patterns,
-            &options.exclude_patterns,
-        )
-    }
-
+    /// Legacy glob entry kept for tests and fallback paths.
     /// Optional score normalization, applied uniformly across all strategies
     /// when `config.score.enable` is set so the final threshold sees one
     /// score scale. Fields carrying the same raw score (`vector_score`,

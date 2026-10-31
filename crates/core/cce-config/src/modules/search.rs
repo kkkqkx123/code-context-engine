@@ -183,13 +183,16 @@ pub struct HybridFusionConfig {
     pub enable_intent_based_weights: bool,
     /// Whether to include items that only appear in one path.
     ///
-    /// The semantics are asymmetric by design: vector-only keys are always
-    /// kept, and this switch only controls whether BM25-only keys join the
-    /// fused list. The vector path is treated as the primary semantic recall,
-    /// so dropping its single-path hits is never desired; the switch instead
-    /// governs the noisy BM25-only tail (e.g. keyword mentions with no
-    /// semantic match).
+    /// Asymmetric by design: vector-only keys are always kept, this switch
+    /// only controls whether BM25-only keys join the fused list. The vector
+    /// path is the primary semantic recall; use `require_strict_intersection`
+    /// for a true intersection of both paths.
     pub include_single_path: bool,
+    /// Require keys present in both paths, dropping all single-path keys.
+    ///
+    /// Off by default. When enabled it takes precedence over
+    /// `include_single_path` and yields the strict intersection.
+    pub require_strict_intersection: bool,
     /// Minimum fused score threshold, normalized to `[0.0, 1.0]` across all
     /// algorithms. Each algorithm internally scales its raw output to this
     /// range before thresholding, so the same value carries the same meaning
@@ -246,6 +249,7 @@ impl Default for HybridFusionConfig {
             intent_weights: QueryIntentWeights::default(),
             enable_intent_based_weights: true,
             include_single_path: true,
+            require_strict_intersection: false,
             min_score: 0.0,
             dedup_by_chunk: true,
         }
@@ -623,11 +627,15 @@ pub struct RelationAnnotationConfig {
     /// Enable relation expansion: attach pre-resolved call-graph neighbours
     /// (callees/callers) supplied by the caller to each annotated result.
     pub expansion_enabled: bool,
-    /// Maximum number of expansion units attached to one result
-    /// (shared across both directions; forward units are taken first).
-    pub max_expanded_units: usize,
+    /// Maximum forward (callee) expansion units per result.
+    pub forward_max_expanded_units: usize,
+    /// Maximum backward (caller) expansion units per result.
+    pub backward_max_expanded_units: usize,
     /// Include caller-side (backward) expansion units.
     pub expansion_include_callers: bool,
+    /// Relation domains resolved for expansion (for example `call`,
+    /// `dependency`, `structural`). Empty means call only.
+    pub expansion_domains: Vec<String>,
     /// Also attach non-call edges (inheritance, implementation, imports).
     /// Off by default: structural edges fan out and drown the budget.
     pub allow_structural_edges: bool,
@@ -670,8 +678,10 @@ impl Default for RelationAnnotationConfig {
             segment_merge_gap: 2,
             omit_primary_body: false,
             expansion_enabled: false,
-            max_expanded_units: 4,
+            forward_max_expanded_units: 4,
+            backward_max_expanded_units: 4,
             expansion_include_callers: true,
+            expansion_domains: vec!["call".to_string()],
             allow_structural_edges: false,
             filter_stdlib: true,
             filter_external: true,
@@ -710,9 +720,16 @@ impl RelationAnnotationConfig {
         self
     }
 
-    /// Set the maximum expansion units per result (builder pattern).
-    pub fn with_max_expanded_units(mut self, count: usize) -> Self {
-        self.max_expanded_units = count;
+    /// Set forward and backward expansion budgets per result.
+    pub fn with_expansion_budgets(mut self, forward: usize, backward: usize) -> Self {
+        self.forward_max_expanded_units = forward;
+        self.backward_max_expanded_units = backward;
+        self
+    }
+
+    /// Set relation domains resolved for expansion.
+    pub fn with_expansion_domains(mut self, domains: Vec<String>) -> Self {
+        self.expansion_domains = domains;
         self
     }
 
@@ -792,10 +809,13 @@ impl Validate for RelationAnnotationConfig {
                 "must be greater than 0",
             ));
         }
-        if self.expansion_enabled && self.max_expanded_units == 0 {
+        if self.expansion_enabled
+            && self.forward_max_expanded_units == 0
+            && self.backward_max_expanded_units == 0
+        {
             errors.push(ConfigValidationError::invalid_field(
-                "max_expanded_units",
-                "must be greater than 0 when expansion is enabled",
+                "forward_max_expanded_units",
+                "at least one direction must be greater than 0 when expansion is enabled",
             ));
         }
 

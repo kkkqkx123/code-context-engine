@@ -90,6 +90,47 @@ pub fn expand_multi_entity_results(results: Vec<SearchResult>) -> Vec<SearchResu
     expanded
 }
 
+/// Weak post-enrichment key for results without an alignment key.
+///
+/// Uses the normalized file path plus a stable hash of the materialized body.
+/// Empty bodies yield no weak key and are kept as-is. The single source of
+/// truth for unkeyed collapsing across post-processing and aggregation.
+pub fn weak_post_key(result: &crate::query::types::SearchResult) -> Option<String> {
+    if alignment_key(
+        &result.entity_ids,
+        result.segment_id.as_deref(),
+        &result.id,
+    )
+    .is_some()
+    {
+        return None;
+    }
+    if result.content.trim().is_empty() || result.file_path.is_empty() {
+        return None;
+    }
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    result.file_path.hash(&mut hasher);
+    result.content.hash(&mut hasher);
+    Some(format!("w:{}:{:x}", result.file_path, hasher.finish()))
+}
+
+/// Unified dedup key: alignment key first, weak post key second.
+///
+/// Shared by single-search post-processing and aggregated merging so both
+/// collapse onto one key space.
+pub fn unified_dedup_key(result: &crate::query::types::SearchResult) -> Option<String> {
+    if let Some(key) = alignment_key(
+        &result.entity_ids,
+        result.segment_id.as_deref(),
+        &result.id,
+    ) {
+        return Some(key);
+    }
+    weak_post_key(result)
+}
+
 /// Aggregate a result list into one best-raw-score entry per alignment key.
 ///
 /// Keys derive from [`alignment_key`]; results without a key are skipped.

@@ -8,7 +8,7 @@ use cce_codegraph::index::{
 };
 use cce_codegraph::query::QueryCache;
 use cce_codegraph::{CallChainNode, CallChainQuery};
-use cce_types::{EntityId, RelationType, ResolvedRelation, TestInfo, language::LanguageInfo};
+use cce_types::{EntityId, RelationType, ResolvedRelation};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -135,7 +135,7 @@ impl RelationQueryOptions {
 #[derive(Debug, Default, Clone)]
 struct RelationFileFilter {
     directory_prefix: Option<String>,
-    exclude_tests: bool,
+    excluded_types: Vec<ExcludableContentType>,
     excluded_files: HashSet<String>,
     relation_domains: HashSet<String>,
     include_external: bool,
@@ -174,9 +174,7 @@ impl RelationFileFilter {
                 .directory_prefix
                 .as_deref()
                 .map(|p| cce_types::normalize_project_path(p.trim_matches('/'))),
-            exclude_tests: options
-                .exclude_content_types
-                .contains(&ExcludableContentType::Test),
+            excluded_types: options.exclude_content_types.clone(),
             excluded_files: options
                 .excluded_files
                 .iter()
@@ -189,7 +187,7 @@ impl RelationFileFilter {
 
     fn is_empty(&self) -> bool {
         self.directory_prefix.is_none()
-            && !self.exclude_tests
+            && self.excluded_types.is_empty()
             && self.excluded_files.is_empty()
             && self.relation_domains.is_empty()
             && self.include_external
@@ -220,11 +218,13 @@ impl RelationFileFilter {
                 return false;
             }
         }
-        if self.exclude_tests {
-            let info = LanguageInfo::detect_from_path(&normalized);
-            if TestInfo::from_path(Some(&info.language), &normalized).is_test() {
-                return false;
-            }
+        if !self.excluded_types.is_empty()
+            && crate::query::types::query_options::path_excluded_by_types(
+                &normalized,
+                &self.excluded_types,
+            )
+        {
+            return false;
         }
         if self.excluded_files.contains(&normalized) {
             return false;

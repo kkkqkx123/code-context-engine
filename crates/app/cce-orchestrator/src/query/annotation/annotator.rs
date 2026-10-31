@@ -261,15 +261,15 @@ impl RelationAnnotator {
     }
 
     /// Deduplicate caller-supplied expansion units against the primary and
-    /// cap the combined count to `max_expanded_units`.
+    /// cap each direction by its own budget.
     ///
     /// Noise is filtered before the budget cap so dropped units never occupy
     /// a slot: stdlib and external targets go first (each behind its own
     /// switch, as a defensive second layer after caller-side filtering),
     /// then non-call edges unless structural edges are allowed. Survivors are
-    /// ordered by score descending within each direction; forward (callee)
-    /// units fill the shared cap first and backward (caller) units take the
-    /// remainder (dropped entirely when `expansion_include_callers` is false).
+    /// ordered by score descending within each direction; forward and backward
+    /// budgets are independent (backward dropped entirely when
+    /// `expansion_include_callers` is false).
     fn prepare_expansion(
         &self,
         primary_entity: Option<EntityId>,
@@ -280,8 +280,13 @@ impl RelationAnnotator {
     ) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
         use std::collections::HashSet;
 
-        let cap = config.max_expanded_units;
-        if cap == 0 {
+        let forward_cap = config.forward_max_expanded_units.clamp(0, 8);
+        let backward_cap = if config.expansion_include_callers {
+            config.backward_max_expanded_units.clamp(0, 8)
+        } else {
+            0
+        };
+        if forward_cap == 0 && backward_cap == 0 {
             return (Vec::new(), Vec::new());
         }
 
@@ -310,13 +315,10 @@ impl RelationAnnotator {
         forward.sort_by(|a, b| b.score.total_cmp(&a.score));
         backward.sort_by(|a, b| b.score.total_cmp(&a.score));
 
-        let mut kept_forward = Vec::new();
-        let mut kept_backward = Vec::new();
-        let mut kept = 0usize;
-
-        let mut pass = |units: Vec<ExpandedUnit>, into_backward: bool| {
+        let mut take = |units: Vec<ExpandedUnit>, cap: usize| {
+            let mut out = Vec::new();
             for unit in units {
-                if kept >= cap {
+                if out.len() >= cap {
                     break;
                 }
                 if config.dedup_strategy == DedupStrategy::ByContentHash
@@ -329,19 +331,12 @@ impl RelationAnnotator {
                         continue;
                     }
                 }
-                if into_backward {
-                    kept_backward.push(unit);
-                } else {
-                    kept_forward.push(unit);
-                }
-                kept += 1;
+                out.push(unit);
             }
+            out
         };
-
-        pass(forward, false);
-        if config.expansion_include_callers {
-            pass(backward, true);
-        }
+        let kept_forward = take(forward, forward_cap);
+        let kept_backward = take(backward, backward_cap);
 
         (kept_forward, kept_backward)
     }
@@ -433,7 +428,7 @@ mod tests {
         RelationAnnotationConfig::new()
             .enable(true)
             .with_expansion(true)
-            .with_max_expanded_units(cap)
+            .with_expansion_budgets(cap, if callers { cap } else { 0 })
             .with_caller_expansion(callers)
             // These tests exercise the legacy expansion semantics; the
             // self-evident filter has dedicated tests below.
@@ -468,7 +463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_budget_cap_forward_first() {
+    async fn test_budget_cap_per_direction() {
         let annotator = RelationAnnotator::new(expansion_config(2, true));
         let forward = (10..14)
             .map(|i| unit(i, &format!("f{i}"), ExpansionOrigin::Forward))
@@ -479,7 +474,7 @@ mod tests {
             .await
             .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 2);
-        assert_eq!(result.metadata.backward_nodes, 0);
+        assert_eq!(result.metadata.backward_nodes, 1);
     }
 
     #[tokio::test]

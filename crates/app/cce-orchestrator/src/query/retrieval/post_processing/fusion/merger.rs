@@ -122,6 +122,15 @@ pub fn fuse_hybrid_results_with_stats(
         bm25_results
     };
 
+    // Fusion min_score is hygiene only; business threshold lives in the final
+    // result filter. A non-trivial fusion threshold hides which stage drops
+    // candidates, so surface it loudly.
+    if config.min_score > 0.05 {
+        tracing::warn!(
+            min_score = config.min_score,
+            "fusion min_score above hygiene level; business threshold belongs in result.min_score"
+        );
+    }
     // Observe cross-path alignment coverage so silent degradation (e.g. all
     // keys single-path) stays visible instead of blending into a ranked list.
     let stats = compute_alignment_coverage(&vector_results, &bm25_results);
@@ -140,16 +149,27 @@ pub fn fuse_hybrid_results_with_stats(
 
 /// Union of alignment keys across both paths in deterministic (sorted) order.
 ///
-/// Vector keys always seed the union; BM25-only keys join only when
-/// `include_single_path` is set, so excluding single-path hits removes the
-/// BM25-only tail while keeping single-path vector recall.
+/// Vector keys always seed the union; BM25-only keys join only when the
+/// fusion config keeps single-path hits. Strict intersection returns only
+/// keys present in both paths and takes precedence over the single-path switch.
 fn union_keys<V, W>(
     vector_by_key: &HashMap<String, V>,
     bm25_by_key: &HashMap<String, W>,
-    include_single_path: bool,
+    config: &HybridFusionConfig,
 ) -> Vec<String> {
+    let strict_intersection = config.require_strict_intersection;
+    let include_single_path = config.include_single_path;
     let mut seen = std::collections::HashSet::new();
     let mut all_keys: Vec<String> = Vec::new();
+    if strict_intersection {
+        for key in vector_by_key.keys() {
+            if bm25_by_key.contains_key(key) && seen.insert(key.clone()) {
+                all_keys.push(key.clone());
+            }
+        }
+        all_keys.sort();
+        return all_keys;
+    }
     for key in vector_by_key.keys() {
         if seen.insert(key.clone()) {
             all_keys.push(key.clone());
@@ -243,7 +263,7 @@ fn fuse_weighted_minmax(
     let (vector_by_key, bm25_by_key) = normalize_path_scores(&vector_results, &bm25_results);
 
     // Step 3: Fuse results by alignment key
-    let all_keys = union_keys(&vector_by_key, &bm25_by_key, config.include_single_path);
+    let all_keys = union_keys(&vector_by_key, &bm25_by_key, config);
 
     if vector_results.is_empty() || bm25_results.is_empty() {
         tracing::trace!(
@@ -357,11 +377,11 @@ impl RankContext {
     fn new(
         vector_results: Vec<SearchResult>,
         bm25_results: Vec<SearchResult>,
-        include_single_path: bool,
+        config: &HybridFusionConfig,
     ) -> Self {
         let vector_ranks = rank_by_key(&vector_results, |r| r.vector_score);
         let bm25_ranks = rank_by_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
-        let all_keys = union_keys(&vector_ranks, &bm25_ranks, include_single_path);
+        let all_keys = union_keys(&vector_ranks, &bm25_ranks, config);
         Self {
             vector_ranks,
             bm25_ranks,
@@ -414,7 +434,7 @@ fn fuse_rrf(
     let beta = config.bm25_weight;
     let k = k.max(1) as f32;
 
-    let ctx = RankContext::new(vector_results, bm25_results, config.include_single_path);
+    let ctx = RankContext::new(vector_results, bm25_results, config);
     let mut fused: Vec<SearchResult> = Vec::with_capacity(ctx.all_keys.len());
 
     for key in &ctx.all_keys {
@@ -488,7 +508,7 @@ fn fuse_borda(
     let alpha = config.vector_weight;
     let beta = config.bm25_weight;
 
-    let ctx = RankContext::new(vector_results, bm25_results, config.include_single_path);
+    let ctx = RankContext::new(vector_results, bm25_results, config);
     let vector_points = ctx.vector_key_count() as f32;
     let bm25_points = ctx.bm25_key_count() as f32;
 
@@ -588,6 +608,9 @@ fn fuse_single_path(
     stats: FusionAlignmentStats,
     normalize: bool,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
+    if config.require_strict_intersection {
+        return (Vec::new(), stats);
+    }
     if !config.include_single_path && !from_vector {
         return (Vec::new(), stats);
     }

@@ -82,6 +82,66 @@ impl std::fmt::Display for SearchSources {
 pub enum ExcludableContentType {
     /// Test files (detected by path patterns like test/, spec/, __tests__, etc.)
     Test,
+    /// Generated outputs (build/, target/, dist/, *.generated.*, *.pb.rs, etc.)
+    Generated,
+    /// Third-party dependencies (node_modules/, vendor/, third_party/, etc.)
+    Dependency,
+}
+
+impl ExcludableContentType {
+    /// Whether a normalized project-relative path falls under this exclusion.
+    pub fn matches_path(&self, normalized_path: &str) -> bool {
+        match self {
+            Self::Test => {
+                let info = cce_types::LanguageInfo::detect_from_path(normalized_path);
+                cce_types::TestInfo::from_path(Some(&info.language), normalized_path).is_test()
+            }
+            Self::Generated => is_generated_path(normalized_path),
+            Self::Dependency => is_dependency_path(normalized_path),
+        }
+    }
+}
+
+/// Shared generated-output detector used by all query paths.
+fn is_generated_path(path: &str) -> bool {
+    const DIR_MARKERS: &[&str] = &[
+        "target/", "build/", "dist/", "out/", "generated/", ".next/", "__pycache__/",
+    ];
+    const SUFFIX_MARKERS: &[&str] = &[
+        ".generated.", ".pb.", ".min.js", ".bundle.js", ".lock", ".rkyv",
+    ];
+    if DIR_MARKERS.iter().any(|m| path.contains(m)) {
+        return true;
+    }
+    if path.starts_with("target/") || path.starts_with("build/") || path.starts_with("dist/") {
+        return true;
+    }
+    SUFFIX_MARKERS.iter().any(|m| path.contains(m))
+}
+
+/// Shared third-party dependency detector used by all query paths.
+fn is_dependency_path(path: &str) -> bool {
+    const DIR_MARKERS: &[&str] = &[
+        "node_modules/",
+        "vendor/",
+        "third_party/",
+        "third-party/",
+        ".cargo/",
+        ".venv/",
+        "site-packages/",
+    ];
+    if DIR_MARKERS.iter().any(|m| path.contains(m)) {
+        return true;
+    }
+    path.starts_with("vendor/") || path.starts_with("third_party/")
+}
+
+/// Whether a normalized path is excluded by any entry of the list.
+pub fn path_excluded_by_types(path: &str, types: &[ExcludableContentType]) -> bool {
+    let normalized = cce_types::normalize_project_path(path);
+    types
+        .iter()
+        .any(|t| t.matches_path(&normalized))
 }
 
 /// Query intent: describes the type of user query for determining fusion weights.

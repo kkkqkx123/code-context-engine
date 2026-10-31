@@ -12,8 +12,10 @@
 //!
 //! # Position in Pipeline
 //!
-//! Glob filtering runs **before** fusion and ranking. This minimizes unnecessary
-//! computation by dropping excluded results as early as possible.
+//! Glob filtering runs inside the retrieval strategies with over-fetch refill,
+//! before fusion and enrichment. Strategy-level filtering is the primary path;
+//! direct calls to `GlobFilter::apply` remain only as a fallback for callers
+//! that bypass the strategies.
 
 use crate::query::error::Result;
 use crate::query::types::SearchResult;

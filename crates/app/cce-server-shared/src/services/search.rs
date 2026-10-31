@@ -193,6 +193,8 @@ impl<'a> SearchService<'a> {
     ) -> Result<ExcludableContentType, SearchServiceError> {
         match raw.to_lowercase().as_str() {
             "test" | "tests" => Ok(ExcludableContentType::Test),
+            "generated" | "generate" => Ok(ExcludableContentType::Generated),
+            "dependency" | "dependencies" | "vendor" => Ok(ExcludableContentType::Dependency),
             _ => Err(SearchServiceError::InvalidInput(format!(
                 "Unknown exclude content type: {raw}"
             ))),
@@ -313,11 +315,19 @@ impl<'a> SearchService<'a> {
         if let Some(max_candidates) = fields.rerank_max_candidates {
             global_config.rerank.max_candidates = max_candidates;
         }
+        let path_probe = QueryOptions {
+            directory_prefix: fields.directory_prefix.clone(),
+            exclude_content_types: fields.exclude_content_types.clone(),
+            include_patterns: fields.include_patterns.clone(),
+            exclude_patterns: fields.exclude_patterns.clone(),
+            ..QueryOptions::new("", project_id)
+        };
         let resolver = self
             .expansion_resolver(
                 project_id,
                 &entry,
                 &mut global_config.annotation,
+                &path_probe,
                 fields.expand,
             )
             .await;
@@ -414,7 +424,7 @@ impl<'a> SearchService<'a> {
     ) -> QueryOptions {
         let mut annotation = query_opts.config.annotation.clone();
         let resolver = self
-            .expansion_resolver(project_id, entry, &mut annotation, expand)
+            .expansion_resolver(project_id, entry, &mut annotation, &query_opts, expand)
             .await;
         query_opts.config.annotation = annotation;
         query_opts.with_neighbour_resolver(resolver)
@@ -429,6 +439,7 @@ impl<'a> SearchService<'a> {
         project_id: i64,
         entry: &cce_config::project_registry::ProjectEntry,
         annotation: &mut RelationAnnotationConfig,
+        query_opts: &QueryOptions,
         expand: bool,
     ) -> Option<NeighbourResolver> {
         if !expand {
@@ -438,9 +449,18 @@ impl<'a> SearchService<'a> {
             Ok(searcher) => {
                 annotation.enable_annotation = true;
                 annotation.expansion_enabled = true;
-                Some(NeighbourResolver::new(
+                let path_filter =
+                    cce_orchestrator::query::expansion::ExpansionPathFilter {
+                        directory_prefix: query_opts.directory_prefix.clone(),
+                        exclude_content_types: query_opts.exclude_content_types.clone(),
+                        include_patterns: query_opts.include_patterns.clone(),
+                        exclude_patterns: query_opts.exclude_patterns.clone(),
+                    };
+                Some(NeighbourResolver::with_filter(
                     searcher,
                     std::path::PathBuf::from(&entry.metadata.root_path),
+                    path_filter,
+                    annotation.expansion_domains.clone(),
                 ))
             }
             Err(error) => {

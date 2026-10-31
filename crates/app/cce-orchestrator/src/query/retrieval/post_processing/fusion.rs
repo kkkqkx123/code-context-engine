@@ -16,6 +16,7 @@ mod normalizer;
 
 pub use aligner::{
     FusionAlignmentStats, alignment_key, compute_alignment_coverage, expand_multi_entity_results,
+    unified_dedup_key, weak_post_key,
 };
 pub use merger::{fuse_hybrid_results, fuse_hybrid_results_with_stats};
 pub use normalizer::minmax_normalize;

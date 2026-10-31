@@ -10,6 +10,6 @@ pub use entity_mapper::{
 };
 pub use fusion::{
     HybridFusionConfig, alignment_key, fuse_hybrid_results, fuse_hybrid_results_with_stats,
-    minmax_normalize,
+    minmax_normalize, unified_dedup_key, weak_post_key,
 };
 pub use glob_filter::GlobFilter;

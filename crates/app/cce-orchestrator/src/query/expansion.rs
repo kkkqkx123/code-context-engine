@@ -62,12 +62,61 @@ fn window_excerpt(code: &str) -> Option<String> {
     Some(out)
 }
 
+/// Path filter inherited from the main query for expansion neighbours.
+///
+/// Neighbours whose file fails this filter never occupy budget. Mirrors the
+/// main-path semantics: directory prefix, content-type exclusion and
+/// include/exclude glob patterns share one implementation.
+#[derive(Clone, Debug, Default)]
+pub struct ExpansionPathFilter {
+    pub directory_prefix: Option<String>,
+    pub exclude_content_types: Vec<crate::query::types::ExcludableContentType>,
+    pub include_patterns: Vec<String>,
+    pub exclude_patterns: Vec<String>,
+}
+
+impl ExpansionPathFilter {
+    pub fn allows(&self, file_path: &str) -> bool {
+        let normalized = cce_types::normalize_project_path(file_path);
+        if let Some(prefix) = &self.directory_prefix {
+            let p = cce_types::normalize_project_path(prefix.trim_matches('/'));
+            if !(normalized == p || normalized.starts_with(&format!("{p}/"))) {
+                return false;
+            }
+        }
+        if crate::query::types::query_options::path_excluded_by_types(
+            &normalized,
+            &self.exclude_content_types,
+        ) {
+            return false;
+        }
+        if !self.include_patterns.is_empty() || !self.exclude_patterns.is_empty() {
+            let filter = crate::query::retrieval::post_processing::GlobFilter::new();
+            let probe = crate::query::types::SearchResult {
+                file_path: normalized.clone(),
+                ..Default::default()
+            };
+            let kept = filter
+                .apply(
+                    vec![probe],
+                    &self.include_patterns,
+                    &self.exclude_patterns,
+                )
+                .unwrap_or_default();
+            if kept.is_empty() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// Neighbour resolver injected into the engine search pass.
 ///
 /// A concrete (non-dyn) carrier bundling the relation searcher and the
 /// project root the caller already holds. When attached to
 /// [`super::types::QueryOptions`], the unified searcher's annotation step
-/// resolves real call-domain neighbours and runs the batch annotation entry,
+/// resolves real neighbours and runs the batch annotation entry,
 /// so real-neighbour resolution, cross-hit shared dedup and single wrapping
 /// all happen inside the engine pass. When absent, the annotation step keeps
 /// its historical empty-vector semantics and default behavior is unchanged.
@@ -75,6 +124,8 @@ fn window_excerpt(code: &str) -> Option<String> {
 pub struct NeighbourResolver {
     searcher: std::sync::Arc<RelationSearcher>,
     project_root: std::path::PathBuf,
+    pub path_filter: ExpansionPathFilter,
+    pub domains: Vec<String>,
 }
 
 impl std::fmt::Debug for NeighbourResolver {
@@ -94,62 +145,117 @@ impl NeighbourResolver {
         Self {
             searcher,
             project_root,
+            path_filter: ExpansionPathFilter::default(),
+            domains: vec!["call".to_string()],
         }
     }
 
-    /// Resolve call-domain neighbour units for one hit (see
-    /// [`resolve_expansion_units`]).
+    /// Bundle with explicit path filter and relation domains.
+    pub fn with_filter(
+        searcher: std::sync::Arc<RelationSearcher>,
+        project_root: std::path::PathBuf,
+        path_filter: ExpansionPathFilter,
+        domains: Vec<String>,
+    ) -> Self {
+        Self {
+            searcher,
+            project_root,
+            path_filter,
+            domains,
+        }
+    }
+
+    /// Resolve neighbour units for one hit (see [`resolve_expansion_units`]).
     pub fn resolve(
         &self,
         file_path: &str,
         start_line: u32,
         end_line: u32,
-        per_direction: usize,
+        forward_budget: usize,
+        backward_budget: usize,
         include_callers: bool,
     ) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
-        resolve_expansion_units(
-            &self.searcher,
-            &self.project_root,
-            file_path,
+        let request = ExpansionRequest {
+            file_path: file_path.to_string(),
             start_line,
             end_line,
-            per_direction,
+            forward_budget,
+            backward_budget,
             include_callers,
-        )
+            domains: self.domains.clone(),
+            path_filter: self.path_filter.clone(),
+        };
+        resolve_expansion_units_with_filter(&self.searcher, &self.project_root, request)
     }
 }
 
-/// Resolve call-domain neighbour units for one search hit.
+/// Single-hit expansion request grouping range, budgets and filters.
 ///
-/// `start_line`/`end_line` are one-based presentation lines; the snapshot index
-/// compares zero-based tree-sitter rows, so the range is translated back before
-/// the lookup. Returns `(forward_callees, backward_callers)`, each capped at
-/// `per_direction`.
-pub fn resolve_expansion_units(
+/// Groups the scalar arguments of neighbour resolution into one owned value
+/// so the resolution entry stays within the argument-count guideline and
+/// future filter fields grow the struct instead of the function signature.
+#[derive(Debug, Clone)]
+pub struct ExpansionRequest {
+    pub file_path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub forward_budget: usize,
+    pub backward_budget: usize,
+    pub include_callers: bool,
+    pub domains: Vec<String>,
+    pub path_filter: ExpansionPathFilter,
+}
+
+/// Resolve neighbour units for one search hit with explicit budgets, domains
+/// and path filtering.
+///
+/// Seeds are ordered by overlap with the hit range so container members win
+/// over unrelated siblings. Neighbours failing the path filter never occupy
+/// budget. Returns `(forward, backward)` capped by their own budgets.
+pub fn resolve_expansion_units_with_filter(
     searcher: &RelationSearcher,
     project_root: &Path,
-    file_path: &str,
-    start_line: u32,
-    end_line: u32,
-    per_direction: usize,
-    include_callers: bool,
+    request: ExpansionRequest,
 ) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
-    if per_direction == 0 {
+    let ExpansionRequest {
+        file_path,
+        start_line,
+        end_line,
+        forward_budget,
+        backward_budget,
+        include_callers,
+        domains,
+        path_filter,
+    } = request;
+    if forward_budget == 0 && (!include_callers || backward_budget == 0) {
         return (Vec::new(), Vec::new());
     }
     let snapshot = searcher.query().index();
+    let domains = if domains.is_empty() {
+        vec!["call".to_string()]
+    } else {
+        domains.to_vec()
+    };
+    let fetch = forward_budget
+        .max(if include_callers { backward_budget } else { 0 })
+        .max(1);
     let options = RelationQueryOptions {
-        relation_domains: vec!["call".to_string()],
+        relation_domains: domains,
         include_external: false,
-        limit: per_direction,
+        limit: fetch.max(8),
         ..RelationQueryOptions::default()
     };
 
     let first_row = start_line.min(end_line).saturating_sub(1) as usize;
     let last_row = start_line.max(end_line).saturating_sub(1) as usize;
     let (first_row, last_row) = (first_row.min(last_row), first_row.max(last_row));
-    let mut seeds = snapshot.get_entities_in_line_range(file_path, first_row, last_row);
-    seeds.sort_by_key(|id| id.0);
+    let mut seeds = snapshot.get_entities_in_line_range(file_path.as_str(), first_row, last_row);
+    seeds.sort_by(|a, b| {
+        overlap_len(*a, first_row, last_row, snapshot)
+            .cmp(&overlap_len(*b, first_row, last_row, snapshot))
+            .reverse()
+            .then_with(|| a.0.cmp(&b.0))
+    });
     seeds.truncate(MAX_SEEDS);
     if seeds.is_empty() {
         return (Vec::new(), Vec::new());
@@ -160,7 +266,7 @@ pub fn resolve_expansion_units(
     let mut forward = Vec::new();
     let mut seen_forward = HashSet::new();
     for entity_id in &seeds {
-        if forward.len() >= per_direction {
+        if forward.len() >= forward_budget {
             break;
         }
         for relation in searcher.get_callees_paginated(*entity_id, &options) {
@@ -170,7 +276,13 @@ pub fn resolve_expansion_units(
             if seed_set.contains(&callee) {
                 continue;
             }
-            if forward.len() >= per_direction || !seen_forward.insert(callee.0) {
+            if forward.len() >= forward_budget || !seen_forward.insert(callee.0) {
+                continue;
+            }
+            if let Some(neighbour_file) =
+                searcher.query().index().get_file_path_by_entity(callee)
+                && !path_filter.allows(&neighbour_file)
+            {
                 continue;
             }
             if let Some(unit) = snippet_unit(
@@ -188,10 +300,10 @@ pub fn resolve_expansion_units(
     }
 
     let mut backward = Vec::new();
-    if include_callers {
+    if include_callers && backward_budget > 0 {
         let mut seen_backward = HashSet::new();
         for entity_id in &seeds {
-            if backward.len() >= per_direction {
+            if backward.len() >= backward_budget {
                 break;
             }
             for relation in searcher.get_callers_paginated(*entity_id, &options) {
@@ -199,7 +311,13 @@ pub fn resolve_expansion_units(
                 if seed_set.contains(&caller) {
                     continue;
                 }
-                if backward.len() >= per_direction || !seen_backward.insert(caller.0) {
+                if backward.len() >= backward_budget || !seen_backward.insert(caller.0) {
+                    continue;
+                }
+                if let Some(neighbour_file) =
+                    searcher.query().index().get_file_path_by_entity(caller)
+                    && !path_filter.allows(&neighbour_file)
+                {
                     continue;
                 }
                 let edge_label = if relation.relation_type.is_constructor_call() {
@@ -222,6 +340,54 @@ pub fn resolve_expansion_units(
         }
     }
     (forward, backward)
+}
+
+/// Overlap length between an entity span and the hit row range.
+fn overlap_len(
+    entity_id: cce_types::EntityId,
+    first_row: usize,
+    last_row: usize,
+    snapshot: &cce_codegraph::LayeredSnapshotIndex,
+) -> usize {
+    use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
+    let Some(entity) = snapshot.get_function_by_entity_id(entity_id) else {
+        return 0;
+    };
+    let start = entity.span.start_position.row;
+    let end = entity.span.end_position.row.max(start);
+    let overlap_start = start.max(first_row);
+    let overlap_end = end.min(last_row);
+    if overlap_end >= overlap_start {
+        overlap_end - overlap_start + 1
+    } else {
+        0
+    }
+}
+
+/// Single-budget entry grouping range, budget and filters into one request.
+///
+/// Keeps the historical seven-argument call shape for direct callers by
+/// building the request value internally.
+pub fn resolve_expansion_units(
+    searcher: &RelationSearcher,
+    project_root: &Path,
+    file_path: &str,
+    start_line: u32,
+    end_line: u32,
+    per_direction: usize,
+    include_callers: bool,
+) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
+    let request = ExpansionRequest {
+        file_path: file_path.to_string(),
+        start_line,
+        end_line,
+        forward_budget: per_direction,
+        backward_budget: if include_callers { per_direction } else { 0 },
+        include_callers,
+        domains: Vec::new(),
+        path_filter: ExpansionPathFilter::default(),
+    };
+    resolve_expansion_units_with_filter(searcher, project_root, request)
 }
 
 /// Read one entity's full definition span as an annotator unit.
@@ -316,10 +482,18 @@ pub async fn annotate_hits_with_resolver(
     config.enable_annotation = true;
     config.expansion_enabled = true;
     config.workspace_root = Some(resolver.project_root.clone());
-    if config.max_expanded_units == 0 {
+    if !resolver.domains.is_empty() {
+        config.expansion_domains = resolver.domains.clone();
+    }
+    let forward_budget = config.forward_max_expanded_units.clamp(0, 8);
+    let backward_budget = if config.expansion_include_callers {
+        config.backward_max_expanded_units.clamp(0, 8)
+    } else {
+        0
+    };
+    if forward_budget == 0 && backward_budget == 0 {
         return;
     }
-    let per_direction = config.max_expanded_units.clamp(1, 8);
     let annotator = RelationAnnotator::new(config.clone());
     let mut batch = Vec::new();
     let mut positions = Vec::new();
@@ -336,7 +510,8 @@ pub async fn annotate_hits_with_resolver(
             &item.file_path,
             item.start_line,
             item.end_line,
-            per_direction,
+            forward_budget,
+            backward_budget,
             config.expansion_include_callers,
         );
         if forward.is_empty() && backward.is_empty() {

@@ -604,9 +604,20 @@ impl QueryCoordinator {
             .load_query_filter(agg_options.project_id)
             .await?;
         let sub_queries_count = agg_options.sub_queries.len();
+        for sub_query in &agg_options.sub_queries {
+            if !sub_query.weight.is_finite() || sub_query.weight < 0.0 {
+                return Err(QueryError::invalid(&format!(
+                    "invalid sub-query weight {} for '{}'",
+                    sub_query.weight, sub_query.text
+                )));
+            }
+        }
 
         // Build every sub-query's options up front so the shared filters and
         // config are decomposed in one place (see `build_sub_query_options`).
+        // Sub-queries run with the business threshold disabled and an inflated
+        // limit; weighting happens before the single global threshold so the
+        // weight decides ranking instead of threshold luck.
         let sub_options: Vec<QueryOptions> = agg_options
             .sub_queries
             .iter()
@@ -657,22 +668,8 @@ impl QueryCoordinator {
                                     sources_used.push(source.clone());
                                 }
                             }
-                            // Weight the sub-query's candidates before the merge so
-                            // the weight decides cross-query ranking, not just
-                            // bookkeeping. Invalid weights degrade to neutral (1.0)
-                            // with a warning instead of dropping results; the API
-                            // boundary rejects them outright.
-                            let weight = if sub_query.weight.is_finite() && sub_query.weight >= 0.0
-                            {
-                                sub_query.weight
-                            } else {
-                                tracing::warn!(
-                                    query = %sub_query.text,
-                                    weight = sub_query.weight,
-                                    "Sub-query has an invalid weight; treating it as 1.0"
-                                );
-                                1.0
-                            };
+                            // Weights are validated upfront; scale here unconditionally.
+                            let weight = sub_query.weight;
                             if weight != 1.0 {
                                 for item in &mut result.items {
                                     item.score *= weight;
@@ -692,19 +689,18 @@ impl QueryCoordinator {
                     }
                 }
 
-                // Deduplicate by alignment key (entity_ids or segment_id), keeping the highest score.
-                // Using chunk id would fail to deduplicate the same entity across BM25/embedding paths,
-                // since chunk id format is {groupId}_{path}_{index} (path-specific).
-                // Reuses the fusion key derivation so the aggregated dedup and hybrid
-                // fusion collapse results onto the same key space.
+                // Deduplicate by unified key (alignment key, else content weak key),
+                // keeping the highest weighted score. Shares the key space with
+                // hybrid fusion and single-search post-processing.
                 let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
+                let mut unkeyed: Vec<crate::query::types::SearchResult> = Vec::new();
                 for item in all_results {
-                    let key = crate::query::retrieval::post_processing::alignment_key(
-                        &item.entity_ids,
-                        item.segment_id.as_deref(),
-                        &item.id,
-                    )
-                    .unwrap_or_else(|| item.id.clone());
+                    let Some(key) =
+                        crate::query::retrieval::post_processing::unified_dedup_key(&item)
+                    else {
+                        unkeyed.push(item);
+                        continue;
+                    };
                     dedup
                         .entry(key)
                         .and_modify(|existing| {
@@ -717,10 +713,9 @@ impl QueryCoordinator {
 
                 let mut merged: Vec<crate::query::types::SearchResult> =
                     dedup.into_values().collect();
-                // Weighting happens after each sub-query threshold, so the global
-                // threshold is re-applied here to keep weighted scores under the
-                // same contract. A zero weight only demotes, never excludes on its
-                // own; the threshold decides exclusion.
+                merged.extend(unkeyed);
+                // Single global threshold on weighted scores; sub-queries run
+                // threshold-free (see build_sub_query_options).
                 let min_score = agg_options.global_config.result.min_score;
                 if min_score > 0.0 {
                     merged.retain(|item| item.score >= min_score);
@@ -784,6 +779,16 @@ impl QueryCoordinator {
             config.annotation.enable_annotation = false;
             config.annotation.expansion_enabled = false;
         }
+        // Threshold-free sub-queries with inflated limit: the merged list
+        // applies the single global threshold after weighting.
+        config.result.min_score = 0.0;
+        let inflated = agg_options
+            .global_config
+            .result
+            .limit
+            .saturating_mul(agg_options.sub_queries.len().max(1))
+            .max(agg_options.global_config.result.limit);
+        config.result.limit = inflated.max(10);
         QueryOptions {
             query: sub_query.text.clone(),
             project_id: agg_options.project_id,

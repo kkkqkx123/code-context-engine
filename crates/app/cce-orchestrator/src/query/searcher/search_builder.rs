@@ -14,7 +14,6 @@ use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::{FulltextStore, RelationStore, VectorStore};
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
-use crate::query::retrieval::post_processing::GlobFilter;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::SearchMetrics;
@@ -143,7 +142,6 @@ impl SearcherBuilder {
             plugin_registry: self.plugin_registry,
             score_sorter: Arc::new(ScoreSorter::new()),
             threshold_filter: Arc::new(ThresholdFilter::new()),
-            glob_filter: Arc::new(GlobFilter::new()),
             scope: self.scope,
             search_metrics: self.search_metrics,
             cache: self

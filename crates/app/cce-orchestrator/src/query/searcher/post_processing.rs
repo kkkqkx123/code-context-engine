@@ -84,6 +84,11 @@ impl Searcher {
             sorted_results
         };
 
+        // Step 2b: Reference demotion. Threshold already sees original scores;
+        // references sort after full bodies on ties and never outrank a
+        // higher-scored full body via downgrade artefacts.
+        let sorted_results = demote_references_for_sort(sorted_results);
+
         // Step 3: Threshold filtering
         let final_results = self
             .threshold_filter
@@ -314,20 +319,19 @@ pub(crate) fn merge_fusion_weights_override(
     config
 }
 
-/// Collapse repeats sharing one alignment key, keeping the highest score.
+/// Collapse repeats sharing one unified dedup key, keeping the highest score.
 ///
-/// Reuses the fusion key derivation so single search and aggregated search
-/// share one key space. Results without a derivable key are kept as-is.
+/// Idempotent recheck for the hybrid path: fusion already collapses onto the
+/// same key space, so this only removes siblings surfaced by enrichment filling
+/// missing entity linkage plus content-identical unkeyed bodies.
 fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
     use std::collections::HashMap;
     let mut best: HashMap<String, SearchResult> = HashMap::new();
     let mut unkeyed = Vec::new();
     for item in results {
-        let Some(key) = crate::query::retrieval::post_processing::alignment_key(
-            &item.entity_ids,
-            item.segment_id.as_deref(),
-            &item.id,
-        ) else {
+        let Some(key) =
+            crate::query::retrieval::post_processing::fusion::unified_dedup_key(&item)
+        else {
             unkeyed.push(item);
             continue;
         };
@@ -342,6 +346,20 @@ fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
     let mut deduped: Vec<SearchResult> = best.into_values().collect();
     deduped.extend(unkeyed);
     deduped
+}
+
+/// Stable demotion for reference results.
+///
+/// Keeps the score order intact while ensuring full bodies precede references
+/// when scores tie. Threshold filtering runs on the same scores, so demotion
+/// only affects tie order, never exclusion.
+fn demote_references_for_sort(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
+    results.sort_by(|a, b| {
+        a.cmp_score_desc_then_stable(b).then_with(|| {
+            a.content_state.is_reference().cmp(&b.content_state.is_reference())
+        })
+    });
+    results
 }
 
 /// Convert a plugin-supplied algorithm enum to the internal representation.

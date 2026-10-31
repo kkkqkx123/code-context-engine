@@ -232,29 +232,37 @@ pub fn enrich_results(
     dedup_file_references(results);
 }
 
-/// Deduplicate file-reference results by file_path, keeping the highest-scoring one.
+/// Deduplicate file-reference results by file path plus line interval.
 ///
-/// After enrichment, multiple chunks from the same file may downgrade to file
-/// references (over budget, missing file, or file-level hits). This collapses
-/// them to a single reference per file.
+/// Non-overlapping intervals from the same file are kept as separate
+/// references; overlapping intervals keep the highest score. Full bodies
+/// never participate here.
 fn dedup_file_references(results: &mut Vec<SearchResult>) {
-    use std::collections::HashMap;
-    let mut best_by_file: HashMap<&str, usize> = HashMap::new();
     let mut keep = vec![true; results.len()];
-    for (i, result) in results.iter().enumerate() {
-        if !result.content_state.is_reference() {
+    for i in 0..results.len() {
+        if !keep[i] || !results[i].content_state.is_reference() {
             continue;
         }
-        let path = result.file_path.as_str();
-        if let Some(&best_idx) = best_by_file.get(path) {
-            if result.score > results[best_idx].score {
-                keep[best_idx] = false;
-                best_by_file.insert(path, i);
-            } else {
-                keep[i] = false;
+        for j in (i + 1)..results.len() {
+            if !keep[j] || !results[j].content_state.is_reference() {
+                continue;
             }
-        } else {
-            best_by_file.insert(path, i);
+            if results[i].file_path != results[j].file_path {
+                continue;
+            }
+            if intervals_overlap(
+                results[i].start_line,
+                results[i].end_line,
+                results[j].start_line,
+                results[j].end_line,
+            ) {
+                if results[j].score > results[i].score {
+                    keep[i] = false;
+                    break;
+                } else {
+                    keep[j] = false;
+                }
+            }
         }
     }
     let mut write_idx = 0;
@@ -265,6 +273,13 @@ fn dedup_file_references(results: &mut Vec<SearchResult>) {
         }
     }
     results.truncate(write_idx);
+}
+
+/// Whether two closed line intervals overlap or touch at an endpoint.
+fn intervals_overlap(a_start: u32, a_end: u32, b_start: u32, b_end: u32) -> bool {
+    let (a_start, a_end) = (a_start.min(a_end), a_start.max(a_end));
+    let (b_start, b_end) = (b_start.min(b_end), b_start.max(b_end));
+    a_start <= b_end + 1 && b_start <= a_end + 1
 }
 
 fn materialize(
@@ -292,7 +307,10 @@ fn materialize(
                     DowngradeReason::ChunkMissing,
                 );
             }
-            result.score *= 0.8;
+            result.metadata.insert(
+                "downgrade".to_string(),
+                DowngradeReason::ChunkMissing.note().to_string(),
+            );
         }
         return;
     };
@@ -367,7 +385,10 @@ fn materialize(
                 0,
                 DowngradeReason::FileMissing,
             );
-            result.score *= 0.8;
+            result.metadata.insert(
+                "downgrade".to_string(),
+                DowngradeReason::FileMissing.note().to_string(),
+            );
         }
         Some(source_text) => {
             let tokens = estimate_tokens(&source_text);
@@ -380,7 +401,10 @@ fn materialize(
                     tokens,
                     DowngradeReason::OverLimit,
                 );
-                result.score *= 0.8;
+                result.metadata.insert(
+                    "downgrade".to_string(),
+                    DowngradeReason::OverLimit.note().to_string(),
+                );
             } else {
                 result.content_state = ContentState::Full;
                 result.content = source_text;

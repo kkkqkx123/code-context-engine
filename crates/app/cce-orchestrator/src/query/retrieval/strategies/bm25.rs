@@ -59,7 +59,15 @@ impl Bm25Strategy {
         query_filter: &QueryFilter,
     ) -> Result<Vec<SearchResult>> {
         // Step 1: Build retrieval options with native project_id and epoch filters.
-        let limit = options.config.vector.top_k.max(options.config.result.limit);
+        // Glob patterns are applied locally inside the strategy with over-fetch
+        // so filtered slots are refilled before fusion.
+        let base_limit = options.config.vector.top_k.max(options.config.result.limit);
+        let has_glob = !options.include_patterns.is_empty() || !options.exclude_patterns.is_empty();
+        let limit = if has_glob {
+            (base_limit.saturating_mul(3)).max(base_limit + 20).min(200)
+        } else {
+            base_limit
+        };
         let retrieval_options = FulltextSearchOptions {
             limit,
             offset: 0,
@@ -71,10 +79,14 @@ impl Bm25Strategy {
             } else {
                 Some(query_filter.excluded_files().to_vec())
             },
-            exclude_test: options
-                .exclude_content_types
-                .iter()
-                .any(|t| matches!(t, crate::query::types::ExcludableContentType::Test)),
+            exclude_test: options.exclude_content_types.iter().any(|t| {
+                matches!(
+                    t,
+                    crate::query::types::ExcludableContentType::Test
+                        | crate::query::types::ExcludableContentType::Generated
+                        | crate::query::types::ExcludableContentType::Dependency
+                )
+            }),
             include_categories: options.include_categories.clone(),
             exclude_categories: options.exclude_categories.clone(),
             term_operator: options.config.bm25.term_operator,
@@ -135,9 +147,33 @@ impl Bm25Strategy {
                 }
             })
             .collect();
-
-        Ok(search_results)
+        Ok(apply_bm25_strategy_filters(search_results, options, base_limit))
     }
+}
+
+fn apply_bm25_strategy_filters(
+    results: Vec<SearchResult>,
+    options: &QueryOptions,
+    limit: usize,
+) -> Vec<SearchResult> {
+    use crate::query::retrieval::post_processing::GlobFilter;
+    let filtered = GlobFilter::new()
+        .apply(results, &options.include_patterns, &options.exclude_patterns)
+        .unwrap_or_default();
+    let mut kept = Vec::with_capacity(filtered.len().min(limit));
+    for item in filtered {
+        if crate::query::types::query_options::path_excluded_by_types(
+            &item.file_path,
+            &options.exclude_content_types,
+        ) {
+            continue;
+        }
+        kept.push(item);
+        if kept.len() >= limit {
+            break;
+        }
+    }
+    kept
 }
 
 /// Classify a BM25 retrieval error.
