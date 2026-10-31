@@ -43,7 +43,7 @@ use cce_types::entity::{
 };
 use std::collections::{HashMap, HashSet};
 
-use super::index_enrichment::{CallsPruneStats, IndexTextEnricher};
+use super::index_enrichment::{CallsPruneStats, IndexTextEnricher, ResolvedCallsIndex};
 
 /// Collected child summary data used to enrich a parent group's description
 struct ParentEnrichment {
@@ -126,6 +126,7 @@ impl super::AstToNlConverter {
 
                 let mut prune_stats = CallsPruneStats::default();
                 if let (Some(pr), Some(src)) = (processing_result, source) {
+                    let resolved_index = ResolvedCallsIndex::from_processing_result(pr);
                     for gc in &mut group_conversions {
                         let language = gc.group.language;
                         let vocabulary = self.vocabulary_for(file_path, language);
@@ -137,6 +138,7 @@ impl super::AstToNlConverter {
                         let plugin = super::index_enrichment::PluginSupport {
                             bare: bare.as_deref(),
                             registry: self.plugin_registry.as_deref(),
+                            resolved: Some(&resolved_index),
                         };
                         if let Some(header) = gc.header_conversion.as_mut() {
                             prune_stats += enricher.enrich_conversion(
@@ -229,10 +231,12 @@ impl super::AstToNlConverter {
 
         // Phase 2: Enrich parent/child descriptions based on group hierarchy.
         Self::enrich_hierarchy_descriptions(&mut group_conversions);
+        self.aggregate_group_call_summaries(&mut group_conversions, file_path);
 
         // Phase 3: Enrich with control-flow and behavior sidecars when available.
         let mut prune_stats = CallsPruneStats::default();
         if let (Some(pr), Some(src)) = (processing_result, source) {
+            let resolved_index = ResolvedCallsIndex::from_processing_result(pr);
             for gc in &mut group_conversions {
                 let language = gc.group.language;
                 let vocabulary = self.vocabulary_for(file_path, language);
@@ -242,6 +246,7 @@ impl super::AstToNlConverter {
                 let plugin = super::index_enrichment::PluginSupport {
                     bare: bare.as_deref(),
                     registry: self.plugin_registry.as_deref(),
+                    resolved: Some(&resolved_index),
                 };
                 if let Some(header) = gc.header_conversion.as_mut() {
                     prune_stats += enricher.enrich_conversion(
@@ -476,126 +481,9 @@ impl super::AstToNlConverter {
             }
         }
 
-        // Phase 2c: Aggregate call relationships at group level.
-        // Collect all call paths from member conversions within each group
-        // and append a summary to the group's embedding text. Member lines
-        // use lowercase `calls:` (plugins may emit legacy `Calls `); header
-        // output normalizes to lowercase so line pruning stays case-stable.
-        // Boilerplate plumbing is filtered during aggregation (name-only,
-        // no body context); curated `internal [..]` aggregates are left
-        // untouched by later line pruning.
-        for gc in group_conversions.iter_mut() {
-            let mut local_calls: Vec<String> = Vec::new();
-            let mut external_calls: Vec<String> = Vec::new();
-            let group_name = gc.group.name.to_string();
-            let group_language = gc.group.language;
-            // Same-file resolved targets per entity: kept even when their
-            // spelling collides with stdlib/boilerplate (resolution trumps
-            // every name rule, mirroring the relation layer).
-            let mut resolved_by_id: std::collections::HashMap<
-                EntityId,
-                std::collections::HashSet<String>,
-            > = std::collections::HashMap::new();
-            {
-                let mut collect = |id: EntityId, md: &std::collections::HashMap<String, String>| {
-                    if let Some(raw) = md.get(meta_keys::RESOLVED_CALLS) {
-                        let set: std::collections::HashSet<String> = raw
-                            .split(',')
-                            .map(|n| n.trim().to_string())
-                            .filter(|n| !n.is_empty())
-                            .collect();
-                        if !set.is_empty() {
-                            resolved_by_id.insert(id, set);
-                        }
-                    }
-                };
-                if let Some(header) = gc.group.header.as_ref() {
-                    collect(header.id, &header.metadata);
-                }
-                for member in &gc.group.members {
-                    collect(member.id, &member.metadata);
-                }
-            }
-
-            for member_conv in &gc.member_conversions {
-                if let Some(ref emb_text) = member_conv.embedding_text {
-                    for line in emb_text.lines() {
-                        let trimmed = line.trim();
-                        // Case-insensitive `calls:` with colon; legacy
-                        // `Calls ` without colon from older plugins.
-                        let rest = if trimmed
-                            .get(.."calls:".len())
-                            .is_some_and(|h| h.eq_ignore_ascii_case("calls:"))
-                        {
-                            &trimmed["calls:".len()..]
-                        } else if trimmed
-                            .get(.."calls ".len())
-                            .is_some_and(|h| h.eq_ignore_ascii_case("calls "))
-                        {
-                            &trimmed["calls ".len()..]
-                        } else {
-                            continue;
-                        };
-                        // Skip already-curated aggregates; only plain lists feed aggregation.
-                        if rest.contains('[') {
-                            continue;
-                        }
-                        let calls_str = rest.trim_end_matches('.');
-                        let member_resolved = resolved_by_id.get(&member_conv.entity_id);
-                        for call_name in calls_str.split(',').map(|s| s.trim()) {
-                            if call_name.is_empty() {
-                                continue;
-                            }
-                            if member_resolved.is_some_and(|set| set.contains(call_name)) {
-                                // Resolved internal target: distinctive by
-                                // definition, never filtered as boilerplate.
-                            } else if super::index_enrichment::is_boilerplate_name(
-                                call_name,
-                                group_language,
-                            ) {
-                                continue;
-                            }
-                            // Classify as local (same group prefix) or external
-                            if call_name.contains(&format!("::{}", group_name))
-                                || call_name.contains(&format!("{}::", group_name))
-                            {
-                                local_calls.push(call_name.to_string());
-                            } else {
-                                external_calls.push(call_name.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !local_calls.is_empty() || !external_calls.is_empty() {
-                // Deduplicate and limit
-                local_calls.sort();
-                local_calls.dedup();
-                external_calls.sort();
-                external_calls.dedup();
-                local_calls.truncate(5);
-                external_calls.truncate(5);
-
-                if let Some(ref mut header) = gc.header_conversion {
-                    if let Some(ref mut emb_text) = header.embedding_text {
-                        if !emb_text.is_empty() {
-                            emb_text.push_str("\ncalls: ");
-                            let mut parts: Vec<String> = Vec::new();
-                            if !local_calls.is_empty() {
-                                parts.push(format!("internal [{}]", local_calls.join(", ")));
-                            }
-                            if !external_calls.is_empty() {
-                                parts.push(format!("external [{}]", external_calls.join(", ")));
-                            }
-                            emb_text.push_str(&parts.join("; "));
-                            emb_text.push('.');
-                        }
-                    }
-                }
-            }
-        }
-
+        // Group call aggregation runs separately after hierarchy
+        // enrichment so plugin file context is available; see
+        // `aggregate_group_call_summaries`.
         // Phase 2d: Enrich member conversions with parent context for container groups.
         // Unlike Phase 2b (cross-group via parent_group_id), this handles in-group
         // parent-child relationships (e.g., ClassWithMethods → method conversions).
@@ -643,6 +531,126 @@ impl super::AstToNlConverter {
                         let mut new_text = prefix;
                         new_text.push_str(emb_text);
                         *emb_text = new_text;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Aggregate member call targets into a curated header summary.
+    ///
+    /// Collects plain `calls:` lists from member conversions and appends
+    /// a curated aggregate to the header embedding text. Built-in and
+    /// plugin boilerplate are both filtered here because the curated
+    /// aggregate is skipped by later line pruning. The header stays
+    /// intentionally more aggressive than member lines: member lines keep a
+    /// sole-signal guard while the header summary may legitimately be empty.
+    /// Local classification uses exact qualifier segments and truncation
+    /// keeps source encounter order. Frequency sorting is deliberately
+    /// absent: frequent helpers would otherwise crowd out rare distinctive
+    /// calls, which carry more retrieval signal.
+    fn aggregate_group_call_summaries(
+        &self,
+        group_conversions: &mut [GroupConversions],
+        file_path: &str,
+    ) {
+        use super::index_enrichment::{
+            is_boilerplate_name_with_plugin, is_local_callee, parse_call_set, split_call_list,
+        };
+        for gc in group_conversions.iter_mut() {
+            let group_name = gc.group.name.to_string();
+            let group_language = gc.group.language;
+            let plugin_bare = self.bare_methods_for(file_path, group_language);
+            let plugin_registry = self.plugin_registry.as_deref();
+            let mut resolved_by_id: std::collections::HashMap<
+                EntityId,
+                std::collections::HashSet<String>,
+            > = std::collections::HashMap::new();
+            {
+                let mut collect = |id: EntityId, md: &std::collections::HashMap<String, String>| {
+                    if let Some(raw) = md.get(meta_keys::RESOLVED_CALLS) {
+                        let set = parse_call_set(raw);
+                        if !set.is_empty() {
+                            resolved_by_id.insert(id, set);
+                        }
+                    }
+                };
+                if let Some(header) = gc.group.header.as_ref() {
+                    collect(header.id, &header.metadata);
+                }
+                for member in &gc.group.members {
+                    collect(member.id, &member.metadata);
+                }
+            }
+            let mut local_calls: Vec<String> = Vec::new();
+            let mut external_calls: Vec<String> = Vec::new();
+            let mut local_seen: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut external_seen: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for member_conv in &gc.member_conversions {
+                let Some(ref emb_text) = member_conv.embedding_text else {
+                    continue;
+                };
+                for line in emb_text.lines() {
+                    let trimmed = line.trim();
+                    let rest = if trimmed
+                        .get(.."calls:".len())
+                        .is_some_and(|h| h.eq_ignore_ascii_case("calls:"))
+                    {
+                        &trimmed["calls:".len()..]
+                    } else if trimmed
+                        .get(.."calls ".len())
+                        .is_some_and(|h| h.eq_ignore_ascii_case("calls "))
+                    {
+                        &trimmed["calls ".len()..]
+                    } else {
+                        continue;
+                    };
+                    if rest.contains('[') {
+                        continue;
+                    }
+                    let member_resolved = resolved_by_id.get(&member_conv.entity_id);
+                    for call_name in split_call_list(rest) {
+                        if member_resolved.is_some_and(|set| set.contains(&call_name)) {
+                            // Resolved internal target stays distinctive.
+                        } else if is_boilerplate_name_with_plugin(
+                            &call_name,
+                            group_language,
+                            plugin_bare.as_deref(),
+                            plugin_registry,
+                            Some(file_path),
+                        ) {
+                            continue;
+                        }
+                        if is_local_callee(&call_name, &group_name) {
+                            if local_seen.insert(call_name.clone()) {
+                                local_calls.push(call_name);
+                            }
+                        } else if external_seen.insert(call_name.clone()) {
+                            external_calls.push(call_name);
+                        }
+                    }
+                }
+            }
+            local_calls.truncate(5);
+            external_calls.truncate(5);
+            if local_calls.is_empty() && external_calls.is_empty() {
+                continue;
+            }
+            if let Some(ref mut header) = gc.header_conversion {
+                if let Some(ref mut emb_text) = header.embedding_text {
+                    if !emb_text.is_empty() {
+                        emb_text.push_str("\ncalls: ");
+                        let mut parts: Vec<String> = Vec::new();
+                        if !local_calls.is_empty() {
+                            parts.push(format!("internal [{}]", local_calls.join(", ")));
+                        }
+                        if !external_calls.is_empty() {
+                            parts.push(format!("external [{}]", external_calls.join(", ")));
+                        }
+                        emb_text.push_str(&parts.join("; "));
+                        emb_text.push('.');
                     }
                 }
             }

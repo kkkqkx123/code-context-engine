@@ -14,7 +14,11 @@
 
 pub(crate) mod calls_prune;
 pub use calls_prune::CallsPruneStats;
-pub(crate) use calls_prune::is_boilerplate_name;
+
+pub(crate) use calls_prune::is_boilerplate_name_with_plugin;
+pub(crate) use calls_prune::is_local_callee;
+pub(crate) use calls_prune::parse_call_set;
+pub(crate) use calls_prune::split_call_list;
 mod source_extract;
 mod syntax_strip;
 mod topic_anchor;
@@ -45,50 +49,57 @@ pub(super) struct IndexTextEnricher<'a> {
     calls_prune_enabled: bool,
 }
 
-/// Plugin inputs for call pruning.
+/// Inputs for call pruning.
 ///
 /// Bundled to keep `enrich_conversion` under the argument limit:
 /// `bare` is the pre-resolved per-file bare list (Custom only),
-/// `registry` backs per-call stdlib checks for Custom languages.
+/// `registry` backs per-call stdlib checks for Custom languages,
+/// `resolved` is the prebuilt per-file resolved-call index.
 #[derive(Clone, Copy, Default)]
 pub(super) struct PluginSupport<'a> {
     pub bare: Option<&'a [String]>,
     pub registry: Option<&'a cce_plugin::PluginRegistry>,
+    pub resolved: Option<&'a ResolvedCallsIndex>,
 }
 
-/// Same-file resolved call targets for one entity, if any.
+/// Same-file resolved call targets indexed once per file.
 ///
-/// Reads `RESOLVED_CALLS` metadata injected by the grouper (Stage 9).
-/// Linear scan over groups is acceptable: files typically hold tens of
-/// groups and the comparison is a cheap integer match per entity.
-fn resolved_calls_for(
-    processing_result: &ProcessingResult,
-    entity_id: EntityId,
-) -> Option<std::collections::HashSet<String>> {
-    use cce_types::entity::meta_keys;
-    for group in &processing_result.groups {
-        if let Some(header) = group.header.as_ref() {
-            if header.id == entity_id {
-                return header.metadata.get(meta_keys::RESOLVED_CALLS).map(|s| {
-                    s.split(',')
-                        .map(|n| n.trim().to_string())
-                        .filter(|n| !n.is_empty())
-                        .collect()
-                });
+/// Reads `RESOLVED_CALLS` metadata injected by the grouper. The map is
+/// built a single time per file conversion so per-entity enrichment stays
+/// a constant-time lookup instead of scanning every group for every entity.
+#[derive(Debug, Default)]
+pub(super) struct ResolvedCallsIndex {
+    map: std::collections::HashMap<EntityId, std::collections::HashSet<String>>,
+}
+
+impl ResolvedCallsIndex {
+    pub(super) fn from_processing_result(processing_result: &ProcessingResult) -> Self {
+        use cce_types::entity::meta_keys;
+        let mut map = std::collections::HashMap::new();
+        for group in &processing_result.groups {
+            if let Some(header) = group.header.as_ref() {
+                if let Some(raw) = header.metadata.get(meta_keys::RESOLVED_CALLS) {
+                    let set = parse_call_set(raw);
+                    if !set.is_empty() {
+                        map.insert(header.id, set);
+                    }
+                }
+            }
+            for member in &group.members {
+                if let Some(raw) = member.metadata.get(meta_keys::RESOLVED_CALLS) {
+                    let set = parse_call_set(raw);
+                    if !set.is_empty() {
+                        map.insert(member.id, set);
+                    }
+                }
             }
         }
-        for member in &group.members {
-            if member.id == entity_id {
-                return member.metadata.get(meta_keys::RESOLVED_CALLS).map(|s| {
-                    s.split(',')
-                        .map(|n| n.trim().to_string())
-                        .filter(|n| !n.is_empty())
-                        .collect()
-                });
-            }
-        }
+        Self { map }
     }
-    None
+
+    pub(super) fn get(&self, entity_id: EntityId) -> Option<&std::collections::HashSet<String>> {
+        self.map.get(&entity_id)
+    }
 }
 
 impl<'a> IndexTextEnricher<'a> {
@@ -150,17 +161,19 @@ impl<'a> IndexTextEnricher<'a> {
         // already names; drop the line when nothing distinctive remains.
         // BM25 text is untouched: the keyword index relies on the raw
         // identifier occurrences. A same-file resolved internal target
-        // is never pruned (resolution trumps every name rule); the set is
-        // small per entity, so it is parsed on demand from group metadata.
+        // is never pruned (resolution trumps every name rule); the set comes
+        // from the prebuilt per-file resolved index.
         // Disabled via `enable_calls_prune=false` for A/B comparison.
         let stats = if self.calls_prune_enabled {
-            let resolved = resolved_calls_for(processing_result, conversion.entity_id);
+            let resolved = plugin
+                .resolved
+                .and_then(|index| index.get(conversion.entity_id));
             prune_redundant_calls_lines(
                 conversion,
                 language,
                 plugin.bare,
                 plugin.registry,
-                resolved.as_ref(),
+                resolved,
             )
         } else {
             CallsPruneStats::default()
@@ -706,13 +719,18 @@ mod tests {
             };
             let bm25_cleaner = Bm25TextCleaner::new();
             let enricher = IndexTextEnricher::new(&bm25_cleaner, enabled);
+            let resolved_index =
+                super::ResolvedCallsIndex::from_processing_result(&processing_result);
             let stats = enricher.enrich_conversion(
                 &mut conversion,
                 &processing_result,
                 "",
                 Language::Rust,
                 None,
-                super::PluginSupport::default(),
+                super::PluginSupport {
+                    resolved: Some(&resolved_index),
+                    ..Default::default()
+                },
             );
             let out = conversion.embedding_text.expect("text survives");
             (out, stats)

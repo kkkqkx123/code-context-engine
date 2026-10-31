@@ -177,6 +177,56 @@ pub(crate) fn bare_boilerplate_methods(language: Language) -> &'static [&'static
     }
 }
 
+/// Normalize one callee spelling for comparison.
+///
+/// Trims surrounding whitespace and trailing statement punctuation so
+/// metadata (`CALL_PATHS`, `RESOLVED_CALLS`) and template `calls:` lines
+/// compare equal despite trailing `.` or macro `!` differences.
+pub(crate) fn normalize_callee(name: &str) -> &str {
+    name.trim().trim_end_matches(['.', '!']).trim()
+}
+
+/// Split a comma-joined call list without breaking generic arguments.
+///
+/// `HashMap<String, i32>::new` keeps its inner comma: only top-level
+/// commas (outside `<...>` nesting) separate entries. Each entry is
+/// normalized and empty entries are dropped.
+pub(crate) fn split_call_list(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut depth: usize = 0;
+    for ch in raw.chars() {
+        match ch {
+            '<' => {
+                depth = depth.saturating_add(1);
+                current.push(ch);
+            }
+            '>' => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                let normalized = normalize_callee(&current);
+                if !normalized.is_empty() {
+                    out.push(normalized.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    let normalized = normalize_callee(&current);
+    if !normalized.is_empty() {
+        out.push(normalized.to_string());
+    }
+    out
+}
+
+/// Parse a stored call list into a set for membership checks.
+pub(crate) fn parse_call_set(raw: &str) -> std::collections::HashSet<String> {
+    split_call_list(raw).into_iter().collect()
+}
+
 /// Whether `name` is boilerplate plumbing by name alone (no body context).
 ///
 /// Used by group-level aggregation, which has no surrounding text to judge
@@ -184,7 +234,7 @@ pub(crate) fn bare_boilerplate_methods(language: Language) -> &'static [&'static
 /// apply. Plugin bare lists are handled later by line pruning, which sees
 /// the full text.
 pub(crate) fn is_boilerplate_name(name: &str, language: Language) -> bool {
-    let name = name.trim().trim_end_matches('.').trim();
+    let name = normalize_callee(name);
     if name.is_empty() {
         return true;
     }
@@ -195,6 +245,50 @@ pub(crate) fn is_boilerplate_name(name: &str, language: Language) -> bool {
         return true;
     }
     bare_boilerplate_methods(language).contains(&name)
+}
+
+/// Plugin-aware variant of [`is_boilerplate_name`] for group aggregation.
+///
+/// Aggregation builds curated header summaries that later pruning skips,
+/// so plugin-contributed bare names must be filtered here as well;
+/// otherwise they would leak into the aggregate permanently. Built-in
+/// languages never consult plugins, keeping their tables pure.
+pub(crate) fn is_boilerplate_name_with_plugin(
+    name: &str,
+    language: Language,
+    plugin_bare: Option<&[String]>,
+    plugin_registry: Option<&cce_plugin::PluginRegistry>,
+    file_path: Option<&str>,
+) -> bool {
+    if is_boilerplate_name(name, language) {
+        return true;
+    }
+    let normalized = normalize_callee(name);
+    if normalized.is_empty() {
+        return true;
+    }
+    if plugin_bare.is_some_and(|list| {
+        list.iter()
+            .any(|entry| normalize_callee(entry) == normalized)
+    }) {
+        return true;
+    }
+    plugin_stdlib_hit(plugin_registry, file_path, language, normalized)
+}
+
+/// Whether a callee belongs to the named group by exact qualifier segment.
+///
+/// Substring matching misclassifies longer names sharing a prefix
+/// (`::Group` matches `::GroupExtra::foo`); exact segment comparison
+/// covers both `::` and `.` qualification without false positives.
+pub(crate) fn is_local_callee(callee: &str, group_name: &str) -> bool {
+    if group_name.is_empty() {
+        return false;
+    }
+    callee
+        .split([':', '.'])
+        .filter(|segment| !segment.is_empty())
+        .any(|segment| segment == group_name)
 }
 
 /// Whether `line` (already trimmed of leading whitespace) opens a `calls:`
@@ -265,7 +359,7 @@ impl std::ops::AddAssign for CallsPruneStats {
 enum CalleeFate {
     /// Distinctive: resolved internal target or unknown name.
     Keep,
-    /// Restates surrounding text (verbatim, same-line head-tail, token).
+    /// Restates surrounding text (verbatim, split qualifier, token).
     PruneRestated,
     /// High-confidence stdlib (COMMON, detector, plugin stdlib).
     PruneStdlib,
@@ -276,12 +370,12 @@ enum CalleeFate {
 /// Precomputed per-entity views for redundancy checks.
 ///
 /// Built once per `calls:`-bearing entity: `body_lines` are the non-`calls:`
-/// lines, `global_tokens` their identifier set, `line_tokens` the per-line
-/// sets for the same-line head-tail rule. No joined `full_text` is kept:
-/// verbatim matching iterates lines, avoiding one allocation per entity.
+/// lines, `line_tokens` their per-line identifier sets for the split
+/// qualifier rule and the call-shaped bare restatement check. No joined
+/// `full_text` is kept: verbatim matching iterates lines, avoiding one
+/// allocation per entity.
 struct PruneCtx<'a> {
     body_lines: Vec<&'a str>,
-    global_tokens: std::collections::HashSet<&'a str>,
     line_tokens: Vec<std::collections::HashSet<&'a str>>,
     language: Language,
     plugin_bare: Option<&'a [String]>,
@@ -302,20 +396,64 @@ fn occurs_verbatim(body_lines: &[&str], callee: &str) -> bool {
     body_lines.iter().any(|l| l.contains(callee))
 }
 
-/// Whether head and tail co-occur as tokens on one body line.
+/// Whether a qualifier is split across two adjacent lines.
 ///
-/// Same-line co-occurrence is required (not whole-text): `Candidate::new`
-/// must not prune when `Candidate` and an unrelated `new` merely appear
-/// pages apart. The receiver spelling may differ (`self.map` vs `items.map`
-/// both state `map` beside a receiver), but both parts must share a line.
-fn head_tail_same_line(
+/// Same-line token co-occurrence is deliberately not treated as
+/// restatement: a shared prefix with opposite tails (`Status::enabled`
+/// next to an unrelated `disabled`) would otherwise prune the one signal
+/// that distinguishes the two. Only an explicit line break at qualifier
+/// punctuation counts, either a head line ending in `::` handing off to a
+/// tail line starting with the tail identifier, or a tail line starting
+/// in qualifier punctuation and carrying the separator-attached tail.
+fn head_tail_nearby(
+    body_lines: &[&str],
     line_tokens: &[std::collections::HashSet<&str>],
     head: &str,
     tail: &str,
 ) -> bool {
-    line_tokens
+    for (lines, tokens) in body_lines.windows(2).zip(line_tokens.windows(2)) {
+        if !(tokens[0].contains(head) && tokens[1].contains(tail)) {
+            continue;
+        }
+        let head_line = lines[0].trim_end();
+        let tail_line = lines[1].trim_start();
+        // Head split (`Candidate::` then `new(...)`): sentence periods must
+        // not qualify, so only `::` breaks the head line. The tail line
+        // must start with the tail identifier itself.
+        if head_line.ends_with("::") {
+            let tail_first = tokenize(tail_line).next().unwrap_or_default();
+            if tail_first == tail {
+                return true;
+            }
+        }
+        // Tail continuation (`.join` on its own line): the tail line must
+        // carry the separator attached to the tail, not merely start with
+        // unrelated punctuation.
+        if tail_line.starts_with("::") || tail_line.starts_with('.') {
+            let scoped_colon = format!("::{tail}");
+            let scoped_dot = format!(".{tail}");
+            if tail_line.contains(&scoped_colon) || tail_line.contains(&scoped_dot) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether a bare callee is restated by a call-shaped body line.
+///
+/// Bare names must appear beside an opening parenthesis to count as
+/// restated. A plain assignment (`let map = 1;`) shares the token but
+/// carries no call signal, so it must not prune `calls: map`.
+fn is_bare_restated(
+    body_lines: &[&str],
+    line_tokens: &[std::collections::HashSet<&str>],
+    callee: &str,
+) -> bool {
+    body_lines
         .iter()
-        .any(|tokens| tokens.contains(head) && tokens.contains(tail))
+        .zip(line_tokens.iter())
+        .any(|(line, tokens)| tokens.contains(callee) && line.contains('('))
 }
 
 fn plugin_stdlib_hit(
@@ -344,12 +482,13 @@ fn plugin_stdlib_hit(
 /// Classify one callee against the precomputed context.
 ///
 /// Order: resolved internal (keep) → restatement → high-confidence stdlib
-/// → low-confidence bare table → keep. Bare names use token membership
-/// only, so `log` never matches `catalog`; qualified names may additionally
-/// match verbatim (their `./::` delimiters make accidental containment
-/// unlikely) or by same-line head-tail co-occurrence.
+/// → low-confidence bare table → keep. Bare names require call-shaped
+/// restatement, so `log` never matches `catalog` and plain assignments do
+/// not count; qualified names may additionally match verbatim (their
+/// `./::` delimiters make accidental containment unlikely) or by an
+/// explicit qualifier split across adjacent lines.
 fn classify_callee(callee: &str, ctx: &PruneCtx) -> CalleeFate {
-    let callee = callee.trim().trim_end_matches('.').trim();
+    let callee = normalize_callee(callee);
     if callee.is_empty() {
         return CalleeFate::PruneRestated;
     }
@@ -363,7 +502,10 @@ fn classify_callee(callee: &str, ctx: &PruneCtx) -> CalleeFate {
         }
         let head = callee.split([':', '.']).next().unwrap_or("").trim();
         let tail = callee.rsplit([':', '.']).next().unwrap_or("").trim();
-        if !head.is_empty() && head != tail && head_tail_same_line(&ctx.line_tokens, head, tail) {
+        if !head.is_empty()
+            && head != tail
+            && head_tail_nearby(&ctx.body_lines, &ctx.line_tokens, head, tail)
+        {
             return CalleeFate::PruneRestated;
         }
         if StdlibDetector::is_stdlib_call(callee, &ctx.language) {
@@ -381,7 +523,7 @@ fn classify_callee(callee: &str, ctx: &PruneCtx) -> CalleeFate {
         }
         return CalleeFate::Keep;
     }
-    if ctx.global_tokens.contains(callee) {
+    if is_bare_restated(&ctx.body_lines, &ctx.line_tokens, callee) {
         return CalleeFate::PruneRestated;
     }
     if COMMON_BARE_METHODS.contains(&callee) {
@@ -398,7 +540,7 @@ fn classify_callee(callee: &str, ctx: &PruneCtx) -> CalleeFate {
     // layer only applies the list it is given.
     if ctx
         .plugin_bare
-        .is_some_and(|list| list.iter().any(|name| name == callee))
+        .is_some_and(|list| list.iter().any(|name| normalize_callee(name) == callee))
     {
         return CalleeFate::PruneBareTable;
     }
@@ -452,13 +594,10 @@ pub(super) fn prune_redundant_calls_lines(
             body_lines.push(line);
         }
     }
-    let global_tokens: std::collections::HashSet<&str> =
-        body_lines.iter().flat_map(|l| tokenize(l)).collect();
     let line_tokens: Vec<std::collections::HashSet<&str>> =
         body_lines.iter().map(|l| tokenize(l).collect()).collect();
     let ctx = PruneCtx {
         body_lines,
-        global_tokens,
         line_tokens,
         language,
         plugin_bare,
@@ -480,19 +619,14 @@ pub(super) fn prune_redundant_calls_lines(
         }
         let indent_len = line.len() - trimmed.len();
         let indent: String = line.chars().take(indent_len).collect();
-        let original: Vec<&str> = rest
-            .trim_end_matches('.')
-            .split(',')
-            .map(str::trim)
-            .filter(|c| !c.is_empty())
-            .collect();
+        let original: Vec<String> = split_call_list(rest);
         stats.lines_scanned += 1;
         stats.callees_total += original.len();
-        let mut kept: Vec<&str> = Vec::with_capacity(original.len());
+        let mut kept: Vec<String> = Vec::with_capacity(original.len());
         let mut saw_restated_or_stdlib_drop = false;
-        for c in original.iter().copied() {
+        for c in original.iter().map(String::as_str) {
             match classify_callee(c, &ctx) {
-                CalleeFate::Keep => kept.push(c),
+                CalleeFate::Keep => kept.push(c.to_string()),
                 CalleeFate::PruneRestated | CalleeFate::PruneStdlib => {
                     saw_restated_or_stdlib_drop = true;
                 }
@@ -939,6 +1073,79 @@ mod tests {
     }
 
     #[test]
+    fn prune_bare_assignment_does_not_count_as_restatement() {
+        // `let map = 1;` shares the token but carries no call signal, so
+        // the bare guess must fall back to the sole-signal guard instead of
+        // vanishing as restated.
+        let out = prune_case_for_language(
+            "function demo.\ncalls: map.\nDoes things.\nlet map = 1;",
+            Language::Rust,
+        );
+        assert!(
+            out.contains("calls: map."),
+            "assignment must not restate bare callee: {out:?}"
+        );
+    }
+
+    #[test]
+    fn prune_distinctive_assignment_does_not_count_as_restatement() {
+        // A distinctive callee sharing a variable name keeps its signal when
+        // the name only appears in a declaration without call syntax.
+        let out = prune_case_for_language(
+            "function demo.\ncalls: build_index.\nDoes things.\nlet build_index = 1;",
+            Language::Rust,
+        );
+        assert!(
+            out.contains("calls: build_index."),
+            "assignment must not restate distinctive callee: {out:?}"
+        );
+    }
+
+    #[test]
+    fn prune_bare_call_shape_counts_as_restatement() {
+        // The same token beside a parenthesis is call evidence and prunes.
+        let out = prune_case_for_language(
+            "function demo.\ncalls: build_index.\nDoes things.\nbuild_index(1);",
+            Language::Rust,
+        );
+        assert!(
+            !out.contains("calls:"),
+            "call-shaped line restates callee: {out:?}"
+        );
+    }
+
+    #[test]
+    fn prune_head_tail_split_qualifier_prunes() {
+        // A qualifier split across adjacent lines at punctuation still
+        // states the call.
+        let out = prune_case(
+            "function demo.\ncalls: Candidate::new.\nReturns true.\nlet x = Candidate::\nnew(path);",
+        );
+        assert!(!out.contains("calls:"), "split qualifier prunes: {out:?}");
+    }
+
+    #[test]
+    fn split_call_list_keeps_generic_comma() {
+        let parts = split_call_list("HashMap<String, i32>::new, build_index.");
+        assert_eq!(
+            parts,
+            vec![
+                "HashMap<String, i32>::new".to_string(),
+                "build_index".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn local_callee_requires_exact_segment() {
+        assert!(is_local_callee("Group::method", "Group"));
+        assert!(is_local_callee("Group.method", "Group"));
+        assert!(!is_local_callee("GroupExtra::method", "Group"));
+        assert!(!is_local_callee("Other::method", "Group"));
+        assert!(!is_local_callee("anything", ""));
+    }
+
+    #[test]
     fn prune_drops_dot_qualified_stdlib_per_language() {
         // CALL_PATHS now preserves dotted qualifiers, so the shared
         // detector sees them whole.
@@ -1021,13 +1228,14 @@ mod tests {
 
     #[test]
     fn prune_head_tail_requires_same_line() {
-        // Head and tail on one line prune; scattered across lines they do not.
+        // Same-line token co-occurrence without separator attachment is not
+        // restatement: `make(Candidate, new)` never states `Candidate::new`.
         let same_line = prune_case(
             "function demo.\ncalls: Candidate::new.\nReturns true.\nlet x = make(Candidate, new);",
         );
         assert!(
-            !same_line.contains("calls:"),
-            "same-line head-tail pruned: {same_line:?}"
+            same_line.contains("Candidate::new"),
+            "separator-free co-occurrence retained: {same_line:?}"
         );
         let scattered = prune_case(
             "function demo.\ncalls: Candidate::new.\nReturns Candidate.\nlet y = new;\nlet x = 1;",
@@ -1035,6 +1243,19 @@ mod tests {
         assert!(
             scattered.contains("Candidate::new"),
             "scattered head-tail retained: {scattered:?}"
+        );
+    }
+
+    #[test]
+    fn prune_opposite_tail_with_shared_head_is_kept() {
+        // Shared prefix with opposite tails must not prune: the tail is the
+        // only signal distinguishing `enable` from `disable`.
+        let out = prune_case(
+            "function demo.\ncalls: Status::disabled.\nReturns true.\nStatus::enabled(x);\nlet ok = disabled;",
+        );
+        assert!(
+            out.contains("Status::disabled"),
+            "opposite tail retained: {out:?}"
         );
     }
 
