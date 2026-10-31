@@ -165,6 +165,9 @@ fn apply_bm25_strategy_filters(
     limit: usize,
 ) -> Vec<SearchResult> {
     use crate::query::retrieval::post_processing::GlobFilter;
+    // Recall-side cost valve in the raw term-weight domain: candidates
+    // below the floor never reach fusion. Disabled at the default 0.0.
+    let floor = options.config.bm25.term_weight_threshold;
     let filtered = GlobFilter::new()
         .apply(
             results,
@@ -174,6 +177,9 @@ fn apply_bm25_strategy_filters(
         .unwrap_or_default();
     let mut kept = Vec::with_capacity(filtered.len().min(limit));
     for item in filtered {
+        if floor > 0.0 && item.score < floor {
+            continue;
+        }
         if !directory_prefix_allows(&item.file_path, options.directory_prefix.as_deref()) {
             continue;
         }

@@ -169,6 +169,10 @@ impl RelationAnnotator {
     /// caller-resolved forward/backward expansion units. Every result is
     /// capped by the single per-result quota; the batch total is bounded by
     /// `annotation_top_n` times that quota and never downgrades tail results.
+    /// The output preserves input order so callers can map results back
+    /// positionally; primary-score order is only used internally for shared
+    /// dedup admission, where the higher-scored hit deterministically wins a
+    /// shared neighbour.
     pub async fn annotate_batch(
         &self,
         results: Vec<(SearchResultInput, Vec<ExpandedUnit>, Vec<ExpandedUnit>)>,
@@ -176,9 +180,10 @@ impl RelationAnnotator {
         let top_n = self.config.annotation_top_n;
 
         // Split into top-N (to be annotated) and rest (simple results).
-        // Top-N are ordered by primary score first (stable) so a shared
+        // Admission runs in primary-score order (stable) so a shared
         // neighbour is deterministically won by the higher-scored hit rather
-        // than by input accident.
+        // than by input accident; results are restored to input order before
+        // returning.
         let (mut top_results, rest_results): (Vec<_>, Vec<_>) = results
             .into_iter()
             .enumerate()
@@ -208,8 +213,9 @@ impl RelationAnnotator {
                 ));
             }
         }
-        let mut futures = Vec::new();
-        for (_, (input, mut forward, mut backward)) in top_results {
+        let mut positions = Vec::with_capacity(top_results.len());
+        let mut futures = Vec::with_capacity(top_results.len());
+        for (position, (input, mut forward, mut backward)) in top_results {
             if share {
                 if self.config.expansion_include_callers {
                     backward.retain(|unit| {
@@ -222,6 +228,7 @@ impl RelationAnnotator {
                     Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes)
                 });
             }
+            positions.push(position);
             futures.push(self.annotate_single(input, forward, backward));
         }
 
@@ -229,8 +236,18 @@ impl RelationAnnotator {
         let annotated_top = future::join_all(futures).await;
 
         // Convert Results to AnnotatedResults
-        let mut annotated: Vec<AnnotatedResult> =
+        let annotated_top: Vec<AnnotatedResult> =
             annotated_top.into_iter().collect::<Result<Vec<_>>>()?;
+
+        // Restore input order: the top-N were admitted in score order, but
+        // callers map output back onto input positionally. The tail past the
+        // annotation budget follows as simple results, so the full output
+        // runs in original input order.
+        let mut ordered: Vec<(usize, AnnotatedResult)> =
+            positions.into_iter().zip(annotated_top).collect();
+        ordered.sort_by_key(|(position, _)| *position);
+        let mut annotated: Vec<AnnotatedResult> =
+            ordered.into_iter().map(|(_, result)| result).collect();
 
         // Add simple results for the rest
         for (_, (input, _, _)) in rest_results {
@@ -1009,7 +1026,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_shared_dedup_higher_score_wins_regardless_of_order() {
         // The lower-scored hit arrives first, but the shared entity must be
-        // won by the higher-scored hit.
+        // won by the higher-scored hit. Output stays in input order so
+        // callers can map results back positionally.
         let annotator = RelationAnnotator::new(expansion_config(4, true));
         let results = vec![
             (
@@ -1027,10 +1045,12 @@ mod tests {
             .annotate_batch(results)
             .await
             .expect("annotation ok");
-        assert_eq!(annotated[0].metadata.forward_nodes, 1);
-        assert!(annotated[0].annotated_content.contains("fn shared()"));
-        assert_eq!(annotated[1].metadata.forward_nodes, 0);
-        assert!(!annotated[1].annotated_content.contains("fn shared()"));
+        assert_eq!(annotated[0].id, "r1");
+        assert_eq!(annotated[1].id, "r2");
+        assert_eq!(annotated[0].metadata.forward_nodes, 0);
+        assert!(!annotated[0].annotated_content.contains("fn shared()"));
+        assert_eq!(annotated[1].metadata.forward_nodes, 1);
+        assert!(annotated[1].annotated_content.contains("fn shared()"));
     }
 
     #[tokio::test]

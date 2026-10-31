@@ -150,7 +150,7 @@ pub use relation_searcher::{
 };
 
 // Re-export relation expansion helpers
-pub use expansion::{annotate_hits_with_expansion, resolve_expansion_units, stable_id_of};
+pub use expansion::{annotate_hits_with_expansion, stable_id_of};
 
 // Re-export graph path
 pub use graph::{

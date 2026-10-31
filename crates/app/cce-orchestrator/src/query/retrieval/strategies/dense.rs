@@ -76,7 +76,7 @@ impl DenseStrategy {
             .search(
                 query_embedding,
                 fetch_k,
-                config.min_score,
+                config.similarity_threshold,
                 Some(config.hnsw_ef as usize),
                 filter,
             )

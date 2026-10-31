@@ -862,7 +862,12 @@ impl QueryCoordinator {
             let root = self.resolve_file_search_root().await?;
             let query = query.to_string();
             return tokio::task::spawn_blocking(move || {
-                super::files::search_files(&root, &query, limit)
+                super::files::search_files(
+                    &root,
+                    &query,
+                    limit,
+                    &super::files::FileSearchOptions::default(),
+                )
             })
             .await
             .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?;
@@ -896,7 +901,14 @@ impl QueryCoordinator {
             .filter(|path| !excluded.contains(path.as_str()))
             .collect();
         let query = query.to_string();
-        tokio::task::spawn_blocking(move || super::files::rank_file_paths(&paths, &query, limit))
+        tokio::task::spawn_blocking(move || {
+            super::files::rank_file_paths(
+                &paths,
+                &query,
+                limit,
+                &super::files::FileSearchOptions::default(),
+            )
+        })
             .await
             .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
     }

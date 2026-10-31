@@ -31,21 +31,58 @@ pub use super::expansion_scoring::ExpansionScoring;
 /// Maximum seeds taken from one hit's line range.
 const MAX_SEEDS: usize = 4;
 
-/// Upper bound for one expansion unit body before windowing. Oversized
-/// bodies are downgraded to a head/tail window excerpt instead of being
-/// delivered whole (where the budget would drop or degrade them entirely).
-const MAX_UNIT_CHARS: usize = 1600;
+/// Whole-body token budget for one expansion unit, estimated with the same
+/// [`TokenEstimator`](cce_utils::token_estimation::TokenEstimator) the
+/// concatenation budget uses, so both stages measure cost in the same unit.
+const MAX_UNIT_TOKENS: usize = 512;
 /// Head lines kept in a window excerpt (signature + first statements).
 const EXCERPT_HEAD_LINES: usize = 24;
 /// Tail lines kept in a window excerpt.
 const EXCERPT_TAIL_LINES: usize = 4;
+/// Call-shaped middle lines kept in a window excerpt as behaviour context.
+/// Only lines the head/tail windows already dropped are candidates, and the
+/// first matches win, so long methods surface their early call sites.
+const EXCERPT_CALL_LINES: usize = 8;
 
-/// Downgrade an oversized unit body to a head/tail window excerpt.
+/// Whether a body line looks like a call site worth keeping as context.
 ///
-/// Returns `None` when the body fits within [`MAX_UNIT_CHARS`] or is too
-/// short to window meaningfully, so the caller keeps the original text.
+/// Purely textual and deliberately conservative: the first `(` preceded by
+/// an identifier-ish character (skipping spaces) counts, covering direct,
+/// method and macro calls as well as control guards (`if (` still describes
+/// behaviour). Comment and preprocessor lines never count. A false positive
+/// only keeps one extra line; a false negative degrades to the head/tail
+/// windows, so the check only ever adds context.
+fn is_call_like_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty()
+        || trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with('#')
+    {
+        return false;
+    }
+    let Some(paren) = trimmed.find('(') else {
+        return false;
+    };
+    trimmed[..paren]
+        .trim_end()
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == ')' || c == ']')
+}
+
+/// Downgrade an oversized unit body to a signature-preserving excerpt.
+///
+/// Returns `None` when the body fits the token budget or is too short to
+/// window meaningfully, so the caller keeps the original text. Otherwise
+/// the head (signature + first statements) and tail windows are kept, plus
+/// up to [`EXCERPT_CALL_LINES`] call-shaped lines from the dropped middle
+/// as behaviour context. Each dropped run is replaced by its own marker
+/// line, so renderers stay honest about every cut.
 fn window_excerpt(code: &str) -> Option<String> {
-    if code.chars().count() <= MAX_UNIT_CHARS {
+    use cce_utils::token_estimation::TokenEstimator;
+    if TokenEstimator::estimate(code) <= MAX_UNIT_TOKENS {
         return None;
     }
     let lines: Vec<&str> = code.lines().collect();
@@ -53,17 +90,57 @@ fn window_excerpt(code: &str) -> Option<String> {
     if total <= EXCERPT_HEAD_LINES + EXCERPT_TAIL_LINES + 1 {
         return None;
     }
-    let head_end = EXCERPT_HEAD_LINES;
-    let tail_start = total - EXCERPT_TAIL_LINES;
-    let mut out = String::with_capacity(MAX_UNIT_CHARS);
-    out.push_str(&lines[..head_end].join("\n"));
-    out.push_str(&format!(
-        "\n... excerpt: lines {}-{} of {} omitted ...\n",
-        head_end + 1,
-        tail_start,
-        total
-    ));
-    out.push_str(&lines[tail_start..].join("\n"));
+    let mut kept = vec![false; total];
+    for line in &mut kept[..EXCERPT_HEAD_LINES.min(total)] {
+        *line = true;
+    }
+    for line in &mut kept[total - EXCERPT_TAIL_LINES.min(total)..] {
+        *line = true;
+    }
+    let mut added = 0;
+    for (index, line) in lines.iter().enumerate() {
+        if added >= EXCERPT_CALL_LINES {
+            break;
+        }
+        if kept[index] {
+            continue;
+        }
+        if is_call_like_line(line) {
+            kept[index] = true;
+            added += 1;
+        }
+    }
+    let mut out = String::with_capacity(code.len());
+    let mut index = 0;
+    let mut omitted_any = false;
+    while index < total {
+        if kept[index] {
+            let mut end = index + 1;
+            while end < total && kept[end] {
+                end += 1;
+            }
+            out.push_str(&lines[index..end].join("\n"));
+            out.push('\n');
+            index = end;
+        } else {
+            let mut end = index + 1;
+            while end < total && !kept[end] {
+                end += 1;
+            }
+            out.push_str(&format!(
+                "... excerpt: lines {}-{} of {} omitted ...\n",
+                index + 1,
+                end,
+                total
+            ));
+            omitted_any = true;
+            index = end;
+        }
+    }
+    if !omitted_any {
+        return None;
+    }
+    out.pop();
     Some(out)
 }
 
@@ -184,7 +261,7 @@ impl NeighbourResolver {
         self
     }
 
-    /// Resolve neighbour units for one hit (see [`resolve_expansion_units`]).
+    /// Resolve neighbour units for one hit (see [`resolve_expansion_units_with_filter`]).
     ///
     /// `primary_score` seeds the neighbour scores so direction-internal
     /// ordering reflects hit relevance instead of traversal discovery order.
@@ -463,35 +540,6 @@ fn overlap_len(
     }
 }
 
-/// Single-budget entry grouping range, budget and filters into one request.
-///
-/// Keeps the historical seven-argument call shape for direct callers by
-/// building the request value internally.
-pub fn resolve_expansion_units(
-    searcher: &RelationSearcher,
-    project_root: &Path,
-    file_path: &str,
-    start_line: u32,
-    end_line: u32,
-    per_direction: usize,
-    include_callers: bool,
-) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
-    let request = ExpansionRequest {
-        file_path: file_path.to_string(),
-        start_line,
-        end_line,
-        forward_budget: per_direction,
-        backward_budget: if include_callers { per_direction } else { 0 },
-        include_callers,
-        domains: Vec::new(),
-        path_filter: ExpansionPathFilter::default(),
-        primary_score: 1.0,
-        query_terms: Vec::new(),
-        scoring: ExpansionScoring::default(),
-    };
-    resolve_expansion_units_with_filter(searcher, project_root, request)
-}
-
 /// Read one entity's full definition span as an annotator unit.
 ///
 /// Returns `None` when the entity has no snapshot metadata or its source
@@ -554,11 +602,11 @@ fn snippet_unit(
 /// Annotate the top-N hits with real expansion units in place.
 ///
 /// Resolution runs per hit, then one batch annotation pass attaches the
-/// units so cross-hit dedup stays active: a neighbour already attached to an
-/// earlier hit is not concatenated again. Only body-bearing hits with a valid
-/// line range take part; reference and empty hits keep their content and no
-/// longer consume annotation budget slots. Surviving expansion counts are
-/// recorded into each hit's `metadata` (`expanded`, `expanded_nodes`,
+/// units so cross-hit dedup stays active: a neighbour already attached to a
+/// higher-scored hit is not concatenated again. Only body-bearing hits with
+/// a valid line range take part; reference and empty hits keep their content
+/// and no longer consume annotation budget slots. Surviving expansion counts
+/// are recorded into each hit's `metadata` (`expanded`, `expanded_nodes`,
 /// `forward_nodes`, `backward_nodes`, `omitted_self_evident`) so API
 /// converters can expose them without changing the orchestrator result shape.
 ///
@@ -566,19 +614,24 @@ fn snippet_unit(
 /// every hit unannotated; single-hit extraction cannot fail here because
 /// degenerate ranges are screened out before the batch is built.
 ///
-/// Callers keep the engine recall pass unannotated
-/// (`annotation.enable_annotation = false`) and pass an enabled config here,
-/// so content is wrapped exactly once.
+/// Scoring switches come from `config` and query terms from `query`,
+/// mirroring the engine-injected resolver path so offline review renders the
+/// same bodies as `expand=true` API responses. Callers keep the engine
+/// recall pass unannotated (`annotation.enable_annotation = false`) and pass
+/// an enabled config here, so content is wrapped exactly once.
 pub async fn annotate_hits_with_expansion(
     searcher: &RelationSearcher,
     project_root: &Path,
     items: &mut [super::types::SearchResult],
     config: &RelationAnnotationConfig,
+    query: &str,
 ) {
     let resolver = NeighbourResolver::new(
         std::sync::Arc::new(RelationSearcher::clone(searcher)),
         project_root.to_path_buf(),
-    );
+    )
+    .with_query(query)
+    .with_scoring(ExpansionScoring::from(config));
     annotate_hits_with_resolver(&resolver, items, config).await;
 }
 
@@ -666,9 +719,9 @@ pub async fn annotate_hits_with_resolver(
 
 /// Copy batch annotation results back onto their source hits.
 ///
-/// The batch preserves input order (top-N annotated first, the rest appended
-/// unchanged), so results map back onto `positions` one to one. Tail hits
-/// past the annotation budget come back unexpanded and are left untouched.
+/// The batch preserves input order, so results map back onto `positions`
+/// one to one. Tail hits past the annotation budget come back unexpanded
+/// and are left untouched.
 fn apply_annotated(
     items: &mut [super::types::SearchResult],
     positions: &[usize],
@@ -806,7 +859,7 @@ mod tests {
 
     #[test]
     fn test_window_excerpt_keeps_head_and_tail() {
-        // Long enough lines to cross MAX_UNIT_CHARS (60 lines x ~40 chars).
+        // Long enough lines to cross the fast path (60 lines x ~40 chars).
         let body: String = (0..60)
             .map(|i| format!("line {i}: {}", "x".repeat(30)))
             .collect::<Vec<_>>()
@@ -821,6 +874,53 @@ mod tests {
     }
 
     #[test]
+    fn test_window_excerpt_keeps_call_context_lines() {
+        // A long method whose dropped middle holds call sites: the calls
+        // survive as context, each dropped run gets its own marker.
+        let mut parts = Vec::new();
+        for i in 0..60 {
+            if i == 30 {
+                parts.push("    do_work(arg);".to_string());
+            } else if i == 40 {
+                parts.push("    let value = compute(other);".to_string());
+            } else {
+                parts.push(format!("line {i}: {}", "x".repeat(30)));
+            }
+        }
+        let body = parts.join("\n");
+        let excerpt = window_excerpt(&body).expect("oversized body must be windowed");
+        assert!(excerpt.contains("    do_work(arg);"));
+        assert!(excerpt.contains("    let value = compute(other);"));
+        assert!(excerpt.contains("excerpt: lines 25-30 of 60 omitted"));
+        assert!(excerpt.contains("excerpt: lines 32-40 of 60 omitted"));
+        assert!(excerpt.contains("excerpt: lines 42-56 of 60 omitted"));
+        // Plain filler between the kept calls stays dropped.
+        assert!(!excerpt.contains("line 35:"));
+    }
+
+    #[test]
+    fn test_window_excerpt_windows_dense_body_over_token_budget() {
+        // Token budget alone decides; densely symbolic bodies are windowed
+        // even when their character count is small.
+        let body: String = (0..40)
+            .map(|_| ";".repeat(38))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(window_excerpt(&body).is_some());
+    }
+
+    #[test]
+    fn test_is_call_like_line() {
+        assert!(super::is_call_like_line("    do_work(arg);"));
+        assert!(super::is_call_like_line("    obj.method(arg);"));
+        assert!(super::is_call_like_line("    foo ();"));
+        assert!(!super::is_call_like_line("    let value = 42;"));
+        assert!(!super::is_call_like_line("    // do_work(arg);"));
+        assert!(!super::is_call_like_line("    #include <other>"));
+        assert!(!super::is_call_like_line(""));
+    }
+
+    #[test]
     fn test_window_excerpt_passes_short_body_through() {
         assert_eq!(window_excerpt("fn a() {}"), None);
         let short: String = (0..10)
@@ -828,5 +928,146 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(window_excerpt(&short), None);
+    }
+
+    fn scored_index_entity(
+        id: u64,
+        name: &str,
+        start_row: usize,
+        end_row: usize,
+    ) -> cce_types::Entity {
+        cce_types::Entity {
+            id: cce_types::EntityId(id),
+            kind: cce_types::EntityKind::Function,
+            name: name.to_string(),
+            signature: String::new(),
+            parameters: Vec::new(),
+            return_type: None,
+            span: cce_types::Span::new(0, 0, start_row, 0, end_row, 0),
+            depth: 0,
+            parent: None,
+            children: Vec::new(),
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: std::collections::HashMap::new(),
+            metadata: std::collections::HashMap::new(),
+            is_stdlib: false,
+            subtype: None,
+            stdlib_category: None,
+        }
+    }
+
+    fn scored_index_relation(
+        caller: u64,
+        callee: u64,
+        relation_type: cce_types::RelationType,
+        call_frequency: u64,
+    ) -> cce_types::ResolvedRelation {
+        cce_types::ResolvedRelation {
+            caller: cce_types::EntityId(caller),
+            callee_id: Some(cce_types::EntityId(callee)),
+            callee_name: format!("callee{callee}"),
+            relation_type,
+            span: cce_types::Span::new(0, 0, 0, 0, 0, 0),
+            is_external: false,
+            external_type: None,
+            callee_symbol: None,
+            stdlib_category: None,
+            owner_type: None,
+            call_context: cce_types::relation::CallContext::Direct,
+            overload_signature: None,
+            call_frequency,
+            cfg_condition: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_scores_prefer_direct_and_frequent_edges() {
+        use cce_codegraph::index::EntityIndexOps;
+        use cce_types::RelationType;
+
+        // One seed caller with three callees: a single direct call, a
+        // repeated direct call, and a type reference. All share the seed,
+        // so score order must follow edge confidence alone.
+        let base = cce_codegraph::RelationIndex::new();
+        base.add_function_with_path(
+            cce_types::EntityId(1),
+            scored_index_entity(1, "caller", 0, 9),
+            "src/main.rs".to_string(),
+        );
+        for (id, name) in [
+            (2u64, "direct_once"),
+            (3, "direct_often"),
+            (4, "type_target"),
+        ] {
+            base.add_function_with_path(
+                cce_types::EntityId(id),
+                scored_index_entity(id, name, 0, 2),
+                "src/lib.rs".to_string(),
+            );
+        }
+        for (callee, relation_type, frequency) in [
+            (2u64, RelationType::DirectCall, 1),
+            (3, RelationType::DirectCall, 4),
+            (4, RelationType::TypeReference, 1),
+        ] {
+            base.add_resolved_relation(scored_index_relation(1, callee, relation_type, frequency));
+        }
+        let searcher = RelationSearcher::new(std::sync::Arc::new(
+            cce_codegraph::CallChainQuery::from_index(base),
+        ));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(
+            dir.path().join("src/main.rs"),
+            (0..10)
+                .map(|i| format!("line {i}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("seed file");
+        std::fs::write(
+            dir.path().join("src/lib.rs"),
+            "fn direct_once() {}\nfn direct_often() {}\nfn type_target() {}\n",
+        )
+        .expect("neighbour file");
+
+        let request = ExpansionRequest {
+            file_path: "src/main.rs".to_string(),
+            start_line: 1,
+            end_line: 5,
+            forward_budget: 8,
+            backward_budget: 0,
+            include_callers: false,
+            domains: vec!["call".to_string(), "reference".to_string()],
+            path_filter: ExpansionPathFilter::default(),
+            primary_score: 0.9,
+            query_terms: Vec::new(),
+            scoring: ExpansionScoring::default(),
+        };
+        let (forward, backward) =
+            resolve_expansion_units_with_filter(&searcher, dir.path(), request);
+        assert!(backward.is_empty());
+        assert_eq!(forward.len(), 3);
+        let score_of = |id: u64| {
+            forward
+                .iter()
+                .find(|unit| unit.entity_id == Some(cce_types::EntityId(id)))
+                .map(|unit| unit.score)
+                .expect("neighbour unit present")
+        };
+        // Repeated direct calls outrank single-site ones, and direct calls
+        // outrank type references.
+        assert!(score_of(3) > score_of(2));
+        assert!(score_of(2) > score_of(4));
+        let relation_of = |id: u64| {
+            forward
+                .iter()
+                .find(|unit| unit.entity_id == Some(cce_types::EntityId(id)))
+                .and_then(|unit| unit.relation_type)
+        };
+        assert_eq!(relation_of(2), Some(RelationType::DirectCall));
+        assert_eq!(relation_of(4), Some(RelationType::TypeReference));
     }
 }

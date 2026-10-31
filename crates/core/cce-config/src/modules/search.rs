@@ -98,13 +98,23 @@ impl Default for QueryIntentWeights {
 // ============================================================================
 
 /// Vector retrieval configuration
+///
+/// Score thresholds and length budgets are different instruments: thresholds
+/// judge relevance, budgets cap cost and output volume. The recall-side
+/// floors here (`similarity_threshold`, `term_weight_threshold`) live in
+/// incompatible domains (vector similarity vs term-weight sum) and are
+/// numerically incomparable; only the normalized fusion/result thresholds
+/// below share the `[0, 1]` scale.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VectorRetrievalConfig {
     /// Number of candidates to retrieve
     pub top_k: usize,
-    /// Minimum similarity threshold
-    pub min_score: f32,
+    /// Recall-side cost valve in the vector similarity domain. Candidates
+    /// below this backend score never reach fusion; 0.0 disables the valve.
+    /// Not comparable with the term-weight threshold: the two live in
+    /// different score domains.
+    pub similarity_threshold: f32,
     /// HNSW ef parameter
     pub hnsw_ef: u32,
 }
@@ -113,7 +123,7 @@ impl Default for VectorRetrievalConfig {
     fn default() -> Self {
         Self {
             top_k: 50,
-            min_score: 0.3,
+            similarity_threshold: 0.3,
             hnsw_ef: 128,
         }
     }
@@ -150,8 +160,11 @@ pub enum RecallFusionAlgorithm {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Bm25RetrievalConfig {
-    /// Minimum score threshold for BM25 results
-    pub min_score: f32,
+    /// Recall-side cost valve in the raw term-weight domain (unbounded sum
+    /// of per-term contributions, `>= 0`). Candidates below it never reach
+    /// fusion; 0.0 (the default) disables the valve. Not comparable with the
+    /// vector similarity threshold: the two live in different score domains.
+    pub term_weight_threshold: f32,
     /// BM25 field weights
     pub field_weights: HashMap<String, f32>,
     /// Multi-term query operator (`or`/`and`). Controls how the terms of a
@@ -183,10 +196,13 @@ pub struct HybridFusionConfig {
     pub enable_intent_based_weights: bool,
     /// Whether to include items that only appear in one path.
     ///
-    /// Asymmetric by design: vector-only keys are always kept, this switch
-    /// only controls whether BM25-only keys join the fused list. The vector
-    /// path is the primary semantic recall; use `require_strict_intersection`
-    /// for a true intersection of both paths.
+    /// Explicit single-path policy, asymmetric by design: vector-only keys
+    /// are always kept, this switch only controls whether BM25-only keys
+    /// join the fused list. The vector path is the primary semantic recall,
+    /// so a lone vector path is never gated here while a lone BM25 path
+    /// is; use `require_strict_intersection` for a true intersection of
+    /// both paths. The same rule applies to the single-path fast path,
+    /// which skips the union key set but thresholds identically.
     pub include_single_path: bool,
     /// Require keys present in both paths, dropping all single-path keys.
     ///
@@ -196,7 +212,10 @@ pub struct HybridFusionConfig {
     /// Minimum fused score threshold, normalized to `[0.0, 1.0]` across all
     /// algorithms. Each algorithm internally scales its raw output to this
     /// range before thresholding, so the same value carries the same meaning
-    /// regardless of the selected algorithm.
+    /// regardless of the selected algorithm. Shares the normalized scale
+    /// (and the name) with the result threshold, but not the role: this one
+    /// prices the fused ranking, the result threshold is the user-visible
+    /// quality gate applied after rerank fusion.
     pub min_score: f32,
     /// Whether to keep at most one result per physical chunk after fusion.
     ///
@@ -224,7 +243,7 @@ pub enum TermOperator {
 impl Default for Bm25RetrievalConfig {
     fn default() -> Self {
         Self {
-            min_score: 0.1,
+            term_weight_threshold: 0.0,
             term_operator: TermOperator::default(),
             field_weights: {
                 let mut w = HashMap::new();
@@ -343,9 +362,9 @@ impl Validate for Bm25RetrievalConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        if !self.min_score.is_finite() || self.min_score < 0.0 {
+        if !self.term_weight_threshold.is_finite() || self.term_weight_threshold < 0.0 {
             errors.push(ConfigValidationError::invalid_field(
-                "min_score",
+                "term_weight_threshold",
                 "must be finite and >= 0.0",
             ));
         }
@@ -359,14 +378,21 @@ impl Validate for Bm25RetrievalConfig {
 }
 
 /// Result filtering configuration
+///
+/// The score threshold here is the only user-visible quality gate, applied
+/// after rerank fusion on the normalized final score. Length budgets
+/// (`max_content_tokens`, annotation/expansion budgets, traversal
+/// depth/counts) are not score thresholds: they cap cost and output volume
+/// and never judge relevance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResultFilterConfig {
     /// Maximum number of results to return
     pub limit: usize,
     /// Minimum score threshold for final results, observed after score
-    /// normalization. Keep fusion and result thresholds independent: tightening
-    /// both at once hides which stage drops candidates.
+    /// normalization on the shared `[0, 1]` scale. Keep fusion and result
+    /// thresholds independent: tightening both at once hides which stage
+    /// drops candidates.
     pub min_score: f32,
     /// Maximum token budget for a single result body. A body over this budget
     /// is replaced by a file-and-range reference instead of being returned in
@@ -974,7 +1000,7 @@ mod tests {
     fn test_vector_retrieval_config_default() {
         let config = VectorRetrievalConfig::default();
         assert_eq!(config.top_k, 50);
-        assert_eq!(config.min_score, 0.3);
+        assert_eq!(config.similarity_threshold, 0.3);
         assert_eq!(config.hnsw_ef, 128);
     }
 

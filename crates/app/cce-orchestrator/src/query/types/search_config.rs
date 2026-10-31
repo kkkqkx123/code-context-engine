@@ -56,8 +56,8 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 ///
 /// | Field | Purpose |
 /// |-------|---------|
-/// | `vector` | Vector retrieval parameters (top_k, min_score, hnsw_ef) |
-/// | `bm25` | BM25 retrieval parameters (min_score, field_weights, term_operator) |
+/// | `vector` | Vector retrieval parameters (top_k, similarity_threshold, hnsw_ef) |
+/// | `bm25` | BM25 retrieval parameters (term_weight_threshold, field_weights, term_operator) |
 /// | `fusion` | Hybrid fusion parameters (weights, algorithm, intent weights) |
 /// | `result` | Result filtering (limit, min_score, max_per_file) |
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn test_bm25_fusion_config_default() {
         let retrieval = Bm25RetrievalConfig::default();
-        assert!((retrieval.min_score - 0.1).abs() < f32::EPSILON);
+        assert!((retrieval.term_weight_threshold - 0.0).abs() < f32::EPSILON);
         let fusion = HybridFusionConfig::default();
         assert!(fusion.enable_intent_based_weights);
         assert!((fusion.vector_weight - 0.5).abs() < f32::EPSILON);
@@ -170,7 +170,7 @@ mod tests {
     fn test_search_config_default() {
         let config = SearchConfig::default();
         assert_eq!(config.vector.top_k, 50);
-        assert_eq!(config.vector.min_score, 0.3);
+        assert_eq!(config.vector.similarity_threshold, 0.3);
         assert_eq!(config.result.limit, 10);
         assert_eq!(config.result.min_score, 0.25);
     }

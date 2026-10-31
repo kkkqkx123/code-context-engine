@@ -75,22 +75,36 @@ pub fn split_query_terms(query: &str) -> Vec<String> {
     terms
 }
 
+/// Whether a call context carries concrete receiver/owner type information.
+///
+/// Only statically dispatched calls gain confidence: direct calls report no
+/// context at all, virtual dispatch resolves at runtime so its receiver
+/// type does not disambiguate the edge, and empty payloads mean the type
+/// was never recorded.
+fn has_typed_context(context: &cce_types::relation::CallContext) -> bool {
+    use cce_types::relation::CallContext as Context;
+    match context {
+        Context::InstanceMethod { receiver_type } => !receiver_type.is_empty(),
+        Context::StaticMethod { owner_type } | Context::Constructor { owner_type } => {
+            !owner_type.is_empty()
+        }
+        Context::Direct | Context::VirtualDispatch { .. } => false,
+    }
+}
+
 /// Edge confidence from relation metadata.
 ///
 /// Reuses the graph traversal edge load (type prior scaled by call heat),
 /// then adjusts for resolution quality signals the load does not carry:
-/// disambiguated overloads and typed call contexts gain confidence,
-/// conditional-compilation edges lose it.
+/// disambiguated overloads and statically typed call contexts gain
+/// confidence, conditional-compilation edges lose it.
 pub fn edge_confidence(relation: &ResolvedRelation) -> f32 {
     let mut score =
         super::graph::service::edge_load(&relation.relation_type, relation.call_frequency);
     if relation.overload_signature.is_some() {
         score *= OVERLOAD_BONUS;
     }
-    if !matches!(
-        relation.call_context,
-        cce_types::relation::CallContext::Direct
-    ) {
+    if has_typed_context(&relation.call_context) {
         score *= TYPED_CONTEXT_BONUS;
     }
     if relation.cfg_condition.is_some() {
@@ -217,13 +231,38 @@ mod tests {
 
     #[test]
     fn overload_and_typed_context_gain_cfg_loses() {
+        use cce_types::relation::CallContext as Context;
         let mut rich = relation(RelationType::DirectCall);
         rich.overload_signature = Some("f(i32)".to_string());
         let plain = edge_confidence(&relation(RelationType::DirectCall));
         assert!(edge_confidence(&rich) > plain);
+        let mut typed = relation(RelationType::DirectCall);
+        typed.call_context = Context::InstanceMethod {
+            receiver_type: "Widget".to_string(),
+        };
+        assert!(edge_confidence(&typed) > plain);
         let mut guarded = relation(RelationType::DirectCall);
         guarded.cfg_condition = Some("test".to_string());
         assert!(edge_confidence(&guarded) < plain);
+    }
+
+    #[test]
+    fn untyped_context_gains_nothing() {
+        use cce_types::relation::CallContext as Context;
+        let plain = edge_confidence(&relation(RelationType::DirectCall));
+        // Virtual dispatch resolves at runtime: the receiver type does not
+        // disambiguate the edge.
+        let mut virtual_dispatch = relation(RelationType::DirectCall);
+        virtual_dispatch.call_context = Context::VirtualDispatch {
+            receiver_type: "dyn Trait".to_string(),
+        };
+        assert_eq!(edge_confidence(&virtual_dispatch), plain);
+        // Empty payloads mean the type was never recorded.
+        let mut empty_owner = relation(RelationType::DirectCall);
+        empty_owner.call_context = Context::StaticMethod {
+            owner_type: String::new(),
+        };
+        assert_eq!(edge_confidence(&empty_owner), plain);
     }
 
     #[test]

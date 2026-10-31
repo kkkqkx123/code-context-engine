@@ -446,9 +446,9 @@ impl QueryConfigBuilder {
         self
     }
 
-    /// Set vector minimum score
-    pub fn vector_min_score(mut self, score: f32) -> Self {
-        self.config.vector.min_score = score;
+    /// Set vector similarity threshold (vector-domain recall floor)
+    pub fn vector_similarity_threshold(mut self, score: f32) -> Self {
+        self.config.vector.similarity_threshold = score;
         self
     }
 
@@ -490,9 +490,9 @@ impl QueryConfigBuilder {
         self
     }
 
-    /// Set BM25 minimum score threshold
-    pub fn bm25_min_score(mut self, score: f32) -> Self {
-        self.config.bm25.min_score = score;
+    /// Set BM25 term-weight threshold (term-weight-domain recall floor)
+    pub fn bm25_term_weight_threshold(mut self, score: f32) -> Self {
+        self.config.bm25.term_weight_threshold = score;
         self
     }
 

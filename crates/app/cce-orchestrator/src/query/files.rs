@@ -6,14 +6,22 @@
 //! returned. Two output tiers share one matcher: bare paths, or paths with
 //! file metadata (size and line count only).
 //!
-//! The walk always observes the latest filesystem state and never applies
-//! generation filtering: files have no cross-backend consistency requirement,
-//! so returning the newest data is correct. The remote relation branch holds
-//! no project files, so file search there reports unavailability instead of
-//! silently returning indexed (potentially stale) rows.
+//! The directory listing is cached per project root (bounded staleness, see
+//! [`FileListCache`]) so repeated queries skip the full walk; the metadata
+//! tier always stats the live filesystem, so vanished files are still
+//! skipped. Generation filtering never applies: files have no cross-backend
+//! consistency requirement, so returning the newest data is correct. The
+//! remote relation branch holds no project files, so file search there
+//! reports unavailability instead of silently returning indexed (potentially
+//! stale) rows.
 
+use std::collections::HashMap;
 use std::io::BufRead;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
+
+use super::expansion::ExpansionPathFilter;
 
 /// A single file hit with the metadata tier attached.
 ///
@@ -30,6 +38,74 @@ pub struct FileHit {
     pub line_count: Option<u64>,
 }
 
+/// Options for file search, reusing the query-side path判定.
+///
+/// The path filter (directory prefix, content-type exclusion, glob
+/// include/exclude) is the same [`ExpansionPathFilter`] the expansion and
+/// relation paths enforce, so a file hidden from semantic recall is hidden
+/// from file search too. `respect_ignore` mirrors the indexer default:
+/// root `.gitignore`/`.indexignore` rules prune the walk. Per-request
+/// filters (prefix, globs) are not yet threaded through the file-search
+/// API surface, so callers pass defaults today; the mechanism is covered by
+/// unit tests for when that wiring lands.
+#[derive(Clone, Debug)]
+pub struct FileSearchOptions {
+    /// Directory-prefix, content-type and glob判定 shared with query paths.
+    pub path_filter: ExpansionPathFilter,
+    /// Observe root ignore files during the walk (default on).
+    pub respect_ignore: bool,
+    /// Serve the directory listing from the per-root cache (default on).
+    pub use_cache: bool,
+}
+
+impl Default for FileSearchOptions {
+    fn default() -> Self {
+        Self {
+            path_filter: ExpansionPathFilter::default(),
+            respect_ignore: true,
+            use_cache: true,
+        }
+    }
+}
+
+/// How long a cached directory listing stays valid.
+const FILE_LIST_TTL: Duration = Duration::from_secs(30);
+
+/// One cached directory listing: raw walked paths plus the freshness
+/// evidence (walk time and root mtime) used to validate it.
+#[derive(Debug)]
+struct CacheEntry {
+    walked_at: Instant,
+    root_mtime: Option<SystemTime>,
+    paths: Vec<String>,
+}
+
+/// Per-process directory listing cache keyed by canonical project root plus
+/// the ignore flag.
+///
+/// A full [`walkdir`] traversal per query is the cost this removes: entries
+/// are revalidated by TTL plus root-directory mtime, so direct-child
+/// add/remove usually invalidates immediately while deeper changes fall back
+/// to the TTL bound. Staleness is self-healing (deleted files are skipped by
+/// the live stat pass) and never affects ranking, only membership. The key
+/// includes `respect_ignore` because an ignore-pruned listing must never
+/// serve a caller that opted out; the remaining path filters apply per call
+/// after the cache.
+fn file_list_cache() -> &'static Mutex<HashMap<(PathBuf, bool), CacheEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, bool), CacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Drop every cached directory listing.
+///
+/// Available so tests observe a fresh walk on demand and future indexer
+/// hooks can invalidate a root after reindexing.
+pub fn clear_file_list_cache() {
+    if let Ok(mut cache) = file_list_cache().lock() {
+        cache.clear();
+    }
+}
+
 /// Search file paths matching `query`, returning at most `limit` hits.
 ///
 /// Paths are project-relative, ordered by match quality with a lexical
@@ -38,8 +114,9 @@ pub fn search_file_paths(
     root: &Path,
     query: &str,
     limit: usize,
+    options: &FileSearchOptions,
 ) -> crate::query::error::Result<Vec<String>> {
-    let ranked = rank_paths(root, query, limit)?;
+    let ranked = rank_paths(root, query, limit, options)?;
     Ok(ranked.into_iter().map(|(path, _)| path).collect())
 }
 
@@ -51,8 +128,9 @@ pub fn search_files(
     root: &Path,
     query: &str,
     limit: usize,
+    options: &FileSearchOptions,
 ) -> crate::query::error::Result<Vec<FileHit>> {
-    let ranked = rank_paths(root, query, limit)?;
+    let ranked = rank_paths(root, query, limit, options)?;
     let mut hits = Vec::with_capacity(ranked.len());
     for (path, _) in ranked {
         let full = root.join(&path);
@@ -80,22 +158,18 @@ pub fn rank_file_paths(
     paths: &[String],
     query: &str,
     limit: usize,
+    options: &FileSearchOptions,
 ) -> crate::query::error::Result<Vec<FileHit>> {
     let pattern = checked_query(query, limit)?;
-    let match_full_path = pattern.contains('/');
-    let mut ranked: Vec<(String, i64)> = Vec::new();
-    for path in paths {
-        let target = if match_full_path {
-            path.clone()
-        } else {
-            file_name_of(path).to_string()
-        };
-        if let Some(score) = fuzzy_score(&pattern, &target) {
-            ranked.push((path.clone(), score));
-        }
-    }
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    ranked.truncate(limit);
+    // Index rows already passed generation filtering; the query-side path
+    // 判定 still applies so both branches hide the same files. Ignore rules
+    // are a live-filesystem concept and do not apply here.
+    let candidates: Vec<String> = paths
+        .iter()
+        .filter(|path| options.path_filter.allows(path))
+        .cloned()
+        .collect();
+    let ranked = rank_candidates(candidates, &pattern, limit);
     Ok(ranked
         .into_iter()
         .map(|(path, _)| FileHit {
@@ -122,19 +196,140 @@ fn checked_query(query: &str, limit: usize) -> crate::query::error::Result<Strin
     Ok(pattern)
 }
 
+/// Rank pre-filtered candidate paths against the query pattern.
+fn rank_candidates(
+    candidates: Vec<String>,
+    pattern: &str,
+    limit: usize,
+) -> Vec<(String, i64)> {
+    let match_full_path = pattern.contains('/');
+    let mut ranked: Vec<(String, i64)> = Vec::new();
+    for path in candidates {
+        let target = if match_full_path {
+            path.clone()
+        } else {
+            file_name_of(&path).to_string()
+        };
+        if let Some(score) = fuzzy_score(pattern, &target) {
+            ranked.push((path, score));
+        }
+    }
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.truncate(limit);
+    ranked
+}
+
 /// Walk `root` and rank every visible file against the query.
 fn rank_paths(
     root: &Path,
     query: &str,
     limit: usize,
+    options: &FileSearchOptions,
 ) -> crate::query::error::Result<Vec<(String, i64)>> {
     let pattern = checked_query(query, limit)?;
-    let match_full_path = pattern.contains('/');
-    let mut ranked: Vec<(String, i64)> = Vec::new();
+    let candidates = cached_or_walked_files(root, options)?;
+    let candidates: Vec<String> = candidates
+        .into_iter()
+        .filter(|path| options.path_filter.allows(path))
+        .collect();
+    Ok(rank_candidates(candidates, &pattern, limit))
+}
+
+/// Serve the walked file list from the per-root cache when fresh.
+fn cached_or_walked_files(
+    root: &Path,
+    options: &FileSearchOptions,
+) -> crate::query::error::Result<Vec<String>> {
+    if !options.use_cache {
+        return walk_project_files(root, load_ignore_matcher(root, options));
+    }
+    let key = (
+        root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
+        options.respect_ignore,
+    );
+    let root_mtime = std::fs::metadata(root).and_then(|m| m.modified()).ok();
+    if let Ok(cache) = file_list_cache().lock()
+        && let Some(entry) = cache.get(&key)
+        && entry.walked_at.elapsed() <= FILE_LIST_TTL
+        && mtime_matches(entry.root_mtime, root_mtime)
+    {
+        return Ok(entry.paths.clone());
+    }
+    let paths = walk_project_files(root, load_ignore_matcher(root, options))?;
+    if let Ok(mut cache) = file_list_cache().lock() {
+        cache.insert(
+            key,
+            CacheEntry {
+                walked_at: Instant::now(),
+                root_mtime,
+                paths: paths.clone(),
+            },
+        );
+    }
+    Ok(paths)
+}
+
+/// Root mtimes agree when both sides are known and equal; an unknown mtime
+/// never invalidates on its own, leaving the TTL bound in charge.
+fn mtime_matches(cached: Option<SystemTime>, current: Option<SystemTime>) -> bool {
+    match (cached, current) {
+        (Some(cached), Some(current)) => cached == current,
+        _ => true,
+    }
+}
+
+/// Load root ignore rules: `.gitignore` plus `.indexignore` merged into one
+/// matcher. Missing files simply contribute nothing.
+fn load_ignore_matcher(root: &Path, options: &FileSearchOptions) -> Option<cce_scanner::IgnoreMatcher> {
+    if !options.respect_ignore {
+        return None;
+    }
+    let mut merged: Option<cce_scanner::IgnoreMatcher> = None;
+    for name in [".gitignore", ".indexignore"] {
+        match cce_scanner::IgnoreMatcher::from_file(root.join(name)) {
+            Ok(matcher) => {
+                if let Some(existing) = merged.as_mut() {
+                    existing.merge(matcher);
+                } else {
+                    merged = Some(matcher);
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    merged
+}
+
+/// Walk `root` and collect project-relative file paths.
+///
+/// Hidden directories are always pruned; when an ignore matcher is present
+/// its ignored directories are pruned too (so `target/`-scale subtrees are
+/// never descended into) and ignored files are skipped.
+fn walk_project_files(
+    root: &Path,
+    ignore: Option<cce_scanner::IgnoreMatcher>,
+) -> crate::query::error::Result<Vec<String>> {
+    let has_patterns = ignore.as_ref().is_some_and(|m| m.pattern_count() > 0);
+    let mut paths = Vec::new();
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| entry.depth() == 0 || !is_skipped_dir(entry))
+        .filter_entry(|entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            if is_skipped_dir(entry) {
+                return false;
+            }
+            if has_patterns
+                && ignore
+                    .as_ref()
+                    .is_some_and(|m| m.is_ignored(entry.path()))
+            {
+                return false;
+            }
+            true
+        })
     {
         let entry = entry.map_err(|e| {
             crate::query::error::QueryError::storage(&format!("Failed to walk project files: {e}"))
@@ -143,23 +338,15 @@ fn rank_paths(
             continue;
         }
         let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
-        let path = relative
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        let target = if match_full_path {
-            path.clone()
-        } else {
-            file_name_of(&path).to_string()
-        };
-        if let Some(score) = fuzzy_score(&pattern, &target) {
-            ranked.push((path, score));
-        }
+        paths.push(
+            relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+        );
     }
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    ranked.truncate(limit);
-    Ok(ranked)
+    Ok(paths)
 }
 
 /// Hidden directories (`.git` and friends) never participate in file search.
@@ -264,15 +451,19 @@ mod tests {
         assert!(fuzzy_score("abc", "abc.rs").unwrap() > fuzzy_score("abc", "a_b_c.rs").unwrap());
     }
 
+    fn search_options() -> FileSearchOptions {
+        FileSearchOptions::default()
+    }
+
     #[test]
     fn search_paths_ranks_and_limits() {
         let dir = tempfile::tempdir().expect("tempdir");
         for name in ["main.rs", "domain.rs", "lib.rs"] {
             std::fs::write(dir.path().join(name), "fn x() {}\n").expect("write file");
         }
-        let hits = search_file_paths(dir.path(), "main", 10).expect("search");
+        let hits = search_file_paths(dir.path(), "main", 10, &search_options()).expect("search");
         assert_eq!(hits, vec!["main.rs".to_string(), "domain.rs".to_string()]);
-        let limited = search_file_paths(dir.path(), "rs", 2).expect("search");
+        let limited = search_file_paths(dir.path(), "rs", 2, &search_options()).expect("search");
         assert_eq!(limited.len(), 2);
     }
 
@@ -280,14 +471,19 @@ mod tests {
     fn search_files_attaches_size_and_lines() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("a.rs"), "one\ntwo\nthree\n").expect("write file");
-        let hits = search_files(dir.path(), "a.rs", 10).expect("search");
+        let hits = search_files(dir.path(), "a.rs", 10, &search_options()).expect("search");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "a.rs");
         assert!(hits[0].size_bytes.is_some_and(|size| size > 0));
         assert_eq!(hits[0].line_count, Some(3));
 
-        let ranked =
-            rank_file_paths(&["a.rs".to_string(), "b.rs".to_string()], "a", 10).expect("rank");
+        let ranked = rank_file_paths(
+            &["a.rs".to_string(), "b.rs".to_string()],
+            "a",
+            10,
+            &search_options(),
+        )
+        .expect("rank");
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].path, "a.rs");
         assert_eq!(ranked[0].size_bytes, None);
@@ -297,13 +493,80 @@ mod tests {
     #[test]
     fn empty_query_is_rejected() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert!(search_file_paths(dir.path(), "   ", 10).is_err());
-        assert!(search_files(dir.path(), "", 10).is_err());
+        assert!(search_file_paths(dir.path(), "   ", 10, &search_options()).is_err());
+        assert!(search_files(dir.path(), "", 10, &search_options()).is_err());
     }
 
     #[test]
     fn zero_limit_is_rejected() {
         let dir = tempfile::tempdir().expect("tempdir");
-        assert!(search_file_paths(dir.path(), "a", 0).is_err());
+        assert!(search_file_paths(dir.path(), "a", 0, &search_options()).is_err());
+    }
+
+    #[test]
+    fn ignore_rules_prune_walk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".gitignore"), "target/\n*.log\n").expect("ignore file");
+        std::fs::create_dir_all(dir.path().join("target")).expect("target dir");
+        std::fs::write(dir.path().join("target/build.rs"), "fn x() {}\n").expect("write file");
+        std::fs::write(dir.path().join("debug.log"), "noise\n").expect("write file");
+        std::fs::write(dir.path().join("main.rs"), "fn x() {}\n").expect("write file");
+        let hits = search_file_paths(dir.path(), "a", 10, &search_options()).expect("search");
+        assert_eq!(hits, vec!["main.rs".to_string()]);
+    }
+
+    #[test]
+    fn ignore_rules_can_be_disabled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".gitignore"), "target/\n").expect("ignore file");
+        std::fs::create_dir_all(dir.path().join("target")).expect("target dir");
+        std::fs::write(dir.path().join("target/build.rs"), "fn x() {}\n").expect("write file");
+        let options = FileSearchOptions {
+            respect_ignore: false,
+            ..search_options()
+        };
+        let hits = search_file_paths(dir.path(), "build", 10, &options).expect("search");
+        assert_eq!(hits, vec!["target/build.rs".to_string()]);
+    }
+
+    #[test]
+    fn path_filter_applies_to_file_search() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("src/main.rs"), "fn x() {}\n").expect("write file");
+        std::fs::write(dir.path().join("other.rs"), "fn x() {}\n").expect("write file");
+        let mut options = search_options();
+        options.path_filter.directory_prefix = Some("src".to_string());
+        let hits = search_file_paths(dir.path(), "rs", 10, &options).expect("search");
+        assert_eq!(hits, vec!["src/main.rs".to_string()]);
+    }
+
+    #[test]
+    fn listing_cache_serves_stale_until_cleared() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("sub")).expect("sub dir");
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").expect("write file");
+        let first = search_file_paths(dir.path(), "rs", 10, &search_options()).expect("search");
+        assert_eq!(first, vec!["a.rs".to_string()]);
+        // Adding a file inside an existing subdirectory leaves the root
+        // mtime alone, so the TTL-fresh cache keeps serving the old list.
+        std::fs::write(dir.path().join("sub/b.rs"), "fn x() {}\n").expect("write file");
+        let stale = search_file_paths(dir.path(), "rs", 10, &search_options()).expect("search");
+        assert_eq!(stale, vec!["a.rs".to_string()]);
+        clear_file_list_cache();
+        let fresh = search_file_paths(dir.path(), "rs", 10, &search_options()).expect("search");
+        assert_eq!(fresh, vec!["a.rs".to_string(), "sub/b.rs".to_string()]);
+    }
+
+    #[test]
+    fn cache_can_be_bypassed_per_call() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").expect("write file");
+        let options = FileSearchOptions {
+            use_cache: false,
+            ..search_options()
+        };
+        let hits = search_file_paths(dir.path(), "a", 10, &options).expect("search");
+        assert_eq!(hits, vec!["a.rs".to_string()]);
     }
 }
