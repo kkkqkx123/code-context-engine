@@ -178,6 +178,16 @@ async fn resolve_chunk_records_from_store(
     Ok(records)
 }
 
+/// Downgrade empty bodies to honest references when no store is available.
+///
+/// Enrichment without a relation store cannot materialize content; hits with
+/// an empty body become file-level or range references instead of keeping a
+/// full state with no content.
+pub fn downgrade_empty_bodies(results: &mut Vec<SearchResult>) {
+    let empty: HashMap<String, ChunkRecord> = HashMap::new();
+    enrich_results(results, &empty, None, usize::MAX);
+}
+
 /// Resolve a project root directory through the relation store.
 ///
 /// Query contexts only know `project_id`; chunk file paths are stored relative
@@ -265,13 +275,7 @@ fn materialize(
     max_content_tokens: usize,
 ) {
     let Some(chunk) = chunk_records.get(&result.id) else {
-        // A file-level hit carries no chunk record by construction; point at
-        // the file instead of returning an empty body.
-        if result.content.is_empty() && result.kind == "summary" {
-            result.content_state = ContentState::Reference(DowngradeReason::FileLevel);
-            result.content = file_level_reference(&result.file_path, DowngradeReason::FileLevel);
-            result.score *= 0.8;
-        } else if result.content.is_empty() {
+        if result.content.is_empty() {
             // A chunk hit without a record means the index and query metadata
             // stores diverged. Downgrade honestly instead of keeping the
             // recall-stage Full state with an empty body.
@@ -798,10 +802,9 @@ mod tests {
     }
 
     #[test]
-    fn materialize_summary_without_record_gets_file_level_reference() {
+    fn materialize_unknown_hit_without_record_downgrades_honestly() {
         let result = SearchResult {
-            id: "summary::src/lib.rs".to_string(),
-            kind: "summary".to_string(),
+            id: "group_9_bm25_0".to_string(),
             file_path: "src/lib.rs".to_string(),
             ..Default::default()
         };
@@ -811,7 +814,7 @@ mod tests {
 
         assert_eq!(
             results[0].content_state,
-            ContentState::Reference(DowngradeReason::FileLevel)
+            ContentState::Reference(DowngradeReason::ChunkMissing)
         );
         assert!(
             results[0]

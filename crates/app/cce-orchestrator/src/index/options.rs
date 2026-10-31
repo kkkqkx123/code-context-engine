@@ -34,13 +34,11 @@ pub struct IndexOptions {
     pub store_vectors: bool,
     /// Store in BM25 index
     pub store_bm25: bool,
-    /// Store file summaries
-    pub store_summaries: bool,
-    /// Embed file summary vectors into Qdrant.
+    /// Generate file summaries as NL document export input.
     ///
-    /// When false, summary text is still generated and stored for export but
-    /// summary vectors are not embedded into the vector store.
-    pub embed_summaries: bool,
+    /// No summary vectors, BM25 documents, or metadata rows are written;
+    /// generation only feeds the export spool and its checkpoints.
+    pub store_summaries: bool,
     /// Build relation index
     pub build_relations: bool,
     /// Whether to respect .gitignore files
@@ -67,7 +65,6 @@ impl Default for IndexOptions {
             store_vectors: config.store_vectors,
             store_bm25: config.store_bm25,
             store_summaries: config.store_summaries,
-            embed_summaries: config.embed_summaries,
             build_relations: config.build_relations,
             respect_gitignore: true,
             additional_ignore_patterns: Vec::new(),
@@ -93,7 +90,6 @@ impl IndexOptions {
             store_vectors: indexer_config.store_vectors,
             store_bm25: indexer_config.store_bm25,
             store_summaries: indexer_config.store_summaries,
-            embed_summaries: indexer_config.embed_summaries,
             build_relations: indexer_config.build_relations,
             respect_gitignore: scanner_config.respect_gitignore,
             additional_ignore_patterns: scanner_config.gitignore_patterns.clone(),

@@ -1,17 +1,14 @@
 //! Post-retrieval score boosting module
 //!
-//! Provides unified score boosting through additive aggregation of multiple
-//! boost sources (summary relevance).
-//! Each boost source contributes a capped additive value; the aggregator
-//! sums all contributions and caps the total to prevent score overshoot.
+//! Provides unified score boosting through additive aggregation of boost
+//! sources. Each boost source contributes a capped additive value; the
+//! aggregator sums all contributions and caps the total to prevent score
+//! overshoot.
 //!
 //! # Architecture
 //!
 //! ```text
 //! Boost Layer (boosting)
-//!     │
-//!     ├── SummaryBoost (summary boost)
-//!     │   └── File-level summary relevance contribution
 //!     │
 //!     └── UnifiedBoostAggregator (unified boost aggregation)
 //!         └── Collects, caps, and applies all contributions to vector_score
@@ -25,8 +22,7 @@
 //! score = base_score × (1.0 + capped_addition)
 //! ```
 //!
-//! The base is the incoming candidate score: normalized fused score on the
-//! hybrid path, normalized vector score on the dense path.
+//! The base is the incoming candidate score.
 
 use std::collections::HashMap;
 
@@ -34,18 +30,16 @@ use crate::query::types::SearchResult;
 
 // Sub-modules: individual boost contributors
 pub mod normalization;
-pub mod summary;
 
 // Re-exports
 pub use normalization::{NormalizationStrategy, normalize_scores};
-pub use summary::SummaryBoost;
 
 /// A single boost contribution from one source for one candidate result.
 #[derive(Debug, Clone)]
 pub struct BoostContribution {
     /// The candidate result ID this contribution applies to
     pub candidate_id: String,
-    /// Source identifier: "bm25", "summary"
+    /// Source identifier naming the contributing plugin or signal
     pub source: &'static str,
     /// Normalized boost addition value [0.0, max_source_boost]
     pub boost_value: f32,

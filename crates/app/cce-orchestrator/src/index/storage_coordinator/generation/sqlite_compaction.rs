@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::error::OrchestratorError;
 
-use super::super::mapping::{replace_epoch_in_id, replace_epoch_in_id_list};
+use super::super::mapping::replace_epoch_in_id_list;
 use super::StorageCoordinator;
 
 /// One entity row staged for insertion into a target generation.
@@ -173,13 +173,6 @@ impl StorageCoordinator {
             (
                 "chunks",
                 format!("DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2{chunk_scope}"),
-            ),
-            (
-                "file_summaries",
-                format!(
-                    "DELETE FROM file_summaries WHERE epoch = ?2 AND file_id IN
-                     (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope})"
-                ),
             ),
             (
                 "entities",
@@ -448,69 +441,6 @@ impl StorageCoordinator {
                         .map_err(|error| cce_types::StorageError::insert("chunks", error.to_string()))?;
                 }
 
-                let summaries = {
-                    let mut statement = tx
-                        .prepare(
-                            "SELECT new_file.id, summary.summary_json,
-                                    summary.qdrant_point_id, summary.bm25_doc_id,
-                                    summary.created_at, summary.updated_at
-                             FROM file_summaries summary
-                             JOIN files old_file ON old_file.id = summary.file_id
-                             JOIN files new_file ON new_file.path = old_file.path
-                                AND new_file.project_id = old_file.project_id
-                                AND new_file.epoch = ?3
-                             WHERE old_file.project_id = ?1 AND old_file.epoch = ?2
-                                AND summary.epoch = ?2",
-                        )
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                    let rows = statement
-                        .query_map(
-                            rusqlite::params![self.project_id, source_epoch, target_epoch],
-                            |row| {
-                                Ok((
-                                    row.get::<_, i64>(0)?,
-                                    row.get::<_, Option<String>>(1)?,
-                                    row.get::<_, Option<String>>(2)?,
-                                    row.get::<_, Option<String>>(3)?,
-                                    row.get::<_, String>(4)?,
-                                    row.get::<_, String>(5)?,
-                                ))
-                            },
-                        )
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                    rows.collect::<Result<Vec<_>, _>>()
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?
-                };
-                for (
-                    new_file_id,
-                    summary_json,
-                    qdrant_point_id,
-                    bm25_doc_id,
-                    created_at,
-                    updated_at,
-                ) in summaries
-                {
-                    // Copy the canonical JSON blob verbatim; the structured
-                    // columns are generated from it and must never be written.
-                    tx.execute(
-                        "INSERT INTO file_summaries
-                            (file_id, epoch, summary_json, qdrant_point_id, bm25_doc_id,
-                             created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        rusqlite::params![
-                            new_file_id,
-                            target_epoch,
-                            summary_json,
-                            qdrant_point_id
-                                .map(|id| replace_epoch_in_id(&id, source_epoch, target_epoch)),
-                            bm25_doc_id
-                                .map(|id| replace_epoch_in_id(&id, source_epoch, target_epoch)),
-                            created_at,
-                            updated_at,
-                        ],
-                    )
-                    .map_err(|error| cce_types::StorageError::insert("file_summaries", error.to_string()))?;
-                }
                 Ok(())
             })
             .map_err(OrchestratorError::Storage)

@@ -74,7 +74,6 @@ async fn run_once(root: &std::path::Path, metadata: Arc<SqliteClient>) -> u64 {
         store_vectors: false,
         store_bm25: false,
         store_summaries: false,
-        embed_summaries: false,
         respect_gitignore: false,
         additional_ignore_patterns: Vec::new(),
         custom_gitignore_path: None,

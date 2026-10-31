@@ -121,7 +121,8 @@ pub async fn handle_config_reload(
             };
             // Build the processor set from the project configuration so export
             // and summary processors are reflected in the reloaded processors
-            // (export gated on `export.enabled`, summary on `store_summaries`).
+            // (export gated on `export.enabled`, summary generation on
+            // `store_summaries`).
             let project_config = match engine.project_registry().get_or_load(project_id).await {
                 Ok(entry) => entry.config.clone(),
                 Err(error) => {
@@ -136,7 +137,6 @@ pub async fn handle_config_reload(
             let mut processor_config = ProcessorConfig::new();
             processor_config.enable_export = project_config.export.enabled;
             processor_config.enable_summary = project_config.orchestrator.indexer.store_summaries;
-            processor_config.embed_summaries = project_config.orchestrator.indexer.embed_summaries;
             processor_config.export_config = if project_config.export.enabled {
                 Some(cce_orchestrator::ExportConfig::from_module_config(
                     &project_config.export,

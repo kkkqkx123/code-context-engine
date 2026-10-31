@@ -413,44 +413,6 @@ impl RelationStorage for PostgresClient {
         self.mappings_delete_by_project(project_id).await
     }
 
-    async fn summary_upsert(
-        &self,
-        file_id: i64,
-        epoch: i64,
-        summary_json: &str,
-    ) -> Result<(), StorageError> {
-        self.summary_upsert(file_id, epoch, summary_json).await
-    }
-
-    async fn summary_at_epoch(
-        &self,
-        file_id: i64,
-        epoch: i64,
-    ) -> Result<Option<String>, StorageError> {
-        self.summary_at_epoch(file_id, epoch).await
-    }
-
-    async fn summaries_by_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> Result<Vec<(String, String, i64)>, StorageError> {
-        self.summaries_by_epoch(project_id, epoch).await
-    }
-
-    async fn summaries_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> Result<usize, StorageError> {
-        self.summaries_delete_by_project_epoch(project_id, epoch)
-            .await
-    }
-
-    async fn summaries_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
-        self.summaries_delete_by_project(project_id).await
-    }
-
     async fn checkpoint_create(
         &self,
         project_id: i64,
@@ -736,7 +698,6 @@ mod tests {
             "entities",
             "entity_detail_mappings",
             "chunks",
-            "file_summaries",
             "checkpoint",
             "checkpoint_batch",
             "checkpoint_file",

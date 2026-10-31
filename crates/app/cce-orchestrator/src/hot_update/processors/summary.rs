@@ -10,11 +10,10 @@ use std::time::Instant;
 use crate::hot_update::BatchChangeResult;
 use crate::hot_update::error::HotUpdateError;
 use crate::hot_update::error::Result;
-use crate::hot_update::processors::deletion::process_deletions;
 use crate::hot_update::processors::trait_def::UpdateProcessor;
 use crate::index::StorageCoordinator;
 use crate::operation::{
-    CheckpointManager, ModuleFailure, OperationContext, OperationMetrics, OperationProcessResult,
+    CheckpointManager, OperationContext, OperationMetrics, OperationProcessResult,
 };
 use cce_parser::document::{DocSummaryExt, PipelineRouter};
 use cce_parser::summary::SummaryGenerator;
@@ -101,21 +100,13 @@ impl UpdateProcessor for SummaryUpdateProcessor {
             });
         }
         let start = Instant::now();
-        let mut failed_modules = Vec::new();
+        let failed_modules = Vec::new();
         let mut success_files = Vec::new();
         let mut processed_count = 0usize;
 
-        // Process removed files using shared deletion handler
-        processed_count += process_deletions(
-            self.storage.as_ref(),
-            batch_result,
-            "summary",
-            &mut failed_modules,
-        )
-        .await;
-
-        // Process modified/added files
-        let mut summaries = Vec::new();
+        // No summary index exists: deletions need no summary cleanup, and
+        // generated summaries flow into `parse_result.file_summary` for the
+        // export processor. Only modified/added files are processed below.
         let mut summary_writes = Vec::new();
 
         for parse_result in &mut batch_result.parse_results {
@@ -171,71 +162,38 @@ impl UpdateProcessor for SummaryUpdateProcessor {
             };
             // Backfill so later derived processors (e.g. NL document export)
             // can reuse the pre-generated summary instead of re-generating it.
-            parse_result.file_summary = Some(generated.clone());
-            let summary = generated;
+            parse_result.file_summary = Some(generated);
             parse_result.summary_fingerprint = Some(self.summary_fingerprint.clone());
 
             // A marker that still matches the current inputs and a valid
-            // in-memory summary mean the candidate already has everything this
-            // module needs to write for the file.
+            // in-memory summary mean the candidate already has everything
+            // this module needs for the file.
             if already_stored && reuse {
                 continue;
             }
 
-            // Remove any stale candidate summary before writing the fresh one.
-            if let Err(error) = self
-                .storage
-                .prepare_hot_update_summary(&parse_result.file_path)
-                .await
-            {
-                tracing::warn!(
-                    path = %parse_result.file_path.display(),
-                    error = %error,
-                    "Failed to prepare candidate summary"
-                );
-            }
-
-            summaries.push(summary);
             summary_writes.push((parse_result.file_path.clone(), module_fp));
         }
 
-        // Store all summaries in batch
-        if !summaries.is_empty() {
-            match self.storage.store_summaries(&summaries).await {
-                Ok(_) => {
-                    processed_count += summaries.len();
-                    for (path, module_fp) in &summary_writes {
-                        success_files.push(path.to_string_lossy().to_string());
-                        // Record completion so recovery can skip re-summarizing.
-                        if let Err(error) = crate::hot_update::progress::persist_module_progress(
-                            &self.checkpoint_manager,
-                            ctx,
-                            path,
-                            crate::hot_update::progress::MODULE_SUMMARY,
-                            module_fp,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                path = %path.display(),
-                                error = %error,
-                                "Failed to persist summary progress marker"
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    for (path, _) in &summary_writes {
-                        failed_modules.push(ModuleFailure {
-                            file_path: path.to_string_lossy().to_string(),
-                            module_name: "summary".to_string(),
-                            error: e.to_string(),
-                            retry_count: 0,
-                            next_retry_time: None,
-                        });
-                    }
-                    tracing::error!(error = %e, "Failed to store summaries");
-                }
+        // Generation cannot fail (outcomes are encoded in the summary); record
+        // progress markers so recovery skips re-summarizing completed files.
+        processed_count += summary_writes.len();
+        for (path, module_fp) in &summary_writes {
+            success_files.push(path.to_string_lossy().to_string());
+            if let Err(error) = crate::hot_update::progress::persist_module_progress(
+                &self.checkpoint_manager,
+                ctx,
+                path,
+                crate::hot_update::progress::MODULE_SUMMARY,
+                module_fp,
+            )
+            .await
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "Failed to persist summary progress marker"
+                );
             }
         }
 

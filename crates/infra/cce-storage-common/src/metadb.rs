@@ -256,41 +256,6 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         project_id: i64,
     ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
-    /// Idempotent write of one file summary at an epoch.
-    fn summary_upsert(
-        &self,
-        file_id: i64,
-        epoch: i64,
-        summary_json: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Read one file summary at an epoch.
-    fn summary_at_epoch(
-        &self,
-        file_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Option<String>, StorageError>> + Send;
-
-    /// List summary payloads of one project and epoch.
-    fn summaries_by_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<(String, String, i64)>, StorageError>> + Send;
-
-    /// Delete summary rows of one project and epoch.
-    fn summaries_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete all summary rows of one project.
-    fn summaries_delete_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
     // -- Progress checkpoints --
 
     /// Create an operation-level checkpoint.

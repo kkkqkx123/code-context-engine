@@ -548,13 +548,6 @@ impl ProjectIndexManifestRepository {
         plan: &GenerationGcPlan,
     ) -> Result<(), StorageError> {
         for epoch in &plan.stale_data_epochs {
-            tx.execute(
-                "DELETE FROM file_summaries
-                 WHERE epoch = ?2 AND file_id IN
-                     (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2)",
-                params![project_id, epoch],
-            )
-            .map_err(|error| StorageError::delete("file_summaries", error.to_string()))?;
             for table in ["entity_detail_mappings", "chunks", "entities", "files"] {
                 let sql = format!("DELETE FROM {table} WHERE project_id = ?1 AND epoch = ?2");
                 tx.execute(&sql, params![project_id, epoch])

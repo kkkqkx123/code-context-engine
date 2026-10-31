@@ -4,12 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ast_to_nl::clean_comment_content;
 use crate::summary::SummaryConfig;
 use crate::summary::strategy::categorization::FileCategory;
 use cce_types::Language;
 use cce_types::test_info::TestInfo;
-use cce_utils::normalize_whitespace;
 
 // Re-export ImportanceLevel from strategy module
 pub use crate::summary::strategy::ImportanceLevel;
@@ -199,46 +197,6 @@ impl FileSummary {
             importance_level: self.importance_level,
             category: self.category.map(|c| c.as_str().to_string()),
         }
-    }
-
-    /// Convert to BM25 document text
-    pub fn to_bm25_text(&self) -> String {
-        let mut parts = vec![
-            format!("File: {}", self.file_path),
-            format!("Language: {}", self.language),
-            format!("Summary: {}", self.summary_text),
-            format!("Entities: {}", self.main_entities.join(", ")),
-            format!("Imports: {}", self.imports.join(", ")),
-            format!("Exports: {}", self.exports.join(", ")),
-            format!("Tags: {}", self.tags.join(", ")),
-        ];
-        if let Some(ref doc) = self.file_doc_comment {
-            let cleaned_doc = normalize_whitespace(&clean_comment_content(doc));
-            if !cleaned_doc.is_empty() {
-                parts.push(format!("FileDoc: {}", cleaned_doc));
-            }
-        }
-        parts.join("\n")
-    }
-
-    /// Convert to embedding text for vector storage
-    pub fn to_embedding_text(&self) -> String {
-        let mut parts = vec![
-            format!("File: {}", self.file_path),
-            format!("Language: {}", self.language),
-            format!("Summary: {}", self.summary_text),
-            format!("Entities: {}", self.main_entities.join(", ")),
-            format!("Imports: {}", self.imports.join(", ")),
-            format!("Exports: {}", self.exports.join(", ")),
-            format!("Tags: {}", self.tags.join(", ")),
-        ];
-        if let Some(ref doc) = self.file_doc_comment {
-            let cleaned_doc = normalize_whitespace(&clean_comment_content(doc));
-            if !cleaned_doc.is_empty() {
-                parts.push(format!("FileDoc: {}", cleaned_doc));
-            }
-        }
-        parts.join("\n")
     }
 }
 
@@ -495,63 +453,6 @@ mod tests {
         assert_eq!(summary.language, "rust");
         assert_eq!(summary.main_entities.len(), 2);
         assert_eq!(summary.importance_level, ImportanceLevel::High);
-    }
-
-    #[test]
-    fn test_to_bm25_text() {
-        let summary = FileSummary::new("test.py")
-            .with_language("python")
-            .with_summary("Test module")
-            .with_entities(vec!["test_func".to_string()]);
-
-        let text = summary.to_bm25_text();
-        assert!(text.contains("test.py"));
-        assert!(text.contains("python"));
-        assert!(text.contains("test_func"));
-    }
-
-    #[test]
-    fn test_to_bm25_text_cleans_file_doc_comment() {
-        let summary = FileSummary::new("test.rs")
-            .with_language("rust")
-            .with_summary("Test module")
-            .with_file_doc_comment(Some(
-                "# Overview\n\n```rust\nimpl<T> OnceCell<T> {}\n```\n".to_string(),
-            ));
-
-        let text = summary.to_bm25_text();
-        assert!(text.contains("# Overview"));
-        assert!(!text.contains("```rust"));
-        assert!(!text.contains("impl<T>"));
-    }
-
-    #[test]
-    fn test_to_embedding_text_cleans_file_doc_comment() {
-        let summary = FileSummary::new("test.rs")
-            .with_language("rust")
-            .with_summary("Test module")
-            .with_file_doc_comment(Some(
-                "# Overview\n\n```rust\nimpl<T> OnceCell<T> {}\n```".to_string(),
-            ));
-
-        let text = summary.to_embedding_text();
-        assert!(text.contains("FileDoc:"));
-        assert!(text.contains("# Overview"));
-        assert!(!text.contains("```rust"));
-        assert!(!text.contains("impl<T>"));
-    }
-
-    #[test]
-    fn test_to_embedding_text_includes_imports_exports() {
-        let summary = FileSummary::new("src/lib.rs")
-            .with_language("rust")
-            .with_summary("Library module")
-            .with_imports(vec!["std::io".to_string(), "tokio::sync".to_string()])
-            .with_exports(vec!["public_func".to_string(), "PublicStruct".to_string()]);
-
-        let text = summary.to_embedding_text();
-        assert!(text.contains("Imports: std::io, tokio::sync"));
-        assert!(text.contains("Exports: public_func, PublicStruct"));
     }
 
     #[test]

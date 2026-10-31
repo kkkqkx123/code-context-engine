@@ -302,7 +302,6 @@ pub struct ProjectIndexerPatch {
     pub store_vectors: Option<bool>,
     pub store_bm25: Option<bool>,
     pub store_summaries: Option<bool>,
-    pub embed_summaries: Option<bool>,
     pub build_relations: Option<bool>,
     pub dead_letter_truncate_retry: Option<bool>,
     pub embed_input_token_limit: Option<usize>,
@@ -356,7 +355,6 @@ pub struct ProjectHotUpdatePatch {
     )]
     pub scanner: Option<Option<ProjectScannerPatch>>,
     pub build_relations: Option<bool>,
-    pub store_summaries: Option<bool>,
     pub store_vectors: Option<bool>,
     pub store_bm25: Option<bool>,
     pub batch_size: Option<usize>,

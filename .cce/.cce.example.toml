@@ -185,9 +185,6 @@ enabled = true
 # Whether to build relations during update (default: true)
 build_relations = true
 
-# Whether to store summaries during update (default: true)
-# store_summaries = true
-
 # Whether to store vectors (embeddings) during update (default: true)
 # store_vectors = true
 

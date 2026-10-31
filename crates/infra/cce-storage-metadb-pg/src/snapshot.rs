@@ -296,14 +296,6 @@ impl PostgresClient {
                     .map_err(classify_pg)?;
             }
             removed += tx
-                .execute(
-                    "DELETE FROM file_summaries WHERE file_id IN \
-                     (SELECT id FROM files WHERE project_id = $1)",
-                    &[&project_id],
-                )
-                .await
-                .map_err(classify_pg)?;
-            removed += tx
                 .execute("DELETE FROM projects WHERE id = $1", &[&project_id])
                 .await
                 .map_err(classify_pg)?;

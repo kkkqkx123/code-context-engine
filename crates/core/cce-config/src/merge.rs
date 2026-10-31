@@ -107,9 +107,6 @@ impl Mergeable for IndexerConfig {
         if let Some(value) = patch.store_summaries {
             self.store_summaries = value;
         }
-        if let Some(value) = patch.embed_summaries {
-            self.embed_summaries = value;
-        }
         if let Some(value) = patch.build_relations {
             self.build_relations = value;
         }
@@ -216,9 +213,6 @@ impl Mergeable for HotUpdateConfig {
         }
         if let Some(value) = patch.build_relations {
             self.build_relations = value;
-        }
-        if let Some(value) = patch.store_summaries {
-            self.store_summaries = value;
         }
         if let Some(value) = patch.store_vectors {
             self.store_vectors = value;

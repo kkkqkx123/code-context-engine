@@ -13,7 +13,6 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::{FulltextStore, RelationStore, VectorStore};
-use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
 use cce_llm_client::OpenAICompatibleProvider;
@@ -30,7 +29,6 @@ pub struct SearcherBuilder {
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
     plugin_rerank_plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
     plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
-    enable_summary_boost: bool,
     scope: ProjectScope,
     search_metrics: Option<Arc<SearchMetrics>>,
     cache: Option<crate::query::cache::QueryCache>,
@@ -52,7 +50,6 @@ impl SearcherBuilder {
             rerank_handler: None,
             plugin_rerank_plugins: Vec::new(),
             plugin_registry: None,
-            enable_summary_boost: false,
             scope,
             search_metrics: None,
             cache: None,
@@ -107,12 +104,6 @@ impl SearcherBuilder {
         self
     }
 
-    /// Enable summary boost enhancement support
-    pub fn with_summary_boost(mut self) -> Self {
-        self.enable_summary_boost = true;
-        self
-    }
-
     /// Enable search metrics collection
     pub fn with_search_metrics(mut self, metrics: Arc<SearchMetrics>) -> Self {
         self.search_metrics = Some(metrics);
@@ -132,29 +123,15 @@ impl SearcherBuilder {
 
     /// Build the Searcher instance
     pub fn build(self) -> Searcher {
-        // Vector backend (local or Qdrant) is shared by dense retrieval and
-        // summary boost; VectorStore is cheap to clone (holds Arc inside).
+        // Vector backend (local or Qdrant) backs dense retrieval;
+        // VectorStore is cheap to clone (holds Arc inside).
         let vector = self.vector.clone();
 
-        // Memoize query embeddings: dense retrieval, summary recall and
-        // summary boost embed the same query text within one search flow; the
-        // shared wrapper collapses those into a single remote call. One
-        // instance is handed to both the searcher and the summary boost so
-        // they observe the same cache.
+        // Memoize query embeddings so repeated embedding calls within one
+        // search flow collapse into a single remote call.
         let embedder = Arc::new(crate::query::cached_embedder::CachedEmbedder::new(
             self.embedder.clone(),
         ));
-
-        // Create summary boost if enabled
-        let summary_boost = if self.enable_summary_boost {
-            Some(Arc::new(SummaryBoost::new(
-                vector.clone(),
-                embedder.clone(),
-                self.scope.project_group_id().to_string(),
-            )))
-        } else {
-            None
-        };
 
         Searcher {
             vector,
@@ -167,7 +144,6 @@ impl SearcherBuilder {
             score_sorter: Arc::new(ScoreSorter::new()),
             threshold_filter: Arc::new(ThresholdFilter::new()),
             glob_filter: Arc::new(GlobFilter::new()),
-            summary_boost,
             scope: self.scope,
             search_metrics: self.search_metrics,
             cache: self

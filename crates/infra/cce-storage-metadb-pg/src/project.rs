@@ -402,14 +402,6 @@ impl PostgresClient {
             }
             removed += tx
                 .execute(
-                    "DELETE FROM file_summaries WHERE epoch = $1 AND file_id IN \
-                     (SELECT id FROM files WHERE project_id = $2)",
-                    &[&epoch, &project_id],
-                )
-                .await
-                .map_err(classify_pg)?;
-            removed += tx
-                .execute(
                     "DELETE FROM generation_overrides WHERE project_id = $1 AND epoch = $2",
                     &[&project_id, &epoch],
                 )

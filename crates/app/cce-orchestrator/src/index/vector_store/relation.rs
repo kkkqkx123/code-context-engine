@@ -332,43 +332,6 @@ impl RelationStorage for RelationStore {
         dispatch_relation!(self, mappings_delete_by_project(project_id))
     }
 
-    async fn summary_upsert(
-        &self,
-        file_id: i64,
-        epoch: i64,
-        summary_json: &str,
-    ) -> Result<(), StorageError> {
-        dispatch_relation!(self, summary_upsert(file_id, epoch, summary_json))
-    }
-
-    async fn summary_at_epoch(
-        &self,
-        file_id: i64,
-        epoch: i64,
-    ) -> Result<Option<String>, StorageError> {
-        dispatch_relation!(self, summary_at_epoch(file_id, epoch))
-    }
-
-    async fn summaries_by_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> Result<Vec<(String, String, i64)>, StorageError> {
-        dispatch_relation!(self, summaries_by_epoch(project_id, epoch))
-    }
-
-    async fn summaries_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> Result<usize, StorageError> {
-        dispatch_relation!(self, summaries_delete_by_project_epoch(project_id, epoch))
-    }
-
-    async fn summaries_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
-        dispatch_relation!(self, summaries_delete_by_project(project_id))
-    }
-
     async fn checkpoint_create(
         &self,
         project_id: i64,

@@ -55,8 +55,8 @@ impl StorageCoordinator {
             }
         }
 
-        // Remove entity detail mappings, file summaries, and file records via FK cascade.
-        // DELETE FROM files cascades to entities → entity_detail_mappings and file_summaries.
+        // Remove entity detail mappings and file records via FK cascade.
+        // DELETE FROM files cascades to entities → entity_detail_mappings.
         if let Some(client) = self.metadata_store.as_deref() {
             let result = client.with_transaction(|tx| {
                 use rusqlite::params;
@@ -198,24 +198,6 @@ impl StorageCoordinator {
                 .await?;
         }
 
-        // Clear vector references in file summary mappings (all epochs)
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                    use rusqlite::params;
-                    let now = chrono::Utc::now().to_rfc3339();
-                    tx.execute(
-                        "UPDATE file_summaries SET qdrant_point_id = NULL, updated_at = ?1 \
-                         WHERE file_id IN (SELECT id FROM files WHERE path = ?2 AND project_id = ?3)",
-                        params![now, &file_id, self.project_id],
-                    )
-                    .map_err(|e| {
-                        cce_types::StorageError::Sqlite(e.to_string())
-                    })?;
-                    Ok(())
-                });
-            result.map_err(OrchestratorError::Storage)?;
-        }
-
         Ok(())
     }
 
@@ -238,24 +220,6 @@ impl StorageCoordinator {
                 self.project_id,
             )
             .await?;
-        }
-
-        // Clear BM25 references in file summary mappings (all epochs)
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                    use rusqlite::params;
-                    let now = chrono::Utc::now().to_rfc3339();
-                    tx.execute(
-                        "UPDATE file_summaries SET bm25_doc_id = NULL, updated_at = ?1 \
-                         WHERE file_id IN (SELECT id FROM files WHERE path = ?2 AND project_id = ?3)",
-                        params![now, &file_id, self.project_id],
-                    )
-                    .map_err(|e| {
-                        cce_types::StorageError::Sqlite(e.to_string())
-                    })?;
-                    Ok(())
-                });
-            result.map_err(OrchestratorError::Storage)?;
         }
 
         Ok(())

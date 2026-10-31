@@ -11,7 +11,6 @@ use std::sync::Arc;
 use crate::CheckpointManager;
 use crate::operation::checkpoint::{ParsedCheckpointPayload, decode_parsed_checkpoint};
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
-use cce_parser::document::DocSummaryExt;
 use cce_scanner::FileEntry;
 use cce_types::error::ParseError;
 use cce_types::{OutputMode, ParsedFile};
@@ -395,11 +394,16 @@ impl IndexOrchestrator {
             let mut file_summary_map: HashMap<String, cce_parser::summary::FileSummary> =
                 HashMap::new();
 
-            // Store summaries for this batch. Skipped when entity rows did
-            // not commit: the batch stops below and a resume replays it, so
-            // spending LLM calls on summaries that cannot be linked yet only
-            // wastes budget.
-            if options.store_summaries && entity_store_ok && !batch_result.parsed_files.is_empty() {
+            // Generate summaries for this batch as NL document export input.
+            // Skipped without an exporter (no consumer remains) and when
+            // entity rows did not commit: the batch stops below and a resume
+            // replays it, so spending LLM calls on summaries that cannot be
+            // linked yet only wastes budget.
+            if self.nl_exporter.is_some()
+                && options.store_summaries
+                && entity_store_ok
+                && !batch_result.parsed_files.is_empty()
+            {
                 // Mark phase as SummaryGenerating
                 self.state_tracker
                     .mark_phase_complete(&success_paths, IndexPhase::SummaryGenerating)
@@ -471,103 +475,53 @@ impl IndexOrchestrator {
                     .map_err(OrchestratorError::Storage)?;
                 }
 
-                match self.storage.store_summaries(&summaries).await {
-                    Ok(_) => {
-                        // A permanent model failure keeps the rule-based text
-                        // (already stored above) but must not masquerade as a
-                        // clean Summary success: those files dead-letter with
-                        // zero retries so a resume re-picks them after the
-                        // config/key is fixed. Transient fallbacks and clean
-                        // generations mark success; degraded counting happens
-                        // in the per-file loop.
-                        for path in &success_paths {
-                            let outcome = file_summary_map
-                                .get(path.to_string_lossy().as_ref())
-                                .map(|s| s.outcome.clone());
-                            match outcome {
-                                // A permanent model failure keeps the
-                                // rule-based text (already stored above) but
-                                // must not masquerade as a clean Summary
-                                // success: the module dead-letters with zero
-                                // retries so a resume re-picks the file once
-                                // the LLM configuration is fixed.
-                                Some(cce_parser::summary::SummaryOutcome::Failed {
-                                    code,
-                                    message,
-                                }) => {
-                                    let failure = TrackerFailure {
-                                        message,
-                                        code: Some(code),
-                                        retryable: false,
-                                    };
-                                    self.state_tracker
-                                        .mark_failed(path, ModuleType::Summary, failure)
-                                        .await
-                                        .unwrap_or_else(|e| {
-                                            tracing::warn!(error = %e, "State tracking operation failed");
-                                        });
-                                }
-                                _ => {
-                                    // A transient fallback produced usable but
-                                    // rule-only content: the file is degraded.
-                                    if matches!(
-                                        outcome,
-                                        Some(cce_parser::summary::SummaryOutcome::Fallback { .. })
-                                    ) {
-                                        ctx.total_degraded += 1;
-                                    }
-                                    self.state_tracker
-                                        .mark_success(path, ModuleType::Summary)
-                                        .await
-                                        .unwrap_or_else(|e| {
-                                            tracing::warn!(error = %e, "State tracking operation failed");
-                                        });
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to store summaries for batch {}", batch_num);
-                        ctx.errors.push(format!(
-                            "Summary storage failed for batch {}: {}",
-                            batch_num, e
-                        ));
-                        // Mark Summary failed
-                        let failure = e.as_module_failure();
-                        for path in &success_paths {
+                // A permanent model failure keeps the rule-based text
+                // (already in the export map above) but must not masquerade
+                // as a clean Summary success: those files dead-letter with
+                // zero retries so a resume re-picks them after the
+                // config/key is fixed. Transient fallbacks and clean
+                // generations mark success; degraded counting happens
+                // in the per-file loop.
+                for path in &success_paths {
+                    let outcome = file_summary_map
+                        .get(path.to_string_lossy().as_ref())
+                        .map(|s| s.outcome.clone());
+                    match outcome {
+                        // A permanent model failure keeps the
+                        // rule-based text (already in the export map) but
+                        // must not masquerade as a clean Summary
+                        // success: the module dead-letters with zero
+                        // retries so a resume re-picks the file once
+                        // the LLM configuration is fixed.
+                        Some(cce_parser::summary::SummaryOutcome::Failed { code, message }) => {
+                            let failure = TrackerFailure {
+                                message,
+                                code: Some(code),
+                                retryable: false,
+                            };
                             self.state_tracker
-                                .mark_failed(path, ModuleType::Summary, failure.clone())
+                                .mark_failed(path, ModuleType::Summary, failure)
                                 .await
                                 .unwrap_or_else(|e| {
                                     tracing::warn!(error = %e, "State tracking operation failed");
                                 });
                         }
-                    }
-                }
-            }
-
-            // Store document summaries for document files
-            if options.store_summaries && entity_store_ok && !batch_result.doc_summaries.is_empty()
-            {
-                // Convert DocSummary to FileSummary for storage
-                let doc_file_summaries: Vec<cce_parser::summary::FileSummary> = batch_result
-                    .doc_summaries
-                    .iter()
-                    .map(|ds| ds.to_file_summary())
-                    .collect();
-
-                match self.storage.store_summaries(&doc_file_summaries).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            "Failed to store document summaries for batch {}",
-                            batch_num
-                        );
-                        ctx.errors.push(format!(
-                            "Document summary storage failed for batch {}: {}",
-                            batch_num, e
-                        ));
+                        _ => {
+                            // A transient fallback produced usable but
+                            // rule-only content: the file is degraded.
+                            if matches!(
+                                outcome,
+                                Some(cce_parser::summary::SummaryOutcome::Fallback { .. })
+                            ) {
+                                ctx.total_degraded += 1;
+                            }
+                            self.state_tracker
+                                .mark_success(path, ModuleType::Summary)
+                                .await
+                                .unwrap_or_else(|e| {
+                                    tracing::warn!(error = %e, "State tracking operation failed");
+                                });
+                        }
                     }
                 }
             }
@@ -821,10 +775,6 @@ impl IndexOrchestrator {
                     if let Some(pr) = &process_result.processing_result {
                         batch_result.processing_results.push(pr.clone());
                     }
-                    // Collect document summaries if present
-                    if let Some(doc_summary) = &process_result.doc_summary {
-                        batch_result.doc_summaries.push(doc_summary.clone());
-                    }
                     if let Some(metrics) = &self.quality_metrics {
                         metrics.record_vocabulary(
                             process_result.vocabulary.injected,
@@ -923,8 +873,6 @@ struct BatchResult {
     parsed_files: Vec<ParsedFile>,
     processing_results: Vec<cce_parser::grouper::ProcessingResult>,
     chunks: Vec<ChunkedResult>,
-    /// Document summaries from document files
-    doc_summaries: Vec<cce_parser::document::DocSummary>,
     /// Files whose failure is transient and will be retried on resume.
     failed_files: Vec<String>,
     errors: Vec<String>,
@@ -945,7 +893,7 @@ struct BatchResult {
 /// How the batch loop should react after finishing one batch.
 ///
 /// Batch-level infrastructure errors (a nonzero `new_errors` pushed by entity/
-/// vector/BM25/summary storage) outrank file-level failures: every remaining
+/// vector/BM25 storage) outrank file-level failures: every remaining
 /// batch would hit the same fault, so the loop stops and stays resumable.
 /// Transient file-level failures only affect their own files, so later batches
 /// keep going. Permanent file failures are short-circuited at collection time

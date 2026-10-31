@@ -237,7 +237,7 @@ poll_interval_ms = 1000             # 轮询间隔（毫秒，仅在非原生监
 [orchestrator.indexer]
 store_vectors = true                # 存储向量到 Qdrant
 store_bm25 = true                   # 存储 BM25 索引
-store_summaries = false             # 存储摘要（需要 LLM）
+store_summaries = false             # 生成文件摘要供导出（需要 LLM）
 build_relations = true              # 构建关系索引
 parse_doc_comments = true           # 解析文档注释
 max_file_parse_time_secs = 30       # 单文件最大解析时间（秒）

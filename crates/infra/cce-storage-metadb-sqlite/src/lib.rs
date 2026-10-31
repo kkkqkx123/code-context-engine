@@ -32,9 +32,9 @@ pub use contract::FileHashCachePort;
 pub use metrics::SqliteMetrics;
 pub use repo::{
     AdmissionAuditRepository, CheckpointRepository, ChunkRepository, EntityDetailMappingRepository,
-    EntityRepository, FileRepository, FileSummaryRepository, GenerationOverrideRepository,
-    ProjectIndexManifestRepository, ProjectRepository, RelationSnapshotManifest,
-    RelationSnapshotRepository, RelationSnapshotState, generate_project_name,
+    EntityRepository, FileRepository, GenerationOverrideRepository, ProjectIndexManifestRepository,
+    ProjectRepository, RelationSnapshotManifest, RelationSnapshotRepository, RelationSnapshotState,
+    generate_project_name,
 };
 pub use snapshot_store::SqliteSnapshotStore;
 pub use types::{

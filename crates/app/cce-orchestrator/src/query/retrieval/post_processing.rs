@@ -5,7 +5,7 @@ pub mod fusion;
 pub mod glob_filter;
 
 pub use entity_mapper::{
-    enrich_results, get_chunk_records, get_chunk_records_from_store,
+    downgrade_empty_bodies, enrich_results, get_chunk_records, get_chunk_records_from_store,
     resolve_project_root_from_store,
 };
 pub use fusion::{

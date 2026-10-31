@@ -1,4 +1,4 @@
-//! Detail tables: entity_detail_mappings, chunks, file_summaries.
+//! Detail tables: entity_detail_mappings, chunks.
 
 use rusqlite::Connection;
 
@@ -58,31 +58,6 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
         [],
     )
     .map_err(|e| StorageError::Table(format!("Failed to create chunks table: {}", e)))?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS file_summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL,
-            epoch INTEGER NOT NULL DEFAULT 0,
-            summary_json TEXT,
-            summary_text TEXT GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.summary_text'), '')) VIRTUAL,
-            main_entities TEXT GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.main_entities'), '[]')) VIRTUAL,
-            imports TEXT GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.imports'), '[]')) VIRTUAL,
-            exports TEXT GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.exports'), '[]')) VIRTUAL,
-            tags TEXT GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.tags'), '[]')) VIRTUAL,
-            entity_count INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.entity_count'), 0)) VIRTUAL,
-            line_count INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.line_count'), 0)) VIRTUAL,
-            language TEXT GENERATED ALWAYS AS (COALESCE(json_extract(summary_json, '$.language'), 'unknown')) VIRTUAL,
-            qdrant_point_id TEXT,
-            bm25_doc_id TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(file_id, epoch),
-            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
-        )",
-        [],
-    )
-    .map_err(|e| StorageError::Table(format!("Failed to create file_summaries table: {}", e)))?;
 
     Ok(())
 }

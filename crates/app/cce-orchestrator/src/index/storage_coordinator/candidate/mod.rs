@@ -20,7 +20,7 @@ mod prepare;
 
 impl StorageCoordinator {
     /// Transaction-scoped variant: drop every candidate-generation row from
-    /// the five data tables.
+    /// the data tables.
     ///
     /// Idempotent: used when a fresh candidate reuses an epoch number left
     /// behind by an interrupted run, and by the failure path so the number
@@ -31,11 +31,6 @@ impl StorageCoordinator {
         epoch: i64,
     ) -> Result<(), cce_types::StorageError> {
         for (table, sql) in [
-            (
-                "file_summaries",
-                "DELETE FROM file_summaries WHERE epoch = ?2 AND file_id IN
-             (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2)",
-            ),
             (
                 "entity_detail_mappings",
                 "DELETE FROM entity_detail_mappings WHERE project_id = ?1 AND epoch = ?2",

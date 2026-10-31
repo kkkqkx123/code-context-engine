@@ -538,8 +538,6 @@ embedding_batch_delay_ms = 100
 enabled = true
 # Whether to build relations during update
 build_relations = true
-# Whether to store summaries during update
-store_summaries = true
 # Whether to store vectors (embeddings) during update
 store_vectors = true
 # Whether to store in BM25 index during update
@@ -680,10 +678,8 @@ exclude_dirs = ["node_modules", "target", ".git", "vendor", "dist", "build"]
 store_vectors = true
 # Store in BM25 index
 store_bm25 = true
-# Store file summaries
+# Generate file summaries (NL document export input; no summary index writes)
 store_summaries = true
-# Embed summary vectors into Qdrant (false = export-only: text is kept, vectors skipped)
-embed_summaries = true
 # Build relation index
 build_relations = true
 

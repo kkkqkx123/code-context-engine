@@ -20,9 +20,6 @@
 //!     │   ├── Glob Filter + Score Normalization + Enrichment
 //!     │   │   └── path filtering, uniform score scale, SQLite chunk enrichment
 //!     │   │
-//!     │   ├── Boost Layer (boost: additive score boosting)
-//!     │   │   └── SummaryBoost (dense + hybrid paths; skipped in SummaryRecall)
-//!     │   │
 //!     │   └── Post-processing (ranking: rerank → sort → ResultFilter → threshold)
 //!     │       ├── LlmReranker / PluginReranker
 //!     │       ├── ScoreSorter
@@ -45,9 +42,9 @@
 //! # Key Components
 //!
 //! - **QueryCoordinator**: unified entry point coordinating all query operations, with caching, capability checks and retry-queue fault tolerance
-//! - **Searcher**: core search engine executing the per-strategy pipeline (retrieval → fusion → filter → normalize → boost → enrich → post-process)
+//! - **Searcher**: core search engine executing the per-strategy pipeline (retrieval → fusion → filter → normalize → enrich → post-process)
 //! - **Retrieval Strategies**: pluggable recall strategies (Dense / Bm25 / Summary) with static dispatch
-//! - **Boost / Ranking**: additive score boosting and deterministic rerank/sort/threshold stages
+//! - **Boost / Ranking**: additive score aggregation and deterministic rerank/sort/threshold stages
 //!
 //! # Usage Example
 //!
@@ -106,6 +103,9 @@ pub mod annotation;
 // Caller-driven relation expansion for opt-in query requests
 pub mod expansion;
 
+// Fuzzy file-path search over project files
+pub mod files;
+
 // Independent graph retrieval path
 pub mod graph;
 
@@ -158,8 +158,11 @@ pub use graph::{
 // Re-export query coordinator
 pub use coordinator::QueryCoordinator;
 
+// Re-export file search hit type
+pub use files::FileHit;
+
 // Re-export boost module components
-pub use boost::{BoostAggregationConfig, BoostContribution, SummaryBoost, apply_boosts};
+pub use boost::{BoostAggregationConfig, BoostContribution, apply_boosts};
 pub use boost::{NormalizationStrategy, normalize_scores};
 
 // Re-export ranking module components (includes LlmReranker)

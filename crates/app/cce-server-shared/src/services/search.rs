@@ -150,7 +150,6 @@ impl<'a> SearchService<'a> {
             "vector" => Ok(SearchSources::none().with_vector()),
             "bm25" => Ok(SearchSources::none().with_bm25()),
             "hybrid" => Ok(SearchSources::default()),
-            "summary" => Ok(SearchSources::none().with_summary()),
             _ => Err(SearchServiceError::InvalidInput(format!(
                 "Invalid {scope}: {label}"
             ))),
@@ -241,7 +240,11 @@ impl<'a> SearchService<'a> {
             .apply_expansion(project_id, query_opts, &entry, fields.expand)
             .await;
 
-        let result = self.state.engine.search(project_id, &query_opts).await?;
+        let coordinator = self.build_coordinator(project_id, &entry).await?;
+        let result = coordinator
+            .search(&query_opts)
+            .await
+            .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
         let items = self.convert_items(project_id, result.items).await;
         let (relation_epoch, relation_stale) = self.relation_version(project_id).await;
         Ok(SearchOutcome {
@@ -360,7 +363,6 @@ impl<'a> SearchService<'a> {
         config.vector = entry.config.search.vector.clone();
         config.bm25 = entry.config.search.bm25.clone();
         config.fusion = entry.config.search.fusion.clone();
-        config.summary = entry.config.search.summary.clone();
         config.score = entry.config.search.score.clone();
         config.boost = entry.config.search.boost.clone();
         config.plugin = entry.config.search.plugin.clone();
@@ -445,7 +447,7 @@ impl<'a> SearchService<'a> {
         let capabilities = IndexCapabilities::from(&entry.config.orchestrator.indexer)
             .merge(&IndexCapabilities::from(&entry.config.relation))
             .with_relation_propagation_depth(entry.config.relation.max_propagation_depth);
-        Ok(QueryCoordinator::with_capabilities(
+        let mut coordinator = QueryCoordinator::with_capabilities(
             Arc::new(searcher),
             relation_searcher,
             capabilities,
@@ -459,7 +461,13 @@ impl<'a> SearchService<'a> {
         // request with a fresh cache always starts empty, so identical
         // queries re-run the embedding pipeline and queue behind the shared
         // LLM rate limiter. The clone shares the underlying store.
-        .with_shared_cache(self.state.engine.get_query_cache(project_id).await))
+        .with_shared_cache(self.state.engine.get_query_cache(project_id).await);
+        if let Some(store) = self.state.engine.relation_store() {
+            if let Ok(project_store) = store.for_project(project_id) {
+                coordinator = coordinator.with_relation_store(project_store);
+            }
+        }
+        Ok(coordinator)
     }
 
     /// Convert orchestrator hits to API items, stamping stable symbol IDs
@@ -528,6 +536,24 @@ impl<'a> SearchService<'a> {
         }
     }
 
+    /// Entity name search as the single FTS5 implementation.
+    ///
+    /// Delegates to the coordinator so the full epoch view (own plus parent
+    /// minus overridden files) applies instead of a single active epoch.
+    pub async fn run_entity_search(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>, SearchServiceError> {
+        let entry = self.load_entry(project_id).await?;
+        let coordinator = self.build_coordinator(project_id, &entry).await?;
+        coordinator
+            .search_entities(query, limit)
+            .await
+            .map_err(|error| SearchServiceError::Execution(error.to_string()))
+    }
+
     /// Best-effort relation version for a project, used to stamp responses
     /// so callers can judge freshness. Never fails the query.
     async fn relation_version(&self, project_id: i64) -> (Option<i64>, bool) {
@@ -556,7 +582,9 @@ mod tests {
         assert!(SearchService::parse_search_sources("vector", "query type").is_ok());
         assert!(SearchService::parse_search_sources("bm25", "query type").is_ok());
         assert!(SearchService::parse_search_sources("hybrid", "query type").is_ok());
-        assert!(SearchService::parse_search_sources("summary", "query type").is_ok());
+        let error = SearchService::parse_search_sources("summary", "query type")
+            .expect_err("summary query type must fail");
+        assert!(matches!(error, SearchServiceError::InvalidInput(_)));
         let error = SearchService::parse_search_sources("nope", "query type")
             .expect_err("unknown query type must fail");
         assert!(matches!(error, SearchServiceError::InvalidInput(_)));

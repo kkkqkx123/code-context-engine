@@ -173,22 +173,6 @@ CREATE TABLE IF NOT EXISTS chunks (
     PRIMARY KEY (project_id, epoch, file_path, chunk_id)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks (project_id);
-CREATE TABLE IF NOT EXISTS file_summaries (
-    id BIGSERIAL PRIMARY KEY,
-    file_id BIGINT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    epoch BIGINT NOT NULL DEFAULT 0,
-    summary_json TEXT,
-    summary_text TEXT GENERATED ALWAYS AS (COALESCE(summary_json::jsonb ->> 'summary_text', '')) STORED,
-    language TEXT GENERATED ALWAYS AS (COALESCE(summary_json::jsonb ->> 'language', 'unknown')) STORED,
-    entity_count BIGINT GENERATED ALWAYS AS (COALESCE((summary_json::jsonb ->> 'entity_count')::BIGINT, 0)) STORED,
-    line_count BIGINT GENERATED ALWAYS AS (COALESCE((summary_json::jsonb ->> 'line_count')::BIGINT, 0)) STORED,
-    qdrant_point_id TEXT,
-    bm25_doc_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (file_id, epoch)
-);
-CREATE INDEX IF NOT EXISTS idx_file_summaries_file_epoch ON file_summaries (file_id, epoch);
 CREATE TABLE IF NOT EXISTS checkpoint (
     id BIGSERIAL PRIMARY KEY,
     project_id BIGINT NOT NULL,

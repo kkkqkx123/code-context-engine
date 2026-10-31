@@ -1,7 +1,7 @@
 //! Shared deletion handling for update processors
 //!
 //! This module extracts the common file-deletion pattern that was duplicated
-//! across EmbeddingUpdateProcessor, Bm25UpdateProcessor, SummaryUpdateProcessor,
+//! across EmbeddingUpdateProcessor, Bm25UpdateProcessor,
 //! and NlDocumentUpdateProcessor.
 
 use std::path::Path;
@@ -29,10 +29,6 @@ pub async fn remove_file_from_storage(
             .remove_file_from_bm25(file_path)
             .await
             .map_err(|e| HotUpdateError::bm25(e.to_string())),
-        "summary" => storage
-            .remove_file_from_summary(file_path)
-            .await
-            .map_err(|e| HotUpdateError::summary(e.to_string())),
         _ => Err(HotUpdateError::hot_update(format!(
             "Unsupported module: {}",
             module_name

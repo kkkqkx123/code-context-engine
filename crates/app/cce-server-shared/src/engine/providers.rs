@@ -62,14 +62,12 @@ impl super::CodeContextEngine {
         );
 
         // Export and summary processors follow the project configuration:
-        // export is gated on `export.enabled`, summary on `store_summaries`
-        // (consistent with the full-index path). The export processor is no
-        // longer unconditionally disabled in hot updates.
+        // export is gated on `export.enabled`, summary generation on
+        // `store_summaries` (consistent with the full-index path). The export
+        // processor is no longer unconditionally disabled in hot updates.
         let mut processor_config = ProcessorConfig::new();
         processor_config.enable_export = project_entry.config.export.enabled;
         processor_config.enable_summary = project_entry.config.orchestrator.indexer.store_summaries;
-        processor_config.embed_summaries =
-            project_entry.config.orchestrator.indexer.embed_summaries;
         processor_config.export_config = if project_entry.config.export.enabled {
             Some(cce_orchestrator::ExportConfig::from_module_config(
                 &project_entry.config.export,

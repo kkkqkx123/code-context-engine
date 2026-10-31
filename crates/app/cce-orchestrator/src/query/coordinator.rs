@@ -45,6 +45,7 @@ use crate::index::vector_store::VectorStore;
 /// - BM25 search (keyword-based)
 /// - Relation search (call chains, inheritance)
 /// - Entity search (FTS5 full-text search for entity names/signatures)
+/// - File search (fuzzy path matching over project files)
 ///
 /// # Example
 ///
@@ -303,6 +304,12 @@ impl QueryCoordinator {
         self
     }
 
+    /// Attach the relation backend for FTS5 entity search via enum dispatch.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.relation = Some(store);
+        self
+    }
+
     /// Get a reference to the searcher
     pub fn searcher(&self) -> &Searcher {
         &self.searcher
@@ -311,6 +318,11 @@ impl QueryCoordinator {
     /// Get a reference to the relation searcher
     pub fn relation_searcher(&self) -> &RelationSearcher {
         &self.relation_searcher
+    }
+
+    /// Clone the relation searcher handle for graph queries.
+    pub fn relation_searcher_arc(&self) -> Arc<RelationSearcher> {
+        Arc::clone(&self.relation_searcher)
     }
 
     /// Get index capabilities
@@ -323,7 +335,6 @@ impl QueryCoordinator {
         match index {
             "vector" | "vectors" => self.capabilities.has_vectors(),
             "bm25" => self.capabilities.has_bm25(),
-            "summary" | "summaries" => self.capabilities.has_summaries(),
             "relation" | "relations" => self.capabilities.has_relations(),
             _ => false,
         }
@@ -798,17 +809,69 @@ impl QueryCoordinator {
             return Err(QueryError::index_not_available("bm25"));
         }
 
-        // Check summary capability
-        if options.sources.summary && !self.capabilities.has_summaries() {
-            return Err(QueryError::index_not_available("summary"));
-        }
-
         Ok(())
     }
 
     /// Invalidate all caches
     pub async fn invalidate_cache(&self) {
         self.cache.invalidate_all().await;
+    }
+
+    // ========== File Search ==========
+    // Fuzzy path matching over project files, independent of every index.
+    // The local branch walks the project directory directly and observes the
+    // latest filesystem state with no generation filtering. The remote branch
+    // holds no project files, so it reports unavailability instead of serving
+    // indexed rows that could silently disagree with the filesystem.
+
+    /// Search file paths matching `query`, returning at most `limit` paths.
+    ///
+    /// Paths are project-relative and ordered by match quality with a lexical
+    /// tiebreak. No index capability is required: files exist regardless of
+    /// which indexes are enabled.
+    pub async fn search_file_paths(&self, query: &str, limit: usize) -> Result<Vec<String>> {
+        let root = self.resolve_file_search_root().await?;
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || super::files::search_file_paths(&root, &query, limit))
+            .await
+            .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
+    }
+
+    /// Search files matching `query`, attaching size and line count.
+    ///
+    /// Shares the matcher and ordering with [`Self::search_file_paths`];
+    /// files unreadable at stat time are skipped.
+    pub async fn search_files(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<super::files::FileHit>> {
+        let root = self.resolve_file_search_root().await?;
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || super::files::search_files(&root, &query, limit))
+            .await
+            .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
+    }
+
+    /// Resolve the project directory file search walks.
+    async fn resolve_file_search_root(&self) -> Result<std::path::PathBuf> {
+        use cce_storage_common::RelationStorage;
+        let store = self.relation.as_ref().ok_or_else(|| {
+            QueryError::config("file search requires a relation store for project lookup")
+        })?;
+        if !store.is_local() {
+            return Err(QueryError::config(
+                "file search is unavailable on the remote relation branch",
+            ));
+        }
+        let record = store
+            .project_record(self.project_id)
+            .await
+            .map_err(|e| QueryError::storage(&format!("Failed to resolve project root: {e}")))?
+            .ok_or_else(|| {
+                QueryError::not_found(format!("Project {} not found", self.project_id))
+            })?;
+        Ok(std::path::PathBuf::from(record.root_path))
     }
 
     // ========== Relation Queries ==========
@@ -1018,143 +1081,9 @@ impl QueryCoordinator {
             .get_all_derived_classes(class_id, max_depth))
     }
 
-    // ========== Graph Queries ==========
-    // Graph-shaped answers over the relation snapshot. These never
-    // participate in semantic scoring; clients call them explicitly.
-
-    /// Ego neighborhood of one entity up to `depth` hops.
-    pub fn graph_ego(
-        &self,
-        entity_id: cce_types::EntityId,
-        depth: usize,
-        direction: super::graph::GraphDirection,
-    ) -> Result<super::graph::SubGraph> {
-        if !self.capabilities.has_relations() {
-            return Err(QueryError::index_not_available("relation"));
-        }
-        super::graph::GraphService::new(Arc::clone(&self.relation_searcher))
-            .ego_graph(entity_id, depth, direction)
-    }
-
-    /// Shortest path between two entities as a linear subgraph.
-    pub fn graph_path(
-        &self,
-        start_id: cce_types::EntityId,
-        end_id: cce_types::EntityId,
-        max_depth: usize,
-    ) -> Result<Option<super::graph::SubGraph>> {
-        if !self.capabilities.has_relations() {
-            return Err(QueryError::index_not_available("relation"));
-        }
-        super::graph::GraphService::new(Arc::clone(&self.relation_searcher))
-            .shortest_path(start_id, end_id, max_depth)
-    }
-
-    /// Induced subgraph over an explicit entity set.
-    pub fn graph_subgraph(
-        &self,
-        entity_ids: &[cce_types::EntityId],
-    ) -> Result<super::graph::SubGraph> {
-        if !self.capabilities.has_relations() {
-            return Err(QueryError::index_not_available("relation"));
-        }
-        super::graph::GraphService::new(Arc::clone(&self.relation_searcher)).subgraph(entity_ids)
-    }
-
-    /// Connected components over internal edges.
-    pub fn graph_components(&self) -> Result<Vec<Vec<cce_types::EntityId>>> {
-        if !self.capabilities.has_relations() {
-            return Err(QueryError::index_not_available("relation"));
-        }
-        super::graph::GraphService::new(Arc::clone(&self.relation_searcher)).connected_components()
-    }
-
-    /// Full project export capped at `limit` nodes in entity order.
-    pub fn graph_export(&self, limit: usize) -> Result<super::graph::SubGraph> {
-        if !self.capabilities.has_relations() {
-            return Err(QueryError::index_not_available("relation"));
-        }
-        super::graph::GraphService::new(Arc::clone(&self.relation_searcher)).export_full(limit)
-    }
-
-    /// Get file summary by file path (direct lookup, no vector search)
-    ///
-    /// This is a direct lookup that retrieves the file summary from SQLite
-    /// without any vector embedding or semantic search. Useful when:
-    /// - User knows the exact file path
-    /// - User wants a quick file overview without retrieval overhead
-    /// - Integration with file browsing/navigation UI
-    ///
-    /// # Arguments
-    /// * `file_path` - The file path to look up (e.g., "src/main.rs")
-    /// * `project_id` - The project ID for isolation
-    ///
-    /// # Returns
-    /// Returns the file summary JSON if found, or QueryError if not available
-    pub async fn get_file_summary(
-        &self,
-        file_path: &str,
-        project_id: i64,
-    ) -> Result<serde_json::Value> {
-        // File-row lookup stays on the embedded branch; the epoch view
-        // itself resolves through the relation contract.
-        let sqlite = self
-            .relation
-            .as_ref()
-            .and_then(RelationStore::as_local)
-            .ok_or_else(|| QueryError::index_not_available("sqlite"))?;
-
-        let view = self.searcher.load_query_filter(project_id).await?;
-
-        let conn = sqlite
-            .read_connection()
-            .map_err(|e| QueryError::invalid(&format!("Failed to connect to SQLite: {}", e)))?;
-
-        // Two-stage resolution ("own first, miss → parent"): an inherited
-        // file's rows live in the parent generation; overridden files never
-        // resolve against it.
-        use cce_storage_metadb_sqlite::repo::FileRepository;
-        let resolve_file = |epoch: i64| {
-            FileRepository::get_by_path_and_project_at_epoch(&conn, file_path, project_id, epoch)
-                .map_err(|e| QueryError::invalid(&format!("Failed to get file: {}", e)))
-        };
-        let mut resolved_epoch = view.epoch_value();
-        let file_record = match resolve_file(resolved_epoch)? {
-            Some(record) => Some(record),
-            None => match view.parent_epoch() {
-                Some(parent) if !view.excluded_files().iter().any(|f| f == file_path) => {
-                    resolved_epoch = parent;
-                    resolve_file(parent)?
-                }
-                _ => None,
-            },
-        }
-        .ok_or_else(|| {
-            QueryError::not_found(format!(
-                "File not found: {} in project {}",
-                file_path, project_id
-            ))
-        })?;
-
-        // Get summary from file_summaries table (returns JSON string)
-        use cce_storage_metadb_sqlite::repo::FileSummaryRepository;
-        let summary_json_str =
-            FileSummaryRepository::get_by_file_id_at_epoch(&conn, file_record.id, resolved_epoch)
-                .map_err(|e| QueryError::invalid(&format!("Failed to get summary: {}", e)))?
-                .ok_or_else(|| {
-                    QueryError::not_found(format!("Summary not found for file: {}", file_path))
-                })?;
-
-        // Parse and update file_path to actual path
-        let mut summary: serde_json::Value = serde_json::from_str(&summary_json_str)
-            .map_err(|e| QueryError::invalid(&format!("Invalid summary JSON: {}", e)))?;
-
-        if let Some(obj) = summary.as_object_mut() {
-            obj["file_path"] = serde_json::json!(file_path);
-        }
-
-        Ok(summary)
-    }
+    // Graph-shaped answers stay on the dedicated graph retrieval path over the
+    // relation snapshot. Handlers construct `GraphService` directly from the
+    // relation searcher, so no graph wrapper lives here.
 }
 
 #[cfg(test)]

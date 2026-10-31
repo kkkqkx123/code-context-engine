@@ -21,7 +21,6 @@ use crate::{
     IndexManager, batch_add_documents, delete_document, delete_documents_by_file_path_and_project,
     delete_documents_by_file_path_project_epoch, delete_documents_by_file_paths_project_epoch,
     delete_documents_by_project, delete_documents_by_project_epoch,
-    delete_summary_documents_by_file_path_and_project,
 };
 
 /// Total attempts (first try plus retries) for a transiently failing batch write.
@@ -366,34 +365,6 @@ impl Bm25Client {
             metrics.record_delete(elapsed, count, result.is_ok());
         }
         result
-    }
-
-    /// Delete only summary documents of one file within one project.
-    pub async fn delete_summaries_by_file_path_scoped(
-        &self,
-        index_name: &str,
-        file_path: &str,
-        project_id: i64,
-    ) -> Result<usize, Bm25Error> {
-        self.validate_index_name(index_name)?;
-        let start_time = Instant::now();
-
-        let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
-        let manager_guard = manager.read().await;
-        let schema = manager_guard.schema();
-        let count = delete_summary_documents_by_file_path_and_project(
-            &manager_guard,
-            schema,
-            file_path,
-            project_id,
-        )?;
-
-        let elapsed = start_time.elapsed().as_secs_f64() * 1000.0;
-        if let Some(metrics) = &self.metrics {
-            metrics.record_delete(elapsed, count, true);
-        }
-
-        Ok(count)
     }
 
     /// Run a keyword retrieval against the local index.

@@ -483,9 +483,8 @@ pub(crate) async fn query_fusion_weights_from_plugins(
 /// Apply the `ResultFilter` capability chain over a registry.
 ///
 /// Each plugin receives the current candidate list; its entries remove or
-/// boost results by id. Boosts are multiplicative (`score *= 1 + boost`) to
-/// stay consistent with the summary boost semantics. Failures keep the
-/// current list.
+/// boost results by id. Boosts are multiplicative (`score *= 1 + boost`).
+/// Failures keep the current list.
 pub(crate) async fn apply_result_filter_chain(
     registry: &cce_plugin::PluginRegistry,
     results: &[SearchResult],

@@ -354,7 +354,9 @@ impl Validate for Bm25RetrievalConfig {
 pub struct ResultFilterConfig {
     /// Maximum number of results to return
     pub limit: usize,
-    /// Minimum score threshold for final results
+    /// Minimum score threshold for final results, observed after score
+    /// normalization. Keep fusion and result thresholds independent: tightening
+    /// both at once hides which stage drops candidates.
     pub min_score: f32,
     /// Maximum token budget for a single result body. A body over this budget
     /// is replaced by a file-and-range reference instead of being returned in
@@ -368,34 +370,6 @@ impl Default for ResultFilterConfig {
             limit: 10,
             min_score: 0.25,
             max_content_tokens: 2000,
-        }
-    }
-}
-
-/// Summary-based score boost configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SummaryBoostConfig {
-    /// Enable summary-based file pre-filtering
-    pub enable_pre_filter: bool,
-    /// Enable summary-based score boosting
-    pub enable_boost: bool,
-    /// Number of files to retrieve from summary index
-    pub top_k: usize,
-    /// Minimum similarity threshold for summary matching
-    pub min_score: f32,
-    /// Boost factor for results in matching files
-    pub boost_factor: f32,
-}
-
-impl Default for SummaryBoostConfig {
-    fn default() -> Self {
-        Self {
-            enable_pre_filter: false,
-            enable_boost: false,
-            top_k: 20,
-            min_score: 0.4,
-            boost_factor: 1.2,
         }
     }
 }
@@ -434,7 +408,7 @@ pub struct BoostAggregationConfig {
     /// Default per-source addition cap for sources without an explicit entry
     /// in `source_caps`
     pub max_source_boost: f32,
-    /// Per-source addition caps by source name (e.g. `summary`). Adding a new
+    /// Per-source addition caps by source name. Adding a new
     /// boost source only requires a new entry here, no code change. Sources
     /// without an entry fall back to `max_source_boost`.
     pub source_caps: HashMap<String, f32>,
@@ -446,7 +420,7 @@ impl Default for BoostAggregationConfig {
             enabled: true,
             max_addition: 0.5,
             max_source_boost: 0.3,
-            source_caps: HashMap::from([("summary".to_string(), 0.15)]),
+            source_caps: HashMap::new(),
         }
     }
 }
@@ -950,9 +924,6 @@ pub struct SearchModuleConfig {
     /// Result filtering configuration
     #[serde(default)]
     pub result: ResultFilterConfig,
-    /// Summary-based score boost configuration
-    #[serde(default)]
-    pub summary: SummaryBoostConfig,
     /// Score normalization configuration
     #[serde(default)]
     pub score: ScoreNormalizationConfig,
@@ -1054,7 +1025,6 @@ mod tests {
             config.fusion.algorithm,
             RecallFusionAlgorithm::WeightedMinMax
         );
-        assert!((config.boost.cap_for("summary") - 0.15).abs() < f32::EPSILON);
         assert!((config.boost.cap_for("unknown_source") - 0.3).abs() < f32::EPSILON);
     }
 

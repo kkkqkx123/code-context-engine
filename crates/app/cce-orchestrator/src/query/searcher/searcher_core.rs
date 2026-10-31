@@ -7,12 +7,11 @@
 //!
 //! Every execution strategy runs the same stage contract:
 //! retrieval → (hybrid: entity expansion + weighted fusion) → glob filter →
-//! optional score normalization → summary boost (dense + hybrid; skipped in
-//! SummaryRecall where the summary path is already the scorer) → SQLite chunk
-//! enrichment → post-processing (rerank, sort, filter, threshold).
+//! optional score normalization → SQLite enrichment → post-processing
+//! (rerank, sort, filter, threshold).
 //!
 //! - SQLite enrichment is always the last data-shaping step before
-//!   post-processing: fusion, filtering, normalization and boost only need
+//!   post-processing: fusion, filtering and normalization only need
 //!   index-carried fields (scores, entity/segment ids, file_path), so the
 //!   expensive content lookups run once, on the surviving candidate set.
 //! - When `config.score.enable` is set, normalization applies uniformly to
@@ -26,7 +25,6 @@ use cce_config::project_registry::ProjectScope;
 use crate::index::vector_store::VectorStore;
 use crate::index::vector_store::{FulltextStore, RelationStore};
 use crate::query::CachedEmbedder;
-use crate::query::boost::{SummaryBoost, apply_boosts};
 use crate::query::cache::CacheKey;
 use crate::query::error::QueryError;
 use crate::query::error::Result;
@@ -52,8 +50,6 @@ pub struct Searcher {
     pub(crate) fulltext: FulltextStore,
     /// Relation backend for the epoch view and chunk content lookup (optional)
     pub(crate) relation: Option<RelationStore>,
-    /// Optional summary relevance boost contributor
-    pub(crate) summary_boost: Option<Arc<SummaryBoost>>,
     /// Immutable project scope binding project_id and project_group_id.
     pub(crate) scope: ProjectScope,
     /// Reranker for LLM-based reranking
@@ -164,7 +160,7 @@ impl Searcher {
         }
         if options.sources.is_empty() {
             return Err(QueryError::invalid(
-                "at least one search source (vector, bm25, summary) must be enabled",
+                "at least one search source (vector, bm25) must be enabled",
             ));
         }
         let start = std::time::Instant::now();
@@ -241,10 +237,7 @@ impl Searcher {
                 self.run_hybrid_recall(options, query_filter, *vector_weight, *bm25_weight)
                     .await
             }
-            ExecutionStrategy::DenseRecall | ExecutionStrategy::SummaryRecall => {
-                self.run_vector_recall(options, strategy, query_filter)
-                    .await
-            }
+            ExecutionStrategy::DenseRecall => self.run_vector_recall(options, query_filter).await,
         }
     }
 
@@ -388,10 +381,6 @@ impl Searcher {
         );
 
         fused_results = self.apply_glob_filter(fused_results, options)?;
-        // Summary boost applies on the fused score (not a third recall path):
-        // `sources.summary` in hybrid mode means "boost fused hits by file
-        // summary relevance", mirroring the dense-path boost.
-        self.apply_summary_boost(&mut fused_results, options).await;
         self.enrich_results(
             &mut fused_results,
             options.project_id,
@@ -402,22 +391,15 @@ impl Searcher {
         self.post_process_results(fused_results, options).await
     }
 
-    /// Single-path vector recall (dense chunks or file-level summaries),
-    /// with optional summary relevance boosting.
+    /// Single-path dense vector recall over chunk embeddings.
     async fn run_vector_recall(
         &self,
         options: &QueryOptions,
-        strategy: &ExecutionStrategy,
         query_filter: &QueryFilter,
     ) -> Result<Vec<SearchResult>> {
         use crate::query::retrieval::strategies::RecallAlgorithm;
 
-        let recall_algo = match strategy {
-            ExecutionStrategy::DenseRecall => RecallAlgorithm::Dense,
-            ExecutionStrategy::SummaryRecall => RecallAlgorithm::Summary,
-            _ => unreachable!("only dense and summary strategies reach this path"),
-        };
-
+        let recall_algo = RecallAlgorithm::Dense;
         let retrieval = recall_algo.create_strategy(self);
         tracing::trace!(algorithm = %recall_algo, "Starting retrieval");
         let retrieval_start = std::time::Instant::now();
@@ -440,13 +422,6 @@ impl Searcher {
         // enrichment to keep the SQLite lookups on the surviving set.
         results = self.apply_glob_filter(results, options)?;
         self.apply_score_normalization(&mut results, options);
-
-        // Summary boost is skipped in SummaryRecall where the summary path is
-        // already the scorer.
-        if !matches!(strategy, ExecutionStrategy::SummaryRecall) {
-            self.apply_summary_boost(&mut results, options).await;
-        }
-
         self.enrich_results(
             &mut results,
             options.project_id,
@@ -455,38 +430,6 @@ impl Searcher {
         )
         .await;
         self.post_process_results(results, options).await
-    }
-
-    /// Collect summary relevance boost contributions and apply them to the
-    /// incoming scores (fused score on hybrid, normalized vector score on
-    /// dense). No-op unless the booster exists and both boost gates
-    /// (`boost.enabled`, `summary.enable_boost`, `sources.summary`) are set.
-    /// Boost collection failure degrades to unboosted scores, never an error.
-    async fn apply_summary_boost(&self, results: &mut [SearchResult], options: &QueryOptions) {
-        let boost_config = &options.config.boost;
-        let Some(ref booster) = self.summary_boost else {
-            return;
-        };
-        if !boost_config.enabled || !options.sources.summary || !options.config.summary.enable_boost
-        {
-            return;
-        }
-        tracing::trace!("Collecting summary relevance boost contributions");
-        match booster
-            .collect(results, &options.query, &options.config, boost_config)
-            .await
-        {
-            Ok(contribs) => {
-                tracing::trace!(
-                    count = contribs.len(),
-                    "Summary boost contributions collected"
-                );
-                apply_boosts(results, contribs, boost_config);
-            }
-            Err(e) => {
-                tracing::warn!("Summary boost collection failed, skipping: {}", e);
-            }
-        }
     }
 
     /// Apply include/exclude path patterns to a result set.
@@ -506,14 +449,14 @@ impl Searcher {
     /// when `config.score.enable` is set so the final threshold sees one
     /// score scale. Fields carrying the same raw score (`vector_score`,
     /// `bm25_score`) are mirrored; fields that already diverged from the
-    /// effective score (e.g. after boosting) stay untouched.
+    /// effective score stay untouched.
     fn apply_score_normalization(&self, results: &mut [SearchResult], options: &QueryOptions) {
         if !options.config.score.enable || results.is_empty() {
             return;
         }
         tracing::trace!(
             strategy = ?options.config.score.strategy,
-            "Applying pre-boost score normalization"
+            "Applying score normalization"
         );
         let mut scores: Vec<f32> = results.iter().map(|r| r.score).collect();
         if let Err(e) =
@@ -539,7 +482,9 @@ impl Searcher {
 
     /// Batch-enrich results from relation-store chunk records (content/snippet,
     /// line ranges, kind, entity fallback). Lookup failures degrade to
-    /// unenriched results; enrichment is data-only and never fails the request.
+    /// reference results; enrichment is data-only and never fails the request.
+    /// Without a relation store empty bodies still downgrade honestly instead
+    /// of keeping a full state with no content.
     async fn enrich_results(
         &self,
         results: &mut Vec<SearchResult>,
@@ -552,19 +497,24 @@ impl Searcher {
             resolve_project_root_from_store,
         };
 
-        let Some(store) = &self.relation else {
-            return;
-        };
         if results.is_empty() {
             return;
         }
+        let Some(store) = &self.relation else {
+            crate::query::retrieval::post_processing::downgrade_empty_bodies(results);
+            return;
+        };
         let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
         let records =
             match get_chunk_records_from_store(store, &point_ids, project_id, query_filter).await {
                 Ok(Some(records)) => records,
-                Ok(None) => return,
+                Ok(None) => {
+                    crate::query::retrieval::post_processing::downgrade_empty_bodies(results);
+                    return;
+                }
                 Err(e) => {
                     tracing::warn!("Chunk enrichment failed: {e}");
+                    crate::query::retrieval::post_processing::downgrade_empty_bodies(results);
                     return;
                 }
             };

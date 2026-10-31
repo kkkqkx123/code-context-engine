@@ -20,12 +20,11 @@ use std::fmt;
 /// let caps = IndexCapabilities::new()
 ///     .with_vectors(true)
 ///     .with_bm25(true)
-///     .with_summaries(false)
 ///     .with_relations(true);
 ///
 /// // Check capabilities
 /// assert!(caps.has_vectors());
-/// assert!(!caps.has_summaries());
+/// assert!(!caps.has_relations());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IndexCapabilities {
@@ -33,8 +32,6 @@ pub struct IndexCapabilities {
     has_vectors: bool,
     /// BM25 index is available
     has_bm25: bool,
-    /// Summary index is available
-    has_summaries: bool,
     /// Relation index is available
     has_relations: bool,
     /// Cross-file dependency propagation is enabled (`track_cross_file_deps`).
@@ -53,7 +50,6 @@ impl Default for IndexCapabilities {
         Self {
             has_vectors: true,
             has_bm25: true,
-            has_summaries: true,
             has_relations: true,
             relation_propagation_enabled: true,
             relation_propagation_depth: 0,
@@ -67,7 +63,6 @@ impl IndexCapabilities {
         Self {
             has_vectors: false,
             has_bm25: false,
-            has_summaries: false,
             has_relations: false,
             relation_propagation_enabled: false,
             relation_propagation_depth: 0,
@@ -93,12 +88,6 @@ impl IndexCapabilities {
     /// Set BM25 index capability
     pub fn with_bm25(mut self, enabled: bool) -> Self {
         self.has_bm25 = enabled;
-        self
-    }
-
-    /// Set summary index capability
-    pub fn with_summaries(mut self, enabled: bool) -> Self {
-        self.has_summaries = enabled;
         self
     }
 
@@ -137,11 +126,6 @@ impl IndexCapabilities {
         self.has_bm25
     }
 
-    /// Check if summary index is available
-    pub fn has_summaries(&self) -> bool {
-        self.has_summaries
-    }
-
     /// Check if relation index is available
     pub fn has_relations(&self) -> bool {
         self.has_relations
@@ -159,12 +143,12 @@ impl IndexCapabilities {
 
     /// Check if any index is available
     pub fn has_any(&self) -> bool {
-        self.has_vectors || self.has_bm25 || self.has_summaries || self.has_relations
+        self.has_vectors || self.has_bm25 || self.has_relations
     }
 
     /// Check if all indexes are available
     pub fn has_all(&self) -> bool {
-        self.has_vectors && self.has_bm25 && self.has_summaries && self.has_relations
+        self.has_vectors && self.has_bm25 && self.has_relations
     }
 
     /// Get count of enabled indexes
@@ -174,9 +158,6 @@ impl IndexCapabilities {
             count += 1;
         }
         if self.has_bm25 {
-            count += 1;
-        }
-        if self.has_summaries {
             count += 1;
         }
         if self.has_relations {
@@ -190,7 +171,6 @@ impl IndexCapabilities {
         Self {
             has_vectors: self.has_vectors || other.has_vectors,
             has_bm25: self.has_bm25 || other.has_bm25,
-            has_summaries: self.has_summaries || other.has_summaries,
             has_relations: self.has_relations || other.has_relations,
             relation_propagation_enabled: self.relation_propagation_enabled
                 || other.relation_propagation_enabled,
@@ -208,7 +188,6 @@ impl IndexCapabilities {
         Self {
             has_vectors: self.has_vectors && other.has_vectors,
             has_bm25: self.has_bm25 && other.has_bm25,
-            has_summaries: self.has_summaries && other.has_summaries,
             has_relations: self.has_relations && other.has_relations,
             relation_propagation_enabled: self.relation_propagation_enabled
                 && other.relation_propagation_enabled,
@@ -236,9 +215,6 @@ impl fmt::Display for IndexCapabilities {
         }
         if self.has_bm25 {
             parts.push("bm25".to_string());
-        }
-        if self.has_summaries {
-            parts.push("summaries".to_string());
         }
         if self.has_relations {
             if self.relation_propagation_enabled {
@@ -268,7 +244,6 @@ impl From<&crate::index::IndexOptions> for IndexCapabilities {
         Self {
             has_vectors: options.store_vectors,
             has_bm25: options.store_bm25,
-            has_summaries: options.store_summaries,
             has_relations: options.build_relations,
             relation_propagation_enabled: true,
             // IndexOptions carries no propagation depth; report unlimited so
@@ -284,7 +259,6 @@ impl From<&cce_config::IndexerConfig> for IndexCapabilities {
         Self {
             has_vectors: config.store_vectors,
             has_bm25: config.store_bm25,
-            has_summaries: config.store_summaries,
             has_relations: config.build_relations,
             relation_propagation_enabled: true,
             relation_propagation_depth: 0,
@@ -301,7 +275,6 @@ impl From<&cce_config::RelationConfig> for IndexCapabilities {
         Self {
             has_vectors: false,
             has_bm25: false,
-            has_summaries: false,
             has_relations: config.index.enabled,
             relation_propagation_enabled: config.track_cross_file_deps,
             relation_propagation_depth: config.max_propagation_depth,
@@ -318,7 +291,6 @@ mod tests {
         let caps = IndexCapabilities::default();
         assert!(caps.has_vectors());
         assert!(caps.has_bm25());
-        assert!(caps.has_summaries());
         assert!(caps.has_relations());
         assert!(caps.has_relation_propagation());
         assert!(caps.has_all());
@@ -329,7 +301,6 @@ mod tests {
         let caps = IndexCapabilities::new();
         assert!(!caps.has_vectors());
         assert!(!caps.has_bm25());
-        assert!(!caps.has_summaries());
         assert!(!caps.has_relations());
         assert!(!caps.has_relation_propagation());
         assert!(!caps.has_any());
@@ -340,7 +311,6 @@ mod tests {
         let caps = IndexCapabilities::new().with_vectors(true).with_bm25(true);
         assert!(caps.has_vectors());
         assert!(caps.has_bm25());
-        assert!(!caps.has_summaries());
         assert!(!caps.has_relations());
         assert_eq!(caps.enabled_count(), 2);
     }
@@ -409,12 +379,11 @@ mod tests {
 
     #[test]
     fn test_intersect() {
-        let caps1 = IndexCapabilities::all().with_summaries(false);
+        let caps1 = IndexCapabilities::all();
         let caps2 = IndexCapabilities::all().with_relations(false);
         let intersected = caps1.intersect(&caps2);
         assert!(intersected.has_vectors());
         assert!(intersected.has_bm25());
-        assert!(!intersected.has_summaries());
         assert!(!intersected.has_relations());
     }
 
@@ -427,7 +396,7 @@ mod tests {
         assert_eq!(format!("{}", none), "none");
 
         let all = IndexCapabilities::all();
-        assert_eq!(format!("{}", all), "vectors, bm25, summaries, relations");
+        assert_eq!(format!("{}", all), "vectors, bm25, relations");
 
         let limited = IndexCapabilities::new()
             .with_relations(true)

@@ -168,34 +168,6 @@ impl FulltextStorage for FulltextStore {
         }
     }
 
-    async fn delete_summaries_by_file_path_scoped(
-        &self,
-        index_name: &str,
-        file_path: &str,
-        project_id: i64,
-    ) -> Result<usize, FulltextError> {
-        match self {
-            Self::Local(client) => {
-                FulltextStorage::delete_summaries_by_file_path_scoped(
-                    client.as_ref(),
-                    index_name,
-                    file_path,
-                    project_id,
-                )
-                .await
-            }
-            Self::Remote(client) => {
-                FulltextStorage::delete_summaries_by_file_path_scoped(
-                    client.as_ref(),
-                    index_name,
-                    file_path,
-                    project_id,
-                )
-                .await
-            }
-        }
-    }
-
     async fn delete_by_file_path_scoped_epoch(
         &self,
         index_name: &str,

@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::CheckpointManager;
 use cce_llm_client::OpenAICompatibleProvider;
@@ -43,7 +43,6 @@ pub(crate) mod entities;
 pub(crate) mod file_ops;
 pub(crate) mod generation;
 pub(crate) mod mapping;
-pub(crate) mod summary;
 pub(crate) mod vector;
 
 pub use mapping::build_bm25_documents;
@@ -60,13 +59,6 @@ pub struct StorageCoordinator {
     epoch: Arc<AtomicI64>,
     /// Current batch_id for per-epoch version tracking
     batch_id: Arc<AtomicI64>,
-    /// Whether file summary vectors are embedded into Qdrant.
-    ///
-    /// When disabled, summary text is still generated and persisted to SQLite
-    /// and BM25 (so NL document export keeps working) but the summary vector
-    /// embedding step is skipped. This lets the pipeline serve export-only
-    /// workloads without populating the vector store.
-    embed_summaries: Arc<AtomicBool>,
     /// Checkpoint manager for work-unit-level progress tracking
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     /// Operation ID for the current indexing operation
@@ -101,7 +93,6 @@ impl StorageCoordinator {
             project_id,
             epoch: Arc::new(AtomicI64::new(0)),
             batch_id: Arc::new(AtomicI64::new(0)),
-            embed_summaries: Arc::new(AtomicBool::new(true)),
             checkpoint_manager: None,
             operation_id: None,
             candidate_operation: Arc::new(StdMutex::new(None)),
@@ -353,16 +344,6 @@ impl StorageCoordinator {
     /// Get the configured embedder, if any.
     pub fn embedder(&self) -> Option<&Arc<OpenAICompatibleProvider>> {
         self.embedder.as_ref()
-    }
-
-    /// Whether summary vectors are embedded into Qdrant.
-    pub fn embed_summaries(&self) -> bool {
-        self.embed_summaries.load(Ordering::Acquire)
-    }
-
-    /// Enable or disable summary vector embedding.
-    pub fn set_embed_summaries(&self, enabled: bool) {
-        self.embed_summaries.store(enabled, Ordering::Release);
     }
 
     /// Get the configured SQLite metadata store, if any.

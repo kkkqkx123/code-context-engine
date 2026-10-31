@@ -4,8 +4,7 @@
 //!
 //! Query-text embeddings are NOT cached here: they are memoized at the
 //! searcher level (`super::cached_embedder::CachedEmbedder`), which is where
-//! all query-side embedder consumers (dense/summary strategies and summary
-//! boost) share a single instance.
+//! all query-side embedder consumers share a single instance.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;

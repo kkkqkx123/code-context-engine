@@ -1,8 +1,8 @@
 //! Query-side embedding memoization.
 //!
 //! A single search flow can require embedding the same query text more than
-//! once: dense retrieval and summary boost each call `Embedder::embed_one`
-//! with the identical text. This wrapper shares one remote call across all
+//! once: each recall path calls `Embedder::embed_one` with the identical
+//! text. This wrapper shares one remote call across all
 //! consumers of a project's [`Searcher`](super::Searcher) by caching results
 //! per query text; concurrent identical lookups additionally coalesce into a
 //! single in-flight remote call (single-flight).

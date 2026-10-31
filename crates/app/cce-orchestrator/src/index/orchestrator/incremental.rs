@@ -47,9 +47,9 @@ impl IndexOrchestrator {
     /// of leaving residue behind the failure point while skipping the rest.
     ///
     /// The generic storage removal already covers summary data: the vector
-    /// delete is untyped (all `PointKind`s including summaries), the BM25
-    /// delete removes every document of the file, and `DELETE FROM files`
-    /// cascades to `file_summaries`. No separate summary call is made.
+    /// delete is untyped (all `PointKind`s including legacy summary points)
+    /// and the BM25 delete removes every document of the file.
+    /// No separate summary call is made.
     ///
     /// Relation state is intentionally untouched here; deletions flow through
     /// the hot-update delta path.

@@ -17,8 +17,8 @@ pub use cce_storage_common::metadb::{
 
 pub use crate::repo::{
     AdmissionAuditRepository, CheckpointRepository, EntityDetailMappingRepository,
-    EntityRepository, FileRepository, FileSummaryRepository, GenerationOverrideRepository,
-    ProjectIndexManifestRepository, ProjectRepository, RelationSnapshotRepository,
+    EntityRepository, FileRepository, GenerationOverrideRepository, ProjectIndexManifestRepository,
+    ProjectRepository, RelationSnapshotRepository,
 };
 
 pub use crate::types::{BatchCheckpointRecord, DbId, NewProjectRecord, ProjectUpdateRecord};
@@ -146,13 +146,6 @@ impl RelationStorage for SqliteClient {
                 .map_err(|error| {
                     StorageError::delete("entity_detail_mappings", error.to_string())
                 })?;
-            removed += tx
-                .execute(
-                    "DELETE FROM file_summaries WHERE epoch = ?1 AND file_id IN \
-                     (SELECT id FROM files WHERE project_id = ?2)",
-                    rusqlite::params![epoch, project_id],
-                )
-                .map_err(|error| StorageError::delete("file_summaries", error.to_string()))?;
             GenerationOverrideRepository::clear_generation(tx, project_id, epoch)?;
             removed += Self::snapshot_delete_epoch_in(tx, project_id, epoch)?;
             removed += tx
@@ -506,62 +499,6 @@ impl RelationStorage for SqliteClient {
                 rusqlite::params![project_id],
             )
             .map_err(|error| StorageError::delete("entity_detail_mappings", error.to_string()))
-        })
-    }
-
-    async fn summary_upsert(
-        &self,
-        file_id: i64,
-        epoch: i64,
-        summary_json: &str,
-    ) -> Result<(), StorageError> {
-        self.with_transaction(|tx| {
-            FileSummaryRepository::upsert_with_epoch(tx, file_id, epoch, summary_json)?;
-            Ok(())
-        })
-    }
-
-    async fn summary_at_epoch(
-        &self,
-        file_id: i64,
-        epoch: i64,
-    ) -> Result<Option<String>, StorageError> {
-        let conn = self.read_connection()?;
-        FileSummaryRepository::get_by_file_id_at_epoch(&conn, file_id, epoch)
-    }
-
-    async fn summaries_by_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> Result<Vec<(String, String, i64)>, StorageError> {
-        let conn = self.read_connection()?;
-        FileSummaryRepository::list_json_by_epoch(&conn, project_id, epoch)
-    }
-
-    async fn summaries_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> Result<usize, StorageError> {
-        self.with_transaction(|tx| {
-            tx.execute(
-                "DELETE FROM file_summaries WHERE epoch = ?1 AND file_id IN \
-                 (SELECT id FROM files WHERE project_id = ?2)",
-                rusqlite::params![epoch, project_id],
-            )
-            .map_err(|error| StorageError::delete("file_summaries", error.to_string()))
-        })
-    }
-
-    async fn summaries_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
-        self.with_transaction(|tx| {
-            tx.execute(
-                "DELETE FROM file_summaries WHERE file_id IN \
-                 (SELECT id FROM files WHERE project_id = ?1)",
-                rusqlite::params![project_id],
-            )
-            .map_err(|error| StorageError::delete("file_summaries", error.to_string()))
         })
     }
 
@@ -955,7 +892,7 @@ mod tests {
         assert!(remote.validate_backend_combination().is_err());
         // Remote branches are forward scaffolding, not an official preset:
         // even with endpoints configured, the full-remote combination needs
-        // the advanced switch.
+        // the advanced switch for its wired branches.
         let mut preset = DatabaseConfig {
             vector_backend: cce_config::modules::VectorBackend::Qdrant,
             relation_backend: cce_config::modules::RelationBackend::Remote,
@@ -973,9 +910,13 @@ mod tests {
         };
         assert!(preset.validate_backend_combination().is_err());
         preset.allow_nonstandard_backends = true;
-        assert!(preset.validate_backend_combination().is_ok());
-        // A partial remote mix stays non-preset and needs the advanced switch.
-        let mut partial = DatabaseConfig {
+        // The remote relation write path is not wired, so a combination
+        // containing it stays rejected even with the advanced switch; only
+        // wired branches (remote fulltext below) are flag-allowed.
+        assert!(preset.validate_backend_combination().is_err());
+        // Remote fulltext is a wired official preset, so the partial mix
+        // validates without the advanced switch.
+        let partial = DatabaseConfig {
             fulltext_backend: cce_config::modules::FulltextBackend::Remote,
             fulltext_remote: cce_config::modules::FulltextRemoteConfig {
                 url: Some("http://localhost:9200".to_string()),
@@ -984,8 +925,6 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(partial.validate_backend_combination().is_err());
-        partial.allow_nonstandard_backends = true;
         assert!(partial.validate_backend_combination().is_ok());
     }
 
@@ -1122,16 +1061,6 @@ mod tests {
             .expect("readback");
         assert_eq!(readback.len(), 1);
         assert_eq!(readback[0].content, "fn a() {}");
-
-        RelationStorage::summary_upsert(&client, 1, 3, r#"{"summary_text":"hi"}"#)
-            .await
-            .expect("upsert summary");
-        assert!(
-            RelationStorage::summary_at_epoch(&client, 1, 3)
-                .await
-                .expect("read summary")
-                .is_some()
-        );
 
         RelationStorage::admission_record_admitted(&client, "fp", &[1], None, 10)
             .await

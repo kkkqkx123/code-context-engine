@@ -18,38 +18,30 @@ pub enum ExecutionStrategy {
     },
     /// Pure dense vector recall
     DenseRecall,
-    /// Summary-only vector recall (file-level, search summary vectors only)
-    SummaryRecall,
 }
 
 impl ExecutionStrategy {
     /// Determine execution strategy from user options.
     ///
-    /// The `summary` flag selects the SummaryRecall path only when it is the
-    /// sole source. Combined with vector/bm25 it acts as a boost gate (file
-    /// summary relevance added on top of dense/hybrid scores), not a third
-    /// recall path. Callers must reject empty sources beforehand
+    /// Callers must reject empty sources beforehand
     /// (`Searcher::search_with_view` does); the fallback below only covers
     /// unreachable direct calls.
     pub fn from_sources(
         sources: &SearchSources,
         config: &super::search_config::SearchConfig,
     ) -> Self {
-        match (sources.vector, sources.bm25, sources.summary) {
+        match (sources.vector, sources.bm25) {
             // BM25 alone -> pure BM25 keyword recall (no vector)
-            (false, true, _) => ExecutionStrategy::Bm25Recall,
+            (false, true) => ExecutionStrategy::Bm25Recall,
 
             // Pure vector -> DenseRecall
-            (true, false, _) => ExecutionStrategy::DenseRecall,
+            (true, false) => ExecutionStrategy::DenseRecall,
 
             // Vector + BM25 -> hybrid recall: two-path parallel + weighted fusion
-            (true, true, _) => ExecutionStrategy::HybridRecall {
+            (true, true) => ExecutionStrategy::HybridRecall {
                 vector_weight: config.fusion.vector_weight,
                 bm25_weight: config.fusion.bm25_weight,
             },
-
-            // Summary only -> SummaryRecall (pure summary vector search)
-            (false, false, true) => ExecutionStrategy::SummaryRecall,
 
             // Unreachable via Searcher (empty sources are rejected upfront);
             // kept as dense recall for direct callers.
@@ -97,7 +89,6 @@ impl ExecutionStrategy {
             ExecutionStrategy::Bm25Recall => "bm25_recall",
             ExecutionStrategy::HybridRecall { .. } => "hybrid_recall",
             ExecutionStrategy::DenseRecall => "dense_recall",
-            ExecutionStrategy::SummaryRecall => "summary_recall",
         }
     }
 }
@@ -113,7 +104,6 @@ impl std::fmt::Display for ExecutionStrategy {
                 write!(f, "hybrid_recall(v={}, b={})", vector_weight, bm25_weight)
             }
             ExecutionStrategy::DenseRecall => write!(f, "dense_recall"),
-            ExecutionStrategy::SummaryRecall => write!(f, "summary_recall"),
         }
     }
 }
@@ -152,11 +142,6 @@ mod tests {
                 bm25_weight: 0.5,
             }
         );
-
-        // Summary only -> SummaryRecall
-        let sources = SearchSources::none().with_summary();
-        let strategy = ExecutionStrategy::from_sources(&sources, &config);
-        assert_eq!(strategy, ExecutionStrategy::SummaryRecall);
     }
 
     #[test]

@@ -90,12 +90,6 @@ pub fn create_all(conn: &Connection) -> Result<(), StorageError> {
     .map_err(|e| StorageError::Table(format!("Failed to drop old index: {}", e)))?;
 
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_file_summaries_file_epoch ON file_summaries(file_id, epoch)",
-        [],
-    )
-    .map_err(|e| StorageError::Table(format!("Failed to create index: {}", e)))?;
-
-    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks(project_id)",
         [],
     )

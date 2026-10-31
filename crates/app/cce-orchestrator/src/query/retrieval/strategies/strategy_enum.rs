@@ -9,7 +9,6 @@ use crate::query::types::{QueryOptions, SearchResult};
 
 use super::bm25::Bm25Strategy;
 use super::dense::DenseStrategy;
-use super::summary::SummaryStrategy;
 
 /// Supported recall algorithms.
 ///
@@ -20,8 +19,6 @@ pub enum RecallAlgorithm {
     Dense,
     /// Pure BM25 keyword-based search
     Bm25,
-    /// Summary-level vector search (file-level, not chunks)
-    Summary,
 }
 
 impl RecallAlgorithm {
@@ -35,7 +32,6 @@ impl RecallAlgorithm {
                     Bm25Strategy::new(crate::query::Searcher::extract_fulltext_store(searcher));
                 RetrievalStrategy::Bm25(bm25_strategy)
             }
-            Self::Summary => RetrievalStrategy::Summary(SummaryStrategy::new(searcher)),
         }
     }
 }
@@ -45,7 +41,6 @@ impl std::fmt::Display for RecallAlgorithm {
         match self {
             Self::Dense => write!(f, "dense"),
             Self::Bm25 => write!(f, "bm25"),
-            Self::Summary => write!(f, "summary"),
         }
     }
 }
@@ -54,7 +49,6 @@ impl std::fmt::Display for RecallAlgorithm {
 pub enum RetrievalStrategy {
     Dense(DenseStrategy),
     Bm25(Bm25Strategy),
-    Summary(SummaryStrategy),
 }
 
 impl RetrievalStrategy {
@@ -67,7 +61,6 @@ impl RetrievalStrategy {
         match self {
             Self::Dense(s) => s.retrieve(options, query_filter).await,
             Self::Bm25(s) => s.retrieve(options, query_filter).await,
-            Self::Summary(s) => s.retrieve(options, query_filter).await,
         }
     }
 
@@ -76,7 +69,6 @@ impl RetrievalStrategy {
         match self {
             Self::Dense(_) => "dense",
             Self::Bm25(_) => "bm25",
-            Self::Summary(_) => "summary",
         }
     }
 }

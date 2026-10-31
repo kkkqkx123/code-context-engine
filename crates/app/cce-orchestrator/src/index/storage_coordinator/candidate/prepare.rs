@@ -137,38 +137,7 @@ impl StorageCoordinator {
         Ok(())
     }
 
-    /// Remove one file's summary only from the candidate generation before
-    /// re-summarizing it.
-    ///
-    /// Module-scoped: it leaves other modules' candidate data intact. The
-    /// `replaced` override is already registered by the module preparation
-    /// that necessarily preceded any summary rewrite, so no duplicate
-    /// registration happens here.
-    pub async fn prepare_hot_update_summary(
-        &self,
-        file_path: &std::path::Path,
-    ) -> Result<(), OrchestratorError> {
-        let path = normalize_project_path(&file_path.to_string_lossy());
-        let epoch = self.epoch();
-        if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
-            client
-                .with_transaction(|tx| {
-                    tx.execute(
-                        "DELETE FROM file_summaries WHERE epoch = ?1 AND file_id IN
-                         (SELECT id FROM files WHERE path = ?2 AND project_id = ?3 AND epoch = ?1)",
-                        rusqlite::params![epoch, path, self.project_id],
-                    )
-                    .map_err(|error| {
-                        cce_types::StorageError::delete("file_summaries", error.to_string())
-                    })?;
-                    Ok(())
-                })
-                .map_err(OrchestratorError::Storage)?;
-        }
-        Ok(())
-    }
-
-    /// Clear every candidate-generation row of one file (summaries, chunks,
+    /// Clear every candidate-generation row of one file (chunks, entities,
     /// entities). Used by both replace and delete preparations.
     fn clear_candidate_file_rows(&self, path: &str) -> Result<(), OrchestratorError> {
         self.clear_candidate_file_rows_batch(std::slice::from_ref(&path))
@@ -203,12 +172,6 @@ impl StorageCoordinator {
         epoch: i64,
         path: &str,
     ) -> Result<(), cce_types::StorageError> {
-        tx.execute(
-            "DELETE FROM file_summaries WHERE epoch = ?1 AND file_id IN
-             (SELECT id FROM files WHERE path = ?2 AND project_id = ?3 AND epoch = ?1)",
-            rusqlite::params![epoch, path, project_id],
-        )
-        .map_err(|error| cce_types::StorageError::delete("file_summaries", error.to_string()))?;
         tx.execute(
             "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3",
             rusqlite::params![project_id, epoch, path],

@@ -262,7 +262,7 @@ api_key_file = "/run/secrets/llm_api_key"
 | `store_vectors=true` 但 `qdrant.enabled=false` | 向量存储未启用 | 设置 `database.qdrant.enabled = true` |
 | `store_bm25=true` 但 `bm25.enabled=false` | BM25 索引未启用 | 设置 `database.bm25.enabled = true` |
 | `llm.enabled=true` 但无提供者配置 | LLM 配置不完整 | 至少配置一个 LLM 提供者 |
-| `include_summary=true` 但 `store_summaries=false` | 摘要未存储 | 自动启用 `orchestrator.indexer.store_summaries` |
+| `include_summary=true` 但 `store_summaries=false` | 摘要未生成 | 自动启用 `orchestrator.indexer.store_summaries` |
 | `enable_relation_enhancement=true` 但 `build_relations=false` | 关系未构建 | 自动启用 `orchestrator.indexer.build_relations` |
 | `logger.output=file` 但 `file` 为空 | 日志文件路径未指定 | 设置 `logger.file` |
 

@@ -15,9 +15,6 @@ pub struct SearchSources {
     pub vector: bool,
     /// Enable BM25 keyword search
     pub bm25: bool,
-    /// Enable summary-level search: standalone summary recall when alone,
-    /// summary relevance boost on top of dense/hybrid scores when combined.
-    pub summary: bool,
 }
 
 impl Default for SearchSources {
@@ -25,7 +22,6 @@ impl Default for SearchSources {
         Self {
             vector: true,
             bm25: true,
-            summary: false,
         }
     }
 }
@@ -36,7 +32,6 @@ impl SearchSources {
         Self {
             vector: false,
             bm25: false,
-            summary: false,
         }
     }
 
@@ -52,25 +47,14 @@ impl SearchSources {
         self
     }
 
-    /// Enable summary search
-    pub fn with_summary(mut self) -> Self {
-        self.summary = true;
-        self
-    }
-
     /// Check if any source is enabled
     pub fn is_empty(&self) -> bool {
-        !self.vector && !self.bm25 && !self.summary
+        !self.vector && !self.bm25
     }
 
     /// Check if any source is enabled (alias for !is_empty)
     pub fn is_any_enabled(&self) -> bool {
         !self.is_empty()
-    }
-
-    /// Check if only summary search is enabled
-    pub fn is_summary_only(&self) -> bool {
-        self.summary && !self.vector && !self.bm25
     }
 }
 
@@ -82,9 +66,6 @@ impl std::fmt::Display for SearchSources {
         }
         if self.bm25 {
             parts.push("bm25");
-        }
-        if self.summary {
-            parts.push("summary");
         }
 
         if parts.is_empty() {
@@ -395,12 +376,6 @@ impl QueryConfigBuilder {
         self
     }
 
-    /// Enable/disable summary search
-    pub fn summary_enabled(mut self, enabled: bool) -> Self {
-        self.sources.summary = enabled;
-        self
-    }
-
     /// Set vector top-k
     pub fn vector_top_k(mut self, k: usize) -> Self {
         self.config.vector.top_k = k;
@@ -422,30 +397,6 @@ impl QueryConfigBuilder {
     /// Set result minimum score
     pub fn result_min_score(mut self, score: f32) -> Self {
         self.config.result.min_score = score;
-        self
-    }
-
-    /// Enable summary pre-filter
-    pub fn with_summary_pre_filter(mut self) -> Self {
-        self.config.summary.enable_pre_filter = true;
-        self
-    }
-
-    /// Set summary top-k
-    pub fn summary_top_k(mut self, k: usize) -> Self {
-        self.config.summary.top_k = k;
-        self
-    }
-
-    /// Set summary minimum score
-    pub fn summary_min_score(mut self, score: f32) -> Self {
-        self.config.summary.min_score = score;
-        self
-    }
-
-    /// Set summary boost factor
-    pub fn summary_boost_factor(mut self, factor: f32) -> Self {
-        self.config.summary.boost_factor = factor;
         self
     }
 
@@ -573,16 +524,6 @@ impl QueryConfigBuilder {
             .result_limit(10)
             .build(query)
     }
-
-    /// Summary-based search: hierarchical file filtering
-    ///
-    /// Uses summary index to pre-filter files before detailed search.
-    pub fn summary_search(project_id: i64, query: impl Into<String>) -> QueryOptions {
-        QueryConfigBuilder::new(project_id)
-            .with_summary_pre_filter()
-            .result_limit(20)
-            .build(query)
-    }
 }
 
 #[cfg(test)]
@@ -594,15 +535,13 @@ mod tests {
         let sources = SearchSources::default();
         assert!(sources.vector);
         assert!(sources.bm25);
-        assert!(!sources.summary);
     }
 
     #[test]
     fn test_search_sources_builder() {
-        let sources = SearchSources::none().with_vector().with_summary();
+        let sources = SearchSources::none().with_vector();
         assert!(sources.vector);
         assert!(!sources.bm25);
-        assert!(sources.summary);
     }
 
     #[test]

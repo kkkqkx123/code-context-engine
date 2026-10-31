@@ -157,14 +157,6 @@ pub trait FulltextStorage: Clone + Send + Sync + 'static {
         project_id: i64,
     ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
-    /// Delete only summary documents of one file within one project.
-    fn delete_summaries_by_file_path_scoped(
-        &self,
-        index_name: &str,
-        file_path: &str,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
-
     /// Delete documents for one file in one data epoch.
     fn delete_by_file_path_scoped_epoch(
         &self,

@@ -303,9 +303,6 @@ pub struct HotUpdateConfig {
     /// while still building relations during full index.
     #[serde(default = "default_true")]
     pub build_relations: bool,
-    /// Whether to store summaries during update
-    #[serde(default = "default_true")]
-    pub store_summaries: bool,
     /// Whether to store vectors (embeddings) during update
     #[serde(default = "default_true")]
     pub store_vectors: bool,
@@ -370,7 +367,6 @@ impl Default for HotUpdateConfig {
             debounce: DebounceConfig::default(),
             scanner: None,
             build_relations: true,
-            store_summaries: true,
             store_vectors: true,
             store_bm25: true,
             batch_size: 10,
@@ -576,17 +572,12 @@ pub struct IndexerConfig {
     /// Store in BM25 index
     #[serde(default = "default_true")]
     pub store_bm25: bool,
-    /// Store file summaries
+    /// Generate file summaries during indexing.
+    ///
+    /// Summaries feed NL document export only; no summary vectors, BM25
+    /// documents, or metadata rows are written anymore.
     #[serde(default = "default_true")]
     pub store_summaries: bool,
-    /// Embed file summary vectors into Qdrant.
-    ///
-    /// When `false` (e.g. export-only mode), summary text is still generated
-    /// and persisted to SQLite and BM25 for NL document export, but the
-    /// summary vector embedding step is skipped so the vector store is not
-    /// populated with summary points.
-    #[serde(default = "default_true")]
-    pub embed_summaries: bool,
     /// Build relation index during full indexing.
     ///
     /// This flag controls whether the relation index is built during
@@ -671,7 +662,6 @@ impl Default for IndexerConfig {
             store_vectors: false,
             store_bm25: false,
             store_summaries: true,
-            embed_summaries: true,
             build_relations: true,
             dead_letter_truncate_retry: false,
             embed_input_token_limit: default_embed_input_token_limit(),
@@ -709,7 +699,6 @@ mod tests {
         let config = HotUpdateConfig::default();
         assert!(config.enabled);
         assert!(config.build_relations);
-        assert!(config.store_summaries);
         assert_eq!(config.batch_size, 10);
     }
 

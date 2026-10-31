@@ -79,46 +79,6 @@ pub async fn handle_entity_search(
         }
     };
 
-    // Get SQLite connection from state
-    let sqlite_client = match state.engine.metadata_store() {
-        Some(client) => match client.for_project(project_id) {
-            Ok(project) => project,
-            Err(e) => {
-                return EntitySearchApiResponse::Error(ErrorResponse::new(
-                    error_codes::INDEX_NOT_INITIALIZED,
-                    format!("Failed to open project database: {e}"),
-                ));
-            }
-        },
-        None => {
-            return EntitySearchApiResponse::Error(ErrorResponse::new(
-                error_codes::INDEX_NOT_INITIALIZED,
-                "SQLite database not initialized",
-            ));
-        }
-    };
-
-    // Resolve the published epoch through the storage cache so the manifest
-    // plus legacy-meta fallback is not re-derived here. Resolved before the
-    // read connection is taken: the cache acquires the same read lock.
-    let active_epoch =
-        cce_storage_metadb_sqlite::cache::FileHashCache::new(sqlite_client.clone(), project_id)
-            .active_epoch()
-            .ok()
-            .flatten()
-            .unwrap_or(0);
-
-    // Execute FTS5 search
-    let conn = match sqlite_client.read_connection() {
-        Ok(c) => c,
-        Err(e) => {
-            return EntitySearchApiResponse::Error(ErrorResponse::new(
-                error_codes::INDEX_NOT_INITIALIZED,
-                format!("Failed to get database connection: {}", e).as_str(),
-            ));
-        }
-    };
-
     // When a kind filter is present the database fetch is widened before
     // filtering so ranking is preserved and the requested limit stays
     // meaningful instead of filtering an already truncated page.
@@ -127,13 +87,11 @@ pub async fn handle_entity_search(
     } else {
         request.limit
     };
-    let results = match cce_storage_metadb_sqlite::repo::EntityRepository::search_fts_at_epoch(
-        &conn,
-        &request.query,
-        project_id,
-        db_limit,
-        active_epoch,
-    ) {
+    let service = cce_server_shared::services::search::SearchService::new(&state);
+    let results = match service
+        .run_entity_search(project_id, &request.query, db_limit)
+        .await
+    {
         Ok(records) => records,
         Err(e) => {
             tracing::error!("FTS5 search failed: {}", e);
@@ -155,17 +113,27 @@ pub async fn handle_entity_search(
         results
     };
 
+    // Resolve project-relative paths for the surviving hits. File mapping
+    // stays a direct lookup; relevance itself comes from the coordinator.
+    let project_client = state
+        .engine
+        .metadata_store()
+        .and_then(|client| client.for_project(project_id).ok());
+    let file_conn = project_client
+        .as_ref()
+        .and_then(|client| client.read_connection().ok());
     // Convert to response format
     let items: Vec<EntitySearchResult> = filtered_results
         .into_iter()
         .map(|record| {
             // Resolve the project-relative path so the hit is directly
             // actionable without a second file lookup.
-            let file_path =
-                cce_storage_metadb_sqlite::repo::FileRepository::get_by_id(&conn, record.file_id)
+            let file_path = file_conn.as_ref().and_then(|conn| {
+                cce_storage_metadb_sqlite::repo::FileRepository::get_by_id(conn, record.file_id)
                     .ok()
                     .flatten()
-                    .map(|file| file.path);
+                    .map(|file| file.path)
+            });
             EntitySearchResult {
                 id: record.id,
                 name: record.name,

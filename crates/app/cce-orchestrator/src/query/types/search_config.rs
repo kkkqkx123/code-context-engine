@@ -16,7 +16,7 @@ pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
     Bm25RetrievalConfig, BoostAggregationConfig, HybridFusionConfig, HybridWeightConfig,
     PluginSearchConfig, QueryIntentWeights, RelationAnnotationConfig, RerankFusionStrategy,
-    ResultFilterConfig, ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
+    ResultFilterConfig, ScoreNormalizationConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================
@@ -60,7 +60,6 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 /// | `bm25` | BM25 retrieval parameters (min_score, field_weights, term_operator) |
 /// | `fusion` | Hybrid fusion parameters (weights, algorithm, intent weights) |
 /// | `result` | Result filtering (limit, min_score, max_per_file) |
-/// | `summary` | Summary pre-filter and boost (top_k, min_score, boost_factor) |
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
 /// | `score` | Score normalization (enable, strategy) |
 /// | `boost` | Unified boost aggregation configuration |
@@ -74,8 +73,6 @@ pub struct SearchConfig {
     pub fusion: HybridFusionConfig,
     /// Result filtering configuration
     pub result: ResultFilterConfig,
-    /// Summary-based score boost configuration
-    pub summary: SummaryBoostConfig,
     /// LLM reranking configuration
     pub rerank: RerankConfig,
     /// Score normalization configuration
@@ -97,7 +94,6 @@ impl Default for SearchConfig {
             bm25: Bm25RetrievalConfig::default(),
             fusion: HybridFusionConfig::default(),
             result: ResultFilterConfig::default(),
-            summary: SummaryBoostConfig::default(),
             rerank: RerankConfig::default(),
             score: ScoreNormalizationConfig::default(),
             boost: BoostAggregationConfig::default(),
@@ -115,7 +111,6 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             bm25: cfg.bm25,
             fusion: cfg.fusion,
             result: cfg.result,
-            summary: cfg.summary,
             // `[search.rerank]` was removed: rerank runtime parameters come
             // exclusively from the top-level `[rerank]` section (merged per
             // request), so this slot keeps the defaults here.
@@ -183,10 +178,6 @@ mod tests {
         assert_eq!(config.vector.min_score, 0.3);
         assert_eq!(config.result.limit, 10);
         assert_eq!(config.result.min_score, 0.25);
-        assert!(!config.summary.enable_pre_filter);
-        assert_eq!(config.summary.top_k, 20);
-        assert_eq!(config.summary.min_score, 0.4);
-        assert_eq!(config.summary.boost_factor, 1.2);
         assert!(config.boost.enabled);
         assert!((config.boost.max_addition - 0.5).abs() < f32::EPSILON);
     }
@@ -194,10 +185,8 @@ mod tests {
     #[test]
     fn test_search_config_with_overrides() {
         let mut config = SearchConfig::default();
-        config.summary.enable_pre_filter = true;
-        config.summary.top_k = 30;
-        config.summary.min_score = 0.5;
-        config.summary.boost_factor = 1.3;
+        config.vector.top_k = 30;
+        config.result.limit = 5;
     }
 
     #[test]

@@ -8,7 +8,6 @@
 use cce_storage_common::FulltextStorage;
 use std::collections::HashMap;
 
-use cce_parser::summary::FileSummary;
 use cce_storage_common::FulltextDocument;
 use cce_storage_common::VectorStorage;
 use cce_types::PointKind;
@@ -23,14 +22,12 @@ use super::StorageCoordinator;
 /// The tantivy `content` and `keywords` fields are index-only (not stored), so
 /// the active generation's chunk text and keywords must be read back from
 /// SQLite when cloning into a candidate epoch. Chunk docs resolve by
-/// `chunk_id`; summary docs by file path.
+/// `chunk_id`.
 struct Bm25CloneContent {
     /// `chunk_id -> chunk text` (from the `chunks` table).
     chunk_by_id: HashMap<String, String>,
     /// `chunk_id -> space-joined BM25 keywords` (from the `chunks` table).
     keywords_by_id: HashMap<String, String>,
-    /// `file_path -> summary BM25 text` (rebuilt from `file_summaries`).
-    summary_by_path: HashMap<String, String>,
 }
 
 impl StorageCoordinator {
@@ -61,21 +58,18 @@ impl StorageCoordinator {
                 .filter(|point| {
                     point.payload.group_id.as_deref() == Some(self.project_group_id.as_str())
                         && point.payload.epoch == Some(source_epoch)
+                        && point.payload.r#type != Some(PointKind::Summary)
                         && !is_excluded(Some(point.payload.file_path.as_str()))
                 })
                 .map(|mut point| {
+                    // Legacy summary points have no reader anymore; skipping
+                    // them here lets one compaction GC what the deleted
+                    // summary write path used to produce.
                     point.payload.epoch = Some(target_epoch);
-                    point.id = if point.payload.r#type == Some(PointKind::Summary) {
-                        format!(
-                            "{}::{}::summary::{}",
-                            self.project_group_id, target_epoch, point.payload.file_path
-                        )
-                    } else {
-                        format!(
-                            "{}::{}::{}",
-                            self.project_group_id, target_epoch, point.payload.source_id
-                        )
-                    };
+                    point.id = format!(
+                        "{}::{}::{}",
+                        self.project_group_id, target_epoch, point.payload.source_id
+                    );
                     point
                 })
                 .collect();
@@ -96,8 +90,7 @@ impl StorageCoordinator {
             // content and keywords are index-only BM25 fields, so the snapshot
             // above carries neither. Reconstruct them from SQLite, which
             // remains the single source of truth: chunk docs from
-            // `chunks.content` / `chunks.bm25_keywords`, and summary docs by
-            // rebuilding `to_bm25_text()` from `file_summaries`.
+            // `chunks.content` / `chunks.bm25_keywords`.
             let clone_content = self.load_bm25_clone_content(source_epoch)?;
             let cloned: Vec<_> = documents
                 .into_iter()
@@ -107,17 +100,10 @@ impl StorageCoordinator {
                 .map(|document| {
                     let mut document = document;
                     if !document.fields.contains_key("content") {
-                        let content = if document.fields.contains_key("chunk_id") {
-                            document
-                                .fields
-                                .get("chunk_id")
-                                .and_then(|id| clone_content.chunk_by_id.get(id).cloned())
-                        } else {
-                            document
-                                .fields
-                                .get("file_path")
-                                .and_then(|path| clone_content.summary_by_path.get(path).cloned())
-                        };
+                        let content = document
+                            .fields
+                            .get("chunk_id")
+                            .and_then(|id| clone_content.chunk_by_id.get(id).cloned());
                         if let Some(content) = content {
                             document.fields.insert("content".to_string(), content);
                         }
@@ -131,15 +117,9 @@ impl StorageCoordinator {
                             document.fields.insert("keywords".to_string(), keywords);
                         }
                     }
-                    let file_path = document.fields.get("file_path").cloned();
                     let chunk_id = document.fields.get("chunk_id").cloned();
                     let document_id = if let Some(chunk_id) = chunk_id {
                         format!("{}::{}::{}", self.project_id, target_epoch, chunk_id)
-                    } else if let Some(file_path) = file_path {
-                        format!(
-                            "{}::{}::summary::{}",
-                            self.project_id, target_epoch, file_path
-                        )
                     } else {
                         document.document_id
                     };
@@ -162,17 +142,15 @@ impl StorageCoordinator {
 
     /// Load the content needed to clone the active BM25 generation into a
     /// candidate epoch. Because content and keywords are index-only fields in
-    /// tantivy, the snapshot cannot copy them; both chunk text/keywords and
-    /// summary BM25 text are reconstructed from SQLite.
+    /// tantivy, the snapshot cannot copy them; chunk text/keywords are
+    /// reconstructed from SQLite.
     fn load_bm25_clone_content(&self, epoch: i64) -> Result<Bm25CloneContent, OrchestratorError> {
         let mut chunk_content: HashMap<String, String> = HashMap::new();
         let mut chunk_keywords: HashMap<String, String> = HashMap::new();
-        let mut summary_content: HashMap<String, String> = HashMap::new();
         let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) else {
             return Ok(Bm25CloneContent {
                 chunk_by_id: chunk_content,
                 keywords_by_id: chunk_keywords,
-                summary_by_path: summary_content,
             });
         };
         client
@@ -204,50 +182,12 @@ impl StorageCoordinator {
                         }
                     }
                 }
-                {
-                    let mut stmt = tx
-                        .prepare(
-                            "SELECT files.path, fs.summary_json
-                             FROM file_summaries fs
-                             JOIN files ON files.id = fs.file_id
-                             WHERE files.project_id = ?1 AND fs.epoch = ?2
-                                AND fs.summary_json IS NOT NULL",
-                        )
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                    let rows = stmt
-                        .query_map(rusqlite::params![self.project_id, epoch], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                        })
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                    for row in rows {
-                        let (file_path, summary_json) =
-                            row.map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                        // The persisted blob is the canonical FileSummary;
-                        // deserialize it instead of reassembling from columns.
-                        match serde_json::from_str::<FileSummary>(&summary_json) {
-                            Ok(summary) => {
-                                let text = summary.to_bm25_text();
-                                if !text.is_empty() {
-                                    summary_content.insert(file_path, text);
-                                }
-                            }
-                            Err(error) => {
-                                tracing::warn!(
-                                    path = %file_path,
-                                    %error,
-                                    "Skipping unreadable persisted summary during BM25 clone"
-                                );
-                            }
-                        }
-                    }
-                }
                 Ok(())
             })
             .map_err(OrchestratorError::Storage)?;
         Ok(Bm25CloneContent {
             chunk_by_id: chunk_content,
             keywords_by_id: chunk_keywords,
-            summary_by_path: summary_content,
         })
     }
 }
@@ -257,14 +197,14 @@ mod tests {
     use std::sync::Arc;
 
     use cce_storage_metadb_sqlite::{
-        ChunkRecord, ChunkRepository, FileRepository, FileSummaryRepository, NewProjectRecord,
-        ProjectRepository, SqliteClient,
+        ChunkRecord, ChunkRepository, FileRepository, NewProjectRecord, ProjectRepository,
+        SqliteClient,
     };
 
     use super::super::StorageCoordinator;
 
     #[test]
-    fn load_bm25_clone_content_reconstructs_chunk_and_summary_text() {
+    fn load_bm25_clone_content_reconstructs_chunk_text() {
         let database = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
         let client = database.as_ref().clone();
         client
@@ -310,17 +250,6 @@ mod tests {
             .with_transaction(|tx| ChunkRepository::insert_batch(tx, &[chunk]))
             .expect("chunk should be inserted");
 
-        let summary = cce_parser::summary::FileSummary::new("src/lib.rs")
-            .with_language("rust")
-            .with_summary("handles file parsing")
-            .with_entities(vec!["Parser".to_string()]);
-        let summary_json = serde_json::to_string(&summary).expect("summary should serialize");
-        client
-            .with_transaction(|tx| {
-                FileSummaryRepository::upsert_with_epoch(tx, 1, 3, &summary_json)
-            })
-            .expect("summary should be inserted");
-
         let storage = StorageCoordinator::new(1)
             .expect("valid project ID")
             .with_metadata_store(database);
@@ -335,12 +264,5 @@ mod tests {
                 .map(String::as_str),
             Some("bm25 chunk text")
         );
-        let summary_text = clone_content
-            .summary_by_path
-            .get("src/lib.rs")
-            .expect("summary bm25 text should be reconstructed");
-        assert!(summary_text.contains("Summary: handles file parsing"));
-        assert!(summary_text.contains("Entities: Parser"));
-        assert!(summary_text.contains("File: src/lib.rs"));
     }
 }

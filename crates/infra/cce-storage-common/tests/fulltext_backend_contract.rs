@@ -269,56 +269,30 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
     assert!(epochs.contains(&1), "epoch 1 present: {epochs:?}");
     assert!(epochs.contains(&5), "epoch 5 present: {epochs:?}");
 
-    // Summary-scoped delete removes only the summary document of a file.
-    // Chunk documents share the same file_path/project_id, so the generic
-    // per-file delete would clear them as well; the summary form must not.
-    let summary_id = format!("{group}::1::summary::src/a.rs");
+    // Scoped deletes remove exactly their scope; counts follow along. A file
+    // with two chunk documents loses both, while other files survive.
+    let second_id = format!("{group}-b");
     store
         .batch_index(
             index,
             &[doc(
-                &summary_id,
+                &second_id,
                 7,
                 1,
-                "zephyrwind summary of alpha",
+                "zephyrwind beta helper",
                 "src/a.rs",
                 false,
                 FileCategory::Code,
             )],
         )
         .await
-        .expect("index summary");
+        .expect("index second chunk");
     store.flush().await.expect("flush");
-    let removed = store
-        .delete_summaries_by_file_path_scoped(index, "src/a.rs", 7)
-        .await
-        .expect("delete summaries");
-    assert_eq!(removed, 1, "only the summary document matches");
-    store.flush().await.expect("flush");
-    let hits = store
-        .search("zephyrwind", &options(7, vec![1]))
-        .await
-        .expect("search after summary delete");
-    assert!(
-        hits.iter().all(|h| h.document_id != summary_id),
-        "the summary document must be gone"
-    );
-    assert!(
-        hits.iter().any(|h| h.document_id == format!("{group}-a")),
-        "the chunk document of the same file must survive"
-    );
-    let removed = store
-        .delete_summaries_by_file_path_scoped(index, "src/a.rs", 7)
-        .await
-        .expect("repeat summary delete");
-    assert_eq!(removed, 0, "a repeat summary delete matches nothing");
-
-    // Scoped deletes remove exactly their scope; counts follow along.
     let removed = store
         .delete_by_file_path_scoped(index, "src/a.rs", 7)
         .await
         .expect("delete file");
-    assert_eq!(removed, 1);
+    assert_eq!(removed, 2);
     store.flush().await.expect("flush");
     let hits = store
         .search("zephyrwind", &options(7, vec![1, 4, 5]))
@@ -328,6 +302,11 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         hits.iter()
             .all(|h| h.fields.get("file_path").map(String::as_str) != Some("src/a.rs"))
     );
+    let removed = store
+        .delete_by_file_path_scoped(index, "src/a.rs", 7)
+        .await
+        .expect("repeat file delete");
+    assert_eq!(removed, 0, "a repeat file delete matches nothing");
     let removed = store
         .delete_by_file_path_scoped_epoch(index, "src/ledger.rs", 7, 5)
         .await

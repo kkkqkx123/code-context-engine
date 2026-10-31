@@ -536,28 +536,6 @@ async fn local_backend_contract() {
             .expect("delete operation files"),
         1
     );
-    RelationStorage::summary_upsert(&client, file_id, 9, r#"{"summary_text":"hi"}"#)
-        .await
-        .expect("upsert summary");
-    assert!(
-        RelationStorage::summary_at_epoch(&client, file_id, 9)
-            .await
-            .expect("read summary")
-            .is_some()
-    );
-    assert_eq!(
-        RelationStorage::summaries_by_epoch(&client, 7, 9)
-            .await
-            .expect("list summaries")
-            .len(),
-        1
-    );
-    assert_eq!(
-        RelationStorage::summaries_delete_by_project_epoch(&client, 7, 9)
-            .await
-            .expect("delete summaries"),
-        1
-    );
     assert_eq!(
         RelationStorage::entities_delete_by_project_epoch(&client, 7, 9)
             .await

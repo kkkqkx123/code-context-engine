@@ -35,13 +35,9 @@ pub struct ProcessorConfig {
     pub enable_bm25: bool,
     /// Enable relation update processor
     pub enable_relation: bool,
-    /// Enable summary update processor
+    /// Enable summary update processor (regenerates file summaries for NL
+    /// document export; no summary index is written).
     pub enable_summary: bool,
-    /// Whether summary vectors are embedded into the vector backend during updates.
-    ///
-    /// When false, summaries are still regenerated and persisted for NL
-    /// document export, but their vectors are not written to the vector store.
-    pub embed_summaries: bool,
     /// Enable NL document export processor
     pub enable_export: bool,
     /// Export configuration (optional)
@@ -55,7 +51,6 @@ impl Default for ProcessorConfig {
             enable_bm25: true,
             enable_relation: true,
             enable_summary: true,
-            embed_summaries: true,
             enable_export: true,
             export_config: None,
         }
@@ -356,9 +351,6 @@ impl ProcessorFactory {
         }
 
         let storage_coordinator = Arc::new(storage_coordinator);
-        // Apply the configured summary-embedding policy so summary vectors are
-        // skipped (while text is still persisted for export) when disabled.
-        storage_coordinator.set_embed_summaries(config.embed_summaries);
         let shared_storage = storage_coordinator.clone();
 
         // Create processor context

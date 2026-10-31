@@ -65,25 +65,6 @@ impl ElasticsearchClient {
         .await
     }
 
-    /// Delete only summary documents of one file within one project.
-    pub async fn delete_summaries_by_file_path_scoped(
-        &self,
-        index_name: &str,
-        file_path: &str,
-        project_id: i64,
-    ) -> Result<usize, Bm25Error> {
-        self.validate_index_name(index_name)?;
-        let normalized = normalize_project_path(file_path);
-        self.delete_by_query(&json!({
-            "bool": { "filter": [
-                { "term": { "file_path": normalized } },
-                { "term": { "project_id": project_id.to_string() } },
-                { "wildcard": { "document_id": "*::summary::*" } },
-            ]}
-        }))
-        .await
-    }
-
     /// Delete documents for one file in one data epoch.
     pub async fn delete_by_file_path_scoped_epoch(
         &self,

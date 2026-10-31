@@ -202,11 +202,6 @@ impl EmbeddingUpdateProcessor {
                 .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
         }
 
-        storage
-            .reembed_stored_summaries(self.batch_size)
-            .await
-            .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
-
         client
             .project_meta_set_string(storage.project_id(), EMBEDDER_FINGERPRINT_KEY, &current_fp)
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
