@@ -49,6 +49,8 @@ impl ElasticsearchClient {
             "entity_id": entity_ids,
             "segment_id": field("segment_id"),
             "test": parse_i64("test"),
+            "generated": parse_i64("generated"),
+            "dependency": parse_i64("dependency"),
             "category": parse_i64("category"),
         })
     }

@@ -34,6 +34,8 @@ fn doc(
         .with_field("project_id", project_id.to_string())
         .with_field("epoch", epoch.to_string())
         .with_field("test", if test { "1" } else { "0" }.to_string())
+        .with_field("generated", "0")
+        .with_field("dependency", "0")
         .with_field("category", (category.as_u8()).to_string())
 }
 
@@ -46,6 +48,8 @@ fn options(project_id: i64, epochs: Vec<i64>) -> FulltextSearchOptions {
         epochs,
         excluded_files: None,
         exclude_test: false,
+        exclude_generated: false,
+        exclude_dependency: false,
         include_categories: vec![],
         exclude_categories: vec![],
         term_operator: TermOperator::Or,
@@ -232,6 +236,63 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         hits.iter()
             .all(|h| h.document_id != format!("{flags}-test")),
         "test document must be hidden"
+    );
+    let flags_doc = |id: &str, title: &str, path: &str, generated: bool, dependency: bool| {
+        FulltextDocument::new(id)
+            .with_field("chunk_id", id)
+            .with_field("title", title)
+            .with_field("content", title)
+            .with_field("keywords", title)
+            .with_field("file_path", path)
+            .with_field("project_id", "7")
+            .with_field("epoch", "1")
+            .with_field("test", "0")
+            .with_field("generated", if generated { "1" } else { "0" })
+            .with_field("dependency", if dependency { "1" } else { "0" })
+            .with_field("category", FileCategory::Code.as_u8().to_string())
+    };
+    store
+        .batch_index(
+            index,
+            &[
+                flags_doc(
+                    &format!("{flags}-gen"),
+                    "zephyrwind generated bundle",
+                    "target/bundle.js",
+                    true,
+                    false,
+                ),
+                flags_doc(
+                    &format!("{flags}-dep"),
+                    "zephyrwind vendored helper",
+                    "vendor/helper.js",
+                    false,
+                    true,
+                ),
+            ],
+        )
+        .await
+        .expect("index generated/dependency");
+    store.flush().await.expect("flush");
+    let mut no_generated = options(7, vec![1]);
+    no_generated.exclude_generated = true;
+    let hits = store
+        .search("zephyrwind", &no_generated)
+        .await
+        .expect("exclude generated");
+    assert!(
+        hits.iter().all(|h| h.document_id != format!("{flags}-gen")),
+        "generated document must be hidden"
+    );
+    let mut no_dependency = options(7, vec![1]);
+    no_dependency.exclude_dependency = true;
+    let hits = store
+        .search("zephyrwind", &no_dependency)
+        .await
+        .expect("exclude dependency");
+    assert!(
+        hits.iter().all(|h| h.document_id != format!("{flags}-dep")),
+        "dependency document must be hidden"
     );
     let mut docs_only = options(7, vec![1]);
     docs_only.include_categories = vec![FileCategory::Documentation];

@@ -50,6 +50,14 @@ pub fn build_bm25_documents(
                     "test",
                     test_storage_value(&chunk.metadata.test_info).to_string(),
                 )
+                .with_field(
+                    "generated",
+                    u8::from(cce_types::is_generated_path(&chunk.metadata.file_path)).to_string(),
+                )
+                .with_field(
+                    "dependency",
+                    u8::from(cce_types::is_dependency_path(&chunk.metadata.file_path)).to_string(),
+                )
                 .with_field("category", chunk.metadata.file_category.as_u8().to_string())
         })
         .collect()

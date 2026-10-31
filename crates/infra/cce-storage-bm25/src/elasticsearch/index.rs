@@ -46,6 +46,8 @@ impl ElasticsearchClient {
                     "entity_id": { "type": "keyword", "index": false },
                     "segment_id": { "type": "keyword", "index": false },
                     "test": { "type": "integer" },
+                    "generated": { "type": "integer" },
+                    "dependency": { "type": "integer" },
                     "category": { "type": "integer" },
                 }
             }

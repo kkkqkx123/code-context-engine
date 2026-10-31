@@ -27,7 +27,7 @@ impl ElasticsearchClient {
                 "query": { "bool": { "filter": Self::scope_filter(project_id, &[epoch]) } },
                 "size": SNAPSHOT_PAGE_SIZE,
                 "sort": [{ "document_id": "asc" }],
-                "_source": ["document_id", "chunk_id", "file_path", "title", "project_id", "epoch", "entity_id", "segment_id", "test", "category"],
+                "_source": ["document_id", "chunk_id", "file_path", "title", "project_id", "epoch", "entity_id", "segment_id", "test", "generated", "dependency", "category"],
             });
             if let Some(after) = search_after.as_ref() {
                 body["search_after"] = json!([after]);
@@ -75,7 +75,7 @@ impl ElasticsearchClient {
                         fields.insert(name.to_string(), value.to_string());
                     }
                 }
-                for name in ["epoch", "test", "category"] {
+                for name in ["epoch", "test", "generated", "dependency", "category"] {
                     if let Some(value) = source.get(name).and_then(Value::as_i64) {
                         fields.insert(name.to_string(), value.to_string());
                     }

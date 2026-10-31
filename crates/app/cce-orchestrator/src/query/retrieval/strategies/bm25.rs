@@ -59,14 +59,13 @@ impl Bm25Strategy {
         query_filter: &QueryFilter,
     ) -> Result<Vec<SearchResult>> {
         // Step 1: Build retrieval options with native project_id and epoch filters.
-        // Glob patterns and excluded content types are applied locally inside
-        // the strategy with over-fetch so filtered slots are refilled before fusion.
-        // Storage only excludes test-marked rows; generated and dependency
-        // paths are filtered locally via path classification.
+        // Content-type exclusions are indexed markers pushed to storage.
+        // Only glob patterns and the BM25-missing directory prefix are applied
+        // locally with over-fetch so filtered slots are refilled before fusion.
         let base_limit = options.config.vector.top_k.max(options.config.result.limit);
         let needs_over_fetch = !options.include_patterns.is_empty()
             || !options.exclude_patterns.is_empty()
-            || !options.exclude_content_types.is_empty();
+            || options.directory_prefix.is_some();
         let limit = if needs_over_fetch {
             (base_limit.saturating_mul(3)).max(base_limit + 20).min(200)
         } else {
@@ -86,6 +85,12 @@ impl Bm25Strategy {
             exclude_test: options
                 .exclude_content_types
                 .contains(&crate::query::types::ExcludableContentType::Test),
+            exclude_generated: options
+                .exclude_content_types
+                .contains(&crate::query::types::ExcludableContentType::Generated),
+            exclude_dependency: options
+                .exclude_content_types
+                .contains(&crate::query::types::ExcludableContentType::Dependency),
             include_categories: options.include_categories.clone(),
             exclude_categories: options.exclude_categories.clone(),
             term_operator: options.config.bm25.term_operator,
@@ -169,10 +174,7 @@ fn apply_bm25_strategy_filters(
         .unwrap_or_default();
     let mut kept = Vec::with_capacity(filtered.len().min(limit));
     for item in filtered {
-        if crate::query::types::query_options::path_excluded_by_types(
-            &item.file_path,
-            &options.exclude_content_types,
-        ) {
+        if !directory_prefix_allows(&item.file_path, options.directory_prefix.as_deref()) {
             continue;
         }
         kept.push(item);
@@ -181,6 +183,24 @@ fn apply_bm25_strategy_filters(
         }
     }
     kept
+}
+
+/// Whether a result path passes the optional directory prefix filter.
+///
+/// Mirrors the vector storage prefix semantics: exact match or slash-boundary
+/// prefix on the normalized project path. The BM25 index carries no prefix
+/// field, so this stays a query-time check with over-fetch refill.
+fn directory_prefix_allows(file_path: &str, prefix: Option<&str>) -> bool {
+    let Some(prefix) = prefix else {
+        return true;
+    };
+    let normalized = cce_types::normalize_project_path(file_path);
+    let trimmed = cce_types::normalize_project_path(prefix.trim_matches('/'));
+    let trimmed = trimmed.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return true;
+    }
+    normalized == trimmed || normalized.starts_with(&format!("{trimmed}/"))
 }
 
 /// Classify a BM25 retrieval error.

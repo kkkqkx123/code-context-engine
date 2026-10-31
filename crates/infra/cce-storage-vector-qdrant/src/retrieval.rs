@@ -120,6 +120,20 @@ impl QdrantRetrieval {
                 }));
             }
 
+            if f.exclude_generated {
+                must_not_conditions.push(serde_json::json!({
+                    "key": "generated",
+                    "match": { "value": true }
+                }));
+            }
+
+            if f.exclude_dependency {
+                must_not_conditions.push(serde_json::json!({
+                    "key": "dependency",
+                    "match": { "value": true }
+                }));
+            }
+
             if must_conditions.is_empty() && must_not_conditions.is_empty() {
                 None
             } else {

@@ -32,7 +32,9 @@ fn point(
             .with_type(kind)
             .with_category(category)
             .with_epoch(epoch)
-            .with_test(test),
+            .with_test(test)
+            .with_generated(cce_types::is_generated_path(file))
+            .with_dependency(cce_types::is_dependency_path(file)),
     )
 }
 
@@ -266,6 +268,56 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
         .expect("category search");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].id, "doc-1");
+    // Generated / dependency markers push down like the test marker.
+    let markers = format!("{tag}-markers");
+    store
+        .upsert_points(&[
+            code_point(
+                "plain-1",
+                vec![1.0, 0.0, 0.0, 0.0],
+                "src/plain.rs",
+                &markers,
+                1,
+            ),
+            code_point(
+                "gen-1",
+                vec![1.0, 0.05, 0.0, 0.0],
+                "target/bundle.js",
+                &markers,
+                1,
+            ),
+            code_point(
+                "dep-1",
+                vec![1.0, 0.02, 0.0, 0.0],
+                "vendor/helper.js",
+                &markers,
+                1,
+            ),
+        ])
+        .await
+        .expect("upsert markers");
+    let hits = store
+        .search_dense(
+            DenseSearchQuery::new(vec![1.0, 0.0, 0.0, 0.0], 10).with_filter(SearchFilter {
+                group_id: Some(markers.clone()),
+                exclude_generated: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("exclude generated");
+    assert!(hits.iter().all(|h| h.id != "gen-1"));
+    let hits = store
+        .search_dense(
+            DenseSearchQuery::new(vec![1.0, 0.0, 0.0, 0.0], 10).with_filter(SearchFilter {
+                group_id: Some(markers.clone()),
+                exclude_dependency: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("exclude dependency");
+    assert!(hits.iter().all(|h| h.id != "dep-1"));
 
     // Scoped file delete then group delete, counts follow along.
     let removed = store
@@ -280,6 +332,7 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
         (&generation, 2),
         (&types, 2),
         (&docs, 3),
+        (&markers, 3),
         (&orthogonal, 2),
     ] {
         let removed = store.delete_by_group(cleanup).await.expect("delete group");

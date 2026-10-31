@@ -190,6 +190,14 @@ impl LocalVectorStore {
             sim = sim.must_not(FilterCondition::match_value("test", "true"));
             has = true;
         }
+        if filter.exclude_generated {
+            sim = sim.must_not(FilterCondition::match_value("generated", "true"));
+            has = true;
+        }
+        if filter.exclude_dependency {
+            sim = sim.must_not(FilterCondition::match_value("dependency", "true"));
+            has = true;
+        }
         if has { Some(sim) } else { None }
     }
 

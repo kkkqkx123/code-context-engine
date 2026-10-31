@@ -430,13 +430,26 @@ impl Bm25Client {
                 (schema.chunk_id, "chunk_id"),
                 (schema.file_path, "file_path"),
                 (schema.segment_id, "segment_id"),
-                (schema.test, "test"),
-                (schema.category, "category"),
             ] {
                 if let Some(value) = document
                     .get_first(field)
                     .and_then(|value| value.as_str().map(ToString::to_string))
                 {
+                    result = result.with_field(target, value);
+                }
+            }
+            for (field, target) in [
+                (schema.test, "test"),
+                (schema.generated, "generated"),
+                (schema.dependency, "dependency"),
+                (schema.category, "category"),
+            ] {
+                if let Some(value) = document.get_first(field).and_then(|value| {
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .or_else(|| value.as_u64().map(|v| v.to_string()))
+                }) {
                     result = result.with_field(target, value);
                 }
             }

@@ -215,6 +215,57 @@ pub fn is_extensionless_doc_name(lower_name: &str) -> bool {
     EXTENSIONLESS_DOC_NAMES.contains(&lower_name)
 }
 
+/// Whether a normalized project-relative path is a generated output.
+///
+/// Single source of truth shared by index-time marking and query-time
+/// filtering so storage pushdown can never diverge from path classification.
+pub fn is_generated_path(path: &str) -> bool {
+    const DIR_MARKERS: &[&str] = &[
+        "target/",
+        "build/",
+        "dist/",
+        "out/",
+        "generated/",
+        ".next/",
+        "__pycache__/",
+    ];
+    const SUFFIX_MARKERS: &[&str] = &[
+        ".generated.",
+        ".pb.",
+        ".min.js",
+        ".bundle.js",
+        ".lock",
+        ".rkyv",
+    ];
+    if DIR_MARKERS.iter().any(|m| path.contains(m)) {
+        return true;
+    }
+    if path.starts_with("target/") || path.starts_with("build/") || path.starts_with("dist/") {
+        return true;
+    }
+    SUFFIX_MARKERS.iter().any(|m| path.contains(m))
+}
+
+/// Whether a normalized project-relative path is a third-party dependency.
+///
+/// Single source of truth shared by index-time marking and query-time
+/// filtering so storage pushdown can never diverge from path classification.
+pub fn is_dependency_path(path: &str) -> bool {
+    const DIR_MARKERS: &[&str] = &[
+        "node_modules/",
+        "vendor/",
+        "third_party/",
+        "third-party/",
+        ".cargo/",
+        ".venv/",
+        "site-packages/",
+    ];
+    if DIR_MARKERS.iter().any(|m| path.contains(m)) {
+        return true;
+    }
+    path.starts_with("vendor/") || path.starts_with("third_party/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

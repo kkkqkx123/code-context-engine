@@ -104,47 +104,12 @@ impl ExcludableContentType {
 
 /// Shared generated-output detector used by all query paths.
 fn is_generated_path(path: &str) -> bool {
-    const DIR_MARKERS: &[&str] = &[
-        "target/",
-        "build/",
-        "dist/",
-        "out/",
-        "generated/",
-        ".next/",
-        "__pycache__/",
-    ];
-    const SUFFIX_MARKERS: &[&str] = &[
-        ".generated.",
-        ".pb.",
-        ".min.js",
-        ".bundle.js",
-        ".lock",
-        ".rkyv",
-    ];
-    if DIR_MARKERS.iter().any(|m| path.contains(m)) {
-        return true;
-    }
-    if path.starts_with("target/") || path.starts_with("build/") || path.starts_with("dist/") {
-        return true;
-    }
-    SUFFIX_MARKERS.iter().any(|m| path.contains(m))
+    cce_types::is_generated_path(path)
 }
 
 /// Shared third-party dependency detector used by all query paths.
 fn is_dependency_path(path: &str) -> bool {
-    const DIR_MARKERS: &[&str] = &[
-        "node_modules/",
-        "vendor/",
-        "third_party/",
-        "third-party/",
-        ".cargo/",
-        ".venv/",
-        "site-packages/",
-    ];
-    if DIR_MARKERS.iter().any(|m| path.contains(m)) {
-        return true;
-    }
-    path.starts_with("vendor/") || path.starts_with("third_party/")
+    cce_types::is_dependency_path(path)
 }
 
 /// Whether a normalized path is excluded by any entry of the list.

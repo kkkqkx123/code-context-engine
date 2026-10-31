@@ -72,10 +72,12 @@ pub struct SearchFilter {
     pub file_path: Option<String>,
     /// Directory prefix filter
     pub directory_prefix: Option<String>,
-    /// Exclude test-marked rows only. Generated outputs and third-party
-    /// dependencies carry no storage marker and are filtered at the retrieval
-    /// strategy layer via path classification.
+    /// Exclude test-marked rows only.
     pub exclude_test: bool,
+    /// Exclude generated-output rows (indexed marker, see `Payload`).
+    pub exclude_generated: bool,
+    /// Exclude third-party dependency rows (indexed marker, see `Payload`).
+    pub exclude_dependency: bool,
     /// Include only specific categories
     pub include_categories: Option<Vec<FileCategory>>,
     /// Exclude specific categories
@@ -225,6 +227,14 @@ pub struct Payload {
     /// partially-written payload cannot fail deserialization.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test: Option<bool>,
+    /// Generated-output marker derived from the normalized file path.
+    /// New writes always populate it; `None` reads as not generated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated: Option<bool>,
+    /// Third-party dependency marker derived from the normalized file path.
+    /// New writes always populate it; `None` reads as not a dependency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency: Option<bool>,
     /// Source of the test determination (ast/path/none) stored as u8 encoding.
     /// Always populated on new writes; `Option` is read-side defense only.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -262,6 +272,8 @@ impl Payload {
             r#type: None,
             category: None,
             test: None,
+            generated: None,
+            dependency: None,
             test_source: None,
             truncated: None,
             epoch: None,
@@ -298,6 +310,18 @@ impl Payload {
     /// Set the test-code marker
     pub fn with_test(mut self, test: bool) -> Self {
         self.test = Some(test);
+        self
+    }
+
+    /// Set the generated-output marker
+    pub fn with_generated(mut self, generated: bool) -> Self {
+        self.generated = Some(generated);
+        self
+    }
+
+    /// Set the third-party dependency marker
+    pub fn with_dependency(mut self, dependency: bool) -> Self {
+        self.dependency = Some(dependency);
         self
     }
 
@@ -407,6 +431,12 @@ pub fn payload_matches_filter(payload: &Payload, filter: &SearchFilter) -> bool 
         }
     }
     if filter.exclude_test && payload.test == Some(true) {
+        return false;
+    }
+    if filter.exclude_generated && payload.generated == Some(true) {
+        return false;
+    }
+    if filter.exclude_dependency && payload.dependency == Some(true) {
         return false;
     }
     true

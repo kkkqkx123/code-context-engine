@@ -155,6 +155,8 @@ impl KeywordSearchTool {
                 Some(query_filter.excluded_files().to_vec())
             },
             exclude_test: false,
+            exclude_generated: false,
+            exclude_dependency: false,
             include_categories: Vec::new(),
             exclude_categories: Vec::new(),
             term_operator: request.term_operator,

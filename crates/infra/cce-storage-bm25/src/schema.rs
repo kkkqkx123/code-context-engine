@@ -25,15 +25,19 @@ pub struct IndexSchema {
     /// enabling BM25 ↔ vector matching when no entity is available.
     pub segment_id: Field,
     pub test: Field,
+    pub generated: Field,
+    pub dependency: Field,
     pub category: Field,
     schema: Schema,
 }
 
 impl IndexSchema {
-    // 13-field canonical schema: keep the flat tuple (mirrors the index)
+    // 15-field canonical schema: keep the flat tuple (mirrors the index)
     #[allow(clippy::type_complexity)]
     fn build_canonical() -> (
         Schema,
+        Field,
+        Field,
         Field,
         Field,
         Field,
@@ -90,6 +94,20 @@ impl IndexSchema {
                 .set_indexed()
                 .set_fast(),
         );
+        let generated = schema_builder.add_u64_field(
+            "generated",
+            NumericOptions::default()
+                .set_stored()
+                .set_indexed()
+                .set_fast(),
+        );
+        let dependency = schema_builder.add_u64_field(
+            "dependency",
+            NumericOptions::default()
+                .set_stored()
+                .set_indexed()
+                .set_fast(),
+        );
         let category = schema_builder.add_u64_field(
             "category",
             NumericOptions::default()
@@ -112,6 +130,8 @@ impl IndexSchema {
             entity_id,
             segment_id,
             test,
+            generated,
+            dependency,
             category,
         )
     }
@@ -143,6 +163,8 @@ impl IndexSchema {
             entity_id,
             segment_id,
             test,
+            generated,
+            dependency,
             category,
         ) = Self::build_canonical();
 
@@ -158,6 +180,8 @@ impl IndexSchema {
             entity_id,
             segment_id,
             test,
+            generated,
+            dependency,
             category,
             schema,
         }
@@ -175,6 +199,8 @@ impl IndexSchema {
         let entity_id = Self::resolve_field(tantivy_schema, "entity_id")?;
         let segment_id = Self::resolve_field(tantivy_schema, "segment_id")?;
         let test = Self::resolve_field(tantivy_schema, "test")?;
+        let generated = Self::resolve_field(tantivy_schema, "generated")?;
+        let dependency = Self::resolve_field(tantivy_schema, "dependency")?;
         let category = Self::resolve_field(tantivy_schema, "category")?;
 
         Ok(IndexSchema {
@@ -189,6 +215,8 @@ impl IndexSchema {
             entity_id,
             segment_id,
             test,
+            generated,
+            dependency,
             category,
             schema: tantivy_schema.clone(),
         })
@@ -238,6 +266,16 @@ impl IndexSchema {
                 "test" => {
                     if let Ok(v) = value.parse::<u64>() {
                         doc.add_u64(self.test, v);
+                    }
+                }
+                "generated" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        doc.add_u64(self.generated, v);
+                    }
+                }
+                "dependency" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        doc.add_u64(self.dependency, v);
                     }
                 }
                 "category" => {

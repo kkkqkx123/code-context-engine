@@ -160,6 +160,34 @@ impl Bm25Retrieval {
             ]));
         }
 
+        // Exclude generated-output chunks when requested (indexed marker).
+        if options.exclude_generated {
+            let term = tantivy::Term::from_field_u64(schema.generated, 1);
+            let filter: Box<dyn tantivy::query::Query> = Box::new(tantivy::query::TermQuery::new(
+                term,
+                tantivy::schema::IndexRecordOption::Basic,
+            ));
+
+            query = Box::new(tantivy::query::BooleanQuery::new(vec![
+                (tantivy::query::Occur::Must, query),
+                (tantivy::query::Occur::MustNot, filter),
+            ]));
+        }
+
+        // Exclude third-party dependency chunks when requested (indexed marker).
+        if options.exclude_dependency {
+            let term = tantivy::Term::from_field_u64(schema.dependency, 1);
+            let filter: Box<dyn tantivy::query::Query> = Box::new(tantivy::query::TermQuery::new(
+                term,
+                tantivy::schema::IndexRecordOption::Basic,
+            ));
+
+            query = Box::new(tantivy::query::BooleanQuery::new(vec![
+                (tantivy::query::Occur::Must, query),
+                (tantivy::query::Occur::MustNot, filter),
+            ]));
+        }
+
         // Include only specific categories
         if !options.include_categories.is_empty() {
             let clauses: Vec<(tantivy::query::Occur, Box<dyn tantivy::query::Query>)> = options

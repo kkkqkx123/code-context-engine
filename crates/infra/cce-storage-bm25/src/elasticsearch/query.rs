@@ -66,6 +66,18 @@ impl ElasticsearchClient {
                 .expect("scope filter is an array")
                 .push(json!({ "bool": { "must_not": [{ "term": { "test": 1 } }] } }));
         }
+        if options.exclude_generated {
+            filter
+                .as_array_mut()
+                .expect("scope filter is an array")
+                .push(json!({ "bool": { "must_not": [{ "term": { "generated": 1 } }] } }));
+        }
+        if options.exclude_dependency {
+            filter
+                .as_array_mut()
+                .expect("scope filter is an array")
+                .push(json!({ "bool": { "must_not": [{ "term": { "dependency": 1 } }] } }));
+        }
         if !options.include_categories.is_empty() {
             let values: Vec<u8> = options
                 .include_categories
@@ -109,7 +121,7 @@ impl ElasticsearchClient {
             "size": window,
             "from": options.offset.min(window),
             "track_scores": true,
-            "_source": ["document_id", "chunk_id", "file_path", "title", "project_id", "epoch", "entity_id", "segment_id", "test", "category"],
+            "_source": ["document_id", "chunk_id", "file_path", "title", "project_id", "epoch", "entity_id", "segment_id", "test", "generated", "dependency", "category"],
         })
     }
 
@@ -188,7 +200,7 @@ impl ElasticsearchClient {
                     fields.insert(name.to_string(), value.to_string());
                 }
             };
-            for name in ["test", "category"] {
+            for name in ["test", "generated", "dependency", "category"] {
                 put_num(&mut fields, &source, name);
             }
             if let Some(ids) = source.get("entity_id") {

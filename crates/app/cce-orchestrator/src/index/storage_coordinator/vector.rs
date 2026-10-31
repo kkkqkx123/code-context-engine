@@ -468,6 +468,8 @@ impl StorageCoordinator {
                 .with_entity_ids(content_entity_ids)
                 .with_segment_id(chunk_segment_id(chunk))
                 .with_test(chunk.metadata.test_info.is_test())
+                .with_generated(cce_types::is_generated_path(&chunk.metadata.file_path))
+                .with_dependency(cce_types::is_dependency_path(&chunk.metadata.file_path))
                 .with_test_source(chunk.metadata.test_info.source)
                 .with_truncated(chunk.truncated);
 
@@ -813,6 +815,8 @@ fn build_reembed_points<'a>(
                 .with_entity_ids(record.get_entity_ids())
                 .with_segment_id(segment_id)
                 .with_test(record.test_status == 1)
+                .with_generated(cce_types::is_generated_path(&record.file_path))
+                .with_dependency(cce_types::is_dependency_path(&record.file_path))
                 .with_test_source(TestSource::from_u8(record.test_source))
                 .with_truncated(record.truncated != 0);
 
