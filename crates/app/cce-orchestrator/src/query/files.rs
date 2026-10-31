@@ -6,14 +6,13 @@
 //! returned. Two output tiers share one matcher: bare paths, or paths with
 //! file metadata (size and line count only).
 //!
-//! The directory listing is cached per project root (bounded staleness, see
-//! [`FileListCache`]) so repeated queries skip the full walk; the metadata
-//! tier always stats the live filesystem, so vanished files are still
-//! skipped. Generation filtering never applies: files have no cross-backend
-//! consistency requirement, so returning the newest data is correct. The
-//! remote relation branch holds no project files, so file search there
-//! reports unavailability instead of silently returning indexed (potentially
-//! stale) rows.
+//! The directory listing is cached per project root (bounded staleness) so
+//! repeated queries skip the full walk; the metadata tier always stats the
+//! live filesystem, so vanished files are still skipped. Content-type
+//! exclusion applies through the shared path filter whenever the caller
+//! supplies it. Branches without live project files rank indexed file rows
+//! with the same matcher and ordering instead, returning path-only hits
+//! without live metadata.
 
 use std::collections::HashMap;
 use std::io::BufRead;
@@ -44,15 +43,15 @@ pub struct FileHit {
 /// include/exclude) is the same [`ExpansionPathFilter`] the expansion and
 /// relation paths enforce, so a file hidden from semantic recall is hidden
 /// from file search too. `respect_ignore` mirrors the indexer default:
-/// root `.gitignore`/`.indexignore` rules prune the walk. Per-request
-/// filters (prefix, globs) are not yet threaded through the file-search
-/// API surface, so callers pass defaults today; the mechanism is covered by
-/// unit tests for when that wiring lands.
+/// `.gitignore`/`.indexignore` rules at every directory level prune the walk,
+/// deeper levels overriding shallower ones. Callers thread
+/// per-request filters through the file-search API surface; the walk-level
+/// listing cache is unaffected because path filters apply after the walk.
 #[derive(Clone, Debug)]
 pub struct FileSearchOptions {
     /// Directory-prefix, content-type and glob判定 shared with query paths.
     pub path_filter: ExpansionPathFilter,
-    /// Observe root ignore files during the walk (default on).
+    /// Observe ignore files during the walk (default on).
     pub respect_ignore: bool,
     /// Serve the directory listing from the per-root cache (default on).
     pub use_cache: bool,
@@ -197,11 +196,7 @@ fn checked_query(query: &str, limit: usize) -> crate::query::error::Result<Strin
 }
 
 /// Rank pre-filtered candidate paths against the query pattern.
-fn rank_candidates(
-    candidates: Vec<String>,
-    pattern: &str,
-    limit: usize,
-) -> Vec<(String, i64)> {
+fn rank_candidates(candidates: Vec<String>, pattern: &str, limit: usize) -> Vec<(String, i64)> {
     let match_full_path = pattern.contains('/');
     let mut ranked: Vec<(String, i64)> = Vec::new();
     for path in candidates {
@@ -241,7 +236,7 @@ fn cached_or_walked_files(
     options: &FileSearchOptions,
 ) -> crate::query::error::Result<Vec<String>> {
     if !options.use_cache {
-        return walk_project_files(root, load_ignore_matcher(root, options));
+        return walk_project_files(root, load_ignore_stack(root, options));
     }
     let key = (
         root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
@@ -255,7 +250,7 @@ fn cached_or_walked_files(
     {
         return Ok(entry.paths.clone());
     }
-    let paths = walk_project_files(root, load_ignore_matcher(root, options))?;
+    let paths = walk_project_files(root, load_ignore_stack(root, options))?;
     if let Ok(mut cache) = file_list_cache().lock() {
         cache.insert(
             key,
@@ -278,9 +273,12 @@ fn mtime_matches(cached: Option<SystemTime>, current: Option<SystemTime>) -> boo
     }
 }
 
-/// Load root ignore rules: `.gitignore` plus `.indexignore` merged into one
-/// matcher. Missing files simply contribute nothing.
-fn load_ignore_matcher(root: &Path, options: &FileSearchOptions) -> Option<cce_scanner::IgnoreMatcher> {
+/// Stack ignore rules under `root`: the merged root `.gitignore` plus
+/// `.indexignore` as level zero, deeper per-directory files discovered during
+/// the walk with deeper rules overriding shallower ones. Missing files simply
+/// contribute nothing. Nested edits surface after the listing cache expires,
+/// like deep tree changes.
+fn load_ignore_stack(root: &Path, options: &FileSearchOptions) -> Option<cce_scanner::IgnoreStack> {
     if !options.respect_ignore {
         return None;
     }
@@ -297,19 +295,24 @@ fn load_ignore_matcher(root: &Path, options: &FileSearchOptions) -> Option<cce_s
             Err(_) => continue,
         }
     }
-    merged
+    let root_matcher = merged.unwrap_or_else(|| cce_scanner::IgnoreMatcher::new(Vec::new(), root));
+    Some(cce_scanner::IgnoreStack::new(
+        root.to_path_buf(),
+        root_matcher,
+        vec![".gitignore".to_string(), ".indexignore".to_string()],
+    ))
 }
 
 /// Walk `root` and collect project-relative file paths.
 ///
-/// Hidden directories are always pruned; when an ignore matcher is present
-/// its ignored directories are pruned too (so `target/`-scale subtrees are
-/// never descended into) and ignored files are skipped.
+/// Hidden directories are always pruned; when an ignore stack is present
+/// ignored directories are pruned too (so `target/`-scale subtrees are
+/// never descended into) and ignored files are skipped. Nested ignore files
+/// apply with deeper rules overriding shallower ones.
 fn walk_project_files(
     root: &Path,
-    ignore: Option<cce_scanner::IgnoreMatcher>,
+    ignore: Option<cce_scanner::IgnoreStack>,
 ) -> crate::query::error::Result<Vec<String>> {
-    let has_patterns = ignore.as_ref().is_some_and(|m| m.pattern_count() > 0);
     let mut paths = Vec::new();
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
@@ -321,10 +324,8 @@ fn walk_project_files(
             if is_skipped_dir(entry) {
                 return false;
             }
-            if has_patterns
-                && ignore
-                    .as_ref()
-                    .is_some_and(|m| m.is_ignored(entry.path()))
+            if let Some(stack) = ignore.as_ref()
+                && stack.is_ignored(entry.path())
             {
                 return false;
             }
@@ -516,6 +517,30 @@ mod tests {
     }
 
     #[test]
+    fn nested_ignore_child_reinclude_overrides_parent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".gitignore"), "*.log\n").expect("ignore file");
+        std::fs::create_dir_all(dir.path().join("sub")).expect("sub dir");
+        std::fs::write(dir.path().join("sub/.gitignore"), "!keep.log\n").expect("ignore file");
+        std::fs::write(dir.path().join("sub/keep.log"), "keep\n").expect("write file");
+        std::fs::write(dir.path().join("sub/drop.log"), "drop\n").expect("write file");
+        std::fs::write(dir.path().join("root.log"), "drop\n").expect("write file");
+        let hits = search_file_paths(dir.path(), "log", 10, &search_options()).expect("search");
+        assert_eq!(hits, vec!["sub/keep.log".to_string()]);
+    }
+
+    #[test]
+    fn nested_ignore_prunes_ignored_subtree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".gitignore"), "build/\n").expect("ignore file");
+        std::fs::create_dir_all(dir.path().join("build")).expect("build dir");
+        std::fs::write(dir.path().join("build/output.rs"), "fn x() {}\n").expect("write file");
+        std::fs::write(dir.path().join("src_main.rs"), "fn x() {}\n").expect("write file");
+        let hits = search_file_paths(dir.path(), "rs", 10, &search_options()).expect("search");
+        assert_eq!(hits, vec!["src_main.rs".to_string()]);
+    }
+
+    #[test]
     fn ignore_rules_can_be_disabled() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join(".gitignore"), "target/\n").expect("ignore file");
@@ -537,6 +562,22 @@ mod tests {
         std::fs::write(dir.path().join("other.rs"), "fn x() {}\n").expect("write file");
         let mut options = search_options();
         options.path_filter.directory_prefix = Some("src".to_string());
+        let hits = search_file_paths(dir.path(), "rs", 10, &options).expect("search");
+        assert_eq!(hits, vec!["src/main.rs".to_string()]);
+    }
+
+    #[test]
+    fn combined_path_filter_applies_to_file_search() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("src/main.rs"), "fn x() {}\n").expect("write file");
+        std::fs::write(dir.path().join("src/skip.rs"), "fn x() {}\n").expect("write file");
+        std::fs::write(dir.path().join("src/gen.generated.rs"), "fn x() {}\n").expect("write file");
+        let mut options = search_options();
+        options.path_filter.directory_prefix = Some("src".to_string());
+        options.path_filter.exclude_patterns = vec!["src/skip.rs".to_string()];
+        options.path_filter.exclude_content_types =
+            vec![crate::query::types::ExcludableContentType::Generated];
         let hits = search_file_paths(dir.path(), "rs", 10, &options).expect("search");
         assert_eq!(hits, vec!["src/main.rs".to_string()]);
     }

@@ -11,7 +11,7 @@ use cce_api::models::{ContentStateDto, SearchResultItem};
 use cce_codegraph::CallChainQuery;
 use cce_config::modules::search::RelationAnnotationConfig;
 use cce_orchestrator::SearchResult as OrchestratorResultItem;
-use cce_orchestrator::query::expansion::{NeighbourResolver, stable_id_of};
+use cce_orchestrator::query::expansion::{ExpansionPathFilter, NeighbourResolver, stable_id_of};
 use cce_orchestrator::query::types::{
     ContentState, DowngradeReason, ExcludableContentType, QueryConfigBuilder, SearchConfig,
     SearchSources,
@@ -117,6 +117,14 @@ pub struct FileSearchSpec {
     pub limit: usize,
     /// When true return size and line counts, otherwise paths only.
     pub detail: bool,
+    /// Directory prefix filter, shared with the query paths.
+    pub directory_prefix: Option<String>,
+    /// Already-parsed excluded content types.
+    pub exclude_content_types: Vec<ExcludableContentType>,
+    /// Glob include patterns.
+    pub include_patterns: Vec<String>,
+    /// Glob exclude patterns.
+    pub exclude_patterns: Vec<String>,
 }
 
 /// One file hit converted for transport rendering.
@@ -637,9 +645,18 @@ impl<'a> SearchService<'a> {
         }
         let entry = self.load_entry(project_id).await?;
         let coordinator = self.build_coordinator(project_id, &entry).await?;
+        let options = cce_orchestrator::query::files::FileSearchOptions {
+            path_filter: ExpansionPathFilter {
+                directory_prefix: spec.directory_prefix.clone(),
+                exclude_content_types: spec.exclude_content_types.clone(),
+                include_patterns: spec.include_patterns.clone(),
+                exclude_patterns: spec.exclude_patterns.clone(),
+            },
+            ..cce_orchestrator::query::files::FileSearchOptions::default()
+        };
         if spec.detail {
             let hits = coordinator
-                .search_files(&spec.query, spec.limit)
+                .search_files(&spec.query, spec.limit, &options)
                 .await
                 .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
             let items = hits
@@ -656,7 +673,7 @@ impl<'a> SearchService<'a> {
             })
         } else {
             let paths = coordinator
-                .search_file_paths(&spec.query, spec.limit)
+                .search_file_paths(&spec.query, spec.limit, &options)
                 .await
                 .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
             let items = paths

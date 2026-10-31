@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
-use crate::ignore::IgnoreMatcher;
+use crate::ignore::{IgnoreMatcher, IgnoreStack};
 use cce_utils::Glob;
 
 /// Options for loading pattern matcher
@@ -39,6 +39,9 @@ pub struct PatternMatcher {
     exclude_patterns: Vec<Glob>,
     /// Gitignore matcher (optional)
     gitignore: Option<IgnoreMatcher>,
+    /// Stacked per-directory ignore matchers, preferred over the single
+    /// root matcher when nested ignore files are respected
+    ignore_stack: Option<Arc<IgnoreStack>>,
     /// Glob patterns that failed to compile and were dropped.
     /// Dropped excludes widen the indexed set, dropped includes narrow
     /// it: either way the scanned set drifts, so callers surface these.
@@ -98,6 +101,7 @@ impl PatternMatcher {
             include_patterns,
             exclude_patterns,
             gitignore,
+            ignore_stack: None,
             dropped_globs: dropped,
             ignore_load_error: None,
             ignore_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -107,6 +111,9 @@ impl PatternMatcher {
     /// Load pattern matcher from options
     ///
     /// This method handles loading .gitignore files and merging custom patterns.
+    /// Nested ignore files below the root are stacked on the composed root
+    /// matcher when ignore files are respected, so deeper rules override
+    /// shallower ones; otherwise only the single root matcher applies.
     pub fn from_options(opts: &PatternLoadOptions, root_path: &Path) -> Self {
         let (gitignore, ignore_load_error) = Self::load_ignore(opts, root_path);
         let mut matcher = Self::with_gitignore(
@@ -115,6 +122,17 @@ impl PatternMatcher {
             gitignore,
         );
         matcher.ignore_load_error = ignore_load_error;
+        if opts.respect_gitignore {
+            let root = matcher
+                .gitignore
+                .clone()
+                .unwrap_or_else(|| IgnoreMatcher::new(Vec::new(), root_path));
+            matcher.ignore_stack = Some(Arc::new(IgnoreStack::new(
+                root_path.to_path_buf(),
+                root,
+                vec![".gitignore".to_string()],
+            )));
+        }
         matcher
     }
 
@@ -179,12 +197,14 @@ impl PatternMatcher {
         (matcher, load_error)
     }
 
-    /// Memoized [`IgnoreMatcher::is_ignored`] for the given path.
+    /// Memoized ignore verdict for the given path.
     ///
+    /// Routes through the stacked per-directory matchers when nested ignore
+    /// files are respected, otherwise through the single root matcher.
     /// The lock is not held while computing: a concurrent duplicate
     /// computation is idempotent, and releasing it lets distinct paths (for
     /// example the per-file path) be evaluated in parallel.
-    fn is_ignored_cached(&self, matcher: &IgnoreMatcher, path: &Path) -> bool {
+    fn is_ignored_cached(&self, path: &Path) -> bool {
         if let Some(verdict) = self
             .ignore_cache
             .lock()
@@ -193,7 +213,13 @@ impl PatternMatcher {
         {
             return *verdict;
         }
-        let verdict = matcher.is_ignored(path);
+        let verdict = if let Some(stack) = &self.ignore_stack {
+            stack.is_ignored(path)
+        } else if let Some(matcher) = &self.gitignore {
+            matcher.is_ignored(path)
+        } else {
+            false
+        };
         self.ignore_cache
             .lock()
             .expect("pattern ignore cache poisoned")
@@ -222,16 +248,16 @@ impl PatternMatcher {
             return false;
         }
 
-        // Check gitignore patterns
-        if let Some(matcher) = &self.gitignore {
-            if self.is_ignored_cached(matcher, path) {
+        // Check ignore files (stacked when nested rules are respected)
+        if self.gitignore.is_some() || self.ignore_stack.is_some() {
+            if self.is_ignored_cached(path) {
                 return false;
             }
 
             // Check parent directories
             let mut current = path.parent();
             while let Some(parent) = current {
-                if self.is_ignored_cached(matcher, parent) {
+                if self.is_ignored_cached(parent) {
                     return false;
                 }
                 current = parent.parent();
@@ -250,9 +276,9 @@ impl PatternMatcher {
             return true;
         }
 
-        // Check gitignore patterns
-        if let Some(matcher) = &self.gitignore {
-            if self.is_ignored_cached(matcher, path) {
+        // Check ignore files (stacked when nested rules are respected)
+        if self.gitignore.is_some() || self.ignore_stack.is_some() {
+            if self.is_ignored_cached(path) {
                 return true;
             }
         }
@@ -280,7 +306,7 @@ impl PatternMatcher {
         self.exclude_patterns.len()
     }
 
-    /// Get gitignore pattern count
+    /// Get root-level gitignore pattern count
     pub fn gitignore_pattern_count(&self) -> usize {
         self.gitignore
             .as_ref()

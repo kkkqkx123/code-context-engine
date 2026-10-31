@@ -306,6 +306,37 @@ fn test_scan_with_gitignore() {
 }
 
 #[test]
+fn test_scan_with_nested_gitignore() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+    std::fs::write(temp_dir.path().join(".gitignore"), "*.log\n")
+        .expect("Failed to write gitignore");
+    std::fs::create_dir_all(temp_dir.path().join("sub")).expect("Failed to create sub");
+    std::fs::write(temp_dir.path().join("sub/.gitignore"), "!keep.log\n")
+        .expect("Failed to write nested gitignore");
+    std::fs::write(temp_dir.path().join("sub/keep.log"), "keep").expect("Failed to write");
+    std::fs::write(temp_dir.path().join("sub/drop.log"), "drop").expect("Failed to write");
+    std::fs::write(temp_dir.path().join("keep.rs"), "code").expect("Failed to write");
+
+    let opts = ScanOptions {
+        root_path: temp_dir.path().to_str().unwrap().to_string(),
+        respect_gitignore: true,
+        ..Default::default()
+    };
+
+    let mut scanner = create_test_scanner();
+    let entries = scanner.scan(&opts).expect("Scan failed");
+
+    let paths: Vec<String> = entries
+        .iter()
+        .map(|e| e.relative_path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(paths.iter().any(|p| p.ends_with("sub/keep.log")));
+    assert!(!paths.iter().any(|p| p.ends_with("sub/drop.log")));
+    assert!(paths.iter().any(|p| p.ends_with("keep.rs")));
+}
+
+#[test]
 fn test_scan_binary_file_detection() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
 

@@ -4,7 +4,9 @@
 //! and match file paths against ignore-style patterns.
 //! Patterns can be loaded from any source(.gitignore and .indexignore) and merged together.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use cce_utils::Glob;
 
@@ -194,8 +196,11 @@ impl IgnoreMatcher {
         self.patterns.extend(other.patterns);
     }
 
-    /// Check if a path should be ignored
-    pub fn is_ignored(&self, path: &Path) -> bool {
+    /// Evaluate patterns without a default verdict.
+    ///
+    /// The last matching pattern decides; no match yields no opinion so a
+    /// shallower directory level keeps its say when matchers are stacked.
+    pub fn check(&self, path: &Path) -> Option<bool> {
         // The scanner often passes paths relative to `base_dir` (root
         // stripped). Directory-ness must be resolved against `base_dir` —
         // resolving the relative path against the process CWD would silently
@@ -210,7 +215,7 @@ impl IgnoreMatcher {
         let path_str = relative_path.to_string_lossy();
         let is_dir = abs_path.is_dir();
 
-        let mut ignored = false;
+        let mut ignored = None;
 
         for pattern in &self.patterns {
             if pattern.dir_only && !is_dir {
@@ -220,11 +225,16 @@ impl IgnoreMatcher {
             let matched = matches_pattern(&path_str, pattern);
 
             if matched {
-                ignored = !pattern.negated;
+                ignored = Some(!pattern.negated);
             }
         }
 
         ignored
+    }
+
+    /// Check if a path should be ignored
+    pub fn is_ignored(&self, path: &Path) -> bool {
+        self.check(path).unwrap_or(false)
     }
 
     /// Get the number of patterns
@@ -237,6 +247,102 @@ impl IgnoreMatcher {
     /// exclude, so callers surface the count instead of staying silent.
     pub fn invalid_pattern_count(&self) -> usize {
         self.patterns.iter().filter(|p| p.glob.is_none()).count()
+    }
+}
+
+/// Lazily loaded stack of per-directory ignore matchers under one root.
+///
+/// Level zero is the caller-supplied root matcher (already composed with any
+/// custom patterns or custom ignore file path); deeper levels are discovered
+/// on demand by reading the configured file names in each ancestor directory.
+/// Folding runs root to leaf so deeper rules override shallower ones, and a
+/// level with no opinion leaves the inherited verdict untouched.
+pub struct IgnoreStack {
+    root: PathBuf,
+    filenames: Vec<String>,
+    root_matcher: IgnoreMatcher,
+    levels: Mutex<HashMap<PathBuf, Option<IgnoreMatcher>>>,
+}
+
+impl std::fmt::Debug for IgnoreStack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IgnoreStack")
+            .field("root", &self.root)
+            .field("filenames", &self.filenames)
+            .field(
+                "cached_levels",
+                &self.levels.lock().map(|levels| levels.len()).unwrap_or(0),
+            )
+            .finish()
+    }
+}
+
+impl IgnoreStack {
+    /// Stack per-directory ignore files under `root` on a composed root matcher.
+    pub fn new(root: PathBuf, root_matcher: IgnoreMatcher, filenames: Vec<String>) -> Self {
+        Self {
+            root,
+            filenames,
+            root_matcher,
+            levels: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Whether the absolute or root-relative `path` is ignored.
+    ///
+    /// Ancestor directories strictly below the root contribute their own
+    /// ignore files with the deepest opinion winning; a directory's own
+    /// ignore files never decide the directory itself, only its contents.
+    pub fn is_ignored(&self, path: &Path) -> bool {
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root.join(path)
+        };
+        let mut verdict = self.root_matcher.check(&absolute);
+        // Levels are visited deepest first, so the first opinion found is
+        // the deepest one and wins; levels with no opinion defer upward.
+        let mut current = absolute.parent();
+        while let Some(dir) = current {
+            if dir == self.root || !dir.starts_with(&self.root) {
+                break;
+            }
+            if let Some(matcher) = self.level_matcher(dir)
+                && let Some(opinion) = matcher.check(&absolute)
+            {
+                verdict = Some(opinion);
+                break;
+            }
+            current = dir.parent();
+        }
+        verdict.unwrap_or(false)
+    }
+
+    /// Matcher composed from the ignore files directly inside `dir`.
+    ///
+    /// Missing or unreadable files contribute nothing; the outcome (including
+    /// the absence) is cached so every directory pays discovery once.
+    fn level_matcher(&self, dir: &Path) -> Option<IgnoreMatcher> {
+        let mut cached = self.levels.lock().expect("ignore stack cache poisoned");
+        if let Some(entry) = cached.get(dir) {
+            return entry.clone();
+        }
+        let mut merged: Option<IgnoreMatcher> = None;
+        for name in &self.filenames {
+            let candidate = dir.join(name);
+            if !candidate.is_file() {
+                continue;
+            }
+            if let Ok(matcher) = IgnoreMatcher::from_file(&candidate) {
+                if let Some(existing) = merged.as_mut() {
+                    existing.merge(matcher);
+                } else {
+                    merged = Some(matcher);
+                }
+            }
+        }
+        cached.insert(dir.to_path_buf(), merged.clone());
+        merged
     }
 }
 
@@ -323,5 +429,60 @@ mod tests {
         let matcher = IgnoreMatcher::new(vec!["node_modules/".to_string()], &base);
         assert!(matcher.is_ignored(Path::new("node_modules")));
         assert!(!matcher.is_ignored(Path::new("node_modules.js")));
+    }
+
+    fn stack_fixture(root: &Path, root_patterns: &[&str]) -> IgnoreStack {
+        let patterns = root_patterns.iter().map(|s| s.to_string()).collect();
+        IgnoreStack::new(
+            root.to_path_buf(),
+            IgnoreMatcher::new(patterns, root),
+            vec![".gitignore".to_string()],
+        )
+    }
+
+    #[test]
+    fn test_stack_child_reinclude_overrides_parent() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let base = temp_dir.path().canonicalize().expect("canonical");
+        std::fs::create_dir_all(base.join("sub")).expect("sub dir");
+        std::fs::write(base.join("sub/.gitignore"), "!keep.log\n").expect("ignore file");
+        let stack = stack_fixture(&base, &["*.log"]);
+        assert!(!stack.is_ignored(&base.join("sub/keep.log")));
+        assert!(stack.is_ignored(&base.join("sub/drop.log")));
+        assert!(stack.is_ignored(&base.join("root.log")));
+    }
+
+    #[test]
+    fn test_stack_parent_ignore_prunes_subtree() {
+        // Directory-only patterns match the directory itself; descendants
+        // never reach the stack because callers prune top-down.
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let base = temp_dir.path().canonicalize().expect("canonical");
+        std::fs::create_dir_all(base.join("build")).expect("build dir");
+        let stack = stack_fixture(&base, &["build/"]);
+        assert!(stack.is_ignored(&base.join("build")));
+        assert!(!stack.is_ignored(&base.join("src/main.rs")));
+    }
+
+    #[test]
+    fn test_stack_directory_own_file_never_decides_itself() {
+        // A directory's own ignore file constrains its contents, not the
+        // directory itself: the parent verdict still applies.
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let base = temp_dir.path().canonicalize().expect("canonical");
+        std::fs::create_dir_all(base.join("sub")).expect("sub dir");
+        std::fs::write(base.join("sub/.gitignore"), "sub/\n").expect("ignore file");
+        let stack = stack_fixture(&base, &[]);
+        assert!(!stack.is_ignored(&base.join("sub")));
+        assert!(!stack.is_ignored(&base.join("sub/inner.rs")));
+    }
+
+    #[test]
+    fn test_stack_empty_without_files() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let base = temp_dir.path().canonicalize().expect("canonical");
+        let stack = stack_fixture(&base, &[]);
+        assert!(!stack.is_ignored(&base.join("src/main.rs")));
+        assert!(!stack.is_ignored(Path::new("src/main.rs")));
     }
 }

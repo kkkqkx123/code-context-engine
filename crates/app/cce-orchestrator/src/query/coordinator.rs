@@ -831,17 +831,23 @@ impl QueryCoordinator {
     // ========== File Search ==========
     // Fuzzy path matching over project files, independent of every index.
     // The local branch walks the project directory directly and observes the
-    // latest filesystem state with no generation filtering. The remote branch
-    // holds no project files, so it ranks the indexed file rows of the active
-    // epoch view with the same matcher and ordering instead.
+    // latest filesystem state; caller-supplied path filters apply through
+    // the shared path filter. Branches without live project files rank the
+    // indexed file rows of the active epoch view with the same matcher and
+    // ordering instead, returning path-only hits without live metadata.
 
     /// Search file paths matching `query`, returning at most `limit` paths.
     ///
     /// Paths are project-relative and ordered by match quality with a lexical
     /// tiebreak. No index capability is required: files exist regardless of
     /// which indexes are enabled.
-    pub async fn search_file_paths(&self, query: &str, limit: usize) -> Result<Vec<String>> {
-        let hits = self.search_files(query, limit).await?;
+    pub async fn search_file_paths(
+        &self,
+        query: &str,
+        limit: usize,
+        options: &super::files::FileSearchOptions,
+    ) -> Result<Vec<String>> {
+        let hits = self.search_files(query, limit, options).await?;
         Ok(hits.into_iter().map(|hit| hit.path).collect())
     }
 
@@ -850,10 +856,12 @@ impl QueryCoordinator {
     /// Shares the matcher and ordering with [`Self::search_file_paths`];
     /// files unreadable at stat time are skipped. Size and line metadata is
     /// present only on the local branch; remote hits carry paths alone.
+    /// Caller-supplied path filters apply to both branches.
     pub async fn search_files(
         &self,
         query: &str,
         limit: usize,
+        options: &super::files::FileSearchOptions,
     ) -> Result<Vec<super::files::FileHit>> {
         let store = self.relation.as_ref().ok_or_else(|| {
             QueryError::config("file search requires a relation store for project lookup")
@@ -861,18 +869,15 @@ impl QueryCoordinator {
         if store.is_local() {
             let root = self.resolve_file_search_root().await?;
             let query = query.to_string();
+            let options = options.clone();
             return tokio::task::spawn_blocking(move || {
-                super::files::search_files(
-                    &root,
-                    &query,
-                    limit,
-                    &super::files::FileSearchOptions::default(),
-                )
+                super::files::search_files(&root, &query, limit, &options)
             })
             .await
             .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?;
         }
-        self.search_files_from_index(store, query, limit).await
+        self.search_files_from_index(store, query, limit, options)
+            .await
     }
 
     /// Index-based file search for branches without live project files.
@@ -885,6 +890,7 @@ impl QueryCoordinator {
         store: &RelationStore,
         query: &str,
         limit: usize,
+        options: &super::files::FileSearchOptions,
     ) -> Result<Vec<super::files::FileHit>> {
         use cce_storage_common::RelationStorage;
 
@@ -901,16 +907,12 @@ impl QueryCoordinator {
             .filter(|path| !excluded.contains(path.as_str()))
             .collect();
         let query = query.to_string();
+        let options = options.clone();
         tokio::task::spawn_blocking(move || {
-            super::files::rank_file_paths(
-                &paths,
-                &query,
-                limit,
-                &super::files::FileSearchOptions::default(),
-            )
+            super::files::rank_file_paths(&paths, &query, limit, &options)
         })
-            .await
-            .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
+        .await
+        .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
     }
 
     /// Resolve the project directory file search walks.
@@ -919,11 +921,6 @@ impl QueryCoordinator {
         let store = self.relation.as_ref().ok_or_else(|| {
             QueryError::config("file search requires a relation store for project lookup")
         })?;
-        if !store.is_local() {
-            return Err(QueryError::config(
-                "file search is unavailable on the remote relation branch",
-            ));
-        }
         let record = store
             .project_record(self.project_id)
             .await

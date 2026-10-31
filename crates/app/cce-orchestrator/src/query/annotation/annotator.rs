@@ -349,7 +349,7 @@ impl RelationAnnotator {
             .collect();
 
         // Highest score first within each direction (stable: ties keep
-        // caller order). Forward fills the shared cap before backward.
+        // caller order). Each direction is capped by its own budget.
         forward.sort_by(|a, b| b.score.total_cmp(&a.score));
         backward.sort_by(|a, b| b.score.total_cmp(&a.score));
 

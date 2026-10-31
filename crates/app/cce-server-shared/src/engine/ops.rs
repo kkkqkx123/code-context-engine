@@ -483,10 +483,11 @@ impl super::CodeContextEngine {
         project_id: i64,
         query: &str,
         limit: usize,
+        options: &cce_orchestrator::query::files::FileSearchOptions,
     ) -> Result<Vec<String>, EngineError> {
         let coordinator = self.build_query_coordinator(project_id).await?;
         coordinator
-            .search_file_paths(query, limit)
+            .search_file_paths(query, limit, options)
             .await
             .map_err(EngineError::Query)
     }
@@ -500,10 +501,11 @@ impl super::CodeContextEngine {
         project_id: i64,
         query: &str,
         limit: usize,
+        options: &cce_orchestrator::query::files::FileSearchOptions,
     ) -> Result<Vec<cce_orchestrator::query::FileHit>, EngineError> {
         let coordinator = self.build_query_coordinator(project_id).await?;
         coordinator
-            .search_files(query, limit)
+            .search_files(query, limit, options)
             .await
             .map_err(EngineError::Query)
     }

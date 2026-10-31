@@ -39,7 +39,7 @@ pub struct SearchArgs {
     /// Glob include patterns.
     #[serde(default)]
     pub include_patterns: Option<Vec<String>>,
-    /// Content types to exclude (currently only test/tests).
+    /// Content types to exclude (test, generated, dependency).
     #[serde(default)]
     pub exclude_content_types: Option<Vec<String>>,
     /// File categories to include (code, config, documentation, schema, other).
@@ -75,6 +75,18 @@ pub struct FileSearchArgs {
     /// When true attach size and line counts, otherwise paths only.
     #[serde(default)]
     pub detail: Option<bool>,
+    /// Optional directory prefix to restrict results (e.g. "src/parser").
+    #[serde(default)]
+    pub directory_prefix: Option<String>,
+    /// Glob exclude patterns.
+    #[serde(default)]
+    pub exclude_patterns: Option<Vec<String>>,
+    /// Glob include patterns.
+    #[serde(default)]
+    pub include_patterns: Option<Vec<String>>,
+    /// Content types to exclude (test, generated, dependency).
+    #[serde(default)]
+    pub exclude_content_types: Option<Vec<String>>,
 }
 
 /// Arguments for keyword (BM25) search.
@@ -198,7 +210,7 @@ pub async fn search(
 ///
 /// Delegates to the shared query service so MCP and future HTTP callers
 /// share the coordinator policy: the local branch walks the project
-/// directory, the remote branch reports unavailability.
+/// directory, branches without live files rank indexed file rows instead.
 #[allow(clippy::too_many_lines)]
 pub async fn file_search(
     state: &Arc<SharedContext>,
@@ -222,10 +234,25 @@ pub async fn file_search(
         ))]));
     }
     let service = SearchService::new(state);
+    let mut exclude_content_types = Vec::new();
+    for raw in args.exclude_content_types.clone().unwrap_or_default() {
+        match SearchService::parse_exclude_content_type(&raw) {
+            Ok(content_type) => exclude_content_types.push(content_type),
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "search failed: {error}"
+                ))]));
+            }
+        }
+    }
     let spec = FileSearchSpec {
         query: args.query.clone(),
         limit,
         detail: args.detail.unwrap_or(false),
+        directory_prefix: args.directory_prefix.clone(),
+        exclude_content_types,
+        include_patterns: args.include_patterns.clone().unwrap_or_default(),
+        exclude_patterns: args.exclude_patterns.clone().unwrap_or_default(),
     };
     match service.run_file_search(args.project_id, spec).await {
         Ok(outcome) => Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -345,5 +372,9 @@ mod tests {
         assert_eq!(args.project_id, 3);
         assert!(args.limit.is_none());
         assert!(args.detail.is_none());
+        assert!(args.directory_prefix.is_none());
+        assert!(args.include_patterns.is_none());
+        assert!(args.exclude_patterns.is_none());
+        assert!(args.exclude_content_types.is_none());
     }
 }

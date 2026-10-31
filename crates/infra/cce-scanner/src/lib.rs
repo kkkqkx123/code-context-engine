@@ -22,7 +22,7 @@ pub use filter::{
     ScanFileDecision, classify_scan_file, extension_matches, gateway_include_patterns,
     parse_exclude_filter, parse_extension_filter, scan_exclude_patterns, scan_include_patterns,
 };
-pub use ignore::IgnoreMatcher;
+pub use ignore::{IgnoreMatcher, IgnoreStack};
 
 pub use models::{FileContentPayload, FileEntry, FileSetView, FileViewEntry};
 pub use path_tracker::PathTracker;
