@@ -2,8 +2,10 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { CompressResult } from '$lib/api/tools';
 
@@ -35,33 +37,30 @@
 	}
 </script>
 
-<div class="tool-content">
-	{#if error}
-		<ErrorBanner message={error} />
-	{/if}
-
+<ToolShell {error}>
 	<SplitPane leftWidth={50}>
 		{#snippet left()}
 			<div class="tool-input">
-				<div class="input-header">
-					<label class="field-label" for="file-path">File Path</label>
+				<ToolField label="File Path" wide>
 					<input
 						id="file-path"
 						type="text"
 						bind:value={filePath}
 						placeholder="e.g., /path/to/file.ts"
-						class="file-path-input"
+						class="text-input"
 					/>
-				</div>
+				</ToolField>
 				<div class="tool-actions">
-					<label class="toggle">
-						<input type="checkbox" bind:checked={includeEntities} />
-						<span>Include entities</span>
-					</label>
-					<label class="toggle">
-						<input type="checkbox" bind:checked={includeGroups} />
-						<span>Include groups</span>
-					</label>
+					<Toggle
+						checked={includeEntities}
+						label="Include entities"
+						onchange={(e) => (includeEntities = e.checked)}
+					/>
+					<Toggle
+						checked={includeGroups}
+						label="Include groups"
+						onchange={(e) => (includeGroups = e.checked)}
+					/>
 					<Button
 						onclick={handleCompress}
 						disabled={!filePath.trim() || loading}
@@ -99,13 +98,9 @@
 			</div>
 		{/snippet}
 	</SplitPane>
-</div>
+</ToolShell>
 
 <style>
-	.tool-content {
-		width: 100%;
-	}
-
 	.tool-input,
 	.tool-output {
 		height: 100%;
@@ -114,53 +109,13 @@
 		padding: 1rem;
 	}
 
-	.input-header {
-		margin-bottom: 1rem;
-	}
-
-	.field-label {
-		display: block;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-		margin-bottom: 0.5rem;
-	}
-
-	.file-path-input {
-		width: 100%;
-		padding: 0.75rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.9rem;
-		background: var(--white);
-		color: var(--black);
-	}
-
-	.file-path-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
 	.tool-actions {
 		margin-top: 1rem;
 		display: flex;
 		justify-content: flex-end;
 		align-items: center;
 		gap: 1rem;
-	}
-
-	.toggle {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-		cursor: pointer;
+		flex-wrap: wrap;
 	}
 
 	.compression-info {

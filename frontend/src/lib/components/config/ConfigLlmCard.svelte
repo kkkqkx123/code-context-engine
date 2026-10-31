@@ -7,6 +7,7 @@
 	 */
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Toggle from '$lib/components/ui/Toggle.svelte';
@@ -82,9 +83,11 @@
 	{#if loading && !loaded}
 		<p class="placeholder-text">Loading model overview...</p>
 	{:else if loadError && !overview}
-		<div class="editor-error">{loadError}</div>
+		<InlineError message={loadError} />
 		<div class="reload-actions">
-			<Button onclick={onReload} disabled={loading} variant="secondary">Retry</Button>
+			<Button onclick={onReload} disabled={loading} variant="secondary"
+				>Retry</Button
+			>
 		</div>
 	{:else if overview}
 		<div class="version-row">
@@ -97,7 +100,9 @@
 				variant={overview.llm_enabled ? 'active' : 'inactive'}
 			/>
 			<Badge
-				label={overview.dimension.matches ? 'Dimension OK' : 'Dimension Mismatch'}
+				label={overview.dimension.matches
+					? 'Dimension OK'
+					: 'Dimension Mismatch'}
 				variant={overview.dimension.matches ? 'success' : 'danger'}
 			/>
 			<span class="validate-spacer"></span>
@@ -111,13 +116,18 @@
 		{/if}
 
 		{#if !overview.dimension.matches}
-			<div class="editor-error">
-				{overview.dimension.message} (model {overview.dimension.default_embedding_dimension ?? '?'}
-				vs backend {overview.dimension.effective_vector_size}).
-				Embedding selection is global: edit config.toml and restart, then reindex.
-			</div>
+			<InlineError>
+				{overview.dimension.message} (model {overview.dimension
+					.default_embedding_dimension ?? '?'}
+				vs backend {overview.dimension.effective_vector_size}). Embedding
+				selection is global: edit config.toml and restart, then reindex.
+			</InlineError>
 			<div class="reload-actions split">
-				<Button onclick={onClearVectors} disabled={reindexBusy} variant="secondary">
+				<Button
+					onclick={onClearVectors}
+					disabled={reindexBusy}
+					variant="secondary"
+				>
 					{#if reindexBusy}Working...{:else}Clear Vectors{/if}
 				</Button>
 				<Button onclick={onReindex} disabled={reindexBusy}>
@@ -125,7 +135,9 @@
 				</Button>
 			</div>
 			{#if reindexMessage}
-				<div class="reload-result"><span class="reload-message">{reindexMessage}</span></div>
+				<div class="reload-result">
+					<span class="reload-message">{reindexMessage}</span>
+				</div>
 			{/if}
 		{/if}
 
@@ -133,23 +145,27 @@
 			<div class="reload-result">
 				<Badge label="Keys Missing" variant="warning" />
 				<span class="reload-message">
-					No API keys for: {overview.missing_api_key_providers.join(', ')}.
-					Set env placeholders or key files on the server host.
+					No API keys for: {overview.missing_api_key_providers.join(', ')}. Set
+					env placeholders or key files on the server host.
 				</span>
 			</div>
 		{/if}
 
 		{#if overview.unknown_provider_refs.length > 0}
-			<div class="editor-error">
+			<InlineError>
 				Unknown provider refs: {overview.unknown_provider_refs.join('; ')}
-			</div>
+			</InlineError>
 		{/if}
 
 		<h3 class="section-title">Providers (masked, read-only)</h3>
 		<div class="table-wrap">
 			<table class="model-table">
 				<thead>
-					<tr><th>ID</th><th>Name</th><th>Base URL</th><th>Keys</th><th>Models</th></tr>
+					<tr
+						><th>ID</th><th>Name</th><th>Base URL</th><th>Keys</th><th
+							>Models</th
+						></tr
+					>
 				</thead>
 				<tbody>
 					{#each overview.providers as provider (provider.id)}
@@ -176,11 +192,16 @@
 			</table>
 		</div>
 
-		<h3 class="section-title">Embedding models (global-effective, read-only)</h3>
+		<h3 class="section-title">
+			Embedding models (global-effective, read-only)
+		</h3>
 		<div class="table-wrap">
 			<table class="model-table">
 				<thead>
-					<tr><th>Key</th><th>Model</th><th>Dim</th><th>Default</th><th>Probe</th></tr>
+					<tr
+						><th>Key</th><th>Model</th><th>Dim</th><th>Default</th><th>Probe</th
+						></tr
+					>
 				</thead>
 				<tbody>
 					{#each overview.embedding_models as model (model.key)}
@@ -189,15 +210,18 @@
 							<td class="mono">{model.model}</td>
 							<td>{model.vector_dimension}</td>
 							<td>
-								{#if model.is_default}<Badge label="default" variant="active" />{/if}
+								{#if model.is_default}<Badge
+										label="default"
+										variant="active"
+									/>{/if}
 							</td>
 							<td>
 								<Button
 									onclick={() => onTest('embedding', model.key)}
 									disabled={testing}
 									variant="secondary"
-									size="sm"
-								>Test</Button>
+									size="sm">Test</Button
+								>
 							</td>
 						</tr>
 					{/each}
@@ -205,11 +229,17 @@
 			</table>
 		</div>
 
-		<h3 class="section-title">Chat defaults and parameters (project-effective)</h3>
+		<h3 class="section-title">
+			Chat defaults and parameters (project-effective)
+		</h3>
 		<div class="form-grid">
 			<label class="field">
 				<span class="config-label">Default chat model</span>
-				<select bind:value={defaultChat} class="select-input" aria-label="Default chat model">
+				<select
+					bind:value={defaultChat}
+					class="text-input"
+					aria-label="Default chat model"
+				>
 					<option value="">-- unset --</option>
 					{#each overview.chat_models as model (model.key)}
 						<option value={model.key}>{model.key} ({model.model})</option>
@@ -218,7 +248,11 @@
 			</label>
 			<label class="field">
 				<span class="config-label">Default rerank model</span>
-				<select bind:value={defaultRerank} class="select-input" aria-label="Default rerank model">
+				<select
+					bind:value={defaultRerank}
+					class="text-input"
+					aria-label="Default rerank model"
+				>
 					<option value="">-- unset --</option>
 					{#each overview.rerank_models as model (model.key)}
 						<option value={model.key}>{model.key} ({model.model})</option>
@@ -260,7 +294,11 @@
 		<div class="table-wrap">
 			<table class="model-table">
 				<thead>
-					<tr><th>Key</th><th>Model</th><th>Temp</th><th>Default</th><th>Probe</th></tr>
+					<tr
+						><th>Key</th><th>Model</th><th>Temp</th><th>Default</th><th
+							>Probe</th
+						></tr
+					>
 				</thead>
 				<tbody>
 					{#each overview.chat_models as model (model.key)}
@@ -269,15 +307,18 @@
 							<td class="mono">{model.model}</td>
 							<td>{model.temperature}</td>
 							<td>
-								{#if model.is_default}<Badge label="default" variant="active" />{/if}
+								{#if model.is_default}<Badge
+										label="default"
+										variant="active"
+									/>{/if}
 							</td>
 							<td>
 								<Button
 									onclick={() => onTest('chat', model.key)}
 									disabled={testing}
 									variant="secondary"
-									size="sm"
-								>Test</Button>
+									size="sm">Test</Button
+								>
 							</td>
 						</tr>
 					{/each}
@@ -289,7 +330,7 @@
 			<p class="placeholder-text">Probing model...</p>
 		{/if}
 		{#if testError}
-			<div class="editor-error">{testError}</div>
+			<InlineError message={testError} />
 		{/if}
 		{#if testResult}
 			<div class="reload-result">
@@ -298,34 +339,45 @@
 					variant={testResult.success ? 'success' : 'danger'}
 				/>
 				<span class="reload-message">
-					{testResult.service}:{testResult.model_key} in {testResult.latency_ms}ms —
+					{testResult.service}:{testResult.model_key} in {testResult.latency_ms}ms
+					—
 					{testResult.message}
 				</span>
 			</div>
 		{/if}
 
 		<div class="reload-actions split">
-			<span class="config-label">Edits stay in memory until reload/restart</span>
+			<span class="config-label">Edits stay in memory until reload/restart</span
+			>
 			<Button onclick={onSave} disabled={saving || loading}>
 				{#if saving}Saving...{:else}Save Chat/Rerank Config{/if}
 			</Button>
 		</div>
 		{#if saveError}
-			<div class="editor-error">{saveError}</div>
+			<InlineError message={saveError} />
 		{/if}
 		{#if saveResult}
 			<div class="reload-result">
-				<Badge label={saveResult.success ? 'Success' : 'Failed'} variant={saveResult.success ? 'active' : 'inactive'} />
 				<Badge
-					label={saveResult.hot_reload_applied ? 'Hot Reload' : 'Restart Needed'}
+					label={saveResult.success ? 'Success' : 'Failed'}
+					variant={saveResult.success ? 'active' : 'inactive'}
+				/>
+				<Badge
+					label={saveResult.hot_reload_applied
+						? 'Hot Reload'
+						: 'Restart Needed'}
 					variant={saveResult.hot_reload_applied ? 'success' : 'warning'}
 				/>
 				<Badge label="Ephemeral" variant="info" />
-				<span class="reload-message">v{saveResult.config_version} — {saveResult.message}</span>
+				<span class="reload-message"
+					>v{saveResult.config_version} — {saveResult.message}</span
+				>
 			</div>
 		{/if}
 	{:else}
-		<p class="placeholder-text">No model data. Open a project to load its merged LLM view.</p>
+		<p class="placeholder-text">
+			No model data. Open a project to load its merged LLM view.
+		</p>
 	{/if}
 </Card>
 
@@ -403,13 +455,6 @@
 		flex-direction: column;
 		gap: 0.35rem;
 	}
-	.select-input {
-		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-	}
 	.reload-actions {
 		display: flex;
 		justify-content: flex-end;
@@ -433,16 +478,5 @@
 	.reload-message {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.8rem;
-	}
-	.editor-error {
-		margin-top: 0.75rem;
-		padding: 0.75rem 1rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		background: var(--danger-bg, #fff5f5);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		line-height: 1.5;
-		overflow-wrap: anywhere;
 	}
 </style>

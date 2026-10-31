@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { logsApi, type LogFileInfo } from '$lib/api/logs';
+	import Button from '$lib/components/ui/Button.svelte';
+	import Card from '$lib/components/ui/Card.svelte';
+	import Toolbar from '$lib/components/ui/Toolbar.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 
 	let files = $state<LogFileInfo[]>([]);
 	let loading = $state(false);
@@ -46,39 +51,88 @@
 	}
 </script>
 
-<div class="p-4 space-y-4">
-	<div class="flex gap-2">
-		<button type="button" class="bg-blue-500 text-white px-4 py-2 rounded" onclick={refresh} disabled={loading}>
-			{loading ? 'Loading...' : 'Refresh'}
-		</button>
-		<button type="button" class="bg-yellow-500 text-white px-4 py-2 rounded" onclick={rotate}>Rotate Now</button>
-	</div>
+<Card title="Log Files" subtitle="Rotate, download and clean up log files">
 	{#if error}
-		<div class="text-red-600">{error}</div>
+		<InlineError message={error} />
 	{/if}
-	<div class="overflow-auto border">
-		<table class="w-full text-sm">
-			<thead class="bg-gray-100">
-				<tr>
-					<th class="p-2 text-left">Name</th>
-					<th class="p-2 text-left">Size</th>
-					<th class="p-2 text-left">Modified</th>
-					<th class="p-2 text-left">Actions</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each files as f (f.name)}
-					<tr class="border-t">
-						<td class="p-2">{f.name}</td>
-						<td class="p-2">{formatSize(f.size)}</td>
-						<td class="p-2">{f.modified}</td>
-						<td class="p-2 flex gap-2">
-							<a class="text-blue-600 underline" href={logsApi.downloadUrl(f.name)} target="_blank" rel="external">Download</a>
-							<button type="button" class="text-red-600" onclick={() => remove(f.name)}>Delete</button>
-						</td>
+	<Toolbar>
+		<span class="count">{files.length} file(s)</span>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={refresh} disabled={loading}>
+				{loading ? 'Loading...' : 'Refresh'}
+			</Button>
+			<Button variant="secondary" onclick={rotate}>Rotate Now</Button>
+		{/snippet}
+	</Toolbar>
+	{#if files.length === 0}
+		<EmptyState message="No log files found." />
+	{:else}
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Size</th>
+						<th>Modified</th>
+						<th>Actions</th>
 					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-</div>
+				</thead>
+				<tbody>
+					{#each files as f (f.name)}
+						<tr>
+							<td class="mono">{f.name}</td>
+							<td class="mono">{formatSize(f.size)}</td>
+							<td class="mono">{f.modified}</td>
+							<td>
+								<div class="row-actions">
+									<a
+										class="download-link"
+										href={logsApi.downloadUrl(f.name)}
+										target="_blank"
+										rel="external">Download</a
+									>
+									<Button
+										variant="danger"
+										size="xs"
+										onclick={() => remove(f.name)}
+									>
+										Delete
+									</Button>
+								</div>
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
+</Card>
+
+<style>
+	.count {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+		color: var(--gray-600);
+	}
+
+	.mono {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.78rem;
+	}
+
+	.row-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.download-link {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--info);
+		text-decoration: none;
+		border-bottom: 1px solid var(--info);
+	}
+</style>

@@ -2,7 +2,9 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi, type GotoDefinitionResult } from '$lib/api/tools';
 	import { projectStore } from '$lib/stores/project.svelte';
 	import { goto } from '$app/navigation';
@@ -38,38 +40,32 @@
 	}
 </script>
 
-<div class="tool">
-	{#if error}
-		<InlineError message={error} />
-	{/if}
-
-	<div class="form-row">
-		<label class="field field-wide">
-			<span class="field-label">File Path</span>
+<ToolShell {error}>
+	<div class="tool-form-row">
+		<ToolField label="File Path" wide>
 			<input
 				class="text-input"
 				type="text"
 				bind:value={filePath}
 				placeholder="/path/to/file.ts"
 			/>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Line</span>
+		</ToolField>
+		<ToolField label="Line">
 			<input class="text-input" type="number" min="1" bind:value={line} />
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Column</span>
+		</ToolField>
+		<ToolField label="Column">
 			<input class="text-input" type="number" min="1" bind:value={column} />
-		</label>
+		</ToolField>
 		<Button onclick={handleGoto} disabled={!filePath.trim() || loading}>
 			{#if loading}Resolving...{:else}Goto Definition{/if}
 		</Button>
 	</div>
 
-	<label class="check-row">
-		<input type="checkbox" bind:checked={includeBody} />
-		<span>Include definition body</span>
-	</label>
+	<Toggle
+		checked={includeBody}
+		label="Include definition body"
+		onchange={(e) => (includeBody = e.checked)}
+	/>
 
 	{#if result}
 		{#if result.definitions.length === 0}
@@ -102,56 +98,9 @@
 			{/each}
 		{/if}
 	{/if}
-</div>
+</ToolShell>
 
 <style>
-	.tool {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-
-	.form-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 0.75rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
-
-	.field-wide {
-		flex: 1;
-		min-width: 220px;
-	}
-
-	.field-narrow {
-		width: 110px;
-	}
-
-	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-	}
-
-	
-	
-	.check-row {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.8rem;
-		color: var(--gray-600);
-	}
-
 	.def-card {
 		border: 1px solid var(--gray-200);
 		padding: 0.75rem;

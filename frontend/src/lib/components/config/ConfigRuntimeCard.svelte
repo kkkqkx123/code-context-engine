@@ -8,6 +8,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import type { ConfigValidateResponse } from '$lib/api/config';
 	import type { ProjectConfigUpdateResponse } from '$lib/api';
 
@@ -92,7 +93,7 @@
 		</div>
 
 		{#if runtimeError}
-			<div class="editor-error">{runtimeError}</div>
+			<InlineError message={runtimeError} />
 		{/if}
 
 		{#if runtimeResult}
@@ -187,17 +188,5 @@
 	.config-editor:focus {
 		outline: none;
 		border-color: var(--accent);
-	}
-
-	.editor-error {
-		margin-top: 1rem;
-		padding: 0.75rem 1rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		background: var(--danger-bg, #fff5f5);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		line-height: 1.5;
-		overflow-wrap: anywhere;
 	}
 </style>

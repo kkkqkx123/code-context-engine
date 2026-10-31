@@ -4,6 +4,8 @@
 	 * Path tabs. Each row navigates to the entity detail page on click.
 	 */
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 
 	interface ChainNode {
 		function_id: string;
@@ -15,14 +17,23 @@
 
 	interface Props {
 		nodes: ChainNode[];
+		onNavigate?: (id: string) => void;
 	}
 
-	let { nodes }: Props = $props();
+	let { nodes, onNavigate }: Props = $props();
+
+	function navigate(id: string) {
+		if (onNavigate) {
+			onNavigate(id);
+			return;
+		}
+		goto(resolve(`/entities/${id}`));
+	}
 
 	function handleKeydown(event: KeyboardEvent, id: string) {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
-			window.location.href = `/entities/${id}`;
+			navigate(id);
 		}
 	}
 </script>
@@ -33,7 +44,7 @@
 			class="chain-item"
 			role="button"
 			tabindex="0"
-			onclick={() => (window.location.href = `/entities/${node.function_id}`)}
+			onclick={() => navigate(node.function_id)}
 			onkeydown={(e) => handleKeydown(e, node.function_id)}
 		>
 			<span class="chain-number">{i + 1}</span>

@@ -2,7 +2,9 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi, type BatchCompressResponse } from '$lib/api/tools';
 
 	let pathsText = $state('');
@@ -37,32 +39,28 @@
 	}
 </script>
 
-<div class="tool">
-	{#if error}
-		<InlineError message={error} />
-	{/if}
-
-	<label class="field">
-		<span class="field-label">File paths (one per line)</span>
+<ToolShell {error}>
+	<ToolField label="File paths (one per line)" wide>
 		<textarea
-			class="paths-input"
+			class="text-input"
 			rows="6"
 			bind:value={pathsText}
 			placeholder="src/auth/login.ts\nsrc/utils/token.ts"
 			spellcheck="false"></textarea>
-	</label>
+	</ToolField>
 
-	<div class="options-row">
-		<label class="check-row">
-			<input type="checkbox" bind:checked={includeEntities} />
-			<span>Include entities</span>
-		</label>
-		<label class="check-row">
-			<input type="checkbox" bind:checked={includeGroups} />
-			<span>Include groups</span>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Max concurrency</span>
+	<div class="tool-form-row">
+		<Toggle
+			checked={includeEntities}
+			label="Include entities"
+			onchange={(e) => (includeEntities = e.checked)}
+		/>
+		<Toggle
+			checked={includeGroups}
+			label="Include groups"
+			onchange={(e) => (includeGroups = e.checked)}
+		/>
+		<ToolField label="Max concurrency">
 			<input
 				class="text-input"
 				type="number"
@@ -70,7 +68,7 @@
 				max="16"
 				bind:value={maxConcurrency}
 			/>
-		</label>
+		</ToolField>
 		<Button onclick={handleBatch} disabled={loading || !pathsText.trim()}>
 			{#if loading}Compressing...{:else}Batch Compress{/if}
 		</Button>
@@ -111,68 +109,9 @@
 			</div>
 		{/each}
 	{/if}
-</div>
+</ToolShell>
 
 <style>
-	.tool {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
-
-	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-	}
-
-	.paths-input {
-		padding: 0.6rem 0.7rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
-		line-height: 1.5;
-		color: var(--black);
-		resize: vertical;
-	}
-
-	.paths-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
-	.options-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 1rem;
-	}
-
-	.check-row {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.8rem;
-		color: var(--gray-600);
-		padding-bottom: 0.4rem;
-	}
-
-	.field-narrow {
-		width: 140px;
-	}
-
-	
-	
 	.result-head {
 		display: flex;
 		gap: 0.5rem;

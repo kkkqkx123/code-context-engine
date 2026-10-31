@@ -6,6 +6,7 @@
 	 * props and actions as callbacks.
 	 */
 	import type { GraphModuleResponse } from '$lib/api/graph';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 
 	interface Props {
 		data: GraphModuleResponse | null;
@@ -36,7 +37,7 @@
 		{/if}
 	</div>
 	{#if error}
-		<p class="panel-error">{error}</p>
+		<InlineError message={error} />
 	{:else if loading && data === null}
 		<p class="panel-empty">Loading module relations…</p>
 	{:else if data !== null}
@@ -148,12 +149,6 @@
 		color: var(--warning);
 		border: 1px solid var(--warning);
 		padding: 0.1rem 0.4rem;
-	}
-
-	.panel-error {
-		font-size: 0.75rem;
-		color: var(--danger);
-		margin: 0;
 	}
 
 	.panel-empty {

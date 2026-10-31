@@ -3,6 +3,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import {
 		retryQueueApi,
 		type RetryQueueStatus,
@@ -52,7 +53,8 @@
 	}
 
 	function deadBadge(count: number | undefined) {
-		if (count === undefined) return { label: 'Unknown', variant: 'inactive' as const };
+		if (count === undefined)
+			return { label: 'Unknown', variant: 'inactive' as const };
 		return count > 0
 			? { label: `${count} dead`, variant: 'warning' as const }
 			: { label: 'No dead', variant: 'success' as const };
@@ -76,24 +78,29 @@
 			title="Query Retry Queue"
 			subtitle="Queued query replays and dead-lettered queries across all projects"
 		>
-			<Button variant="secondary" onclick={load} disabled={loading}>Refresh</Button>
+			<Button variant="secondary" onclick={load} disabled={loading}
+				>Refresh</Button
+			>
 		</PageHeader>
 
 		{#if error}
-			<div class="error-banner">{error}</div>
+			<ErrorBanner message={error} />
 		{/if}
 
 		<div class="filter-row">
 			<label for="retry-project-scope">Project scope</label>
 			<select
 				id="retry-project-scope"
+				class="text-input"
 				onchange={(e) => {
 					const value = (e.currentTarget as HTMLSelectElement).value;
 					selectedProjectId = value === 'all' ? null : Number(value);
 					load();
 				}}
 			>
-				<option value="all" selected={selectedProjectId === null}>All projects</option>
+				<option value="all" selected={selectedProjectId === null}
+					>All projects</option
+				>
 				{#each projectStore.projects as project (project.id)}
 					<option
 						value={Number(project.id)}
@@ -137,7 +144,8 @@
 			</div>
 			<p class="note">
 				Dead queries exceeded the maximum retry count and are never replayed
-				automatically. Re-issue them manually once the backend service has recovered.
+				automatically. Re-issue them manually once the backend service has
+				recovered.
 			</p>
 			{#if deadEntries.length === 0}
 				<p class="empty">No dead-lettered queries.</p>
@@ -164,16 +172,24 @@
 </div>
 
 {#if clearConfirmOpen}
-	<div class="modal-backdrop" role="presentation" onclick={() => (clearConfirmOpen = false)}>
+	<div
+		class="modal-backdrop"
+		role="presentation"
+		onclick={() => (clearConfirmOpen = false)}
+	>
 		<div class="modal" role="dialog" aria-modal="true">
 			<h3>Clear the dead list?</h3>
 			<p>
-				All {deadEntries.length} dead-lettered query entries will be discarded. This cannot
-				be undone.
+				All {deadEntries.length} dead-lettered query entries will be discarded. This
+				cannot be undone.
 			</p>
 			<div class="modal-actions">
-				<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}>Cancel</Button>
-				<Button variant="danger" disabled={busy} onclick={clearDead}>Clear</Button>
+				<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}
+					>Cancel</Button
+				>
+				<Button variant="danger" disabled={busy} onclick={clearDead}
+					>Clear</Button
+				>
 			</div>
 		</div>
 	</div>
@@ -210,13 +226,6 @@
 	}
 	.stat-label {
 		color: var(--color-text-muted, #888);
-	}
-	.error-banner {
-		padding: 0.75rem 1rem;
-		border-radius: 6px;
-		background: var(--color-danger-bg, #3b1a1a);
-		color: var(--color-danger, #ff6b6b);
-		margin-bottom: 1rem;
 	}
 	.toolbar {
 		display: flex;

@@ -8,6 +8,7 @@
 	 */
 	import type { GraphLayoutName } from './GraphCanvas.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	interface Props {
 		nodeCount?: number;
@@ -55,32 +56,35 @@
 
 <div class="graph-toolbar">
 	<div class="toolbar-group">
-		<button
-			type="button"
-			class="tool-btn"
+		<Button
+			variant="ghost"
+			size="xs"
 			onclick={onZoomOut}
 			aria-label="Zoom out"
-			title="Zoom out"><Icon name="minus" /></button
+			title="Zoom out"
 		>
-		<button
-			type="button"
-			class="tool-btn"
+			<Icon name="minus" />
+		</Button>
+		<Button
+			variant="ghost"
+			size="xs"
 			onclick={onZoomIn}
 			aria-label="Zoom in"
-			title="Zoom in">+</button
+			title="Zoom in"
 		>
-		<button
-			type="button"
-			class="tool-btn wide"
+			+
+		</Button>
+		<Button
+			variant="ghost"
+			size="xs"
 			onclick={onFit}
-			title="Fit graph to viewport">Fit</button
+			title="Fit graph to viewport"
 		>
-		<button
-			type="button"
-			class="tool-btn wide"
-			onclick={onReset}
-			title="Reset viewport">Reset</button
-		>
+			Fit
+		</Button>
+		<Button variant="ghost" size="xs" onclick={onReset} title="Reset viewport">
+			Reset
+		</Button>
 	</div>
 
 	<div class="toolbar-group">
@@ -95,22 +99,22 @@
 				<option value={item.value}>{item.label}</option>
 			{/each}
 		</select>
-		<button
-			type="button"
-			class="tool-btn wide"
+		<Button
+			variant="ghost"
+			size="xs"
 			onclick={onRelayout}
 			title="Re-run the current layout"
 		>
 			Re-layout
-		</button>
-		<button
-			type="button"
-			class="tool-btn wide"
+		</Button>
+		<Button
+			variant="ghost"
+			size="xs"
 			onclick={onExportPng}
 			title="Export the current view as PNG"
 		>
 			Export PNG
-		</button>
+		</Button>
 	</div>
 
 	<div class="toolbar-spacer"></div>
@@ -145,35 +149,6 @@
 
 	.toolbar-spacer {
 		flex: 1;
-	}
-
-	.tool-btn {
-		height: 28px;
-		min-width: 30px;
-		padding: 0 0.5rem;
-		background: var(--white);
-		border: 1px solid var(--gray-300);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		color: var(--black);
-		transition: all 0.15s;
-	}
-
-	.tool-btn.wide {
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.tool-btn:hover {
-		border-color: var(--black);
-		background: var(--gray-100);
-	}
-
-	.tool-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
 	}
 
 	.tool-label {

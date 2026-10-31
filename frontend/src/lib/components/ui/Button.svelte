@@ -7,6 +7,7 @@
 		size?: 'xs' | 'sm' | 'md' | 'lg';
 		block?: boolean;
 		loading?: boolean;
+		active?: boolean;
 		children?: Snippet;
 	}
 
@@ -15,6 +16,7 @@
 		size = 'md',
 		block = false,
 		loading = false,
+		active = false,
 		type = 'button',
 		disabled = false,
 		class: className = undefined,
@@ -34,6 +36,7 @@
 	class:btn-sm={size === 'sm'}
 	class:btn-lg={size === 'lg'}
 	class:btn-block={block}
+	class:active
 	{disabled}
 	{...rest}
 >

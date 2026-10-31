@@ -18,7 +18,10 @@
 	let { validateResult, validating = false, onValidate }: Props = $props();
 </script>
 
-<Card title="Global Validation" subtitle="Cross-module checks for the active config">
+<Card
+	title="Global Validation"
+	subtitle="Cross-module checks for the active config"
+>
 	{#if validateResult}
 		<div class="validate-status">
 			<span class="validate-label">Status</span>
@@ -75,9 +78,7 @@
 		{/if}
 
 		{#if validateResult.valid && validateResult.errors.length === 0 && validateResult.warnings.length === 0 && validateResult.dependency_warnings.length === 0}
-			<p class="placeholder-text">
-				No issues found — configuration is clean.
-			</p>
+			<p class="placeholder-text">No issues found — configuration is clean.</p>
 		{/if}
 	{:else}
 		<p class="placeholder-text">Loading validation results...</p>

@@ -3,7 +3,11 @@
 	 * Static legend for the graph explorer: line style per relation domain
 	 * and node shape per node kind. Purely presentational.
 	 */
-	import { NODE_SHAPE_LEGEND, RELATION_DOMAINS, relationLineStyle } from '$lib/utils/graph-domains';
+	import {
+		NODE_SHAPE_LEGEND,
+		RELATION_DOMAINS,
+		relationLineStyle,
+	} from '$lib/utils/graph-domains';
 </script>
 
 <div class="legend">

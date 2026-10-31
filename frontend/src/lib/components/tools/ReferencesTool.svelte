@@ -2,7 +2,8 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi, type FindReferencesResult } from '$lib/api/tools';
 	import { projectStore } from '$lib/stores/project.svelte';
 
@@ -48,40 +49,31 @@
 	}
 </script>
 
-<div class="tool">
-	{#if error}
-		<InlineError message={error} />
-	{/if}
-
-	<div class="form-row">
-		<label class="field field-wide">
-			<span class="field-label">File Path</span>
+<ToolShell {error}>
+	<div class="tool-form-row">
+		<ToolField label="File Path" wide>
 			<input
 				class="text-input"
 				type="text"
 				bind:value={filePath}
 				placeholder="/path/to/file.ts"
 			/>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Line</span>
+		</ToolField>
+		<ToolField label="Line">
 			<input class="text-input" type="number" min="1" bind:value={line} />
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Column</span>
+		</ToolField>
+		<ToolField label="Column">
 			<input class="text-input" type="number" min="1" bind:value={column} />
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Symbol (optional)</span>
+		</ToolField>
+		<ToolField label="Symbol (optional)">
 			<input
 				class="text-input"
 				type="text"
 				bind:value={symbol}
 				placeholder="authenticate"
 			/>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Context lines</span>
+		</ToolField>
+		<ToolField label="Context lines">
 			<input
 				class="text-input"
 				type="number"
@@ -92,9 +84,8 @@
 					contextLines = Number.isInteger(n) && n >= 0 ? n : null;
 				}}
 			/>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Snippets</span>
+		</ToolField>
+		<ToolField label="Snippets">
 			<select
 				class="text-input"
 				value={includeSnippet === true
@@ -109,9 +100,8 @@
 				<option value="on">On</option>
 				<option value="off">Off</option>
 			</select>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Entity info</span>
+		</ToolField>
+		<ToolField label="Entity info">
 			<select
 				class="text-input"
 				value={includeEntityInfo === true
@@ -126,7 +116,7 @@
 				<option value="on">On</option>
 				<option value="off">Off</option>
 			</select>
-		</label>
+		</ToolField>
 		<Button onclick={handleFind} disabled={!filePath.trim() || loading}>
 			{#if loading}Searching...{:else}Find References{/if}
 		</Button>
@@ -160,48 +150,9 @@
 			</div>
 		{/each}
 	{/if}
-</div>
+</ToolShell>
 
 <style>
-	.tool {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-
-	.form-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 0.75rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
-
-	.field-wide {
-		flex: 1;
-		min-width: 220px;
-	}
-
-	.field-narrow {
-		width: 110px;
-	}
-
-	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-	}
-
-	
-	
 	.result-head {
 		display: flex;
 		gap: 0.5rem;

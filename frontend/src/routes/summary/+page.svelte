@@ -2,12 +2,12 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import {
 		summaryApi,
 		type SummaryResponse,
@@ -96,10 +96,7 @@
 		/>
 
 		{#if error}
-			<ErrorBanner>
-				<span>{error}</span>
-				<button type="button" class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
-			</ErrorBanner>
+			<ErrorBanner message={error} onDismiss={() => (error = null)} />
 		{/if}
 
 		<!-- Input Card -->
@@ -108,23 +105,26 @@
 			subtitle="Select files or directories to summarize"
 		>
 			<!-- Tab Navigation -->
-			<div class="input-tabs">
-				<button type="button"
-					class="input-tab"
+			<div class="tab-nav">
+				<button
+					type="button"
+					class="tab-btn"
 					class:active={activeTab === 'single'}
 					onclick={() => (activeTab = 'single')}
 				>
 					Single File
 				</button>
-				<button type="button"
-					class="input-tab"
+				<button
+					type="button"
+					class="tab-btn"
 					class:active={activeTab === 'batch'}
 					onclick={() => (activeTab = 'batch')}
 				>
 					Batch Files
 				</button>
-				<button type="button"
-					class="input-tab"
+				<button
+					type="button"
+					class="tab-btn"
 					class:active={activeTab === 'directory'}
 					onclick={() => (activeTab = 'directory')}
 				>
@@ -153,7 +153,7 @@
 					>
 					<textarea
 						id="file-paths"
-						class="textarea-input"
+						class="text-input"
 						bind:value={filePathsText}
 						placeholder="/path/to/file1.rs\n/path/to/file2.ts"
 						rows="6"></textarea>
@@ -197,10 +197,11 @@
 					</div>
 				</div>
 				<div class="input-group checkbox-group">
-					<label class="checkbox-label">
-						<input type="checkbox" bind:checked={respectGitignore} />
-						Respect .gitignore
-					</label>
+					<Toggle
+						checked={respectGitignore}
+						label="Respect .gitignore"
+						onchange={(e) => (respectGitignore = e.checked)}
+					/>
 				</div>
 			{/if}
 
@@ -304,48 +305,6 @@
 </div>
 
 <style>
-
-	.dismiss-btn {
-		background: none;
-		border: none;
-		color: var(--white);
-		font-size: 1.5rem;
-		cursor: pointer;
-		line-height: 1;
-	}
-
-	.input-tabs {
-		display: flex;
-		gap: 0;
-		border-bottom: 1px solid var(--gray-200);
-		margin-bottom: 1.5rem;
-	}
-
-	.input-tab {
-		padding: 0.75rem 1.5rem;
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -1px;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		cursor: pointer;
-		transition: all 0.2s ease;
-		color: var(--gray-600);
-	}
-
-	.input-tab:hover {
-		color: var(--black);
-	}
-
-	.input-tab.active {
-		color: var(--black);
-		border-bottom-color: var(--accent);
-		font-weight: bold;
-	}
-
 	.input-group {
 		margin-bottom: 1rem;
 	}
@@ -374,32 +333,8 @@
 		display: block;
 	}
 
-	.textarea-input {
-		width: 100%;
-		padding: 0.75rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-		resize: vertical;
-		box-sizing: border-box;
-	}
-
-	.textarea-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
 	.checkbox-group {
 		margin-top: 0.5rem;
-	}
-
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		cursor: pointer;
 	}
 
 	.generate-actions {

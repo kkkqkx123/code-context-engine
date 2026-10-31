@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { logsApi, type LogEntry } from '$lib/api/logs';
+	import Button from '$lib/components/ui/Button.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import Card from '$lib/components/ui/Card.svelte';
+	import Toolbar from '$lib/components/ui/Toolbar.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 
 	let entries = $state<LogEntry[]>([]);
 	let total = $state(0);
@@ -53,59 +59,179 @@
 		a.click();
 		URL.revokeObjectURL(url);
 	}
+
+	type LevelVariant = 'default' | 'info' | 'success' | 'warning' | 'danger';
+
+	function levelVariant(raw: string): LevelVariant {
+		switch (raw) {
+			case 'ERROR':
+				return 'danger';
+			case 'WARN':
+				return 'warning';
+			case 'INFO':
+				return 'info';
+			default:
+				return 'default';
+		}
+	}
 </script>
 
-<div class="p-4 space-y-4">
-	<div class="grid grid-cols-2 gap-2">
-		<select class="select" bind:value={level}>
-			<option value="">All levels</option>
-			<option value="TRACE">TRACE</option>
-			<option value="DEBUG">DEBUG</option>
-			<option value="INFO">INFO</option>
-			<option value="WARN">WARN</option>
-			<option value="ERROR">ERROR</option>
-		</select>
-		<input class="input" placeholder="module" bind:value={module} />
-		<input class="input" placeholder="keyword" bind:value={query} />
-		<input class="input" placeholder="start time (ISO)" bind:value={startTime} />
-		<input class="input" placeholder="end time (ISO)" bind:value={endTime} />
-		<input class="input" type="number" bind:value={pageSize} />
-	</div>
-	<div class="flex gap-2">
-		<button type="button" class="bg-blue-500 text-white px-4 py-2 rounded" onclick={search} disabled={loading}>
-			{loading ? 'Searching...' : 'Search'}
-		</button>
-		<button type="button" class="bg-gray-200 px-4 py-2 rounded" onclick={exportCsv}>Export CSV</button>
+<Card
+	title="Search Filters"
+	subtitle="Query historical logs by level, module and time"
+>
+	<div class="filter-grid">
+		<label class="filter-field">
+			<span class="filter-label">Level</span>
+			<select class="text-input" bind:value={level} aria-label="Log level">
+				<option value="">All levels</option>
+				<option value="TRACE">TRACE</option>
+				<option value="DEBUG">DEBUG</option>
+				<option value="INFO">INFO</option>
+				<option value="WARN">WARN</option>
+				<option value="ERROR">ERROR</option>
+			</select>
+		</label>
+		<label class="filter-field">
+			<span class="filter-label">Module</span>
+			<input class="text-input" placeholder="module" bind:value={module} />
+		</label>
+		<label class="filter-field">
+			<span class="filter-label">Keyword</span>
+			<input class="text-input" placeholder="keyword" bind:value={query} />
+		</label>
+		<label class="filter-field">
+			<span class="filter-label">Start time (ISO)</span>
+			<input
+				class="text-input"
+				placeholder="start time (ISO)"
+				bind:value={startTime}
+			/>
+		</label>
+		<label class="filter-field">
+			<span class="filter-label">End time (ISO)</span>
+			<input
+				class="text-input"
+				placeholder="end time (ISO)"
+				bind:value={endTime}
+			/>
+		</label>
+		<label class="filter-field">
+			<span class="filter-label">Page size</span>
+			<input class="text-input" type="number" bind:value={pageSize} />
+		</label>
 	</div>
 	{#if error}
-		<div class="text-red-600">{error}</div>
+		<InlineError message={error} />
 	{/if}
-	<div class="text-sm text-gray-500">Total: {total}</div>
-	<div class="overflow-auto max-h-[60vh] border">
-		<table class="w-full text-xs font-mono">
-			<thead>
-				<tr class="bg-gray-100">
-					<th class="p-1 text-left">Time</th>
-					<th class="p-1 text-left">Level</th>
-					<th class="p-1 text-left">Target</th>
-					<th class="p-1 text-left">Message</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each entries as e, i (i)}
-					<tr class="border-t">
-						<td class="p-1">{e.timestamp}</td>
-						<td class="p-1">{e.level}</td>
-						<td class="p-1">{e.target}</td>
-						<td class="p-1">{e.message}</td>
+	<Toolbar>
+		<span class="total">Total: {total}</span>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={exportCsv}>Export CSV</Button>
+			<Button onclick={() => search()} disabled={loading}>
+				{loading ? 'Searching...' : 'Search'}
+			</Button>
+		{/snippet}
+	</Toolbar>
+</Card>
+
+<Card title="Results" subtitle={`${entries.length} entries on page ${page}`}>
+	{#if entries.length === 0}
+		<EmptyState message="No log entries match the current filters." />
+	{:else}
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Time</th>
+						<th>Level</th>
+						<th>Target</th>
+						<th>Message</th>
 					</tr>
-				{/each}
-			</tbody>
-		</table>
+				</thead>
+				<tbody>
+					{#each entries as e, i (i)}
+						<tr>
+							<td class="mono">{e.timestamp}</td>
+							<td><Badge label={e.level} variant={levelVariant(e.level)} /></td>
+							<td class="mono">{e.target}</td>
+							<td>{e.message}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
+	<div class="pagination">
+		<Button
+			variant="secondary"
+			size="xs"
+			onclick={() => {
+				if (page > 1) {
+					page--;
+					search();
+				}
+			}}
+		>
+			Prev
+		</Button>
+		<span class="page-label">Page {page}</span>
+		<Button
+			variant="secondary"
+			size="xs"
+			onclick={() => {
+				page++;
+				search();
+			}}
+		>
+			Next
+		</Button>
 	</div>
-	<div class="flex gap-2 items-center">
-		<button type="button" class="px-2 py-1 bg-gray-200 rounded" onclick={() => { if (page > 1) { page--; search(); } }}>Prev</button>
-		<span>Page {page}</span>
-		<button type="button" class="px-2 py-1 bg-gray-200 rounded" onclick={() => { page++; search(); }}>Next</button>
-	</div>
-</div>
+</Card>
+
+<style>
+	.filter-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		gap: 1rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.filter-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+
+	.filter-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.62rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+	}
+
+	.total {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+		color: var(--gray-600);
+	}
+
+	.mono {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+	}
+
+	.pagination {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-top: 1rem;
+	}
+
+	.page-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+		color: var(--gray-600);
+	}
+</style>

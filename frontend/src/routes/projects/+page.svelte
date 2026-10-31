@@ -3,7 +3,6 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -159,7 +158,7 @@
 
 	function selectProject(project: Project) {
 		detailProject = project;
-		projectStore.currentProjectId = (Number(project.id));
+		projectStore.currentProjectId = Number(project.id);
 	}
 </script>
 
@@ -174,16 +173,16 @@
 	/>
 
 	{#if error}
-		<ErrorBanner>
-			<span>{error}</span>
-			<button type="button" class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
-		</ErrorBanner>
+		<ErrorBanner message={error} onDismiss={() => (error = null)} />
 	{/if}
 
 	<div class="layout">
 		<!-- Project List -->
 		<div class="list-column">
-			<Card title="All Projects" subtitle={`${projectStore.projects.length} project(s)`}>
+			<Card
+				title="All Projects"
+				subtitle={`${projectStore.projects.length} project(s)`}
+			>
 				<div class="header-actions">
 					<Button onclick={openCreateForm} disabled={showForm}>
 						+ New Project
@@ -191,11 +190,15 @@
 				</div>
 
 				{#if projectStore.projects.length === 0}
-					<EmptyState padded message="No projects found. Create your first project to get started." />
+					<EmptyState
+						padded
+						message="No projects found. Create your first project to get started."
+					/>
 				{:else}
 					<div class="project-list">
 						{#each projectStore.projects as project (project.id)}
-							<button type="button"
+							<button
+								type="button"
 								class="project-item"
 								class:selected={detailProject?.id === project.id}
 								onclick={() => selectProject(project)}
@@ -364,16 +367,6 @@
 </div>
 
 <style>
-
-	.dismiss-btn {
-		background: none;
-		border: none;
-		color: var(--white);
-		font-size: 1.5rem;
-		cursor: pointer;
-		line-height: 1;
-	}
-
 	.layout {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -390,7 +383,6 @@
 	.header-actions {
 		margin-bottom: 1.5rem;
 	}
-
 
 	.project-list {
 		display: flex;

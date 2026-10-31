@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
-	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi, type BatchFoldResponse } from '$lib/api/tools';
 
 	interface DraftItem {
@@ -65,23 +66,17 @@
 	}
 </script>
 
-<div class="tool-content">
-	{#if error}
-		<InlineError message={error} />
-	{/if}
-
-	<div class="defaults">
-		<label class="field">
-			<span class="field-label">Global language (optional)</span>
+<ToolShell {error}>
+	<div class="tool-form-row">
+		<ToolField label="Global language (optional)" wide>
 			<input
 				class="text-input"
 				type="text"
 				bind:value={globalLanguage}
 				placeholder="e.g., rust"
 			/>
-		</label>
-		<label class="field">
-			<span class="field-label">Global max tokens (optional)</span>
+		</ToolField>
+		<ToolField label="Global max tokens (optional)">
 			<input
 				class="text-input"
 				type="number"
@@ -92,57 +87,54 @@
 					globalMaxTokens = Number.isInteger(n) && n > 0 ? n : null;
 				}}
 			/>
-		</label>
-		<label class="field">
-			<span class="field-label">Global mode (optional)</span>
+		</ToolField>
+		<ToolField label="Global mode (optional)">
 			<input
 				class="text-input"
 				type="text"
 				bind:value={globalMode}
 				placeholder="detailed or minimal"
 			/>
-		</label>
+		</ToolField>
 	</div>
 
 	{#each items as item, i (i)}
 		<div class="item">
 			<div class="item-head">
 				<span class="mono">Item {i + 1}</span>
-				<button
-					class="remove"
-					type="button"
-					disabled={items.length <= 1}
+				<Button
+					variant="ghost"
+					size="xs"
 					onclick={() => removeItem(i)}
+					disabled={items.length <= 1}
+					aria-label={`Remove item ${i + 1}`}
 				>
 					<Icon name="close" />
-				</button>
+				</Button>
 			</div>
 			<textarea
 				class="text-input"
 				rows="4"
 				bind:value={item.text}
 				placeholder="Raw source text"></textarea>
-			<div class="item-opts">
-				<label class="field">
-					<span class="field-label">Language (optional)</span>
+			<div class="tool-form-row">
+				<ToolField label="Language (optional)" wide>
 					<input
 						class="text-input"
 						type="text"
 						bind:value={item.language}
 						placeholder="e.g., python"
 					/>
-				</label>
-				<label class="field">
-					<span class="field-label">File name (optional)</span>
+				</ToolField>
+				<ToolField label="File name (optional)" wide>
 					<input
 						class="text-input"
 						type="text"
 						bind:value={item.fileName}
 						placeholder="e.g., main.py"
 					/>
-				</label>
-				<label class="field">
-					<span class="field-label">Max tokens (optional)</span>
+				</ToolField>
+				<ToolField label="Max tokens (optional)">
 					<input
 						class="text-input"
 						type="number"
@@ -153,22 +145,21 @@
 							item.maxTokens = Number.isInteger(n) && n > 0 ? n : null;
 						}}
 					/>
-				</label>
-				<label class="field">
-					<span class="field-label">Mode (optional)</span>
+				</ToolField>
+				<ToolField label="Mode (optional)">
 					<input
 						class="text-input"
 						type="text"
 						bind:value={item.mode}
 						placeholder="detailed or minimal"
 					/>
-				</label>
+				</ToolField>
 			</div>
 		</div>
 	{/each}
 
-	<div class="actions">
-		<Button onclick={addItem}>+ Add item</Button>
+	<div class="tool-actions">
+		<Button variant="secondary" onclick={addItem}>+ Add item</Button>
 		<Button
 			onclick={handleFold}
 			disabled={loading || !items.some((item) => item.text.trim())}
@@ -197,39 +188,9 @@
 			</div>
 		{/each}
 	{/if}
-</div>
+</ToolShell>
 
 <style>
-	.tool-content {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-	.defaults,
-	.item-opts {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		flex: 1;
-		min-width: 160px;
-	}
-
-	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-	}
-
-	
 	.item {
 		border: 1px solid var(--gray-200);
 		padding: 0.75rem;
@@ -242,18 +203,6 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-	}
-
-	.remove {
-		border: 1px solid var(--gray-200);
-		background: none;
-		cursor: pointer;
-		padding: 0.1rem 0.5rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.75rem;
 	}
 
 	.result-head {

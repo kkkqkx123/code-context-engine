@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import type {
 		ClassInheritanceResponse,
@@ -61,22 +62,20 @@
 		<EmptyState padded message="No inheritance data available" />
 	{:else}
 		<div class="view-toggle" role="tablist" aria-label="Inheritance view mode">
-			<button
-				type="button"
-				class="toggle-btn"
-				class:active={viewMode === 'graph'}
+			<Button
+				variant="tab"
+				active={viewMode === 'graph'}
 				onclick={() => (viewMode = 'graph')}
 			>
 				Graph
-			</button>
-			<button
-				type="button"
-				class="toggle-btn"
-				class:active={viewMode === 'list'}
+			</Button>
+			<Button
+				variant="tab"
+				active={viewMode === 'list'}
 				onclick={() => (viewMode = 'list')}
 			>
 				List
-			</button>
+			</Button>
 		</div>
 
 		{#if viewMode === 'graph'}
@@ -183,34 +182,11 @@
 		padding: 1rem;
 	}
 
-
 	.view-toggle {
 		display: flex;
-		gap: 0;
 		margin-bottom: 1rem;
-	}
-
-	.toggle-btn {
-		padding: 0.4rem 0.85rem;
-		background: var(--white);
 		border: 1px solid var(--gray-300);
-		border-right: none;
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-	}
-
-	.toggle-btn:last-child {
-		border-right: 1px solid var(--gray-300);
-	}
-
-	.toggle-btn.active {
-		background: var(--black);
-		color: var(--white);
-		border-color: var(--black);
+		width: fit-content;
 	}
 
 	.tree-section {

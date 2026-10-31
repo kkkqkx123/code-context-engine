@@ -14,6 +14,7 @@
 	 */
 	import type { GraphDirection } from '$lib/api/graph';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
 	type ExternalEdgesMode = 'default' | 'on' | 'off';
@@ -97,43 +98,43 @@
 		<h3 class="seed-section-title">Load</h3>
 		<div class="seed-section-body">
 			<div class="seed-mode" role="group" aria-label="Seed mode">
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={seedMode === 'focus'}
+				<Button
+					variant="tab"
+					size="xs"
+					active={seedMode === 'focus'}
 					onclick={() => (seedMode = 'focus')}
 				>
 					Focus entity
-				</button>
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={seedMode === 'overview'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={seedMode === 'overview'}
 					onclick={() => (seedMode = 'overview')}
 				>
 					Project overview
-				</button>
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={seedMode === 'path'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={seedMode === 'path'}
 					onclick={() => (seedMode = 'path')}
 				>
 					Find path
-				</button>
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={seedMode === 'subgraph'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={seedMode === 'subgraph'}
 					onclick={() => (seedMode = 'subgraph')}
 				>
 					Subgraph
-				</button>
+				</Button>
 			</div>
 
 			{#if seedMode === 'focus'}
 				<input
-					class="graph-seed-input"
+					class="text-input"
 					type="text"
 					placeholder="Symbol name, path#name or id…"
 					bind:value={seedId}
@@ -143,7 +144,7 @@
 				<label class="graph-inline-field">
 					<span class="graph-inline-label">Depth</span>
 					<input
-						class="graph-seed-input narrow"
+						class="text-input text-input--narrow"
 						type="number"
 						min="1"
 						max="4"
@@ -154,7 +155,7 @@
 				<label class="graph-inline-field">
 					<span class="graph-inline-label">Dir</span>
 					<select
-						class="graph-seed-input narrow"
+						class="text-input text-input--narrow"
 						bind:value={egoDirection}
 						aria-label="Traversal direction"
 					>
@@ -165,7 +166,7 @@
 				</label>
 			{:else if seedMode === 'path'}
 				<input
-					class="graph-seed-input"
+					class="text-input"
 					type="text"
 					placeholder="Start entity id…"
 					bind:value={pathStart}
@@ -176,7 +177,7 @@
 					><Icon name="arrow-right" /></span
 				>
 				<input
-					class="graph-seed-input"
+					class="text-input"
 					type="text"
 					placeholder="End entity id…"
 					bind:value={pathEnd}
@@ -186,7 +187,7 @@
 				<label class="graph-inline-field">
 					<span class="graph-inline-label">Depth</span>
 					<input
-						class="graph-seed-input narrow"
+						class="text-input text-input--narrow"
 						type="number"
 						min="1"
 						max="100"
@@ -196,7 +197,7 @@
 				</label>
 			{:else if seedMode === 'subgraph'}
 				<input
-					class="graph-seed-input wide-input"
+					class="text-input text-input--wide"
 					type="text"
 					placeholder="Comma-separated entity ids…"
 					bind:value={subgraphIds}
@@ -207,7 +208,7 @@
 				<label class="graph-inline-field">
 					<span class="graph-inline-label">Limit</span>
 					<input
-						class="graph-seed-input narrow"
+						class="text-input text-input--narrow"
 						type="number"
 						min="1"
 						max="10000"
@@ -217,15 +218,15 @@
 				</label>
 			{/if}
 
-			<button
-				type="button"
-				class="primary-btn"
+			<Button
+				variant="primary"
+				size="xs"
 				onclick={onRunSeed}
 				disabled={loading}
 				title="Replace the working set with the seeded view"
 			>
 				{loading ? 'Loading…' : 'Load'}
-			</button>
+			</Button>
 		</div>
 	</section>
 
@@ -233,26 +234,26 @@
 		<h3 class="seed-section-title">Impact</h3>
 		<div class="seed-section-body">
 			<div class="impact-mode" role="group" aria-label="Impact mode">
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={impactMode === 'file'}
+				<Button
+					variant="tab"
+					size="xs"
+					active={impactMode === 'file'}
 					onclick={() => (impactMode = 'file')}
 				>
 					File
-				</button>
-				<button
-					type="button"
-					class="mode-btn"
-					class:active={impactMode === 'entity'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={impactMode === 'entity'}
 					onclick={() => (impactMode = 'entity')}
 				>
 					Entity
-				</button>
+				</Button>
 			</div>
 			{#if impactMode === 'file'}
 				<input
-					class="graph-seed-input file-input"
+					class="text-input text-input--inline"
 					type="text"
 					placeholder="Impact: file path…"
 					bind:value={impactFile}
@@ -261,7 +262,7 @@
 				/>
 			{:else}
 				<input
-					class="graph-seed-input file-input"
+					class="text-input text-input--inline"
 					type="text"
 					placeholder="Impact: entity id…"
 					bind:value={impactEntity}
@@ -271,7 +272,7 @@
 				<label class="graph-inline-field">
 					<span class="graph-inline-label">Scope</span>
 					<select
-						class="graph-seed-input narrow"
+						class="text-input text-input--narrow"
 						bind:value={impactScope}
 						aria-label="Entity impact scope"
 					>
@@ -282,7 +283,7 @@
 				<label class="graph-inline-field">
 					<span class="graph-inline-label">Depth</span>
 					<input
-						class="graph-seed-input narrow"
+						class="text-input text-input--narrow"
 						type="number"
 						min="1"
 						max="50"
@@ -291,24 +292,24 @@
 					/>
 				</label>
 			{/if}
-			<button
-				type="button"
-				class="graph-ghost-btn"
+			<Button
+				variant="secondary"
+				size="xs"
 				onclick={onRunImpact}
 				disabled={impactBusy}
 				title="Highlight direct and indirect dependents"
 			>
 				{impactBusy ? 'Analyzing…' : 'Impact'}
-			</button>
+			</Button>
 			{#if showClear}
-				<button
-					type="button"
-					class="graph-ghost-btn"
+				<Button
+					variant="secondary"
+					size="xs"
 					onclick={onClearImpact}
 					title="Clear impact highlighting"
 				>
 					Clear
-				</button>
+				</Button>
 			{/if}
 		</div>
 	</section>
@@ -317,22 +318,22 @@
 		<h3 class="seed-section-title">Module</h3>
 		<div class="seed-section-body">
 			<input
-				class="graph-seed-input file-input"
+				class="text-input text-input--inline"
 				type="text"
 				placeholder="Module: file path…"
 				bind:value={impactFile}
 				onkeydown={handleModuleKeydown}
 				aria-label="File path for module relations"
 			/>
-			<button
-				type="button"
-				class="graph-ghost-btn"
+			<Button
+				variant="secondary"
+				size="xs"
 				onclick={onRunModule}
 				disabled={moduleLoading}
 				title="Query exports, callers and imports for this file"
 			>
 				{moduleLoading ? 'Querying…' : 'Module'}
-			</button>
+			</Button>
 		</div>
 	</section>
 </div>
@@ -343,7 +344,7 @@
 		<label class="graph-inline-field">
 			<span class="graph-inline-label">Relation types</span>
 			<input
-				class="graph-seed-input wide-input"
+				class="text-input text-input--wide"
 				type="text"
 				placeholder="call.direct, inheritance, … (empty = all)"
 				bind:value={serverRelationTypes}
@@ -353,7 +354,7 @@
 		<label class="graph-inline-field">
 			<span class="graph-inline-label">External edges</span>
 			<select
-				class="graph-seed-input narrow"
+				class="text-input text-input--narrow"
 				bind:value={serverIncludeExternal}
 				aria-label="Include external edges on the server"
 			>
@@ -407,56 +408,8 @@
 	.seed-mode,
 	.impact-mode {
 		display: flex;
-	}
-
-	.mode-btn {
-		padding: 0.4rem 0.75rem;
-		background: var(--white);
 		border: 1px solid var(--gray-300);
-		border-right: none;
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-	}
-
-	.mode-btn:last-child {
-		border-right: 1px solid var(--gray-300);
-	}
-
-	.mode-btn.active {
-		background: var(--black);
-		color: var(--white);
-		border-color: var(--black);
-	}
-
-	.graph-seed-input {
-		height: 30px;
-		min-width: 220px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
-	.graph-seed-input:focus {
-		outline: none;
-		border-color: var(--black);
-	}
-
-	.graph-seed-input.narrow {
-		min-width: 70px;
-		width: 70px;
-	}
-
-	.graph-seed-input.wide-input {
-		min-width: 320px;
-	}
-
-	.file-input {
-		min-width: 200px;
+		width: fit-content;
 	}
 
 	.path-arrow {
@@ -493,47 +446,6 @@
 	.adv-filter-hint {
 		font-size: 0.62rem;
 		color: var(--gray-500);
-	}
-
-	.graph-inline-field {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-	}
-
-	.graph-inline-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--gray-500);
-	}
-
-	.primary-btn {
-		height: 30px;
-		padding: 0 0.85rem;
-		border: 1px solid var(--black);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		transition: all 0.15s;
-	}
-
-	.primary-btn {
-		background: var(--black);
-		color: var(--white);
-	}
-
-	.primary-btn:disabled {
-		opacity: 0.5;
-		cursor: wait;
-	}
-
-
-	.impact-mode .mode-btn {
-		padding: 0.4rem 0.6rem;
 	}
 
 	@media (max-width: 900px) {

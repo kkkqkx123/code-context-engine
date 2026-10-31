@@ -7,6 +7,11 @@
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 
 	// Lazy load FilterPanel component
 	let FilterPanel: Component | null = $state(null);
@@ -29,7 +34,7 @@
 	}
 
 	function handleNavigate(entityId: string) {
-		window.location.href = `/entities/${entityId}`;
+		goto(resolve(`/entities/${entityId}`));
 	}
 
 	function prevPage() {
@@ -70,31 +75,30 @@
 		<SearchInput onSearch={handleSearch} />
 
 		<div class="filter-toggle">
-			<button type="button"
-				class="filter-toggle-btn"
-				class:active={filterPanelVisible}
+			<Button
+				variant="secondary"
+				size="xs"
+				active={filterPanelVisible}
 				onclick={toggleFilterPanel}
 			>
 				{filterPanelVisible ? 'Hide Filters' : 'Show Filters'}
-			</button>
+			</Button>
 		</div>
 
 		{#if filterPanelVisible}
 			{#if filterPanelLoaded && FilterPanel}
 				<FilterPanel />
 			{:else}
-				<div class="loading-filter">Loading filters...</div>
+				<LoadingState message="Loading filters..." />
 			{/if}
 		{/if}
 
 		{#if searchStore.error}
-			<div class="error-banner">Search failed: {searchStore.error}</div>
+			<ErrorBanner message={`Search failed: ${searchStore.error}`} />
 		{/if}
 
 		{#if searchStore.isSearching}
-			<div class="loading-indicator">
-				<p>Searching...</p>
-			</div>
+			<LoadingState message="Searching..." />
 		{:else if searchStore.results.length > 0}
 			<Toolbar>
 				<h2 class="results-title">
@@ -131,11 +135,12 @@
 					{#if searchStore.relationEpoch !== null}
 						<span>(epoch {searchStore.relationEpoch})</span>
 					{/if}
-					— results may be outdated. Re-run the search after indexing catches
-					up.
+					— results may be outdated. Re-run the search after indexing catches up.
 				</div>
 			{:else if searchStore.relationEpoch !== null}
-				<div class="relation-meta">Relation epoch: {searchStore.relationEpoch}</div>
+				<div class="relation-meta">
+					Relation epoch: {searchStore.relationEpoch}
+				</div>
 			{/if}
 
 			<div class="results-list">
@@ -162,10 +167,10 @@
 				</div>
 			{/if}
 		{:else if searchStore.query && !searchStore.error}
-			<div class="no-results">
-				<p>No results found for "{searchStore.query}"</p>
-				<p class="hint">Try adjusting your filters or search terms</p>
-			</div>
+			<EmptyState
+				message={`No results found for "${searchStore.query}"`}
+				hint="Try adjusting your filters or search terms"
+			/>
 		{/if}
 	</div>
 </div>
@@ -173,47 +178,6 @@
 <style>
 	.filter-toggle {
 		margin-bottom: 1.5rem;
-	}
-
-	.filter-toggle-btn {
-		padding: 0.5rem 1rem;
-		background: none;
-		border: 1px solid var(--gray-200);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		cursor: pointer;
-		transition: all 0.2s ease;
-		color: var(--gray-600);
-	}
-
-	.filter-toggle-btn:hover {
-		border-color: var(--accent);
-		color: var(--black);
-	}
-
-	.filter-toggle-btn.active {
-		background: var(--accent);
-		border-color: var(--accent);
-		color: var(--white);
-	}
-
-	.loading-filter {
-		padding: 2rem;
-		text-align: center;
-		color: var(--gray-400);
-		font-style: italic;
-		border: 1px dashed var(--gray-200);
-		margin-bottom: 1.5rem;
-	}
-
-	.loading-indicator {
-		padding: 3rem;
-		text-align: center;
-		font-family: 'Space Mono', monospace;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
 	}
 
 	.results-title {
@@ -227,16 +191,6 @@
 		font-size: 0.75rem;
 		font-weight: 400;
 		color: var(--gray-500);
-	}
-
-	.error-banner {
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-		background: var(--danger-bg);
-		border-left: 4px solid var(--danger);
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
 	}
 
 	.warn-banner {
@@ -275,20 +229,5 @@
 	.page-info {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.85rem;
-	}
-
-	.no-results {
-		padding: 4rem 2rem;
-		text-align: center;
-		border: 1px solid var(--gray-200);
-	}
-
-	.no-results p {
-		margin-bottom: 0.5rem;
-	}
-
-	.hint {
-		color: var(--gray-400);
-		font-style: italic;
 	}
 </style>

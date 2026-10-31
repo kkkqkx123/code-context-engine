@@ -9,6 +9,11 @@
 	 * helper and talks to the graph store directly.
 	 */
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { graphStore } from '$lib/stores/graph.svelte';
 	import { watchStore } from '$lib/stores/watch.svelte';
 	import { StaleQuery } from '$lib/stores/stale-query.svelte';
@@ -86,7 +91,7 @@
 	}
 
 	function openEntity(entityId: string) {
-		window.location.href = `/entities/${encodeURIComponent(entityId)}`;
+		goto(resolve(`/entities/${encodeURIComponent(entityId)}`));
 	}
 </script>
 
@@ -112,27 +117,15 @@
 		</dl>
 
 		<div class="inspector-actions">
-			<button
-				type="button"
-				class="graph-ghost-btn"
-				onclick={() => openEntity(node.id)}
-			>
+			<Button variant="secondary" size="xs" onclick={() => openEntity(node.id)}>
 				Open entity
-			</button>
-			<button
-				type="button"
-				class="graph-ghost-btn"
-				onclick={() => onExpand(node.id)}
-			>
+			</Button>
+			<Button variant="secondary" size="xs" onclick={() => onExpand(node.id)}>
 				Expand
-			</button>
-			<button
-				type="button"
-				class="graph-ghost-btn"
-				onclick={() => onCenter(node.id)}
-			>
+			</Button>
+			<Button variant="secondary" size="xs" onclick={() => onCenter(node.id)}>
 				Center
-			</button>
+			</Button>
 		</div>
 
 		<h5 class="subsection-title">Relations ({edges.length})</h5>
@@ -182,7 +175,7 @@
 			<label class="graph-inline-field">
 				<span class="graph-inline-label">Kind</span>
 				<select
-					class="graph-seed-input"
+					class="text-input"
 					bind:value={structuralKind}
 					aria-label="Structural relation family"
 				>
@@ -194,7 +187,7 @@
 			<label class="graph-inline-field">
 				<span class="graph-inline-label">Dir</span>
 				<select
-					class="graph-seed-input narrow"
+					class="text-input text-input--narrow"
 					bind:value={structuralDirection}
 					aria-label="Structural direction"
 				>
@@ -205,7 +198,7 @@
 			<label class="graph-inline-field">
 				<span class="graph-inline-label">Limit</span>
 				<input
-					class="graph-seed-input narrow"
+					class="text-input text-input--narrow"
 					type="number"
 					min="1"
 					max="2000"
@@ -213,17 +206,17 @@
 					aria-label="Structural result limit"
 				/>
 			</label>
-			<button
-				type="button"
-				class="graph-ghost-btn graph-small-btn"
+			<Button
+				variant="secondary"
+				size="xs"
 				onclick={runStructural}
 				disabled={query.loading}
 			>
 				{query.loading ? 'Querying…' : 'Query'}
-			</button>
+			</Button>
 		</div>
 		{#if query.error}
-			<p class="panel-error">{query.error}</p>
+			<InlineError message={query.error} />
 		{:else if query.data !== null && structuralFor === node.id}
 			{#if query.data.relations.length === 0}
 				<p class="panel-empty">
@@ -251,20 +244,20 @@
 							</p>
 							<p class="relation-target mono">{relation.source_file}</p>
 							<div class="peer-actions">
-								<button
-									type="button"
-									class="graph-ghost-btn graph-small-btn"
+								<Button
+									variant="ghost"
+									size="xs"
 									onclick={() => openEntity(relation.entity_id)}
 								>
 									Open
-								</button>
-								<button
-									type="button"
-									class="graph-ghost-btn graph-small-btn"
+								</Button>
+								<Button
+									variant="ghost"
+									size="xs"
 									onclick={() => onFocusEntity(relation.entity_id)}
 								>
 									Focus
-								</button>
+								</Button>
 							</div>
 						</li>
 					{/each}
@@ -274,10 +267,10 @@
 			<p class="panel-empty">Pick a relation family and run the query.</p>
 		{/if}
 	{:else}
-		<div class="inspector-empty">
-			<p>No node selected</p>
-			<span>Click a node in the canvas to inspect it</span>
-		</div>
+		<EmptyState
+			message="No node selected"
+			hint="Click a node in the canvas to inspect it"
+		/>
 	{/if}
 </aside>
 
@@ -409,29 +402,10 @@
 		font-size: 0.7rem;
 	}
 
-	.relation-empty,
-	.inspector-empty {
+	.relation-empty {
 		font-size: 0.78rem;
 		color: var(--gray-500);
 		font-style: italic;
-	}
-
-	.inspector-empty {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-		padding: 2rem 0;
-		text-align: center;
-	}
-
-	.inspector-empty p {
-		margin: 0;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-500);
-		font-style: normal;
 	}
 
 	.stale-tag {
@@ -456,7 +430,7 @@
 		margin-bottom: 0.5rem;
 	}
 
-	.structural-controls .graph-seed-input {
+	.structural-controls .text-input {
 		min-width: 0;
 		height: 26px;
 		font-size: 0.68rem;
@@ -474,56 +448,11 @@
 		margin-top: 0.3rem;
 	}
 
-	.peer-actions .graph-small-btn {
-		margin-left: 0;
-	}
-
-	.panel-error {
-		font-size: 0.75rem;
-		color: var(--danger);
-		margin: 0;
-	}
-
 	.panel-empty {
 		font-size: 0.78rem;
 		color: var(--gray-500);
 		font-style: italic;
 		margin: 0;
-	}
-
-	.graph-inline-field {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-	}
-
-	.graph-inline-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--gray-500);
-	}
-
-	.graph-seed-input {
-		height: 30px;
-		min-width: 220px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
-	.graph-seed-input.narrow {
-		min-width: 70px;
-		width: 70px;
-	}
-
-
-	.graph-small-btn {
-		height: 24px;
-		padding: 0 0.6rem;
-		margin-left: auto;
 	}
 
 	@media (max-width: 1200px) {

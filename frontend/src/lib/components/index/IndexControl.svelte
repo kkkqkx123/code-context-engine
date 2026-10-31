@@ -9,6 +9,7 @@
 	import ProgressBar from '../ui/ProgressBar.svelte';
 	import Badge from '../ui/Badge.svelte';
 	import InlineError from '../ui/InlineError.svelte';
+	import Toggle from '../ui/Toggle.svelte';
 
 	// Form state
 	let incremental = $state(false);
@@ -80,7 +81,9 @@
 				<div class="target-project">
 					<span class="target-label">Target</span>
 					<span class="target-name">{projectStore.currentProject.name}</span>
-					<span class="target-path" title={projectStore.currentProject.root_path}
+					<span
+						class="target-path"
+						title={projectStore.currentProject.root_path}
 						>{projectStore.currentProject.root_path}</span
 					>
 				</div>
@@ -92,20 +95,26 @@
 					}}
 				>
 					<div class="toggle-group">
-						<label class="toggle-item">
-							<input type="checkbox" bind:checked={incremental} />
-							<span class="toggle-label">Incremental Mode</span>
+						<div class="toggle-item">
+							<Toggle
+								checked={incremental}
+								label="Incremental Mode"
+								onchange={(e) => (incremental = e.checked)}
+							/>
 							<span class="toggle-description">Only process changed files</span>
-						</label>
+						</div>
 
 						{#if incremental}
-							<label class="toggle-item">
-								<input type="checkbox" bind:checked={forceReindex} />
-								<span class="toggle-label">Force Re-index</span>
+							<div class="toggle-item">
+								<Toggle
+									checked={forceReindex}
+									label="Force Re-index"
+									onchange={(e) => (forceReindex = e.checked)}
+								/>
 								<span class="toggle-description"
 									>Ignore cache and re-parse all files</span
 								>
-							</label>
+							</div>
 						{/if}
 					</div>
 
@@ -254,8 +263,6 @@
 		margin: 0;
 	}
 
-
-
 	.toggle-group {
 		display: flex;
 		flex-direction: column;
@@ -269,25 +276,12 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
-		cursor: pointer;
-	}
-
-	.toggle-item input[type='checkbox'] {
-		width: auto;
-		margin-right: 0.5rem;
-	}
-
-	.toggle-label {
-		font-family: 'Space Grotesk', sans-serif;
-		font-weight: 500;
-		font-size: 0.95rem;
 	}
 
 	.toggle-description {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.7rem;
 		color: var(--gray-600);
-		margin-left: 1.5rem;
 	}
 
 	.form-actions {

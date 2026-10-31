@@ -1,7 +1,9 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import type { CallChainNode } from '$lib/api/search';
 	import EntityGraphView from '$lib/components/graph/EntityGraphView.svelte';
+	import CallChainList from '$lib/components/entities/CallChainList.svelte';
 	import { callChainToElements } from '$lib/utils/entity-graph';
 
 	interface Props {
@@ -15,13 +17,6 @@
 	let elements = $derived(callChainToElements(nodes));
 	let effectiveFocusId = $derived(focusId ?? nodes[0]?.function_id ?? null);
 	let viewMode = $state<'graph' | 'list'>('graph');
-
-	function handleItemKeydown(event: KeyboardEvent, id: string) {
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			onNavigate(id);
-		}
-	}
 </script>
 
 <div class="call-graph-container">
@@ -29,22 +24,20 @@
 		<EmptyState padded message="No call graph data available" />
 	{:else}
 		<div class="view-toggle" role="tablist" aria-label="Call graph view mode">
-			<button
-				type="button"
-				class="toggle-btn"
-				class:active={viewMode === 'graph'}
+			<Button
+				variant="tab"
+				active={viewMode === 'graph'}
 				onclick={() => (viewMode = 'graph')}
 			>
 				Graph
-			</button>
-			<button
-				type="button"
-				class="toggle-btn"
-				class:active={viewMode === 'list'}
+			</Button>
+			<Button
+				variant="tab"
+				active={viewMode === 'list'}
 				onclick={() => (viewMode = 'list')}
 			>
 				List
-			</button>
+			</Button>
 		</div>
 
 		{#if viewMode === 'graph'}
@@ -56,25 +49,7 @@
 				</div>
 			</div>
 		{:else}
-			<ol class="chain-list">
-				{#each nodes as node, i (node.function_id)}
-					<li>
-						<div
-							class="chain-item"
-							tabindex="0"
-							role="button"
-							onclick={() => onNavigate(node.function_id)}
-							onkeydown={(e) => handleItemKeydown(e, node.function_id)}
-						>
-							<span class="chain-number">{i + 1}</span>
-							<span class="chain-name">{node.function_name}</span>
-							<span class="chain-location"
-								>{node.file_path.split('/').pop()}:{node.call_line ?? ''}</span
-							>
-						</div>
-					</li>
-				{/each}
-			</ol>
+			<CallChainList {nodes} {onNavigate} />
 		{/if}
 	{/if}
 </div>
@@ -85,72 +60,12 @@
 		padding: 1rem;
 	}
 
-
 	.view-toggle {
 		display: flex;
 		gap: 0;
 		margin-bottom: 1rem;
-	}
-
-	.toggle-btn {
-		padding: 0.4rem 0.85rem;
-		background: var(--white);
 		border: 1px solid var(--gray-300);
-		border-right: none;
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-	}
-
-	.toggle-btn:last-child {
-		border-right: 1px solid var(--gray-300);
-	}
-
-	.toggle-btn.active {
-		background: var(--black);
-		color: var(--white);
-		border-color: var(--black);
-	}
-
-	.chain-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: grid;
-		gap: 0.5rem;
-	}
-
-	.chain-item {
-		padding: 0.75rem 1rem;
-		border: 1px solid var(--black);
-		cursor: pointer;
-		display: grid;
-		grid-template-columns: auto 1fr auto;
-		gap: 1rem;
-		align-items: center;
-	}
-
-	.chain-item:hover {
-		background-color: var(--gray-100);
-	}
-
-	.chain-number {
-		font-family: 'Space Mono', monospace;
-		color: var(--gray-400);
-	}
-
-	.chain-name {
-		font-family: 'Space Grotesk', sans-serif;
-		font-weight: 700;
-	}
-
-	.chain-location {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		color: var(--gray-400);
+		width: fit-content;
 	}
 
 	.graph-legend {

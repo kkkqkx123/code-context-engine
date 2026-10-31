@@ -3,30 +3,55 @@
 
 	interface Props {
 		message?: string;
+		hint?: string;
 		fill?: boolean;
 		padded?: boolean;
 		card?: boolean;
 		children?: Snippet;
 	}
 
-	let { message = '', fill = false, padded = false, card = false, children }: Props = $props();
+	let {
+		message = '',
+		hint = '',
+		fill = false,
+		padded = false,
+		card = false,
+		children,
+	}: Props = $props();
 </script>
 
-<div class="empty-state" class:empty-state-fill={fill} class:empty-state-padded={padded} class:empty-state-card={card}>
-	{#if message}
-		{message}
+<div
+	class="empty-state"
+	class:empty-state-fill={fill}
+	class:empty-state-padded={padded}
+	class:empty-state-card={card}
+>
+	{#if children}
+		{@render children()}
 	{:else}
-		{@render children?.()}
+		{#if message}
+			<span>{message}</span>
+		{/if}
+		{#if hint}
+			<span class="empty-hint">{hint}</span>
+		{/if}
 	{/if}
 </div>
 
 <style>
 	.empty-state {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
+		gap: 0.5rem;
 		color: var(--gray-500);
 		font-style: italic;
+	}
+
+	.empty-hint {
+		font-size: 0.85em;
+		color: var(--gray-400);
 	}
 
 	.empty-state-fill {

@@ -8,6 +8,8 @@
 	import { watchStore } from '$lib/stores/watch.svelte';
 	import { StaleQuery } from '$lib/stores/stale-query.svelte';
 	import { clampPositive } from '$lib/utils/graph-params';
+	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 
 	interface Props {
 		/** Called with a cycle's members to load them as an induced subgraph. */
@@ -48,7 +50,7 @@
 		<label class="graph-inline-field">
 			<span class="graph-inline-label">Level</span>
 			<select
-				class="graph-seed-input narrow"
+				class="text-input text-input--narrow"
 				bind:value={cyclesLevel}
 				aria-label="Cycle detection level"
 			>
@@ -59,7 +61,7 @@
 		<label class="graph-inline-field">
 			<span class="graph-inline-label">Limit</span>
 			<input
-				class="graph-seed-input narrow"
+				class="text-input text-input--narrow"
 				type="number"
 				min="1"
 				max="5000"
@@ -67,17 +69,17 @@
 				aria-label="Cycle result limit"
 			/>
 		</label>
-		<button
-			type="button"
-			class="graph-ghost-btn"
+		<Button
+			variant="secondary"
+			size="xs"
 			onclick={runCycles}
 			disabled={query.loading}
 		>
 			{query.loading ? 'Detecting…' : 'Detect'}
-		</button>
+		</Button>
 	</div>
 	{#if query.error}
-		<p class="panel-error">{query.error}</p>
+		<InlineError message={query.error} />
 	{:else if query.data !== null}
 		{#if sortedCycles.length === 0}
 			<p class="panel-empty">
@@ -101,13 +103,13 @@
 							<span class="community-index">#{index}</span>
 							<span class="community-size">{cycle.members.length} members</span>
 							{#if cyclesLevel === 'entity'}
-								<button
-									type="button"
-									class="graph-ghost-btn graph-small-btn"
+								<Button
+									variant="ghost"
+									size="xs"
 									onclick={() => onLoadSubgraph(cycle.members)}
 								>
 									Load as subgraph
-								</button>
+								</Button>
 							{/if}
 						</div>
 						<p class="community-preview mono">
@@ -165,12 +167,6 @@
 		margin: 0.5rem 0 0.75rem;
 	}
 
-	.panel-error {
-		font-size: 0.75rem;
-		color: var(--danger);
-		margin: 0;
-	}
-
 	.panel-empty {
 		font-size: 0.78rem;
 		color: var(--gray-500);
@@ -225,41 +221,6 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-
-	.graph-small-btn {
-		height: 24px;
-		padding: 0 0.6rem;
-		margin-left: auto;
-	}
-
-	.graph-inline-field {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-	}
-
-	.graph-inline-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--gray-500);
-	}
-
-	.graph-seed-input {
-		height: 30px;
-		min-width: 220px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
-	.graph-seed-input.narrow {
-		min-width: 70px;
-		width: 70px;
-	}
-
 
 	.mono {
 		font-family: 'Space Mono', monospace;

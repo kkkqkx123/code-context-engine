@@ -7,7 +7,14 @@
 	import { onProjectChange } from '$lib/stores/project.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import CallChainList from '$lib/components/entities/CallChainList.svelte';
 
 	// Lazy load all heavy components
@@ -76,12 +83,12 @@
 	}
 
 	function handleNavigate(id: string) {
-		window.location.href = `/entities/${id}`;
+		goto(resolve(`/entities/${id}`));
 	}
 
 	/** Hand the current entity off to the graph explorer, focused on it. */
 	function openInGraph(id: string) {
-		window.location.href = `/graph?entity=${encodeURIComponent(id)}`;
+		goto(resolve(`/graph?entity=${encodeURIComponent(id)}`));
 	}
 
 	function loadCallChain(direction: 'up' | 'down') {
@@ -128,13 +135,9 @@
 <div class="page">
 	<div class="container">
 		{#if entityStore.isLoading}
-			<div class="loading-state">
-				<p>Loading entity...</p>
-			</div>
+			<LoadingState message="Loading entity..." />
 		{:else if entityStore.error}
-			<div class="error-state">
-				<p>{entityStore.error}</p>
-			</div>
+			<ErrorBanner message={entityStore.error} />
 		{:else if entityStore.currentEntity}
 			<PageHeader
 				title="Entity Details"
@@ -143,9 +146,10 @@
 
 			<!-- Relation traversal filter: every control maps onto RelationFilter -->
 			<div class="relation-filter" aria-label="Relation filter">
-				<label class="filter-field">
-					<span>Max depth</span>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Max depth</span>
 					<input
+						class="text-input text-input--narrow"
 						type="number"
 						min="1"
 						max="50"
@@ -157,9 +161,10 @@
 						aria-label="Maximum traversal depth"
 					/>
 				</label>
-				<label class="filter-field">
-					<span>Limit</span>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Limit</span>
 					<input
+						class="text-input text-input--narrow"
 						type="number"
 						min="1"
 						max="1000"
@@ -171,31 +176,35 @@
 						aria-label="Result limit"
 					/>
 				</label>
-				<label class="filter-field">
-					<span>Directory prefix</span>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Directory prefix</span>
 					<input
+						class="text-input text-input--inline"
 						type="text"
 						bind:value={filterDirectoryPrefix}
 						placeholder="e.g., src/"
 						aria-label="Directory prefix"
 					/>
 				</label>
-				<label class="filter-field">
-					<span>Domains</span>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Domains</span>
 					<input
+						class="text-input text-input--inline"
 						type="text"
 						bind:value={filterDomains}
 						placeholder="e.g., call"
 						aria-label="Relation domains"
 					/>
 				</label>
-				<label class="filter-check">
-					<input type="checkbox" bind:checked={filterExcludeTests} />
-					<span>Exclude tests</span>
-				</label>
-				<label class="filter-field">
-					<span>External</span>
+				<Toggle
+					checked={filterExcludeTests}
+					label="Exclude tests"
+					onchange={(e) => (filterExcludeTests = e.checked)}
+				/>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">External</span>
 					<select
+						class="text-input text-input--narrow"
 						bind:value={filterIncludeExternal}
 						aria-label="Include external edges"
 					>
@@ -204,30 +213,28 @@
 						<option value="off">Exclude</option>
 					</select>
 				</label>
-				<button
-					type="button"
-					class="graph-action-btn"
-					onclick={() => void loadEntity()}
-				>
+				<Button variant="primary" size="xs" onclick={() => void loadEntity()}>
 					Apply
-				</button>
+				</Button>
 			</div>
 
 			<!-- Tab Navigation -->
 			<div class="tab-navigation">
-				<button type="button"
-					class="tab"
-					class:active={currentTab === 'details'}
+				<Button
+					variant="tab"
+					size="xs"
+					active={currentTab === 'details'}
 					onclick={() => {
 						currentTab = 'details';
 						loadEntityDetailComponent();
 					}}
 				>
 					Details
-				</button>
-				<button type="button"
-					class="tab"
-					class:active={currentTab === 'call-graph'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={currentTab === 'call-graph'}
 					onclick={() => {
 						currentTab = 'call-graph';
 						loadCallGraphComponent();
@@ -235,36 +242,39 @@
 					}}
 				>
 					Call Graph
-				</button>
-				<button type="button"
-					class="tab"
-					class:active={currentTab === 'inheritance'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={currentTab === 'inheritance'}
 					onclick={() => {
 						currentTab = 'inheritance';
 						loadInheritanceTreeComponent();
 					}}
 				>
 					Inheritance
-				</button>
-				<button type="button"
-					class="tab"
-					class:active={currentTab === 'call-chain'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={currentTab === 'call-chain'}
 					onclick={() => {
 						currentTab = 'call-chain';
 						loadCallChain('down');
 					}}
 				>
 					Call Chain
-				</button>
-				<button type="button"
-					class="tab"
-					class:active={currentTab === 'call-path'}
+				</Button>
+				<Button
+					variant="tab"
+					size="xs"
+					active={currentTab === 'call-path'}
 					onclick={() => {
 						currentTab = 'call-path';
 					}}
 				>
 					Call Path
-				</button>
+				</Button>
 			</div>
 
 			<!-- Tab Content -->
@@ -277,24 +287,20 @@
 						onNavigate={handleNavigate}
 					/>
 				{:else}
-					<button type="button"
-						class="loading-spinner-button"
-						onclick={loadEntityDetailComponent}
-						aria-label="Load entity details"
-					>
+					<Button variant="secondary" block onclick={loadEntityDetailComponent}>
 						Loading entity details... (click to load)
-					</button>
+					</Button>
 				{/if}
 			{:else if currentTab === 'call-graph'}
 				<Card title="Call Graph" subtitle="Visual relationship map">
 					<div class="graph-actions">
-						<button
-							type="button"
-							class="graph-action-btn"
+						<Button
+							variant="secondary"
+							size="xs"
 							onclick={() => openInGraph(String(entityId))}
 						>
 							Open in Graph Explorer
-						</button>
+						</Button>
 					</div>
 					{#if CallGraph}
 						<CallGraph
@@ -335,40 +341,42 @@
 				>
 					<div class="path-form">
 						<input
-							class="path-input"
+							class="text-input text-input--inline"
 							type="text"
 							placeholder="From function id…"
 							bind:value={pathFrom}
 							aria-label="Path start function id"
 						/>
-						<span class="path-arrow" aria-hidden="true"><Icon name="arrow-right" /></span>
+						<span class="path-arrow" aria-hidden="true"
+							><Icon name="arrow-right" /></span
+						>
 						<input
-							class="path-input"
+							class="text-input text-input--inline"
 							type="text"
 							placeholder="To function id…"
 							bind:value={pathTo}
 							aria-label="Path end function id"
 						/>
 						<input
-							class="path-input path-depth"
+							class="text-input text-input--narrow"
 							type="number"
 							min="1"
 							max="100"
 							bind:value={pathDepth}
 							aria-label="Path maximum search depth"
 						/>
-						<button
-							type="button"
-							class="graph-action-btn"
+						<Button
+							variant="primary"
+							size="xs"
 							onclick={runCallPath}
 							disabled={entityStore.isLoading}
 						>
 							{entityStore.isLoading ? 'Searching...' : 'Find Path'}
-						</button>
+						</Button>
 					</div>
 
 					{#if entityStore.error}
-						<p class="path-error">{entityStore.error}</p>
+						<InlineError message={entityStore.error} />
 					{/if}
 
 					{#if entityStore.callPath.length > 0}
@@ -382,40 +390,15 @@
 				</Card>
 			{/if}
 		{:else}
-			<div class="not-found">
-				<h2>Entity Not Found</h2>
-				<p>No entity found with ID: {entityId}</p>
-			</div>
+			<EmptyState
+				message="Entity Not Found"
+				hint={`No entity found with ID: ${entityId}`}
+			/>
 		{/if}
 	</div>
 </div>
 
 <style>
-	.loading-state,
-	.error-state,
-	.not-found {
-		padding: 4rem 2rem;
-		text-align: center;
-		border: 1px solid var(--gray-200);
-	}
-
-	.loading-state p,
-	.error-state p {
-		font-family: 'Space Mono', monospace;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-	}
-
-	.error-state {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.not-found h2 {
-		font-size: 1.5rem;
-		margin-bottom: 1rem;
-	}
-
 	.tab-navigation {
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
@@ -423,28 +406,6 @@
 		margin-bottom: 2rem;
 		border-bottom: 1px solid var(--gray-200);
 		padding-bottom: 1rem;
-	}
-
-	.tab {
-		padding: 0.75rem 1rem;
-		background: var(--white);
-		border: 1px solid var(--gray-200);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		transition: all 0.2s;
-	}
-
-	.tab:hover {
-		background: var(--gray-100);
-	}
-
-	.tab.active {
-		background: var(--black);
-		color: var(--white);
-		border-color: var(--black);
 	}
 
 	.relation-filter {
@@ -458,86 +419,12 @@
 		background: var(--gray-50);
 	}
 
-	.filter-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-	}
-
-	.filter-field input,
-	.filter-field select {
-		height: 30px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		min-width: 110px;
-	}
-
-	.filter-check {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray-600);
-		height: 30px;
-	}
-
 	.graph-actions {
 		display: flex;
 		justify-content: flex-end;
 		margin-bottom: 1rem;
 	}
 
-	.graph-action-btn {
-		padding: 0.5rem 0.85rem;
-		background: var(--black);
-		color: var(--white);
-		border: 1px solid var(--black);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		transition: all 0.15s;
-	}
-
-	.graph-action-btn:hover {
-		background: var(--gray-900);
-	}
-
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 2rem;
-	}
-
-	.loading-spinner-button {
-		padding: 2rem;
-		text-align: center;
-		color: var(--gray-600);
-		font-family: 'Space Mono', monospace;
-		background: none;
-		border: 1px dashed var(--gray-300);
-		width: 100%;
-		cursor: pointer;
-		transition: all 0.2s ease;
-	}
-
-	.loading-spinner-button:hover {
-		border-color: var(--accent);
-		color: var(--black);
-		background: var(--gray-50);
-	}
 	.path-form {
 		display: flex;
 		flex-wrap: wrap;
@@ -546,34 +433,8 @@
 		margin-bottom: 1rem;
 	}
 
-	.path-input {
-		height: 32px;
-		min-width: 200px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
-	.path-input:focus {
-		outline: none;
-		border-color: var(--black);
-	}
-
-	.path-input.path-depth {
-		min-width: 70px;
-		width: 70px;
-	}
-
 	.path-arrow {
 		color: var(--gray-500);
-	}
-
-	.path-error {
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
-		margin: 0.5rem 0;
 	}
 
 	.path-meta {

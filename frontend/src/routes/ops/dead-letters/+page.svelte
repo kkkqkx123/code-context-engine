@@ -4,6 +4,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import {
 		deadLetterApi,
@@ -190,7 +191,7 @@
 		</PageHeader>
 
 		{#if error}
-			<div class="error-banner">{error}</div>
+			<ErrorBanner message={error} />
 		{/if}
 
 		{#if projectId === null}
@@ -259,7 +260,8 @@
 									/>
 								</td>
 								<td>
-									<button type="button"
+									<button
+										type="button"
 										class="file-link"
 										onclick={() => toggleExpand(file.file_path)}
 									>
@@ -274,7 +276,9 @@
 											{#if m.truncated}<em title="already truncate-retried"
 													>T</em
 												>{/if}
-											{#if m.acknowledged}<em title="acknowledged"><Icon name="check" /></em>{/if}
+											{#if m.acknowledged}<em title="acknowledged"
+													><Icon name="check" /></em
+												>{/if}
 										</span>
 									{/each}
 								</td>
@@ -349,13 +353,6 @@
 {/if}
 
 <style>
-	.error-banner {
-		padding: 0.75rem 1rem;
-		border-radius: 6px;
-		background: var(--color-danger-bg, #3b1a1a);
-		color: var(--color-danger, #ff6b6b);
-		margin-bottom: 1rem;
-	}
 	.empty {
 		color: var(--color-text-muted, #888);
 		text-align: center;

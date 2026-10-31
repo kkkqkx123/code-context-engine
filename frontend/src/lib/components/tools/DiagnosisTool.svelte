@@ -3,9 +3,10 @@
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { Diagnostic } from '$lib/api/tools';
 
@@ -78,21 +79,16 @@
 	}
 </script>
 
-<div class="tool-content">
-	{#if error}
-		<ErrorBanner message={error} />
-	{/if}
-
+<ToolShell {error}>
 	<SplitPane leftWidth={50}>
 		{#snippet left()}
 			<div class="tool-input">
-				<div class="input-row">
-					<div class="input-field">
-						<label class="field-label" for="diagnose-language">Language</label>
+				<div class="tool-form-row">
+					<ToolField label="Language">
 						<select
 							id="diagnose-language"
+							class="text-input"
 							bind:value={language}
-							class="select-input"
 						>
 							<option value="typescript">TypeScript</option>
 							<option value="javascript">JavaScript</option>
@@ -101,19 +97,16 @@
 							<option value="go">Go</option>
 							<option value="java">Java</option>
 						</select>
-					</div>
-					<div class="input-field flex-1">
-						<label class="field-label" for="diagnose-filename"
-							>File Name (optional)</label
-						>
+					</ToolField>
+					<ToolField label="File Name (optional)" wide>
 						<input
 							id="diagnose-filename"
 							type="text"
 							bind:value={fileName}
 							placeholder="e.g., main.ts"
-							class="text-input text-input--strong"
+							class="text-input"
 						/>
-					</div>
+					</ToolField>
 				</div>
 				<textarea
 					bind:value={code}
@@ -165,66 +158,15 @@
 			</div>
 		{/snippet}
 	</SplitPane>
-</div>
+</ToolShell>
 
 <style>
-	.tool-content {
-		width: 100%;
-	}
-
 	.tool-input,
 	.tool-output {
 		height: 100%;
 		display: flex;
 		flex-direction: column;
 		padding: 1rem;
-	}
-
-	.input-row {
-		display: flex;
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
-
-	.input-field {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.input-field.flex-1 {
-		flex: 1;
-	}
-
-	.field-label {
-		display: block;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-		margin-bottom: 0.5rem;
-	}
-
-	.select-input,
-	
-	.select-input:focus,
-	
-	.code-textarea {
-		flex: 1;
-		width: 100%;
-		padding: 1rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-		background: var(--black);
-		color: var(--white);
-		resize: none;
-		min-height: 300px;
-	}
-
-	.code-textarea:focus {
-		outline: none;
-		border-color: var(--accent);
 	}
 
 	.tool-actions {

@@ -4,9 +4,7 @@
 </script>
 
 <svelte:head><title>Realtime Logs</title></svelte:head>
-<div class="page h-screen flex flex-col">
+<div class="page">
 	<PageHeader title="Realtime Logs" subtitle="Live application log stream" />
-	<div class="flex-1">
-		<RealtimeLogViewer />
-	</div>
+	<RealtimeLogViewer />
 </div>

@@ -42,23 +42,4 @@
 		gap: 1rem;
 		margin-bottom: 1.5rem;
 	}
-
-	.search-input {
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 1.25rem;
-		padding: 1rem 1.5rem;
-		border: 1px solid var(--black);
-		background: var(--white);
-		color: var(--black);
-		outline: none;
-		transition: border-color 0.2s;
-	}
-
-	.search-input:focus {
-		border-color: var(--accent);
-	}
-
-	.search-input::placeholder {
-		color: var(--gray-400);
-	}
 </style>

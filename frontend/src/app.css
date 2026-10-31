@@ -147,8 +147,6 @@ pre code {
 	gap: 2rem;
 }
 
-
-
 /* Borders & Dividers */
 .border-top {
 	border-top: 1px solid var(--black);
@@ -251,6 +249,17 @@ pre code {
 	border-color: var(--gray-300);
 }
 
+.btn-sm {
+	height: 32px;
+	padding: 0 0.9rem;
+	font-size: 0.68rem;
+}
+
+.btn-lg {
+	padding: 1.25rem 2.25rem;
+	font-size: 0.9rem;
+}
+
 .btn-block {
 	width: 100%;
 }
@@ -315,6 +324,46 @@ pre code {
 	border-color: var(--black);
 	font-size: 0.9rem;
 	cursor: pointer;
+}
+
+/* Hero search input — large single-query entry, distinct from compact .text-input. */
+.search-input {
+	width: 100%;
+	font-family: 'Space Grotesk', sans-serif;
+	font-size: 1.25rem;
+	padding: 1rem 1.5rem;
+	border: 1px solid var(--black);
+	background: var(--white);
+	color: var(--black);
+	outline: none;
+	transition: border-color 0.2s;
+}
+
+.search-input:focus {
+	border-color: var(--accent);
+}
+
+.search-input::placeholder {
+	color: var(--gray-400);
+}
+
+/* Dark code editor textarea — single source for tool code inputs. */
+.code-textarea {
+	flex: 1;
+	width: 100%;
+	padding: 1rem;
+	border: 1px solid var(--black);
+	background: var(--black);
+	color: var(--white);
+	font-family: 'Space Mono', monospace;
+	font-size: 0.85rem;
+	resize: none;
+	min-height: 300px;
+}
+
+.code-textarea:focus {
+	outline: none;
+	border-color: var(--accent);
 }
 
 /* Tables */
@@ -384,7 +433,6 @@ pre code {
 	color: var(--white);
 	border-color: var(--danger);
 }
-
 
 /* Navigation Links */
 .nav-link {
@@ -555,7 +603,6 @@ pre code {
 	margin: 0;
 }
 
-
 /* Quick-action tile row (overview shortcuts) */
 .quick-grid {
 	display: grid;
@@ -587,7 +634,8 @@ pre code {
 	line-height: 1.5;
 }
 
-/* Shared graph control styles (extracted from duplicated component styles). */
+/* Horizontal inline field — label and control on one row. Distinct from
+   vertical ToolField; shared by graph panels and filter rows. */
 .graph-inline-field {
 	display: flex;
 	align-items: center;
@@ -602,53 +650,46 @@ pre code {
 	color: var(--gray-500);
 }
 
-.graph-seed-input {
-	height: 30px;
-	min-width: 220px;
-	padding: 0 0.5rem;
-	border: 1px solid var(--gray-300);
-	font-family: 'Space Mono', monospace;
-	font-size: 0.75rem;
-}
-
-.graph-seed-input:focus {
-	outline: none;
-	border-color: var(--black);
-}
-
-.graph-seed-input.narrow {
+/* Compact width modifiers for .text-input in dense filter rows. */
+.text-input--narrow {
 	min-width: 70px;
 	width: 70px;
 }
 
-.graph-seed-input.wide-input {
+.text-input--wide {
 	min-width: 320px;
 }
 
-.graph-seed-input.file-input {
-	min-width: 200px;
+/* Page-level underline tabs (config / summary / tools share one pattern). */
+.tab-nav {
+	display: flex;
+	gap: 0;
+	border-bottom: 2px solid var(--black);
+	margin-bottom: 2rem;
+	flex-wrap: wrap;
 }
 
-.graph-ghost-btn {
-	height: 30px;
-	padding: 0 0.85rem;
-	border: 1px solid var(--black);
-	cursor: pointer;
+.tab-btn {
+	padding: 1rem 2rem;
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	margin-bottom: -2px;
 	font-family: 'Space Mono', monospace;
-	font-size: 0.65rem;
+	font-size: 0.85rem;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
-	transition: all 0.15s;
-	background: var(--white);
+	cursor: pointer;
+	transition: all 0.3s ease;
+	color: var(--gray-600);
+}
+
+.tab-btn:hover {
 	color: var(--black);
 }
 
-.graph-ghost-btn:hover {
-	background: var(--gray-100);
-}
-
-.graph-small-btn {
-	height: 24px;
-	padding: 0 0.6rem;
-	margin-left: auto;
+.tab-btn.active {
+	color: var(--black);
+	border-bottom-color: var(--accent);
+	font-weight: bold;
 }

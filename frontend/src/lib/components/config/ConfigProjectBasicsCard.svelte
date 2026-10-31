@@ -7,6 +7,7 @@
 	 */
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Toggle from '$lib/components/ui/Toggle.svelte';
@@ -64,7 +65,10 @@
 			</label>
 			<label class="form-field">
 				<span class="form-label">Exclude dirs (comma separated)</span>
-				<Input bind:value={basicExcludeDirs} placeholder="target, node_modules" />
+				<Input
+					bind:value={basicExcludeDirs}
+					placeholder="target, node_modules"
+				/>
 			</label>
 			<label class="form-field">
 				<span class="form-label">Ignore patterns (comma separated)</span>
@@ -86,7 +90,7 @@
 		</div>
 
 		{#if basicError}
-			<div class="editor-error">{basicError}</div>
+			<InlineError message={basicError} />
 		{/if}
 		{#if basicResult}
 			<div class="reload-result">
@@ -154,17 +158,5 @@
 
 	.toggle-row {
 		margin: 0.5rem 0 1rem;
-	}
-
-	.editor-error {
-		margin-top: 1rem;
-		padding: 0.75rem 1rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		background: var(--danger-bg, #fff5f5);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		line-height: 1.5;
-		overflow-wrap: anywhere;
 	}
 </style>

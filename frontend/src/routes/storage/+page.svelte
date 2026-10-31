@@ -2,7 +2,6 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -96,12 +95,10 @@
 		/>
 
 		{#if storageStore.error}
-			<ErrorBanner>
-				<span>{storageStore.error}</span>
-				<button type="button" class="dismiss-btn" onclick={storageStore.clearError}
-					><Icon name="close" /></button
-				>
-			</ErrorBanner>
+			<ErrorBanner
+				message={storageStore.error}
+				onDismiss={storageStore.clearError}
+			/>
 		{/if}
 
 		<!-- Storage Status Overview -->
@@ -304,15 +301,6 @@
 {/if}
 
 <style>
-	.dismiss-btn {
-		background: none;
-		border: none;
-		color: var(--white);
-		font-size: 1.5rem;
-		cursor: pointer;
-		line-height: 1;
-	}
-
 	.backend-note {
 		color: var(--gray-600);
 		font-size: 0.85rem;

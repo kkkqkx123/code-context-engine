@@ -1,6 +1,14 @@
 <script lang="ts">
-	import { searchStore, QUERY_TYPES, SUB_QUERY_TYPES, AGGREGATED_TYPE, MAX_SUB_QUERIES, type SubQueryDraft } from '$lib/stores/search.svelte';
+	import {
+		searchStore,
+		QUERY_TYPES,
+		SUB_QUERY_TYPES,
+		AGGREGATED_TYPE,
+		MAX_SUB_QUERIES,
+		type SubQueryDraft,
+	} from '$lib/stores/search.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	function addSubQuery() {
 		if (searchStore.subQueries.length >= MAX_SUB_QUERIES) return;
@@ -132,13 +140,14 @@
 		<span class="section-label" id="query-mode-label">Query Mode</span>
 		<div class="mode-tabs" role="group" aria-labelledby="query-mode-label">
 			{#each [...QUERY_TYPES, AGGREGATED_TYPE] as mode (mode)}
-				<button type="button"
-					class="tab"
-					class:active={searchStore.mode === mode}
+				<Button
+					variant="tab"
+					size="xs"
+					active={searchStore.mode === mode}
 					onclick={() => searchStore.setMode(mode)}
 				>
 					{mode.toUpperCase()}
-				</button>
+				</Button>
 			{/each}
 		</div>
 	</div>
@@ -149,7 +158,7 @@
 			{#each searchStore.subQueries as sq, i (i)}
 				<div class="sub-query-row">
 					<input
-						class="sub-query-text"
+						class="text-input"
 						type="text"
 						placeholder="Sub-query text"
 						value={sq.text}
@@ -159,6 +168,7 @@
 							})}
 					/>
 					<select
+						class="text-input"
 						value={sq.query_type}
 						onchange={(e) =>
 							updateSubQuery(i, {
@@ -171,7 +181,7 @@
 						{/each}
 					</select>
 					<input
-						class="sub-query-weight"
+						class="text-input"
 						type="number"
 						min="0"
 						step="0.1"
@@ -182,24 +192,24 @@
 							if (!Number.isNaN(n) && n >= 0) updateSubQuery(i, { weight: n });
 						}}
 					/>
-					<button
-						class="sub-query-remove"
-						type="button"
-						aria-label="Remove sub-query"
+					<Button
+						variant="ghost"
+						size="xs"
 						onclick={() => removeSubQuery(i)}
+						aria-label="Remove sub-query"
 					>
 						<Icon name="close" />
-					</button>
+					</Button>
 				</div>
 			{/each}
-			<button
-				class="sub-query-add"
-				type="button"
+			<Button
+				variant="secondary"
+				size="xs"
 				disabled={searchStore.subQueries.length >= MAX_SUB_QUERIES}
 				onclick={addSubQuery}
 			>
 				+ Add sub-query (max {MAX_SUB_QUERIES})
-			</button>
+			</Button>
 			<p class="hint">
 				Leave all empty to auto-run BM25 + Vector on the main query. Each
 				sub-query may use its own text, type, and weight; filters below apply to
@@ -211,6 +221,7 @@
 	<div class="filter-section">
 		<label class="section-label" for="directory-input">Directory Prefix</label>
 		<input
+			class="text-input"
 			id="directory-input"
 			type="text"
 			placeholder="e.g., src/components"
@@ -235,7 +246,7 @@
 			/>
 			<input
 				id="min-score-input"
-				class="range-value-input"
+				class="text-input range-value-input"
 				type="number"
 				min="0"
 				max="1"
@@ -251,6 +262,7 @@
 			>Exclude Content Types (comma-separated)</label
 		>
 		<input
+			class="text-input"
 			id="exclude-types-input"
 			type="text"
 			placeholder="e.g., test, generated, vendor"
@@ -265,6 +277,7 @@
 				>Exclude Categories</label
 			>
 			<input
+				class="text-input"
 				id="exclude-cats-input"
 				type="text"
 				placeholder="e.g., test, generated"
@@ -277,6 +290,7 @@
 				>Include Categories</label
 			>
 			<input
+				class="text-input"
 				id="include-cats-input"
 				type="text"
 				placeholder="e.g., test, config"
@@ -291,6 +305,7 @@
 			>Exclude Glob Patterns</label
 		>
 		<input
+			class="text-input"
 			id="exclude-glob-input"
 			type="text"
 			placeholder="e.g., **/*_test.go, vendor/**"
@@ -304,6 +319,7 @@
 			>Include Glob Patterns</label
 		>
 		<input
+			class="text-input"
 			id="include-glob-input"
 			type="text"
 			placeholder="e.g., src/**/*.rs"
@@ -316,6 +332,7 @@
 		<div class="filter-section">
 			<label class="section-label" for="rerank-select">Rerank</label>
 			<select
+				class="text-input"
 				id="rerank-select"
 				value={rerankValue()}
 				onchange={handleRerankChange}
@@ -330,6 +347,7 @@
 				>Rerank Max Candidates</label
 			>
 			<input
+				class="text-input"
 				id="rerank-max-input"
 				type="number"
 				min="1"
@@ -344,6 +362,7 @@
 		<div class="filter-section">
 			<label class="section-label" for="intent-select">Query Intent</label>
 			<select
+				class="text-input"
 				id="intent-select"
 				value={searchStore.filters.query_intent}
 				onchange={handleIntentChange}
@@ -358,6 +377,7 @@
 				>Call-graph Expansion</label
 			>
 			<select
+				class="text-input"
 				id="expand-select"
 				value={expandValue()}
 				onchange={handleExpandChange}
@@ -396,27 +416,10 @@
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
 		gap: 0.5rem;
-	}
-
-	.tab {
-		padding: 0.5rem;
-		background: var(--white);
-		border: 1px solid var(--gray-200);
-		cursor: pointer;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.68rem;
-		text-transform: uppercase;
-		transition: all 0.2s;
-	}
-
-	.tab:hover {
-		background: var(--gray-100);
-	}
-
-	.tab.active {
-		background: var(--black);
-		color: var(--white);
-		border-color: var(--black);
+		border: 1px solid var(--gray-300);
+		padding: 0.35rem;
+		width: fit-content;
+		max-width: 100%;
 	}
 
 	.agg-section {
@@ -430,55 +433,6 @@
 		grid-template-columns: 1fr auto 5rem auto;
 		gap: 0.5rem;
 		align-items: center;
-	}
-
-	.sub-query-row select,
-	.sub-query-remove {
-		padding: 0.4rem 0.5rem;
-		border: 1px solid var(--gray-200);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		cursor: pointer;
-	}
-
-	.sub-query-remove {
-		color: var(--gray-600);
-	}
-
-	.sub-query-remove:hover {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.sub-query-weight {
-		padding: 0.4rem 0.5rem;
-		border: 1px solid var(--gray-200);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
-	.sub-query-add {
-		justify-self: start;
-		padding: 0.4rem 0.75rem;
-		border: 1px dashed var(--gray-400);
-		background: none;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		cursor: pointer;
-		color: var(--gray-600);
-	}
-
-	.sub-query-add:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.sub-query-add:not(:disabled):hover {
-		border-color: var(--accent);
-		color: var(--black);
 	}
 
 	.hint {
@@ -499,27 +453,7 @@
 
 	.range-value-input {
 		width: 5.5rem;
-		padding: 0.35rem 0.5rem;
-		border: 1px solid var(--gray-200);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		color: var(--gray-600);
-		outline: none;
-	}
-
-	.range-value-input:focus {
-		border-color: var(--accent);
-	}
-
-	input[type='text'] {
-		padding: 0.5rem;
-		border: 1px solid var(--gray-200);
-		font-family: 'Space Grotesk', sans-serif;
-		outline: none;
-	}
-
-	input[type='text']:focus {
-		border-color: var(--accent);
+		flex-shrink: 0;
 	}
 
 	.filter-grid {

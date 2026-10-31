@@ -216,7 +216,7 @@
 	<label class="field">
 		<span class="field-label">File paths (one per line)</span>
 		<textarea
-			class="area-input"
+			class="text-input"
 			rows="4"
 			bind:value={batchFilesText}
 			spellcheck="false"></textarea>
@@ -282,22 +282,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
 		color: var(--gray-600);
-	}
-
-	.area-input {
-		padding: 0.6rem 0.7rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
-		line-height: 1.5;
-		color: var(--black);
-		resize: vertical;
-	}
-
-	.area-input:focus {
-		outline: none;
-		border-color: var(--accent);
 	}
 
 	.arm-warning {

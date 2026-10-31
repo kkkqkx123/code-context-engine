@@ -3,8 +3,9 @@
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { FoldResponse } from '$lib/api/tools';
 
@@ -45,22 +46,13 @@
 	}
 </script>
 
-<div class="tool-content">
-	{#if error}
-		<ErrorBanner message={error} />
-	{/if}
-
+<ToolShell {error}>
 	<SplitPane leftWidth={50}>
 		{#snippet left()}
 			<div class="tool-input">
-				<div class="input-row">
-					<div class="input-field">
-						<label class="field-label" for="fold-language">Language</label>
-						<select
-							id="fold-language"
-							bind:value={language}
-							class="select-input"
-						>
+				<div class="tool-form-row">
+					<ToolField label="Language">
+						<select id="fold-language" class="text-input" bind:value={language}>
 							<option value="rust">Rust</option>
 							<option value="python">Python</option>
 							<option value="typescript">TypeScript</option>
@@ -68,11 +60,8 @@
 							<option value="go">Go</option>
 							<option value="java">Java</option>
 						</select>
-					</div>
-					<div class="input-field flex-1">
-						<label class="field-label" for="fold-filename"
-							>File Name (optional)</label
-						>
+					</ToolField>
+					<ToolField label="File Name (optional)" wide>
 						<input
 							id="fold-filename"
 							type="text"
@@ -80,11 +69,10 @@
 							placeholder="e.g., main.rs"
 							class="text-input"
 						/>
-					</div>
+					</ToolField>
 				</div>
-				<div class="input-row">
-					<div class="input-field">
-						<label class="field-label" for="fold-tokens">Max Tokens</label>
+				<div class="tool-form-row">
+					<ToolField label="Max Tokens">
 						<input
 							id="fold-tokens"
 							type="number"
@@ -93,14 +81,13 @@
 							max={8000}
 							class="text-input"
 						/>
-					</div>
-					<div class="input-field">
-						<label class="field-label" for="fold-mode">Mode</label>
-						<select id="fold-mode" bind:value={mode} class="select-input">
+					</ToolField>
+					<ToolField label="Mode">
+						<select id="fold-mode" class="text-input" bind:value={mode}>
 							<option value="detailed">Detailed</option>
 							<option value="minimal">Minimal</option>
 						</select>
-					</div>
+					</ToolField>
 				</div>
 				<textarea
 					bind:value={text}
@@ -137,66 +124,15 @@
 			</div>
 		{/snippet}
 	</SplitPane>
-</div>
+</ToolShell>
 
 <style>
-	.tool-content {
-		width: 100%;
-	}
-
 	.tool-input,
 	.tool-output {
 		height: 100%;
 		display: flex;
 		flex-direction: column;
 		padding: 1rem;
-	}
-
-	.input-row {
-		display: flex;
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
-
-	.input-field {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.input-field.flex-1 {
-		flex: 1;
-	}
-
-	.field-label {
-		display: block;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-		margin-bottom: 0.5rem;
-	}
-
-	.select-input,
-	
-	.select-input:focus,
-	
-	.code-textarea {
-		flex: 1;
-		width: 100%;
-		padding: 1rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-		background: var(--black);
-		color: var(--white);
-		resize: none;
-		min-height: 300px;
-	}
-
-	.code-textarea:focus {
-		outline: none;
-		border-color: var(--accent);
 	}
 
 	.tool-actions {

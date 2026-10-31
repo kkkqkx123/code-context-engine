@@ -19,7 +19,13 @@
 		onClear: () => void;
 	}
 
-	let { tokenDraft = $bindable(''), tokenSaving = false, tokenMessage = null, onSave, onClear }: Props = $props();
+	let {
+		tokenDraft = $bindable(''),
+		tokenSaving = false,
+		tokenMessage = null,
+		onSave,
+		onClear,
+	}: Props = $props();
 </script>
 
 <Card
@@ -27,8 +33,8 @@
 	subtitle="Browser-local admission credential for remote hosts"
 >
 	<p class="reload-description">
-		Stored only in this browser. Leave empty for local loopback use;
-		paste a project-scoped token when the backend requires admission.
+		Stored only in this browser. Leave empty for local loopback use; paste a
+		project-scoped token when the backend requires admission.
 	</p>
 	<div class="form-grid">
 		<label class="form-field">

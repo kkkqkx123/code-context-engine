@@ -2,7 +2,8 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi, type KeywordSearchResult } from '$lib/api/tools';
 	import { projectStore } from '$lib/stores/project.svelte';
 
@@ -24,7 +25,8 @@
 		const trimmedEpoch = epochText.trim();
 		const epoch = trimmedEpoch === '' ? null : Number(trimmedEpoch);
 		if (epoch !== null && (!Number.isInteger(epoch) || epoch < 0)) {
-			error = 'Epoch must be a non-negative integer or empty for the current generation';
+			error =
+				'Epoch must be a non-negative integer or empty for the current generation';
 			loading = false;
 			return;
 		}
@@ -45,14 +47,9 @@
 	}
 </script>
 
-<div class="tool">
-	{#if error}
-		<InlineError message={error} />
-	{/if}
-
-	<div class="form-row">
-		<label class="field field-wide">
-			<span class="field-label">Query</span>
+<ToolShell {error}>
+	<div class="tool-form-row">
+		<ToolField label="Query" wide>
 			<input
 				class="text-input"
 				type="text"
@@ -60,16 +57,14 @@
 				placeholder="authenticate login verify"
 				onkeydown={(e) => e.key === 'Enter' && handleSearch()}
 			/>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Term operator</span>
+		</ToolField>
+		<ToolField label="Term operator">
 			<select class="text-input" bind:value={termOperator}>
 				<option value="or">OR</option>
 				<option value="and">AND</option>
 			</select>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Top N</span>
+		</ToolField>
+		<ToolField label="Top N">
 			<input
 				class="text-input"
 				type="number"
@@ -77,13 +72,11 @@
 				max="100"
 				bind:value={topN}
 			/>
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Offset</span>
+		</ToolField>
+		<ToolField label="Offset">
 			<input class="text-input" type="number" min="0" bind:value={offset} />
-		</label>
-		<label class="field field-narrow">
-			<span class="field-label">Epoch</span>
+		</ToolField>
+		<ToolField label="Epoch">
 			<input
 				class="text-input"
 				type="text"
@@ -92,7 +85,7 @@
 				bind:value={epochText}
 				aria-label="Index epoch for version-aware filtering, empty for current"
 			/>
-		</label>
+		</ToolField>
 		<Button onclick={handleSearch} disabled={!query.trim() || loading}>
 			{#if loading}Searching...{:else}Search{/if}
 		</Button>
@@ -119,48 +112,9 @@
 			{/each}
 		{/if}
 	{/if}
-</div>
+</ToolShell>
 
 <style>
-	.tool {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-
-	.form-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 0.75rem;
-	}
-
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
-
-	.field-wide {
-		flex: 1;
-		min-width: 220px;
-	}
-
-	.field-narrow {
-		width: 120px;
-	}
-
-	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-	}
-
-	
-	
 	.result-head {
 		display: flex;
 		gap: 0.5rem;

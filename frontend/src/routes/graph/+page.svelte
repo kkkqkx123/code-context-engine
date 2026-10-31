@@ -20,7 +20,8 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { watchStore } from '$lib/stores/watch.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-import Button from '$lib/components/ui/Button.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import GraphCanvas, {
 		layoutOptions,
 		type GraphLayoutName,
@@ -490,10 +491,14 @@ import Button from '$lib/components/ui/Button.svelte';
 						<ul class="impact-list">
 							{#each store.meta.impactDirect as id (id)}
 								<li>
-									<Button variant="ghost" size="xs" onclick={() => {
+									<Button
+										variant="ghost"
+										size="xs"
+										onclick={() => {
 											selectedId = id;
 											centerGraphOn(cy, id);
-										}}>{id}</Button>
+										}}>{id}</Button
+									>
 								</li>
 							{/each}
 						</ul>
@@ -508,10 +513,14 @@ import Button from '$lib/components/ui/Button.svelte';
 						<ul class="impact-list">
 							{#each store.meta.impactTransitive as id (id)}
 								<li>
-									<Button variant="ghost" size="xs" onclick={() => {
+									<Button
+										variant="ghost"
+										size="xs"
+										onclick={() => {
 											selectedId = id;
 											centerGraphOn(cy, id);
-										}}>{id}</Button>
+										}}>{id}</Button
+									>
 								</li>
 							{/each}
 						</ul>
@@ -521,9 +530,7 @@ import Button from '$lib/components/ui/Button.svelte';
 		{/if}
 
 		{#if store.error}
-			<div class="error-banner">
-				<span>{store.error.message}</span>
-			</div>
+			<ErrorBanner message={store.error.message} />
 			{#if candidates.length > 0 && GraphCandidatePanel}
 				<GraphCandidatePanel {candidates} onPick={useCandidate} />
 			{/if}
@@ -634,7 +641,7 @@ import Button from '$lib/components/ui/Button.svelte';
 					aria-selected={resultTab === 'communities'}
 					class={resultTab === 'communities' ? 'active' : ''}
 					onclick={() => loadResultTab('communities')}
-					>
+				>
 					Communities
 				</Button>
 				<Button
@@ -643,7 +650,7 @@ import Button from '$lib/components/ui/Button.svelte';
 					aria-selected={resultTab === 'cycles'}
 					class={resultTab === 'cycles' ? 'active' : ''}
 					onclick={() => loadResultTab('cycles')}
-					>
+				>
 					Cycles
 				</Button>
 				<Button
@@ -652,7 +659,7 @@ import Button from '$lib/components/ui/Button.svelte';
 					aria-selected={resultTab === 'module'}
 					class={resultTab === 'module' ? 'active' : ''}
 					onclick={() => loadResultTab('module')}
-					>
+				>
 					Module
 				</Button>
 			</div>
@@ -678,8 +685,7 @@ import Button from '$lib/components/ui/Button.svelte';
 
 <style>
 	.info-banner,
-	.warn-banner,
-	.error-banner {
+	.warn-banner {
 		padding: 0.6rem 0.75rem;
 		margin-bottom: 1rem;
 		border: 1px solid;
@@ -693,18 +699,11 @@ import Button from '$lib/components/ui/Button.svelte';
 		color: var(--gray-600);
 	}
 
-	.error-banner {
-		border-color: var(--danger);
-		background: var(--danger-bg);
-		color: var(--danger);
-	}
-
 	.warn-banner {
 		border-color: var(--warning);
 		background: var(--warning-bg);
 		color: var(--warning);
 	}
-
 
 	.workspace {
 		display: grid;
@@ -749,7 +748,6 @@ import Button from '$lib/components/ui/Button.svelte';
 		background: var(--white);
 	}
 
-
 	.impact-dependents {
 		margin-bottom: 1rem;
 		padding: 0.6rem 0.75rem;
@@ -779,7 +777,6 @@ import Button from '$lib/components/ui/Button.svelte';
 		margin: 0.4rem 0 0;
 		padding: 0;
 	}
-
 
 	.canvas-help {
 		margin: 0.5rem 0 0;

@@ -142,63 +142,72 @@
 
 		<!-- Tab Navigation -->
 		<div class="tab-nav">
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'compress'}
 				onclick={() => (activeTab = 'compress')}
 			>
 				Code Compression
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'diagnose'}
 				onclick={() => (activeTab = 'diagnose')}
 			>
 				Code Diagnosis
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'fold'}
 				onclick={() => (activeTab = 'fold')}
 			>
 				File Fold
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'fold-batch'}
 				onclick={() => (activeTab = 'fold-batch')}
 			>
 				Batch Fold
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'symbols'}
 				onclick={() => (activeTab = 'symbols')}
 			>
 				Symbol Lookup
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'references'}
 				onclick={() => (activeTab = 'references')}
 			>
 				References
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'definition'}
 				onclick={() => (activeTab = 'definition')}
 			>
 				Definition
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'keyword'}
 				onclick={() => (activeTab = 'keyword')}
 			>
 				Keyword Search
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeTab === 'batch'}
 				onclick={() => (activeTab = 'batch')}
@@ -333,37 +342,4 @@
 </div>
 
 <style>
-	/* Tab Navigation */
-	.tab-nav {
-		display: flex;
-		gap: 0;
-		border-bottom: 2px solid var(--black);
-		margin-bottom: 2rem;
-	}
-
-	.tab-btn {
-		padding: 1rem 2rem;
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -2px;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		color: var(--gray-600);
-	}
-
-	.tab-btn:hover {
-		color: var(--black);
-	}
-
-	.tab-btn.active {
-		color: var(--black);
-		border-bottom-color: var(--accent);
-		font-weight: bold;
-	}
-
 </style>

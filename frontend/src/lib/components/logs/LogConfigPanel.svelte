@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { logsApi, type LogConfig } from '$lib/api/logs';
+	import Button from '$lib/components/ui/Button.svelte';
+	import Card from '$lib/components/ui/Card.svelte';
+	import Input from '$lib/components/ui/Input.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
 
 	let config = $state<LogConfig | null>(null);
 	let level = $state('info');
@@ -26,8 +31,12 @@
 		error = null;
 		message = null;
 		try {
-			await logsApi.updateConfig({ level, format, filter: filter || undefined });
-			message = 'Updated';
+			await logsApi.updateConfig({
+				level,
+				format,
+				filter: filter || undefined,
+			});
+			message = 'Configuration updated';
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -39,47 +48,156 @@
 	onMount(load);
 </script>
 
-<div class="p-4 space-y-4 max-w-xl">
-	{#if config}
-		<div class="space-y-2 text-sm text-gray-600">
-			<div>Output: {config.output}</div>
-			<div>File: {config.file ?? '-'}</div>
-			<div>Max file size (MB): {config.max_file_size_mb ?? '-'}</div>
-			<div>Max files: {config.max_files ?? '-'}</div>
-			<div>Max total size (MB): {config.max_total_size_mb ?? '-'}</div>
-			<div>WS capacity: {config.ws_capacity}</div>
-			<div>Buffer size: {config.memory_buffer_size}</div>
+{#if config}
+	<Card title="Current Configuration" subtitle="Read-only runtime values">
+		<div class="spec-grid">
+			<div class="spec-item">
+				<span class="spec-label">Output</span>
+				<span class="spec-value">{config.output}</span>
+			</div>
+			<div class="spec-item">
+				<span class="spec-label">File</span>
+				<span class="spec-value">{config.file ?? '-'}</span>
+			</div>
+			<div class="spec-item">
+				<span class="spec-label">Max file size (MB)</span>
+				<span class="spec-value">{config.max_file_size_mb ?? '-'}</span>
+			</div>
+			<div class="spec-item">
+				<span class="spec-label">Max files</span>
+				<span class="spec-value">{config.max_files ?? '-'}</span>
+			</div>
+			<div class="spec-item">
+				<span class="spec-label">Max total size (MB)</span>
+				<span class="spec-value">{config.max_total_size_mb ?? '-'}</span>
+			</div>
+			<div class="spec-item">
+				<span class="spec-label">WS capacity</span>
+				<span class="spec-value">{config.ws_capacity}</span>
+			</div>
+			<div class="spec-item">
+				<span class="spec-label">Buffer size</span>
+				<span class="spec-value">{config.memory_buffer_size}</span>
+			</div>
 		</div>
-	{/if}
+	</Card>
+{/if}
+
+<Card title="Update Logging" subtitle="Level, format and filter directives">
 	{#if error}
-		<div class="text-red-600">{error}</div>
+		<InlineError message={error} />
 	{/if}
 	{#if message}
-		<div class="text-green-600">{message}</div>
+		<div class="success-note">
+			<Badge label="Updated" variant="success" />
+			<span>{message}</span>
+		</div>
 	{/if}
-	<div>
-		<label for="log-level" class="block text-sm mb-1">Level</label>
-		<select id="log-level" class="select" bind:value={level}>
-			<option value="trace">trace</option>
-			<option value="debug">debug</option>
-			<option value="info">info</option>
-			<option value="warn">warn</option>
-			<option value="error">error</option>
-		</select>
+	<div class="form-grid">
+		<label class="form-field" for="log-level">
+			<span class="form-label">Level</span>
+			<select id="log-level" class="text-input" bind:value={level}>
+				<option value="trace">trace</option>
+				<option value="debug">debug</option>
+				<option value="info">info</option>
+				<option value="warn">warn</option>
+				<option value="error">error</option>
+			</select>
+		</label>
+		<label class="form-field" for="log-format">
+			<span class="form-label">Format</span>
+			<select id="log-format" class="text-input" bind:value={format}>
+				<option value="pretty">pretty</option>
+				<option value="compact">compact</option>
+				<option value="json">json</option>
+			</select>
+		</label>
 	</div>
-	<div>
-		<label for="log-format" class="block text-sm mb-1">Format</label>
-		<select id="log-format" class="select" bind:value={format}>
-			<option value="pretty">pretty</option>
-			<option value="compact">compact</option>
-			<option value="json">json</option>
-		</select>
+	<div class="full-row">
+		<Input
+			id="log-filter"
+			label="Filter directives"
+			bind:value={filter}
+			placeholder="info,cce_server=debug"
+		/>
 	</div>
-	<div>
-		<label for="log-filter" class="block text-sm mb-1">Filter directives</label>
-		<input id="log-filter" class="input" bind:value={filter} placeholder="info,cce_server=debug" />
+	<div class="form-actions">
+		<Button onclick={save} disabled={saving}>
+			{saving ? 'Saving...' : 'Save'}
+		</Button>
 	</div>
-	<button type="button" class="bg-blue-500 text-white px-4 py-2 rounded" onclick={save} disabled={saving}>
-		{saving ? 'Saving...' : 'Save'}
-	</button>
-</div>
+</Card>
+
+<style>
+	.spec-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 1rem;
+	}
+
+	.spec-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		padding: 0.75rem;
+		border: 1px solid var(--gray-200);
+	}
+
+	.spec-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.62rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+	}
+
+	.spec-value {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.82rem;
+		word-break: break-all;
+	}
+
+	.success-note {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+		font-size: 0.85rem;
+	}
+
+	.form-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.form-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+
+	.form-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.62rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+	}
+
+	.full-row {
+		margin-bottom: 1rem;
+	}
+
+	.form-actions {
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	@media (max-width: 768px) {
+		.form-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

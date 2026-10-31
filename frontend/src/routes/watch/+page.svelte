@@ -1,7 +1,6 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 	import type { Component } from 'svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -73,21 +72,18 @@
 		/>
 
 		{#if watchStore.error}
-			<ErrorBanner>
-				<span>{watchStore.error}</span>
-				<button type="button"
-					class="dismiss-btn"
-					onclick={() => (watchStore.error = null)}
-					><Icon name="close" /></button
-				>
-			</ErrorBanner>
+			<ErrorBanner
+				message={watchStore.error}
+				onDismiss={() => (watchStore.error = null)}
+			/>
 		{/if}
 
 		{#if watchStore.error && watchStore.error.includes('gateway-supplied')}
 			<div class="gateway-hint">
 				<span
-					>This project is gateway-supplied; local watching is disabled. Push changes
-					with `cce-cli gateway watch` from the machine where the files live.</span
+					>This project is gateway-supplied; local watching is disabled. Push
+					changes with `cce-cli gateway watch` from the machine where the files
+					live.</span
 				>
 			</div>
 		{/if}
@@ -190,7 +186,9 @@
 						{/if}
 						{#if (watchStore.status as unknown as { data_epoch?: number | null }).data_epoch !== undefined && (watchStore.status as unknown as { data_epoch?: number | null }).data_epoch !== null}
 							<span class="info-item"
-								>Data epoch: {(watchStore.status as unknown as { data_epoch?: number | null }).data_epoch}</span
+								>Data epoch: {(
+									watchStore.status as unknown as { data_epoch?: number | null }
+								).data_epoch}</span
 							>
 						{/if}
 					</div>
@@ -221,16 +219,6 @@
 </div>
 
 <style>
-
-	.dismiss-btn {
-		background: none;
-		border: none;
-		color: var(--white);
-		font-size: 1.5rem;
-		cursor: pointer;
-		line-height: 1;
-	}
-
 	.gateway-hint {
 		background: var(--gray-100);
 		color: var(--black);

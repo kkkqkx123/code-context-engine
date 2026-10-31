@@ -9,7 +9,6 @@
 	 */
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 	import { onMount } from 'svelte';
 	import ConfigTokenCard from '$lib/components/config/ConfigTokenCard.svelte';
 	import ConfigGlobalCard from '$lib/components/config/ConfigGlobalCard.svelte';
@@ -124,7 +123,9 @@
 		basicLoading = true;
 		basicError = null;
 		try {
-			const detail = await projectApi.getProject(String(projectStore.currentProjectId));
+			const detail = await projectApi.getProject(
+				String(projectStore.currentProjectId),
+			);
 			const project = detail.project;
 			rootPath = project.root_path;
 			basicName = project.name;
@@ -169,7 +170,9 @@
 		llmLoading = true;
 		llmLoadError = null;
 		try {
-			const response = await llmApi.getOverview(String(projectStore.currentProjectId));
+			const response = await llmApi.getOverview(
+				String(projectStore.currentProjectId),
+			);
 			llmOverview = response;
 			llmLoaded = true;
 			llmDefaultChat = response.default_chat ?? '';
@@ -182,7 +185,9 @@
 			llmChatTemperature = activeChat ? String(activeChat.temperature) : '';
 			llmChatMaxTokens = activeChat ? String(activeChat.max_tokens) : '';
 			llmChatTopP = activeChat ? String(activeChat.top_p) : '';
-			llmChatMaxInputTokens = activeChat ? String(activeChat.max_input_tokens) : '';
+			llmChatMaxInputTokens = activeChat
+				? String(activeChat.max_input_tokens)
+				: '';
 			llmSaveResult = null;
 			llmTestResult = null;
 			llmTestError = null;
@@ -210,11 +215,16 @@
 			llmSaveError = 'Rerank max candidates must be a number';
 			return;
 		}
-		const temperature = llmChatTemperature.trim() ? Number(llmChatTemperature.trim()) : undefined;
+		const temperature = llmChatTemperature.trim()
+			? Number(llmChatTemperature.trim())
+			: undefined;
 		const maxTokens = parseOptionalNumber(llmChatMaxTokens);
 		const topP = llmChatTopP.trim() ? Number(llmChatTopP.trim()) : undefined;
 		const maxInputTokens = parseOptionalNumber(llmChatMaxInputTokens);
-		if (llmChatTemperature.trim() && (temperature === undefined || !Number.isFinite(temperature))) {
+		if (
+			llmChatTemperature.trim() &&
+			(temperature === undefined || !Number.isFinite(temperature))
+		) {
 			llmSaveError = 'Temperature must be a number';
 			return;
 		}
@@ -249,13 +259,16 @@
 				: undefined;
 		llmSaving = true;
 		try {
-			llmSaveResult = await llmApi.updateConfig(String(projectStore.currentProjectId), {
-				default_chat: trimmedChat ? trimmedChat : null,
-				default_rerank: trimmedRerank ? trimmedRerank : null,
-				rerank_enabled: llmRerankEnabled,
-				rerank_max_candidates: maxCandidates ?? null,
-				chat_model_params: chatModelParams ?? null,
-			});
+			llmSaveResult = await llmApi.updateConfig(
+				String(projectStore.currentProjectId),
+				{
+					default_chat: trimmedChat ? trimmedChat : null,
+					default_rerank: trimmedRerank ? trimmedRerank : null,
+					rerank_enabled: llmRerankEnabled,
+					rerank_max_candidates: maxCandidates ?? null,
+					chat_model_params: chatModelParams ?? null,
+				},
+			);
 			void loadLlmOverview();
 			void loadValidate();
 		} catch (e) {
@@ -270,10 +283,13 @@
 		llmTestError = null;
 		llmTestResult = null;
 		try {
-			llmTestResult = await llmApi.testModel(String(projectStore.currentProjectId), {
-				service,
-				model_key: modelKey,
-			});
+			llmTestResult = await llmApi.testModel(
+				String(projectStore.currentProjectId),
+				{
+					service,
+					model_key: modelKey,
+				},
+			);
 		} catch (e) {
 			llmTestError = errorMessage(e);
 		} finally {
@@ -285,8 +301,11 @@
 		reindexBusy = true;
 		reindexMessage = null;
 		try {
-			const response = await indexApi.clearIndex(Number(projectStore.currentProjectId));
-			reindexMessage = response.message ?? `Clear finished (success=${response.success})`;
+			const response = await indexApi.clearIndex(
+				Number(projectStore.currentProjectId),
+			);
+			reindexMessage =
+				response.message ?? `Clear finished (success=${response.success})`;
 		} catch (e) {
 			reindexMessage = errorMessage(e);
 		} finally {
@@ -298,7 +317,9 @@
 		reindexBusy = true;
 		reindexMessage = null;
 		try {
-			const response = await projectApi.indexProject(String(projectStore.currentProjectId));
+			const response = await projectApi.indexProject(
+				String(projectStore.currentProjectId),
+			);
 			reindexMessage = `Reindex started for project ${response.project_id ?? projectStore.currentProjectId}`;
 		} catch (e) {
 			reindexMessage = errorMessage(e);
@@ -444,22 +465,21 @@
 		/>
 
 		{#if error}
-			<ErrorBanner>
-				<span>{error}</span>
-				<button type="button" class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
-			</ErrorBanner>
+			<ErrorBanner message={error} onDismiss={() => (error = null)} />
 		{/if}
 
 		<!-- Scope Navigation -->
 		<div class="tab-nav">
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeScope === 'global'}
 				onclick={() => (activeScope = 'global')}
 			>
 				Global
 			</button>
-			<button type="button"
+			<button
+				type="button"
 				class="tab-btn"
 				class:active={activeScope === 'project'}
 				onclick={() => {
@@ -467,7 +487,7 @@
 					ensureProjectLoaded();
 				}}
 			>
-				Project #{ projectStore.currentProjectId }
+				Project #{projectStore.currentProjectId}
 			</button>
 		</div>
 
@@ -482,7 +502,11 @@
 
 			<ConfigGlobalCard {configInfo} {loading} onRefresh={loadInfo} />
 
-			<ConfigValidationCard {validateResult} {validating} onValidate={loadValidate} />
+			<ConfigValidationCard
+				{validateResult}
+				{validating}
+				onValidate={loadValidate}
+			/>
 		{/if}
 
 		{#if activeScope === 'project'}
@@ -552,46 +576,4 @@
 </div>
 
 <style>
-
-	.dismiss-btn {
-		background: none;
-		border: none;
-		color: var(--white);
-		font-size: 1.5rem;
-		cursor: pointer;
-		line-height: 1;
-	}
-
-	/* Scope Navigation */
-	.tab-nav {
-		display: flex;
-		gap: 0;
-		border-bottom: 2px solid var(--black);
-		margin-bottom: 2rem;
-	}
-
-	.tab-btn {
-		padding: 1rem 2rem;
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -2px;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		cursor: pointer;
-		transition: all 0.3s ease;
-		color: var(--gray-600);
-	}
-
-	.tab-btn:hover {
-		color: var(--black);
-	}
-
-	.tab-btn.active {
-		color: var(--black);
-		border-bottom-color: var(--accent);
-		font-weight: bold;
-	}
 </style>
