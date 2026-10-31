@@ -381,7 +381,8 @@ pub struct ResultFilterEntry {
     /// Whether to remove the candidate.
     #[serde(default)]
     pub remove: bool,
-    /// Optional additive boost (in score units, applied before final sort).
+    /// Optional multiplicative boost applied as `score *= 1 + boost`
+    /// before the final sort. Values at or below `-1` are rejected.
     #[serde(default)]
     pub boost: Option<f32>,
     /// Optional note (only used for logging/inspection).

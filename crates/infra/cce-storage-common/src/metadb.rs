@@ -202,6 +202,30 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         epoch: i64,
     ) -> impl Future<Output = Result<i64, StorageError>> + Send;
 
+    /// Full-text entity search scoped to one project and epoch.
+    ///
+    /// The local branch serves SQLite FTS5; the remote branch serves a
+    /// portable substring match over name, signature and scoped name.
+    /// Rows whose file path is in `excluded_files` are dropped inside the
+    /// branch. An empty query after sanitization returns no rows.
+    fn entities_search_fts(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: i64,
+        epoch: i64,
+        excluded_files: &[String],
+    ) -> impl Future<Output = Result<Vec<EntityRecord>, StorageError>> + Send;
+
+    /// List file rows of one project across the given epochs, ordered by path.
+    ///
+    /// Backs index-based file search on branches without live project files.
+    fn files_list(
+        &self,
+        project_id: i64,
+        epochs: &[i64],
+    ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
+
     /// Idempotent batch write of chunk rows (records carry project/epoch).
     fn chunks_upsert(
         &self,

@@ -364,6 +364,26 @@ impl RelationStorage for PostgresClient {
         self.entities_count(project_id, epoch).await
     }
 
+    async fn entities_search_fts(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: i64,
+        epoch: i64,
+        excluded_files: &[String],
+    ) -> Result<Vec<EntityRecord>, StorageError> {
+        self.entities_search_fts(project_id, query, limit, epoch, excluded_files)
+            .await
+    }
+
+    async fn files_list(
+        &self,
+        project_id: i64,
+        epochs: &[i64],
+    ) -> Result<Vec<FileRecord>, StorageError> {
+        self.files_list(project_id, epochs).await
+    }
+
     async fn chunks_upsert(&self, chunks: &[ChunkRecord]) -> Result<usize, StorageError> {
         self.chunks_upsert(chunks).await
     }

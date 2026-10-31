@@ -468,7 +468,10 @@ impl super::CodeContextEngine {
             )));
         }
         let coordinator = self.build_query_coordinator(project_id).await?;
-        coordinator.search(options).await.map_err(EngineError::Query)
+        coordinator
+            .search(options)
+            .await
+            .map_err(EngineError::Query)
     }
 
     /// Fuzzy file-path search scoped to one project.

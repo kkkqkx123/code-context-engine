@@ -91,7 +91,7 @@ pub mod relation_searcher;
 // Query coordinator (unified entry point)
 pub mod coordinator;
 
-// Boost module — additive score boosting from multiple sources
+// Score normalization shared by all recall modes
 pub mod boost;
 
 // Ranking module
@@ -161,8 +161,7 @@ pub use coordinator::QueryCoordinator;
 // Re-export file search hit type
 pub use files::FileHit;
 
-// Re-export boost module components
-pub use boost::{BoostAggregationConfig, BoostContribution, apply_boosts};
+// Re-export score normalization components
 pub use boost::{NormalizationStrategy, normalize_scores};
 
 // Re-export ranking module components (includes LlmReranker)

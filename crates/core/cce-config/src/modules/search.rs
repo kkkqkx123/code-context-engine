@@ -397,80 +397,6 @@ impl Default for ScoreNormalizationConfig {
     }
 }
 
-/// Boost aggregation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct BoostAggregationConfig {
-    /// Whether unified boost aggregation is enabled
-    pub enabled: bool,
-    /// Maximum total addition across all sources (e.g., 0.5 = 50% max boost)
-    pub max_addition: f32,
-    /// Default per-source addition cap for sources without an explicit entry
-    /// in `source_caps`
-    pub max_source_boost: f32,
-    /// Per-source addition caps by source name. Adding a new
-    /// boost source only requires a new entry here, no code change. Sources
-    /// without an entry fall back to `max_source_boost`.
-    pub source_caps: HashMap<String, f32>,
-}
-
-impl Default for BoostAggregationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_addition: 0.5,
-            max_source_boost: 0.3,
-            source_caps: HashMap::new(),
-        }
-    }
-}
-
-impl BoostAggregationConfig {
-    /// Addition cap for one boost source: the explicit entry when present,
-    /// otherwise the default per-source cap.
-    pub fn cap_for(&self, source: &str) -> f32 {
-        self.source_caps
-            .get(source)
-            .copied()
-            .unwrap_or(self.max_source_boost)
-    }
-}
-
-impl Validate for BoostAggregationConfig {
-    fn validate_structured(&self) -> ValidationResult {
-        let mut errors = Vec::new();
-
-        for (field, value) in [
-            ("max_addition", self.max_addition),
-            ("max_source_boost", self.max_source_boost),
-        ] {
-            if !value.is_finite() || value < 0.0 {
-                errors.push(ConfigValidationError::invalid_field(
-                    field,
-                    "must be finite and >= 0.0",
-                ));
-            }
-        }
-        let mut names: Vec<&String> = self.source_caps.keys().collect();
-        names.sort();
-        for name in names {
-            let value = self.source_caps[name];
-            if !value.is_finite() || value < 0.0 {
-                errors.push(ConfigValidationError::invalid_field(
-                    format!("source_caps[{name}]"),
-                    "must be finite and >= 0.0",
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(ConfigValidationError::multiple(errors))
-        }
-    }
-}
-
 // ============================================================================
 // Score fusion strategy (serde-compatible)
 // ============================================================================
@@ -927,9 +853,6 @@ pub struct SearchModuleConfig {
     /// Score normalization configuration
     #[serde(default)]
     pub score: ScoreNormalizationConfig,
-    /// Unified boost aggregation configuration
-    #[serde(default)]
-    pub boost: BoostAggregationConfig,
     /// Query-side plugin hooks configuration (`QueryRewrite` / `Fusion` /
     /// `ResultFilter`).
     #[serde(default)]
@@ -958,9 +881,6 @@ impl Validate for SearchModuleConfig {
             errors.push(e);
         }
         if let Err(e) = self.fusion.validate_structured() {
-            errors.push(e);
-        }
-        if let Err(e) = self.boost.validate_structured() {
             errors.push(e);
         }
 
@@ -1019,13 +939,10 @@ mod tests {
         let config = SearchModuleConfig::default();
         assert_eq!(config.vector.top_k, 50);
         assert_eq!(config.result.limit, 10);
-        assert!(config.boost.enabled);
-        assert!((config.boost.max_addition - 0.5).abs() < f32::EPSILON);
         assert_eq!(
             config.fusion.algorithm,
             RecallFusionAlgorithm::WeightedMinMax
         );
-        assert!((config.boost.cap_for("unknown_source") - 0.3).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1034,7 +951,6 @@ mod tests {
         let toml_str = toml::to_string(&config).expect("serialize");
         let deserialized: SearchModuleConfig = toml::from_str(&toml_str).expect("deserialize");
         assert_eq!(deserialized.vector.top_k, 50);
-        assert_eq!(deserialized.boost.max_addition, 0.5);
     }
 
     #[test]

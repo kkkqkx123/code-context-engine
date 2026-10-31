@@ -449,3 +449,122 @@ impl PostgresClient {
         .await
     }
 }
+
+/// Maximum query tokens admitted into the portable entity search.
+const MAX_FTS_TOKENS: usize = 8;
+
+impl PostgresClient {
+    /// Portable substring entity search over one project and epoch.
+    ///
+    /// Baseline ranking ordered by row id; a future `tsvector` index can
+    /// replace the `ILIKE` conjunction without changing the contract.
+    /// FTS5 syntax is sanitized to plain tokens; an empty token set matches
+    /// no rows. Excluded file paths are dropped inside the branch.
+    pub(crate) async fn entities_search_fts(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: i64,
+        epoch: i64,
+        excluded_files: &[String],
+    ) -> Result<Vec<EntityRecord>, StorageError> {
+        let tokens = sanitize_fts_query(query);
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let excluded: Vec<String> = excluded_files.to_vec();
+        self.run(async move {
+            let columns = crate::rows::ENTITY_COLUMNS
+                .split(',')
+                .map(|column| format!("e.{}", column.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut sql = format!(
+                "SELECT {columns} FROM entities e JOIN files f ON f.id = e.file_id \
+                 WHERE e.project_id = $1 AND e.epoch = $2"
+            );
+            let mut next = 3i32;
+            for _ in &tokens {
+                sql.push_str(&format!(
+                    " AND (e.name ILIKE ${next} ESCAPE '\\' OR e.signature ILIKE ${next} ESCAPE '\\' \
+                     OR e.scoped_name ILIKE ${next} ESCAPE '\\')"
+                ));
+                next += 1;
+            }
+            for _ in &excluded {
+                sql.push_str(&format!(" AND f.path <> ${next}"));
+                next += 1;
+            }
+            sql.push_str(&format!(" ORDER BY e.id LIMIT ${next}"));
+            let mut boxed: Vec<Box<dyn tokio_postgres::types::ToSql + Sync + Send>> = Vec::new();
+            boxed.push(Box::new(project_id));
+            boxed.push(Box::new(epoch));
+            for token in &tokens {
+                boxed.push(Box::new(format!("%{token}%")));
+            }
+            for path in &excluded {
+                boxed.push(Box::new(path.clone()));
+            }
+            boxed.push(Box::new(limit));
+            let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                boxed.iter().map(|item| item.as_ref() as _).collect();
+            let client = self.pooled().await?;
+            let rows = client.query(&sql, &refs).await.map_err(classify_pg)?;
+            rows.iter().map(crate::rows::entity_from_row).collect()
+        })
+        .await
+    }
+
+    /// List file rows of one project across the given epochs, ordered by path.
+    ///
+    /// An empty epoch list returns no rows; callers always scope explicitly.
+    pub(crate) async fn files_list(
+        &self,
+        project_id: i64,
+        epochs: &[i64],
+    ) -> Result<Vec<FileRecord>, StorageError> {
+        if epochs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let epochs_vec = epochs.to_vec();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let rows = client
+                .query(
+                    &format!(
+                        "SELECT {} FROM files WHERE project_id = $1 AND epoch = ANY($2) ORDER BY path",
+                        crate::rows::FILE_COLUMNS
+                    ),
+                    &[&project_id, &epochs_vec],
+                )
+                .await
+                .map_err(classify_pg)?;
+            rows.iter().map(crate::rows::file_from_row).collect()
+        })
+        .await
+    }
+}
+
+/// Sanitize an FTS5 query string into plain substring tokens.
+///
+/// Drops quoting, wildcards and boolean keywords; caps the token count so a
+/// hostile query cannot fan out into an unbounded conjunction.
+fn sanitize_fts_query(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(|char| char == '"' || char == '\'' || char == '(' || char == ')')
+                .trim_end_matches('*')
+                .replace(['\\', '%', '_'], "")
+        })
+        .filter(|token| {
+            !token.is_empty()
+                && !matches!(
+                    token.to_ascii_uppercase().as_str(),
+                    "AND" | "OR" | "NOT" | "NEAR"
+                )
+        })
+        .take(MAX_FTS_TOKENS)
+        .collect()
+}

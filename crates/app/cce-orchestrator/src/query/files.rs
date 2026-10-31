@@ -19,14 +19,15 @@ use std::path::Path;
 ///
 /// Only size and line count are reported; hashes and timestamps stay out so
 /// the metadata tier never forces content reads beyond a newline scan.
+/// Metadata is absent for index-based hits on branches without live files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileHit {
     /// Project-relative path with `/` separators.
     pub path: String,
-    /// File size in bytes.
-    pub size_bytes: u64,
-    /// Number of newline-terminated lines.
-    pub line_count: u64,
+    /// File size in bytes, present only for live-filesystem hits.
+    pub size_bytes: Option<u64>,
+    /// Number of newline-terminated lines, present only for live hits.
+    pub line_count: Option<u64>,
 }
 
 /// Search file paths matching `query`, returning at most `limit` hits.
@@ -62,11 +63,47 @@ pub fn search_files(
         let line_count = count_lines(&full);
         hits.push(FileHit {
             path,
-            size_bytes,
-            line_count,
+            size_bytes: Some(size_bytes),
+            line_count: Some(line_count),
         });
     }
     Ok(hits)
+}
+
+/// Rank an index-provided path list with the same matcher and ordering as
+/// the live walk, for branches without project files.
+///
+/// Shares validation, the full-path-vs-filename rule and the
+/// score-descending plus lexical tiebreak with [`search_file_paths`].
+/// Hits carry no size or line metadata on this path.
+pub fn rank_file_paths(
+    paths: &[String],
+    query: &str,
+    limit: usize,
+) -> crate::query::error::Result<Vec<FileHit>> {
+    let pattern = checked_query(query, limit)?;
+    let match_full_path = pattern.contains('/');
+    let mut ranked: Vec<(String, i64)> = Vec::new();
+    for path in paths {
+        let target = if match_full_path {
+            path.clone()
+        } else {
+            file_name_of(path).to_string()
+        };
+        if let Some(score) = fuzzy_score(&pattern, &target) {
+            ranked.push((path.clone(), score));
+        }
+    }
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.truncate(limit);
+    Ok(ranked
+        .into_iter()
+        .map(|(path, _)| FileHit {
+            path,
+            size_bytes: None,
+            line_count: None,
+        })
+        .collect())
 }
 
 /// Validate inputs shared by both output tiers.
@@ -246,8 +283,15 @@ mod tests {
         let hits = search_files(dir.path(), "a.rs", 10).expect("search");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "a.rs");
-        assert!(hits[0].size_bytes > 0);
-        assert_eq!(hits[0].line_count, 3);
+        assert!(hits[0].size_bytes.is_some_and(|size| size > 0));
+        assert_eq!(hits[0].line_count, Some(3));
+
+        let ranked =
+            rank_file_paths(&["a.rs".to_string(), "b.rs".to_string()], "a", 10).expect("rank");
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].path, "a.rs");
+        assert_eq!(ranked[0].size_bytes, None);
+        assert_eq!(ranked[0].line_count, None);
     }
 
     #[test]

@@ -37,6 +37,9 @@ pub struct AggregatedQueryOptions {
     pub include_patterns: Vec<String>,
     /// Per-request rerank override (see [`super::query_options::QueryOptions::enable_rerank`])
     pub enable_rerank: Option<bool>,
+    /// Per-request result-filter override (see
+    /// [`super::query_options::QueryOptions::enable_result_filter`])
+    pub enable_result_filter: Option<bool>,
     /// Query intent override applied to every sub-query. None means auto-detect.
     pub query_intent: Option<super::query_options::QueryIntent>,
     /// Optional neighbour resolver for engine-side relation expansion,

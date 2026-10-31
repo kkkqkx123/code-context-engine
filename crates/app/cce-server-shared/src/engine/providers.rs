@@ -12,8 +12,8 @@ use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
 use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index::RelationStore;
-use cce_orchestrator::query::{IndexCapabilities, QueryCoordinator, RelationSearcher};
 use cce_orchestrator::query::searcher::Searcher;
+use cce_orchestrator::query::{IndexCapabilities, QueryCoordinator, RelationSearcher};
 use cce_parser::summary::SummaryGenerator;
 use cce_plugin::PluginRegistry;
 use cce_plugin_runtime::FilePluginSource;
@@ -563,10 +563,7 @@ impl super::CodeContextEngine {
             capabilities,
             project_id,
         )
-        .with_metrics(QueryMetrics::new(
-            &self.metrics_registry,
-            project_id,
-        ))
+        .with_metrics(QueryMetrics::new(&self.metrics_registry, project_id))
         .with_shared_cache(self.get_query_cache(project_id).await)
         .with_retry_queue(self.get_retry_queue(project_id).await);
         if let Some(store) = self.relation_store() {

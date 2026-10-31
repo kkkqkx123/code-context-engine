@@ -25,7 +25,7 @@ use cce_config::project_registry::ProjectScope;
 use crate::index::vector_store::VectorStore;
 use crate::index::vector_store::{FulltextStore, RelationStore};
 use crate::query::CachedEmbedder;
-use crate::query::cache::CacheKey;
+use crate::query::cache::{CacheKey, QueryCache};
 use crate::query::error::QueryError;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
@@ -125,6 +125,14 @@ impl Searcher {
     /// Relation backend enum backing this searcher.
     pub fn relation_store(&self) -> Option<RelationStore> {
         self.relation.clone()
+    }
+
+    /// Shared handle to the result cache backing this searcher.
+    ///
+    /// Clones share the underlying store, so warming this handle (for
+    /// example from the retry path) is visible to every searcher query.
+    pub fn cache_handle(&self) -> QueryCache {
+        self.cache.clone()
     }
 
     /// Extract the fulltext backend from a searcher reference (used by strategy factory).

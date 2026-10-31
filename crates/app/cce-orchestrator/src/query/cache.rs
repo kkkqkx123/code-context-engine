@@ -10,14 +10,60 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use moka::future::Cache;
 
 use super::error::Result;
-use super::types::{QueryOptions, QueryResult};
+use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
 use crate::query::filter::QueryFilter;
+
+fn hash_one(value: &impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Stable fingerprint of the full search configuration.
+///
+/// Serializes the configuration and sorts every object key before hashing:
+/// map iteration order is hash-random per instance (and the workspace build
+/// unifies `preserve_order`, so insertion order is preserved verbatim),
+/// while a cache key must be identical for identical configurations.
+fn config_fingerprint(config: &super::types::SearchConfig) -> u64 {
+    let mut value = serde_json::to_value((
+        &config.vector,
+        &config.bm25,
+        &config.fusion,
+        &config.result,
+        &config.rerank,
+        &config.score,
+        &config.plugin,
+        &config.annotation,
+        &config.timeout_ms,
+    ))
+    .unwrap_or(serde_json::Value::Null);
+    sort_json_keys(&mut value);
+    hash_one(&serde_json::to_string(&value).unwrap_or_default())
+}
+
+fn sort_json_keys(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.sort_keys();
+            for item in map.values_mut() {
+                sort_json_keys(item);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                sort_json_keys(item);
+            }
+        }
+        _ => {}
+    }
+}
 
 /// Cache key for query results
 ///
@@ -45,6 +91,11 @@ pub struct CacheKey {
     expansion: bool,
     /// Result limit
     limit: usize,
+    /// Hash of the full search configuration debug form, so any effective
+    /// parameter change (fusion, rerank, threshold, annotation, plugin
+    /// switches, content budget) produces a new key even when the epoch is
+    /// unchanged.
+    config_hash: u64,
 }
 
 impl CacheKey {
@@ -84,6 +135,23 @@ impl CacheKey {
         options.include_patterns.hash(&mut hasher);
         let filters_hash = hasher.finish();
 
+        // Hash per-request toggles that change the effective pipeline.
+        let mut hasher = DefaultHasher::new();
+        options.query_intent.hash(&mut hasher);
+        options.enable_rerank.hash(&mut hasher);
+        options.enable_result_filter.hash(&mut hasher);
+        options.with_source.hash(&mut hasher);
+        let toggle_hash = hasher.finish();
+
+        let mut hasher = DefaultHasher::new();
+        sources_hash.hash(&mut hasher);
+        toggle_hash.hash(&mut hasher);
+        let sources_hash = hasher.finish();
+
+        // The configuration fingerprint covers every effective parameter so
+        // future fields join the key without further code changes.
+        let config_hash = config_fingerprint(&options.config);
+
         Self {
             project_id: options.project_id,
             epoch: view.epoch_value(),
@@ -94,6 +162,59 @@ impl CacheKey {
             filters_hash,
             expansion: options.neighbour_resolver.is_some(),
             limit: options.config.result.limit,
+            config_hash,
+        }
+    }
+
+    /// Build a cache key for an aggregated query over one epoch view.
+    ///
+    /// Sub-query texts, sources and weights join the key alongside the
+    /// global configuration, so any merge-affecting change recomputes
+    /// instead of serving a stale union.
+    pub fn for_aggregated(
+        project_id: i64,
+        view: &QueryFilter,
+        agg: &AggregatedQueryOptions,
+    ) -> Self {
+        let mut hasher = DefaultHasher::new();
+        project_id.hash(&mut hasher);
+        view.epoch_value().hash(&mut hasher);
+        view.parent_epoch().hash(&mut hasher);
+        view.excluded_files().hash(&mut hasher);
+        let excluded_hash = hasher.finish();
+        let parent_epoch = view.parent_epoch().unwrap_or(-1);
+
+        let mut hasher = DefaultHasher::new();
+        for sub in &agg.sub_queries {
+            sub.text.hash(&mut hasher);
+            sub.sources.hash(&mut hasher);
+            sub.weight.to_bits().hash(&mut hasher);
+        }
+        format!("{:?}", agg.filters).hash(&mut hasher);
+        agg.exclude_patterns.hash(&mut hasher);
+        agg.include_patterns.hash(&mut hasher);
+        let query_hash = hasher.finish();
+
+        let mut hasher = DefaultHasher::new();
+        agg.enable_rerank.hash(&mut hasher);
+        agg.enable_result_filter.hash(&mut hasher);
+        agg.query_intent.hash(&mut hasher);
+        agg.neighbour_resolver.is_some().hash(&mut hasher);
+        let sources_hash = hasher.finish();
+
+        let config_hash = config_fingerprint(&agg.global_config);
+
+        Self {
+            project_id,
+            epoch: view.epoch_value(),
+            parent_epoch,
+            excluded_hash,
+            query_hash,
+            sources_hash,
+            filters_hash: 0,
+            expansion: agg.neighbour_resolver.is_some(),
+            limit: agg.global_config.result.limit,
+            config_hash,
         }
     }
 }
@@ -148,7 +269,7 @@ pub struct QueryCache {
     /// `result_cache` instead of re-running the pipeline. An entry lives only
     /// while a computation is in flight — the leader removes its own entry on
     /// completion, so idle keys never accumulate.
-    inflight: Arc<Mutex<HashMap<CacheKey, Arc<tokio::sync::Mutex<()>>>>>,
+    inflight: Arc<tokio::sync::Mutex<HashMap<CacheKey, Arc<tokio::sync::Mutex<()>>>>>,
     /// Configuration
     config: CacheConfig,
 }
@@ -163,7 +284,7 @@ impl QueryCache {
 
         Self {
             result_cache,
-            inflight: Arc::new(Mutex::new(HashMap::new())),
+            inflight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             config,
         }
     }
@@ -172,7 +293,7 @@ impl QueryCache {
     pub fn disabled() -> Self {
         Self {
             result_cache: Cache::new(0),
-            inflight: Arc::new(Mutex::new(HashMap::new())),
+            inflight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             config: CacheConfig {
                 enabled: false,
                 ..Default::default()
@@ -242,10 +363,7 @@ impl QueryCache {
         }
 
         let guard = {
-            let mut inflight = self
-                .inflight
-                .lock()
-                .expect("query cache inflight map poisoned");
+            let mut inflight = self.inflight.lock().await;
             Arc::clone(
                 inflight
                     .entry(key.clone())
@@ -269,10 +387,7 @@ impl QueryCache {
             self.result_cache.insert(key.clone(), value.clone()).await;
         }
 
-        let mut inflight = self
-            .inflight
-            .lock()
-            .expect("query cache inflight map poisoned");
+        let mut inflight = self.inflight.lock().await;
         if inflight
             .get(&key)
             .is_some_and(|existing| Arc::ptr_eq(existing, &guard))
@@ -451,5 +566,71 @@ mod tests {
             .await;
         assert!(succeeded.is_ok());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_cache_key_differs_by_effective_config() {
+        use crate::query::types::QueryIntent;
+
+        let base = QueryConfigBuilder::new(1).build("test query");
+        let view = crate::query::filter::QueryFilter::default();
+        let base_key = CacheKey::from_options_with_view(&base, &view);
+
+        let other_intent = QueryConfigBuilder::new(1)
+            .build("test query")
+            .with_query_intent(Some(QueryIntent::Keyword));
+        assert_ne!(
+            base_key,
+            CacheKey::from_options_with_view(&other_intent, &view)
+        );
+
+        let no_rerank = QueryConfigBuilder::new(1)
+            .build("test query")
+            .with_enable_rerank(false);
+        assert_ne!(
+            base_key,
+            CacheKey::from_options_with_view(&no_rerank, &view)
+        );
+
+        let no_filter = QueryConfigBuilder::new(1)
+            .build("test query")
+            .with_enable_result_filter(false);
+        assert_ne!(
+            base_key,
+            CacheKey::from_options_with_view(&no_filter, &view)
+        );
+
+        let mut config = crate::query::types::SearchConfig::default();
+        config.result.min_score = 0.9;
+        let strict = QueryConfigBuilder::new(1)
+            .build("test query")
+            .with_config(config);
+        assert_ne!(base_key, CacheKey::from_options_with_view(&strict, &view));
+    }
+
+    #[test]
+    fn test_aggregated_key_tracks_sub_queries_and_weights() {
+        use crate::query::types::{AggregatedQueryOptions, SubQuery};
+
+        let view = crate::query::filter::QueryFilter::default();
+        let agg = || AggregatedQueryOptions {
+            project_id: 1,
+            sub_queries: vec![SubQuery {
+                text: "auth flow".to_string(),
+                sources: SearchSources::default(),
+                weight: 1.0,
+            }],
+            ..Default::default()
+        };
+        let base_key = CacheKey::for_aggregated(1, &view, &agg());
+        assert_eq!(base_key, CacheKey::for_aggregated(1, &view, &agg()));
+
+        let mut heavier = agg();
+        heavier.sub_queries[0].weight = 2.0;
+        assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &heavier));
+
+        let mut stricter = agg();
+        stricter.global_config.result.limit = 3;
+        assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &stricter));
     }
 }

@@ -158,9 +158,7 @@ impl AggSearchCommand {
             });
         }
         if sub_queries.is_empty() {
-            anyhow::bail!(
-                "at least one sub-query is required (--bm25, --vector or --hybrid)"
-            );
+            anyhow::bail!("at least one sub-query is required (--bm25, --vector or --hybrid)");
         }
         let exclude_content_types: Vec<String> = self
             .exclude_content_types

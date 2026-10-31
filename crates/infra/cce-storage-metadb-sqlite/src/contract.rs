@@ -343,6 +343,57 @@ impl RelationStorage for SqliteClient {
         EntityRepository::count_by_project_and_epoch(&conn, project_id, epoch)
     }
 
+    async fn entities_search_fts(
+        &self,
+        project_id: i64,
+        query: &str,
+        limit: i64,
+        epoch: i64,
+        excluded_files: &[String],
+    ) -> Result<Vec<EntityRecord>, StorageError> {
+        let conn = self.read_connection()?;
+        let entities =
+            EntityRepository::search_fts_at_epoch(&conn, query, project_id, limit, epoch)?;
+        if excluded_files.is_empty() {
+            return Ok(entities);
+        }
+        let excluded: std::collections::HashSet<&str> =
+            excluded_files.iter().map(String::as_str).collect();
+        let mut kept = Vec::with_capacity(entities.len());
+        for entity in entities {
+            let visible = FileRepository::get_by_id(&conn, entity.file_id)?
+                .is_some_and(|file| !excluded.contains(file.path.as_str()));
+            if visible {
+                kept.push(entity);
+            }
+        }
+        Ok(kept)
+    }
+
+    async fn files_list(
+        &self,
+        project_id: i64,
+        epochs: &[i64],
+    ) -> Result<Vec<FileRecord>, StorageError> {
+        let conn = self.read_connection()?;
+        let mut out = Vec::new();
+        for epoch in epochs {
+            let mut offset = 0i64;
+            loop {
+                let page = FileRepository::get_by_project_and_epoch_paged(
+                    &conn, project_id, *epoch, 1000, offset,
+                )?;
+                if page.is_empty() {
+                    break;
+                }
+                offset += page.len() as i64;
+                out.extend(page);
+            }
+        }
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(out)
+    }
+
     async fn chunks_upsert(&self, chunks: &[ChunkRecord]) -> Result<usize, StorageError> {
         if chunks.is_empty() {
             return Ok(0);

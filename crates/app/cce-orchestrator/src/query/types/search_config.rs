@@ -14,9 +14,9 @@
 /// between config.toml and runtime usage.
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
-    Bm25RetrievalConfig, BoostAggregationConfig, HybridFusionConfig, HybridWeightConfig,
-    PluginSearchConfig, QueryIntentWeights, RelationAnnotationConfig, RerankFusionStrategy,
-    ResultFilterConfig, ScoreNormalizationConfig, VectorRetrievalConfig,
+    Bm25RetrievalConfig, HybridFusionConfig, HybridWeightConfig, PluginSearchConfig,
+    QueryIntentWeights, RelationAnnotationConfig, RerankFusionStrategy, ResultFilterConfig,
+    ScoreNormalizationConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================
@@ -62,7 +62,6 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 /// | `result` | Result filtering (limit, min_score, max_per_file) |
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
 /// | `score` | Score normalization (enable, strategy) |
-/// | `boost` | Unified boost aggregation configuration |
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
     /// Vector retrieval configuration
@@ -77,8 +76,6 @@ pub struct SearchConfig {
     pub rerank: RerankConfig,
     /// Score normalization configuration
     pub score: ScoreNormalizationConfig,
-    /// Unified boost aggregation configuration
-    pub boost: BoostAggregationConfig,
     /// Query-side plugin hooks configuration
     pub plugin: PluginSearchConfig,
     /// Structure-preserving annotation of the final top-N results
@@ -96,7 +93,6 @@ impl Default for SearchConfig {
             result: ResultFilterConfig::default(),
             rerank: RerankConfig::default(),
             score: ScoreNormalizationConfig::default(),
-            boost: BoostAggregationConfig::default(),
             plugin: PluginSearchConfig::default(),
             annotation: RelationAnnotationConfig::default(),
             timeout_ms: 30_000,
@@ -116,7 +112,6 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             // request), so this slot keeps the defaults here.
             rerank: RerankConfig::default(),
             score: cfg.score,
-            boost: cfg.boost,
             plugin: cfg.plugin,
             annotation: cfg.annotation,
             timeout_ms: cfg.timeout_ms,
@@ -178,8 +173,6 @@ mod tests {
         assert_eq!(config.vector.min_score, 0.3);
         assert_eq!(config.result.limit, 10);
         assert_eq!(config.result.min_score, 0.25);
-        assert!(config.boost.enabled);
-        assert!((config.boost.max_addition - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -197,6 +190,5 @@ mod tests {
         assert_eq!(config.vector.top_k, 50);
         assert_eq!(config.result.limit, 10);
         assert!(!config.rerank.enabled);
-        assert!(config.boost.enabled);
     }
 }

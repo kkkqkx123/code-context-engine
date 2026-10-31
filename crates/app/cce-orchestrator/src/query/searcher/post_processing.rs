@@ -73,8 +73,11 @@ impl Searcher {
         // reranking + sorting and before the threshold filter so plugins can
         // remove/boost/annotate candidates. Boosts change scores, so the list
         // is re-sorted afterwards; otherwise the threshold filter would
-        // truncate by the pre-boost order.
-        let sorted_results = if options.config.plugin.filter_enabled {
+        // truncate by the pre-boost order. The per-request override can
+        // force the chain on/off; `None` defers to the config switch.
+        let filter_enabled =
+            options.enable_result_filter.unwrap_or(true) && options.config.plugin.filter_enabled;
+        let sorted_results = if filter_enabled {
             let filtered = self.apply_result_filter(&sorted_results, options).await;
             self.score_sorter.sort(filtered)
         } else {
@@ -480,11 +483,77 @@ pub(crate) async fn query_fusion_weights_from_plugins(
     results
 }
 
+/// Upper bound for one `ResultFilter` boost after validation.
+const MAX_RESULT_FILTER_BOOST: f32 = 5.0;
+
+/// Upper bound for one `ResultFilter` response length.
+const MAX_RESULT_FILTER_ENTRIES: usize = 8192;
+
+/// Merged decision for one candidate id within a single plugin response.
+#[derive(Debug, Clone, Default)]
+struct ResultFilterDecision {
+    remove: bool,
+    boost: Option<f32>,
+    note: Option<String>,
+}
+
+/// Merge one plugin response into per-id decisions.
+///
+/// Removal wins over boosting for the same id; the first valid boost wins
+/// among duplicates. Non-finite boosts and boosts at or below `-1` are
+/// rejected with a warning; oversized boosts are clamped to the upper bound.
+fn merge_result_filter_entries(
+    entries: &[cce_types::plugin::ResultFilterEntry],
+    plugin_id: &str,
+) -> std::collections::HashMap<String, ResultFilterDecision> {
+    let mut decisions: std::collections::HashMap<String, ResultFilterDecision> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        let decision = decisions.entry(entry.id.clone()).or_default();
+        if entry.remove {
+            decision.remove = true;
+            continue;
+        }
+        if decision.boost.is_some() {
+            continue;
+        }
+        let Some(boost) = entry.boost else {
+            if entry.note.is_some() {
+                decision.note = entry.note.clone();
+            }
+            continue;
+        };
+        if !boost.is_finite() || boost <= -1.0 {
+            tracing::warn!(
+                plugin = %plugin_id,
+                id = %entry.id,
+                boost,
+                "ResultFilter returned an invalid boost; keeping incoming score"
+            );
+            continue;
+        }
+        let clamped = boost.min(MAX_RESULT_FILTER_BOOST);
+        if clamped != boost {
+            tracing::warn!(
+                plugin = %plugin_id,
+                id = %entry.id,
+                boost,
+                "ResultFilter boost clamped to the upper bound"
+            );
+        }
+        decision.boost = Some(clamped);
+        decision.note = entry.note.clone();
+    }
+    decisions
+}
+
 /// Apply the `ResultFilter` capability chain over a registry.
 ///
 /// Each plugin receives the current candidate list; its entries remove or
 /// boost results by id. Boosts are multiplicative (`score *= 1 + boost`).
-/// Failures keep the current list.
+/// Removal wins over boosting for the same id; invalid boosts keep the
+/// incoming score and emit a warning. Boosted hits record the plugin audit
+/// on `is_boosted`/`boost_reason`. Failures keep the current list.
 pub(crate) async fn apply_result_filter_chain(
     registry: &cce_plugin::PluginRegistry,
     results: &[SearchResult],
@@ -519,16 +588,51 @@ pub(crate) async fn apply_result_filter_chain(
         let result =
             tokio::task::spawn_blocking(move || plugin.filter_results(&query, candidates)).await;
         match result {
-            Ok(Ok(Some(entries))) => {
+            Ok(Ok(Some(mut entries))) => {
+                if entries.len() > MAX_RESULT_FILTER_ENTRIES {
+                    tracing::warn!(
+                        plugin = %plugin_id,
+                        len = entries.len(),
+                        "ResultFilter returned an oversized entry list; truncating"
+                    );
+                    entries.truncate(MAX_RESULT_FILTER_ENTRIES);
+                }
+                let decisions = merge_result_filter_entries(&entries, &plugin_id);
+                let known: std::collections::HashSet<&str> =
+                    current.iter().map(|r| r.id.as_str()).collect();
+                let unknown = decisions
+                    .keys()
+                    .filter(|id| !known.contains(id.as_str()))
+                    .count();
+                if unknown > 0 {
+                    tracing::warn!(
+                        plugin = %plugin_id,
+                        unknown,
+                        "ResultFilter entries reference unknown candidate ids; ignoring them"
+                    );
+                }
                 let mut new_results = Vec::with_capacity(current.len());
                 for mut r in current {
-                    if let Some(entry) = entries.iter().find(|e| e.id == r.id) {
-                        if entry.remove {
-                            continue;
-                        }
-                        if let Some(boost) = entry.boost {
-                            r.score *= 1.0 + boost;
-                        }
+                    let Some(decision) = decisions.get(r.id.as_str()) else {
+                        new_results.push(r);
+                        continue;
+                    };
+                    if decision.remove {
+                        continue;
+                    }
+                    if let Some(boost) = decision.boost {
+                        r.score *= 1.0 + boost;
+                        r.is_boosted = true;
+                        r.boost_reason = Some(match &decision.note {
+                            Some(note) if !note.is_empty() => {
+                                format!("result_filter({plugin_id},+{boost:.3}): {note}")
+                            }
+                            _ => format!("result_filter({plugin_id},+{boost:.3})"),
+                        });
+                        r.metadata.insert(
+                            "result_filter_boost".to_string(),
+                            format!("{plugin_id}={boost:.3}"),
+                        );
                     }
                     new_results.push(r);
                 }

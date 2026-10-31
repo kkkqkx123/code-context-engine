@@ -155,6 +155,11 @@ pub struct QueryOptions {
     /// rerank handler / plugins are available. `Some(true)` forces it on,
     /// `Some(false)` forces it off for this query.
     pub enable_rerank: Option<bool>,
+    /// Per-request result-filter override.
+    ///
+    /// `None` defers to `config.plugin.filter_enabled`. `Some(true)`
+    /// forces the `ResultFilter` chain on, `Some(false)` forces it off.
+    pub enable_result_filter: Option<bool>,
     /// Optional neighbour resolver for relation expansion.
     ///
     /// When set and the annotation config requests expansion, the unified
@@ -182,6 +187,7 @@ impl QueryOptions {
             include_patterns: Vec::new(),
             with_source: true,
             enable_rerank: None,
+            enable_result_filter: None,
             neighbour_resolver: None,
         }
     }
@@ -286,6 +292,13 @@ impl QueryOptions {
         self
     }
 
+    /// Set a per-request result-filter override (takes precedence over the
+    /// config-level enablement).
+    pub fn with_enable_result_filter(mut self, enable: bool) -> Self {
+        self.enable_result_filter = Some(enable);
+        self
+    }
+
     /// Get the execution strategy based on current options
     pub fn execution_strategy(&self) -> super::execution_strategy::ExecutionStrategy {
         super::execution_strategy::ExecutionStrategy::from_options(self)
@@ -319,6 +332,7 @@ pub struct QueryConfigBuilder {
     include_patterns: Vec<String>,
     with_source: bool,
     enable_rerank: Option<bool>,
+    enable_result_filter: Option<bool>,
 }
 
 impl QueryConfigBuilder {
@@ -338,6 +352,7 @@ impl QueryConfigBuilder {
             include_patterns: Vec::new(),
             with_source: true,
             enable_rerank: None,
+            enable_result_filter: None,
         }
     }
 
@@ -496,6 +511,7 @@ impl QueryConfigBuilder {
             include_patterns: self.include_patterns,
             with_source: self.with_source,
             enable_rerank: self.enable_rerank,
+            enable_result_filter: self.enable_result_filter,
             neighbour_resolver: None,
         }
     }

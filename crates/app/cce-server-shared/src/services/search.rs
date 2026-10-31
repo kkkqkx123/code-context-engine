@@ -349,6 +349,7 @@ impl<'a> SearchService<'a> {
             exclude_patterns: fields.exclude_patterns.clone(),
             include_patterns: fields.include_patterns.clone(),
             enable_rerank: fields.enable_rerank,
+            enable_result_filter: None,
             query_intent: fields.query_intent,
             neighbour_resolver: resolver,
         };
@@ -395,7 +396,6 @@ impl<'a> SearchService<'a> {
         config.bm25 = entry.config.search.bm25.clone();
         config.fusion = entry.config.search.fusion.clone();
         config.score = entry.config.search.score.clone();
-        config.boost = entry.config.search.boost.clone();
         config.plugin = entry.config.search.plugin.clone();
         config.annotation = entry.config.search.annotation.clone();
         config.timeout_ms = entry.config.search.timeout_ms;
@@ -621,8 +621,8 @@ impl<'a> SearchService<'a> {
                 .into_iter()
                 .map(|hit| FileSearchItem {
                     path: hit.path,
-                    size_bytes: Some(hit.size_bytes),
-                    line_count: Some(hit.line_count),
+                    size_bytes: hit.size_bytes,
+                    line_count: hit.line_count,
                 })
                 .collect::<Vec<_>>();
             Ok(FileSearchOutcome {

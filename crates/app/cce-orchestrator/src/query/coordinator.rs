@@ -27,7 +27,7 @@ use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
 use cce_types::error::common::ErrorClassify;
 
 use super::SearcherBuilder;
-use super::cache::{CacheConfig, QueryCache};
+use super::cache::{CacheConfig, CacheKey, QueryCache};
 use super::capabilities::IndexCapabilities;
 use super::error::{QueryError, Result};
 use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
@@ -382,23 +382,16 @@ impl QueryCoordinator {
         query: &str,
         limit: i64,
     ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>> {
-        // FTS5 is an embedded-branch capability: the only fenced downcast
-        // on this path. Other branches report unavailability instead of
-        // silently returning no entities.
-        let sqlite = self
+        let store = self
             .relation
             .as_ref()
-            .and_then(RelationStore::as_local)
             .ok_or_else(|| QueryError::Config("FTS5 entity search not configured".to_string()))?;
 
         let view = self.searcher.load_query_filter(self.project_id).await?;
 
-        let conn = sqlite.read_connection().map_err(|e| {
-            QueryError::InvalidQuery(format!("Failed to get database connection: {}", e))
-        })?;
-
         let start = Instant::now();
-        let result = Self::search_entities_at_view(&conn, query, self.project_id, limit, &view);
+        let result =
+            Self::search_entities_at_view(store, query, self.project_id, limit, &view).await;
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
         // Record metrics for FTS5 search (using QueryMetrics)
@@ -408,60 +401,45 @@ impl QueryCoordinator {
             metrics.record_query(elapsed, false, count);
         }
 
-        result.map_err(|e| QueryError::InvalidQuery(format!("FTS5 search failed: {}", e)))
+        result.map_err(|e| QueryError::InvalidQuery(format!("FTS5 search failed: {e}")))
     }
 
-    /// FTS5 entity search over the full epoch view.
+    /// Entity search over the full epoch view through the relation contract.
     ///
     /// Two-stage resolution ("own first, miss → parent"): an empty
-    /// own-generation result falls back to the inherited parent epoch, and
-    /// parent hits belonging to overridden files (replaced/deleted) are
-    /// dropped so only the visible view is returned.
-    fn search_entities_at_view(
-        conn: &rusqlite::Connection,
+    /// own-generation result falls back to the inherited parent epoch.
+    /// Excluded-file filtering runs inside the branch so only the visible
+    /// view is returned.
+    async fn search_entities_at_view(
+        store: &RelationStore,
         query: &str,
         project_id: i64,
         limit: i64,
         view: &crate::query::filter::QueryFilter,
-    ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>> {
-        use cce_storage_metadb_sqlite::EntityRepository;
-        use cce_storage_metadb_sqlite::repo::FileRepository;
+    ) -> std::result::Result<Vec<cce_storage_metadb_sqlite::EntityRecord>, cce_types::StorageError>
+    {
+        use cce_storage_common::RelationStorage;
 
-        let mut entities = EntityRepository::search_fts_at_epoch(
-            conn,
-            query,
-            project_id,
-            limit,
-            view.epoch_value(),
-        )
-        .map_err(|e| QueryError::InvalidQuery(format!("FTS5 search failed: {}", e)))?;
+        let entities = store
+            .entities_search_fts(project_id, query, limit, view.epoch_value(), &[])
+            .await?;
         if !entities.is_empty() || view.parent_epoch().is_none() {
             return Ok(entities);
         }
-        entities = EntityRepository::search_fts_at_epoch(
-            conn,
-            query,
-            project_id,
-            limit,
-            view.parent_epoch().expect("parent checked above"),
-        )
-        .map_err(|e| QueryError::InvalidQuery(format!("FTS5 search failed: {}", e)))?;
-        if !view.excluded_files().is_empty() && !entities.is_empty() {
-            let excluded: std::collections::HashSet<&str> =
-                view.excluded_files().iter().map(String::as_str).collect();
-            entities.retain(|entity| {
-                FileRepository::get_by_id(conn, entity.file_id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|file| !excluded.contains(file.path.as_str()))
-            });
-        }
-        Ok(entities)
+        store
+            .entities_search_fts(
+                project_id,
+                query,
+                limit,
+                view.parent_epoch().expect("parent checked above"),
+                view.excluded_files(),
+            )
+            .await
     }
 
-    /// Check if FTS5 entity search is available (local branch attached)
+    /// Check if entity search is available (relation store attached)
     pub fn has_fts5_search(&self) -> bool {
-        self.relation.as_ref().is_some_and(RelationStore::is_local)
+        self.relation.is_some()
     }
 
     // ========== Unified Search ==========
@@ -570,7 +548,11 @@ impl QueryCoordinator {
             };
             match self.searcher.search_with_view(&options, &view).await {
                 Ok(result) => {
-                    self.cache
+                    // Warm the searcher-owned cache: it owns the read path,
+                    // so the entry is visible however the coordinator was
+                    // assembled, even when the coordinator handle is private.
+                    self.searcher
+                        .cache_handle()
                         .put_result_for_view(&options, &view, result)
                         .await;
                     tracing::trace!(
@@ -631,141 +613,153 @@ impl QueryCoordinator {
             .map(|sub_query| self.build_sub_query_options(agg_options, sub_query))
             .collect();
 
-        // Execute sub-queries concurrently, bounded by a semaphore: the results
-        // stay aligned with the sub-query order (`join_all` preserves input
-        // order), so the merged output is deterministic regardless of which
-        // sub-query finishes first.
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(
-            Self::AGGREGATED_SUB_QUERY_CONCURRENCY,
-        ));
-        let attempts: Vec<_> = sub_options
-            .into_iter()
-            .map(|options| {
-                let semaphore = semaphore.clone();
-                let view = view.clone();
-                async move {
-                    // The semaphore is never closed, so acquire cannot fail.
-                    let _permit = semaphore
-                        .acquire_owned()
-                        .await
-                        .expect("aggregated search semaphore closed");
-                    self.search_with_view(&options, &view).await
-                }
-            })
-            .collect();
-        let attempts = futures::future::join_all(attempts).await;
+        // The merged union is cached under the aggregated key, which covers
+        // sub-query texts, sources, weights and the global configuration.
+        // Sub-queries keep their own single-query entries underneath; the
+        // aggregated key differs from every sub-query key, so the nested
+        // single-flight guards never re-enter on one key.
+        let key = CacheKey::for_aggregated(agg_options.project_id, &view, agg_options);
+        self.cache
+            .get_or_compute(key, || async move {
+                // Execute sub-queries concurrently, bounded by a semaphore: the results
+                // stay aligned with the sub-query order (`join_all` preserves input
+                // order), so the merged output is deterministic regardless of which
+                // sub-query finishes first.
+                let semaphore = Arc::new(tokio::sync::Semaphore::new(
+                    Self::AGGREGATED_SUB_QUERY_CONCURRENCY,
+                ));
+                let attempts: Vec<_> = sub_options
+                    .into_iter()
+                    .map(|options| {
+                        let semaphore = semaphore.clone();
+                        let view = view.clone();
+                        async move {
+                            // The semaphore is never closed, so acquire cannot fail.
+                            let _permit = semaphore
+                                .acquire_owned()
+                                .await
+                                .expect("aggregated search semaphore closed");
+                            self.search_with_view(&options, &view).await
+                        }
+                    })
+                    .collect();
+                let attempts = futures::future::join_all(attempts).await;
 
-        let mut all_results: Vec<crate::query::types::SearchResult> = Vec::new();
-        let mut sources_used: Vec<String> = Vec::new();
-        let mut failed_sub_queries: Vec<String> = Vec::new();
+                let mut all_results: Vec<crate::query::types::SearchResult> = Vec::new();
+                let mut sources_used: Vec<String> = Vec::new();
+                let mut failed_sub_queries: Vec<String> = Vec::new();
 
-        for (sub_query, attempt) in agg_options.sub_queries.iter().zip(attempts) {
-            match attempt {
-                Ok(mut result) => {
-                    for source in &result.sources {
-                        if !sources_used.contains(source) {
-                            sources_used.push(source.clone());
+                for (sub_query, attempt) in agg_options.sub_queries.iter().zip(attempts) {
+                    match attempt {
+                        Ok(mut result) => {
+                            for source in &result.sources {
+                                if !sources_used.contains(source) {
+                                    sources_used.push(source.clone());
+                                }
+                            }
+                            // Weight the sub-query's candidates before the merge so
+                            // the weight decides cross-query ranking, not just
+                            // bookkeeping. Invalid weights degrade to neutral (1.0)
+                            // with a warning instead of dropping results; the API
+                            // boundary rejects them outright.
+                            let weight = if sub_query.weight.is_finite() && sub_query.weight >= 0.0
+                            {
+                                sub_query.weight
+                            } else {
+                                tracing::warn!(
+                                    query = %sub_query.text,
+                                    weight = sub_query.weight,
+                                    "Sub-query has an invalid weight; treating it as 1.0"
+                                );
+                                1.0
+                            };
+                            if weight != 1.0 {
+                                for item in &mut result.items {
+                                    item.score *= weight;
+                                    item.original_score *= weight;
+                                }
+                            }
+                            all_results.extend(result.items);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                query = %sub_query.text,
+                                error = %e,
+                                "Sub-query failed in aggregated search"
+                            );
+                            failed_sub_queries.push(sub_query.text.clone());
                         }
                     }
-                    // Weight the sub-query's candidates before the merge so
-                    // the weight decides cross-query ranking, not just
-                    // bookkeeping. Invalid weights degrade to neutral (1.0)
-                    // with a warning instead of dropping results; the API
-                    // boundary rejects them outright.
-                    let weight = if sub_query.weight.is_finite() && sub_query.weight >= 0.0 {
-                        sub_query.weight
-                    } else {
-                        tracing::warn!(
-                            query = %sub_query.text,
-                            weight = sub_query.weight,
-                            "Sub-query has an invalid weight; treating it as 1.0"
-                        );
-                        1.0
-                    };
-                    if weight != 1.0 {
-                        for item in &mut result.items {
-                            item.score *= weight;
-                            item.original_score *= weight;
-                        }
-                    }
-                    all_results.extend(result.items);
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        query = %sub_query.text,
-                        error = %e,
-                        "Sub-query failed in aggregated search"
-                    );
-                    failed_sub_queries.push(sub_query.text.clone());
-                }
-            }
-        }
 
-        // Deduplicate by alignment key (entity_ids or segment_id), keeping the highest score.
-        // Using chunk id would fail to deduplicate the same entity across BM25/embedding paths,
-        // since chunk id format is {groupId}_{path}_{index} (path-specific).
-        // Reuses the fusion key derivation so the aggregated dedup and hybrid
-        // fusion collapse results onto the same key space.
-        let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
-        for item in all_results {
-            let key = crate::query::retrieval::post_processing::alignment_key(
-                &item.entity_ids,
-                item.segment_id.as_deref(),
-                &item.id,
-            )
-            .unwrap_or_else(|| item.id.clone());
-            dedup
-                .entry(key)
-                .and_modify(|existing| {
-                    if item.score > existing.score {
-                        *existing = item.clone();
+                // Deduplicate by alignment key (entity_ids or segment_id), keeping the highest score.
+                // Using chunk id would fail to deduplicate the same entity across BM25/embedding paths,
+                // since chunk id format is {groupId}_{path}_{index} (path-specific).
+                // Reuses the fusion key derivation so the aggregated dedup and hybrid
+                // fusion collapse results onto the same key space.
+                let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
+                for item in all_results {
+                    let key = crate::query::retrieval::post_processing::alignment_key(
+                        &item.entity_ids,
+                        item.segment_id.as_deref(),
+                        &item.id,
+                    )
+                    .unwrap_or_else(|| item.id.clone());
+                    dedup
+                        .entry(key)
+                        .and_modify(|existing| {
+                            if item.score > existing.score {
+                                *existing = item.clone();
+                            }
+                        })
+                        .or_insert(item);
+                }
+
+                let mut merged: Vec<crate::query::types::SearchResult> =
+                    dedup.into_values().collect();
+                // Weighting happens after each sub-query threshold, so the global
+                // threshold is re-applied here to keep weighted scores under the
+                // same contract. A zero weight only demotes, never excludes on its
+                // own; the threshold decides exclusion.
+                let min_score = agg_options.global_config.result.min_score;
+                if min_score > 0.0 {
+                    merged.retain(|item| item.score >= min_score);
+                }
+                merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
+
+                let limit = agg_options.global_config.result.limit;
+                if merged.len() > limit {
+                    merged.truncate(limit);
+                }
+
+                // Relation expansion runs once on the merged hits so budget,
+                // shared dedup and single wrapping observe the final Top-N instead of
+                // each sub-query's intermediate list. Sub-queries run without
+                // annotation when a resolver is present (see build_sub_query_options).
+                if let Some(resolver) = agg_options.neighbour_resolver.as_ref() {
+                    if agg_options.global_config.annotation.expansion_enabled {
+                        crate::query::expansion::annotate_hits_with_resolver(
+                            resolver,
+                            &mut merged,
+                            &agg_options.global_config.annotation,
+                        )
+                        .await;
                     }
+                }
+
+                let total = merged.len();
+
+                Ok(QueryResult {
+                    items: merged,
+                    total,
+                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    sources: sources_used,
+                    sub_queries_count,
+                    failed_sub_queries,
+                    from_cache: false,
                 })
-                .or_insert(item);
-        }
-
-        let mut merged: Vec<crate::query::types::SearchResult> = dedup.into_values().collect();
-        // Weighting happens after each sub-query threshold, so the global
-        // threshold is re-applied here to keep weighted scores under the
-        // same contract. A zero weight only demotes, never excludes on its
-        // own; the threshold decides exclusion.
-        let min_score = agg_options.global_config.result.min_score;
-        if min_score > 0.0 {
-            merged.retain(|item| item.score >= min_score);
-        }
-        merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
-
-        let limit = agg_options.global_config.result.limit;
-        if merged.len() > limit {
-            merged.truncate(limit);
-        }
-
-        // Relation expansion runs once on the merged hits so budget,
-        // shared dedup and single wrapping observe the final Top-N instead of
-        // each sub-query's intermediate list. Sub-queries run without
-        // annotation when a resolver is present (see build_sub_query_options).
-        if let Some(resolver) = agg_options.neighbour_resolver.as_ref() {
-            if agg_options.global_config.annotation.expansion_enabled {
-                crate::query::expansion::annotate_hits_with_resolver(
-                    resolver,
-                    &mut merged,
-                    &agg_options.global_config.annotation,
-                )
-                .await;
-            }
-        }
-
-        let total = merged.len();
-
-        Ok(QueryResult {
-            items: merged,
-            total,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-            sources: sources_used,
-            sub_queries_count,
-            failed_sub_queries,
-            from_cache: false,
-        })
+            })
+            .await
     }
 
     /// Decompose one sub-query's options out of the aggregated options.
@@ -804,6 +798,7 @@ impl QueryCoordinator {
             with_source: true,
             query_intent: agg_options.query_intent,
             enable_rerank: agg_options.enable_rerank,
+            enable_result_filter: agg_options.enable_result_filter,
             neighbour_resolver: None,
         }
     }
@@ -832,8 +827,8 @@ impl QueryCoordinator {
     // Fuzzy path matching over project files, independent of every index.
     // The local branch walks the project directory directly and observes the
     // latest filesystem state with no generation filtering. The remote branch
-    // holds no project files, so it reports unavailability instead of serving
-    // indexed rows that could silently disagree with the filesystem.
+    // holds no project files, so it ranks the indexed file rows of the active
+    // epoch view with the same matcher and ordering instead.
 
     /// Search file paths matching `query`, returning at most `limit` paths.
     ///
@@ -841,25 +836,62 @@ impl QueryCoordinator {
     /// tiebreak. No index capability is required: files exist regardless of
     /// which indexes are enabled.
     pub async fn search_file_paths(&self, query: &str, limit: usize) -> Result<Vec<String>> {
-        let root = self.resolve_file_search_root().await?;
-        let query = query.to_string();
-        tokio::task::spawn_blocking(move || super::files::search_file_paths(&root, &query, limit))
-            .await
-            .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
+        let hits = self.search_files(query, limit).await?;
+        Ok(hits.into_iter().map(|hit| hit.path).collect())
     }
 
     /// Search files matching `query`, attaching size and line count.
     ///
     /// Shares the matcher and ordering with [`Self::search_file_paths`];
-    /// files unreadable at stat time are skipped.
+    /// files unreadable at stat time are skipped. Size and line metadata is
+    /// present only on the local branch; remote hits carry paths alone.
     pub async fn search_files(
         &self,
         query: &str,
         limit: usize,
     ) -> Result<Vec<super::files::FileHit>> {
-        let root = self.resolve_file_search_root().await?;
+        let store = self.relation.as_ref().ok_or_else(|| {
+            QueryError::config("file search requires a relation store for project lookup")
+        })?;
+        if store.is_local() {
+            let root = self.resolve_file_search_root().await?;
+            let query = query.to_string();
+            return tokio::task::spawn_blocking(move || {
+                super::files::search_files(&root, &query, limit)
+            })
+            .await
+            .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?;
+        }
+        self.search_files_from_index(store, query, limit).await
+    }
+
+    /// Index-based file search for branches without live project files.
+    ///
+    /// Ranks the indexed file rows of the active epoch view with the same
+    /// matcher and ordering as the live walk; excluded files of an inherited
+    /// generation never surface.
+    async fn search_files_from_index(
+        &self,
+        store: &RelationStore,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<super::files::FileHit>> {
+        use cce_storage_common::RelationStorage;
+
+        let view = self.searcher.load_query_filter(self.project_id).await?;
+        let rows = store
+            .files_list(self.project_id, &view.epochs())
+            .await
+            .map_err(|e| QueryError::storage(&format!("File search failed: {e}")))?;
+        let excluded: std::collections::HashSet<&str> =
+            view.excluded_files().iter().map(String::as_str).collect();
+        let paths: Vec<String> = rows
+            .into_iter()
+            .map(|row| row.path)
+            .filter(|path| !excluded.contains(path.as_str()))
+            .collect();
         let query = query.to_string();
-        tokio::task::spawn_blocking(move || super::files::search_files(&root, &query, limit))
+        tokio::task::spawn_blocking(move || super::files::rank_file_paths(&paths, &query, limit))
             .await
             .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
     }

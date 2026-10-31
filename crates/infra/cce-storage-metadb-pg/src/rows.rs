@@ -2,9 +2,9 @@ use cce_types::StorageError;
 use tokio_postgres::Row;
 
 use cce_storage_common::metadb::{
-    AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, FileCheckpointRecord,
-    ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord, WorkUnitCheckpointRecord,
-    WorkUnitStatus,
+    AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, EntityRecord,
+    FileCheckpointRecord, FileRecord, ProjectIndexManifest, ProjectIndexManifestState,
+    ProjectRecord, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 
 use crate::error::classify_pg;
@@ -91,6 +91,58 @@ pub fn chunk_from_row(row: &Row) -> Result<ChunkRecord, StorageError> {
 pub const CHUNK_COLUMNS: &str = "chunk_id, file_path, content, start_line, end_line, entity_ids, \
      entity_names, entity_kinds, group_title, chunk_type, test_status, test_source, created_at, updated_at, project_id, \
      epoch, batch_id, path, bm25_keywords, segment_id, truncated";
+
+pub fn entity_from_row(row: &Row) -> Result<EntityRecord, StorageError> {
+    let rank: f64 = row.try_get("rank").map_err(classify_pg)?;
+    Ok(EntityRecord {
+        id: row.try_get("id").map_err(classify_pg)?,
+        name: row.try_get("name").map_err(classify_pg)?,
+        kind: row.try_get("kind").map_err(classify_pg)?,
+        file_id: row.try_get("file_id").map_err(classify_pg)?,
+        signature: row.try_get("signature").map_err(classify_pg)?,
+        span_start_row: row.try_get("span_start_row").map_err(classify_pg)?,
+        span_end_row: row.try_get("span_end_row").map_err(classify_pg)?,
+        span_start_column: row.try_get("span_start_column").map_err(classify_pg)?,
+        span_end_column: row.try_get("span_end_column").map_err(classify_pg)?,
+        span_start_byte: row.try_get("span_start_byte").map_err(classify_pg)?,
+        span_end_byte: row.try_get("span_end_byte").map_err(classify_pg)?,
+        scoped_name: row.try_get("scoped_name").map_err(classify_pg)?,
+        overload_discriminator: row.try_get("overload_discriminator").map_err(classify_pg)?,
+        depth: row.try_get("depth").map_err(classify_pg)?,
+        parent_id: row.try_get("parent_id").map_err(classify_pg)?,
+        metadata: row.try_get("metadata").map_err(classify_pg)?,
+        parameters_json: row.try_get("parameters_json").map_err(classify_pg)?,
+        return_type: row.try_get("return_type").map_err(classify_pg)?,
+        doc_comment: row.try_get("doc_comment").map_err(classify_pg)?,
+        modifiers_json: row.try_get("modifiers_json").map_err(classify_pg)?,
+        project_id: row.try_get("project_id").map_err(classify_pg)?,
+        epoch: row.try_get("epoch").map_err(classify_pg)?,
+        batch_id: row.try_get("batch_id").map_err(classify_pg)?,
+        rank: rank as f32,
+    })
+}
+
+pub const ENTITY_COLUMNS: &str = "id, name, kind, file_id, signature, span_start_row, \
+     span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, \
+     overload_discriminator, depth, parent_id, metadata, parameters_json, return_type, doc_comment, \
+     modifiers_json, project_id, epoch, batch_id, rank";
+
+pub fn file_from_row(row: &Row) -> Result<FileRecord, StorageError> {
+    let category: i64 = row.try_get("category").map_err(classify_pg)?;
+    Ok(FileRecord {
+        id: row.try_get("id").map_err(classify_pg)?,
+        path: row.try_get("path").map_err(classify_pg)?,
+        language: row.try_get("language").map_err(classify_pg)?,
+        category: category as u8,
+        last_modified: row.try_get("last_modified").map_err(classify_pg)?,
+        created_at: row.try_get("created_at").map_err(classify_pg)?,
+        project_id: row.try_get("project_id").map_err(classify_pg)?,
+        content_hash: row.try_get("content_hash").map_err(classify_pg)?,
+    })
+}
+
+pub const FILE_COLUMNS: &str =
+    "id, path, language, category, last_modified, created_at, project_id, content_hash";
 
 pub fn admission_from_row(row: &Row) -> Result<AdmissionAuditRecord, StorageError> {
     Ok(AdmissionAuditRecord {

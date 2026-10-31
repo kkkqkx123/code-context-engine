@@ -43,9 +43,9 @@ pub struct SearchResult {
     pub start_line: u32,
     /// End line
     pub end_line: u32,
-    /// Whether this result was boosted
+    /// Whether a result-filter plugin adjusted this result
     pub is_boosted: bool,
-    /// Boost reason (if boosted)
+    /// Result-filter adjustment reason (if adjusted)
     pub boost_reason: Option<String>,
     /// Additional metadata
     pub metadata: HashMap<String, String>,
