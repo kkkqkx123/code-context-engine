@@ -5,6 +5,7 @@
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import { projectStore } from '$lib/stores/project.svelte';
 	import type { GetSymbolsResult, FileSymbolResult } from '$lib/api/tools';
@@ -42,7 +43,7 @@
 </script>
 
 <ToolShell {error}>
-	<div class="tool-form-row">
+	<ToolFormRow>
 		<ToolField label="File Path" wide>
 			<input
 				id="symbol-file-path"
@@ -67,7 +68,7 @@
 		<Button onclick={handleGetSymbols} disabled={!filePath.trim() || loading}>
 			{#if loading}Extracting...{:else}Extract Symbols{/if}
 		</Button>
-	</div>
+	</ToolFormRow>
 
 	{#if result?.results}
 		{@const symbols = result.results.flatMap(

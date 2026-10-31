@@ -5,6 +5,7 @@
 	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
 	import { toolsApi, type GotoDefinitionResult } from '$lib/api/tools';
 	import { projectStore } from '$lib/stores/project.svelte';
 	import { goto } from '$app/navigation';
@@ -41,7 +42,7 @@
 </script>
 
 <ToolShell {error}>
-	<div class="tool-form-row">
+	<ToolFormRow>
 		<ToolField label="File Path" wide>
 			<input
 				class="text-input"
@@ -59,7 +60,7 @@
 		<Button onclick={handleGoto} disabled={!filePath.trim() || loading}>
 			{#if loading}Resolving...{:else}Goto Definition{/if}
 		</Button>
-	</div>
+	</ToolFormRow>
 
 	<Toggle
 		checked={includeBody}

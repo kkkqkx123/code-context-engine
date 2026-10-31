@@ -7,6 +7,8 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
+	import ToolActions from '$lib/components/tools/ToolActions.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { Diagnostic } from '$lib/api/tools';
 
@@ -83,7 +85,7 @@
 	<SplitPane leftWidth={50}>
 		{#snippet left()}
 			<div class="tool-input">
-				<div class="tool-form-row">
+				<ToolFormRow>
 					<ToolField label="Language">
 						<select
 							id="diagnose-language"
@@ -107,16 +109,16 @@
 							class="text-input"
 						/>
 					</ToolField>
-				</div>
+				</ToolFormRow>
 				<textarea
 					bind:value={code}
 					placeholder="Enter code to diagnose..."
 					class="code-textarea"></textarea>
-				<div class="tool-actions">
+				<ToolActions>
 					<Button onclick={handleDiagnose} disabled={!code.trim() || loading}>
 						{#if loading}Diagnosing...{:else}Diagnose{/if}
 					</Button>
-				</div>
+				</ToolActions>
 			</div>
 		{/snippet}
 
@@ -167,12 +169,6 @@
 		display: flex;
 		flex-direction: column;
 		padding: 1rem;
-	}
-
-	.tool-actions {
-		margin-top: 1rem;
-		display: flex;
-		justify-content: flex-end;
 	}
 
 	.no-issues {

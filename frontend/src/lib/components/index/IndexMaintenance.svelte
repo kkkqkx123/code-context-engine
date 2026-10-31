@@ -4,10 +4,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import IndexDeletionPanel from '$lib/components/index/IndexDeletionPanel.svelte';
-	import {
-		indexApi,
-		type IndexStatsResponse,
-	} from '$lib/api/index';
+	import { indexApi, type IndexStatsResponse } from '$lib/api/index';
 	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
 	import { onMount } from 'svelte';
 
@@ -58,11 +55,14 @@
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">Entities</span>
-					<span class="stat-value">{stats.total_entities.toLocaleString()}</span>
+					<span class="stat-value">{stats.total_entities.toLocaleString()}</span
+					>
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">Relations</span>
-					<span class="stat-value">{stats.total_relations.toLocaleString()}</span>
+					<span class="stat-value"
+						>{stats.total_relations.toLocaleString()}</span
+					>
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">Vectors</span>

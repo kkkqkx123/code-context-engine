@@ -24,19 +24,4 @@
 		gap: 1rem;
 		width: 100%;
 	}
-
-	.tool-shell :global(.tool-form-row) {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 0.75rem;
-	}
-
-	.tool-shell :global(.tool-actions) {
-		margin-top: 1rem;
-		display: flex;
-		justify-content: flex-end;
-		align-items: center;
-		gap: 1rem;
-	}
 </style>

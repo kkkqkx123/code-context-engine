@@ -4,6 +4,8 @@
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
+	import Notice from '$lib/components/ui/Notice.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
@@ -104,33 +106,17 @@
 			title="Summary Input"
 			subtitle="Select files or directories to summarize"
 		>
-			<!-- Tab Navigation -->
-			<div class="tab-nav">
-				<button
-					type="button"
-					class="tab-btn"
-					class:active={activeTab === 'single'}
-					onclick={() => (activeTab = 'single')}
-				>
-					Single File
-				</button>
-				<button
-					type="button"
-					class="tab-btn"
-					class:active={activeTab === 'batch'}
-					onclick={() => (activeTab = 'batch')}
-				>
-					Batch Files
-				</button>
-				<button
-					type="button"
-					class="tab-btn"
-					class:active={activeTab === 'directory'}
-					onclick={() => (activeTab = 'directory')}
-				>
-					Directory Scan
-				</button>
-			</div>
+			<Tabs
+				variant="underline"
+				label="Summary input modes"
+				active={activeTab}
+				tabs={[
+					{ id: 'single', label: 'Single File' },
+					{ id: 'batch', label: 'Batch Files' },
+					{ id: 'directory', label: 'Directory Scan' },
+				]}
+				onSelect={(id) => (activeTab = id as typeof activeTab)}
+			/>
 
 			<!-- Single File Mode -->
 			{#if activeTab === 'single'}
@@ -234,14 +220,9 @@
 				</div>
 
 				{#if (result.warnings ?? []).length > 0}
-					<div class="warnings-section">
-						<h3 class="section-title">Warnings</h3>
-						<ul class="warnings-list">
-							{#each result.warnings ?? [] as warn (warn)}
-								<li class="warning-item">{warn}</li>
-							{/each}
-						</ul>
-					</div>
+					{#each result.warnings ?? [] as warn (warn)}
+						<Notice variant="warning" message={warn} />
+					{/each}
 				{/if}
 
 				{#if result.summaries.length > 0}
@@ -373,35 +354,6 @@
 		font-family: 'Space Grotesk', sans-serif;
 		font-size: 1.5rem;
 		font-weight: 700;
-	}
-
-	.section-title {
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 1rem;
-		font-weight: 700;
-		margin-bottom: 0.75rem;
-		letter-spacing: -0.03em;
-	}
-
-	.warnings-section {
-		margin-bottom: 1.5rem;
-	}
-
-	.warnings-list {
-		list-style: none;
-		padding: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.warning-item {
-		padding: 0.5rem 0.75rem;
-		background: var(--warning-bg, #fffbe6);
-		border: 1px solid var(--warning, #e6a700);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		color: var(--warning-text, #8a6d00);
 	}
 
 	.summary-list {

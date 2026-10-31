@@ -5,6 +5,7 @@
 	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
 	import { toolsApi, type BatchCompressResponse } from '$lib/api/tools';
 
 	let pathsText = $state('');
@@ -49,7 +50,7 @@
 			spellcheck="false"></textarea>
 	</ToolField>
 
-	<div class="tool-form-row">
+	<ToolFormRow>
 		<Toggle
 			checked={includeEntities}
 			label="Include entities"
@@ -72,7 +73,7 @@
 		<Button onclick={handleBatch} disabled={loading || !pathsText.trim()}>
 			{#if loading}Compressing...{:else}Batch Compress{/if}
 		</Button>
-	</div>
+	</ToolFormRow>
 
 	{#if result}
 		<div class="result-head">

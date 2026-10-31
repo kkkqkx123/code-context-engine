@@ -12,7 +12,7 @@ import type {
 	EmbeddingHealthStatus,
 	HealthStatus,
 	QdrantHealthStatus,
-	RetryQueueStatus
+	RetryQueueStatus,
 } from '../../api/health';
 import type { SearchResponse } from '../../api/search';
 import type {
@@ -21,7 +21,7 @@ import type {
 	ClassInheritanceResponse,
 	FunctionCallersResponse,
 	FunctionCallsResponse,
-	FunctionDetailResponse
+	FunctionDetailResponse,
 } from '../../api/entities';
 import type {
 	GraphComponentsResponse,
@@ -29,27 +29,33 @@ import type {
 	GraphImpactResponse,
 	GraphNode,
 	GraphPathResponse,
-	GraphSubgraphResponse
+	GraphSubgraphResponse,
 } from '../../api/graph';
 import type { StorageStatusResponse } from '../../api/storage';
 import type { MetricsData } from '../../api/metrics';
 import type { WatchStatus } from '../../api/watch';
-import type { ConfigInfoResponse, ConfigValidateResponse } from '../../api/config';
+import type {
+	ConfigInfoResponse,
+	ConfigValidateResponse,
+} from '../../api/config';
 import type {
 	CompressApiResponse,
 	DiagnoseApiResponse,
 	FoldResponse,
-	GetSymbolsResponse
+	GetSymbolsResponse,
 } from '../../api/tools';
 import type { SummaryResponse } from '../../api/summary';
-import type { QdrantActionResponse, QdrantProcessStatusResponse } from '../../api/qdrant';
+import type {
+	QdrantActionResponse,
+	QdrantProcessStatusResponse,
+} from '../../api/qdrant';
 
 export const isMockMode = import.meta.env.VITE_USE_MOCK === 'true';
 
 // ─── Delay helper ──────────────────────────────────────────────────
 
 export function mockDelay(ms: number = 100): Promise<void> {
-	return new Promise(resolve => setTimeout(resolve, ms));
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ─── Index & Project Mock Data ─────────────────────────────────────
@@ -63,7 +69,7 @@ export const mockProjects: Project[] = [
 		exclude_dirs: ['target', 'node_modules'],
 		respect_gitignore: true,
 		created_at: '2024-01-15T10:30:00Z',
-		last_indexed: '2024-03-20T14:25:00Z'
+		last_indexed: '2024-03-20T14:25:00Z',
 	},
 	{
 		id: '2',
@@ -73,7 +79,7 @@ export const mockProjects: Project[] = [
 		exclude_dirs: ['dist', '.svelte-kit'],
 		respect_gitignore: true,
 		created_at: '2024-02-01T09:00:00Z',
-		last_indexed: '2024-03-19T16:00:00Z'
+		last_indexed: '2024-03-19T16:00:00Z',
 	},
 	{
 		id: '3',
@@ -83,8 +89,8 @@ export const mockProjects: Project[] = [
 		exclude_dirs: ['__pycache__', '.venv'],
 		respect_gitignore: true,
 		created_at: '2024-02-20T11:00:00Z',
-		last_indexed: null
-	}
+		last_indexed: null,
+	},
 ];
 
 export const mockIndexStats: IndexStatsResponse = {
@@ -94,9 +100,9 @@ export const mockIndexStats: IndexStatsResponse = {
 		total_relations: 3421,
 		total_vectors: 12847,
 		total_bm25_documents: 12847,
-		total_files: 342
+		total_files: 342,
 	},
-	elapsed_ms: 15230
+	elapsed_ms: 15230,
 };
 
 // ─── Health Mock Data ──────────────────────────────────────────────
@@ -105,7 +111,7 @@ export const mockHealthStatus: HealthStatus = {
 	healthy: true,
 	qdrant: { reachable: true, message: 'Connected to Qdrant v1.8.0' },
 	bm25: { reachable: true, message: 'BM25 index loaded (12847 documents)' },
-	embedding: { reachable: true, message: 'Model: text-embedding-3-small' }
+	embedding: { reachable: true, message: 'Model: text-embedding-3-small' },
 };
 
 export const mockQdrantHealth: QdrantHealthStatus = {
@@ -116,26 +122,26 @@ export const mockQdrantHealth: QdrantHealthStatus = {
 		version: '1.8.0',
 		collection_exists: true,
 		points_count: 12847,
-		error: null
-	}
+		error: null,
+	},
 };
 
 export const mockEmbeddingHealth: EmbeddingHealthStatus = {
 	healthy: true,
 	model_name: 'text-embedding-3-small',
-	message: 'Embedding service ready'
+	message: 'Embedding service ready',
 };
 
 export const mockBm25Health: Bm25HealthStatus = {
 	enabled: true,
 	connected: true,
-	index_path: '/data/bm25_index'
+	index_path: '/data/bm25_index',
 };
 
 export const mockRetryQueueStatus: RetryQueueStatus = {
 	pending_count: 0,
 	dead_count: 0,
-	is_empty: true
+	is_empty: true,
 };
 
 // ─── Search Mock Data ──────────────────────────────────────────────
@@ -152,7 +158,7 @@ export const mockSearchResults: SearchResponse = {
 			start_line: 45,
 			end_line: 55,
 			entity_type: 'function',
-			sources: ['vector']
+			sources: ['vector'],
 		},
 		{
 			entity_ids: [201],
@@ -162,7 +168,7 @@ export const mockSearchResults: SearchResponse = {
 			start_line: 23,
 			end_line: 30,
 			entity_type: 'function',
-			sources: ['vector']
+			sources: ['vector'],
 		},
 		{
 			entity_ids: [301],
@@ -172,7 +178,7 @@ export const mockSearchResults: SearchResponse = {
 			start_line: 12,
 			end_line: 18,
 			entity_type: 'struct',
-			sources: ['bm25']
+			sources: ['bm25'],
 		},
 		{
 			entity_ids: [401],
@@ -182,7 +188,7 @@ export const mockSearchResults: SearchResponse = {
 			start_line: 67,
 			end_line: 75,
 			entity_type: 'function',
-			sources: ['vector', 'bm25']
+			sources: ['vector', 'bm25'],
 		},
 		{
 			entity_ids: [501],
@@ -192,11 +198,11 @@ export const mockSearchResults: SearchResponse = {
 			start_line: 15,
 			end_line: 22,
 			entity_type: 'function',
-			sources: ['bm25']
-		}
+			sources: ['bm25'],
+		},
 	],
 	elapsed_ms: 45,
-	sources_used: ['vector', 'bm25']
+	sources_used: ['vector', 'bm25'],
 };
 
 // ─── Entity Mock Data ──────────────────────────────────────────────
@@ -206,14 +212,16 @@ export const mockFunctionDetail: FunctionDetailResponse = {
 	function: {
 		id: '101',
 		name: 'group_entities',
-		signature: 'pub fn group_entities(entities: Vec<Entity>) -> Vec<EntityGroup>',
+		signature:
+			'pub fn group_entities(entities: Vec<Entity>) -> Vec<EntityGroup>',
 		parameters: [{ name: 'entities', type_name: 'Vec<Entity>' }],
 		return_type: 'Vec<EntityGroup>',
 		file_path: 'crates/cce-parser/src/grouper.rs',
 		start_line: 45,
 		end_line: 68,
-		doc_comment: 'Groups related entities into logical clusters based on file proximity and semantic similarity.'
-	}
+		doc_comment:
+			'Groups related entities into logical clusters based on file proximity and semantic similarity.',
+	},
 };
 
 export const mockFunctionCalls: FunctionCallsResponse = {
@@ -222,10 +230,24 @@ export const mockFunctionCalls: FunctionCallsResponse = {
 	function_id: '101',
 	function_name: 'group_entities',
 	callees: [
-		{ function_id: '102', function_name: 'process_chunk', file_path: 'crates/cce-parser/src/chunker.rs', depth: 1, relation_type: 'callee', call_line: 48 },
-		{ function_id: '103', function_name: 'calculate_similarity', file_path: 'crates/cce-parser/src/similarity.rs', depth: 1, relation_type: 'callee', call_line: 52 }
+		{
+			function_id: '102',
+			function_name: 'process_chunk',
+			file_path: 'crates/cce-parser/src/chunker.rs',
+			depth: 1,
+			relation_type: 'callee',
+			call_line: 48,
+		},
+		{
+			function_id: '103',
+			function_name: 'calculate_similarity',
+			file_path: 'crates/cce-parser/src/similarity.rs',
+			depth: 1,
+			relation_type: 'callee',
+			call_line: 52,
+		},
 	],
-	total_callees: 2
+	total_callees: 2,
 };
 
 export const mockFunctionCallers: FunctionCallersResponse = {
@@ -234,10 +256,24 @@ export const mockFunctionCallers: FunctionCallersResponse = {
 	function_id: '101',
 	function_name: 'group_entities',
 	callers: [
-		{ function_id: '201', function_name: 'parse_file', file_path: 'crates/cce-parser/src/lib.rs', depth: 1, relation_type: 'caller', call_line: 34 },
-		{ function_id: '202', function_name: 'batch_parse', file_path: 'crates/cce-parser/src/batch.rs', depth: 1, relation_type: 'caller', call_line: 67 }
+		{
+			function_id: '201',
+			function_name: 'parse_file',
+			file_path: 'crates/cce-parser/src/lib.rs',
+			depth: 1,
+			relation_type: 'caller',
+			call_line: 34,
+		},
+		{
+			function_id: '202',
+			function_name: 'batch_parse',
+			file_path: 'crates/cce-parser/src/batch.rs',
+			depth: 1,
+			relation_type: 'caller',
+			call_line: 67,
+		},
 	],
-	total_callers: 2
+	total_callers: 2,
 };
 
 export const mockCallChain: CallChainResponse = {
@@ -247,11 +283,38 @@ export const mockCallChain: CallChainResponse = {
 	function_name: 'group_entities',
 	direction: 'down',
 	call_chain: [
-		{ function_id: '101', function_name: 'group_entities', file_path: 'crates/cce-parser/src/grouper.rs', depth: 0, relation_type: 'root' },
-		{ function_id: '102', function_name: 'process_chunk', file_path: 'crates/cce-parser/src/chunker.rs', depth: 1, relation_type: 'callee', call_line: 48 },
-		{ function_id: '103', function_name: 'calculate_similarity', file_path: 'crates/cce-parser/src/similarity.rs', depth: 2, relation_type: 'callee', call_line: 15 },
-		{ function_id: '104', function_name: 'normalize_text', file_path: 'crates/cce-parser/src/utils.rs', depth: 3, relation_type: 'callee', call_line: 22 }
-	]
+		{
+			function_id: '101',
+			function_name: 'group_entities',
+			file_path: 'crates/cce-parser/src/grouper.rs',
+			depth: 0,
+			relation_type: 'root',
+		},
+		{
+			function_id: '102',
+			function_name: 'process_chunk',
+			file_path: 'crates/cce-parser/src/chunker.rs',
+			depth: 1,
+			relation_type: 'callee',
+			call_line: 48,
+		},
+		{
+			function_id: '103',
+			function_name: 'calculate_similarity',
+			file_path: 'crates/cce-parser/src/similarity.rs',
+			depth: 2,
+			relation_type: 'callee',
+			call_line: 15,
+		},
+		{
+			function_id: '104',
+			function_name: 'normalize_text',
+			file_path: 'crates/cce-parser/src/utils.rs',
+			depth: 3,
+			relation_type: 'callee',
+			call_line: 22,
+		},
+	],
 };
 
 export const mockClassInheritance: ClassInheritanceResponse = {
@@ -260,11 +323,21 @@ export const mockClassInheritance: ClassInheritanceResponse = {
 	class_id: '301',
 	class_name: 'StorageManager',
 	base_classes: [
-		{ class_id: '302', class_name: 'BaseManager', file_path: 'crates/cce-core/src/manager.rs', depth: 1 }
+		{
+			class_id: '302',
+			class_name: 'BaseManager',
+			file_path: 'crates/cce-core/src/manager.rs',
+			depth: 1,
+		},
 	],
 	derived_classes: [
-		{ class_id: '303', class_name: 'IndexedStorageManager', file_path: 'crates/cce-infrastructure/src/storage/indexed.rs', depth: 1 }
-	]
+		{
+			class_id: '303',
+			class_name: 'IndexedStorageManager',
+			file_path: 'crates/cce-infrastructure/src/storage/indexed.rs',
+			depth: 1,
+		},
+	],
 };
 
 export const mockClassImplementations: ClassImplementationsResponse = {
@@ -273,10 +346,18 @@ export const mockClassImplementations: ClassImplementationsResponse = {
 	class_id: '301',
 	class_name: 'StorageManager',
 	implemented_interfaces: [
-		{ interface_id: '401', interface_name: 'Storable', file_path: 'crates/cce-core/src/traits.rs' },
-		{ interface_id: '402', interface_name: 'Queryable', file_path: 'crates/cce-core/src/traits.rs' }
+		{
+			interface_id: '401',
+			interface_name: 'Storable',
+			file_path: 'crates/cce-core/src/traits.rs',
+		},
+		{
+			interface_id: '402',
+			interface_name: 'Queryable',
+			file_path: 'crates/cce-core/src/traits.rs',
+		},
 	],
-	implementing_classes: []
+	implementing_classes: [],
 };
 
 // ─── Graph Mock Data ───────────────────────────────────────────────
@@ -285,61 +366,364 @@ export const mockClassImplementations: ClassImplementationsResponse = {
 // every relation domain and confidence level.
 
 export const mockGraphNodes: GraphNode[] = [
-	{ id: '101', kind: 'function', label: 'group_entities', source_file: 'crates/cce-parser/src/grouper.rs', source_location: '45:0' },
-	{ id: '102', kind: 'function', label: 'process_chunk', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '20:0' },
-	{ id: '103', kind: 'function', label: 'calculate_similarity', source_file: 'crates/cce-parser/src/similarity.rs', source_location: '15:0' },
-	{ id: '104', kind: 'function', label: 'normalize_text', source_file: 'crates/cce-parser/src/utils.rs', source_location: '22:0' },
-	{ id: '105', kind: 'function', label: 'parse_file', source_file: 'crates/cce-parser/src/lib.rs', source_location: '34:0' },
-	{ id: '106', kind: 'function', label: 'batch_parse', source_file: 'crates/cce-parser/src/batch.rs', source_location: '67:0' },
-	{ id: '107', kind: 'function', label: 'split_entities', source_file: 'crates/cce-parser/src/splitter.rs', source_location: '10:0' },
-	{ id: '108', kind: 'struct', label: 'EntityGroup', source_file: 'crates/cce-types/src/group.rs', source_location: '8:0' },
-	{ id: '109', kind: 'struct', label: 'Entity', source_file: 'crates/cce-types/src/entity.rs', source_location: '12:0' },
-	{ id: '110', kind: 'class', label: 'Grouper', source_file: 'crates/cce-parser/src/grouper.rs', source_location: '120:0' },
-	{ id: '111', kind: 'interface', label: 'ChunkStrategy', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '5:0' },
-	{ id: '112', kind: 'class', label: 'ParagraphChunker', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '40:0' },
-	{ id: '201', kind: 'class', label: 'StorageManager', source_file: 'crates/cce-storage/src/manager.rs', source_location: '30:0' },
-	{ id: '202', kind: 'class', label: 'BaseManager', source_file: 'crates/cce-storage/src/base.rs', source_location: '10:0' },
-	{ id: '203', kind: 'class', label: 'IndexedStorageManager', source_file: 'crates/cce-storage/src/indexed.rs', source_location: '18:0' },
-	{ id: '204', kind: 'interface', label: 'Storable', source_file: 'crates/cce-storage/src/traits.rs', source_location: '3:0' },
-	{ id: '205', kind: 'interface', label: 'Queryable', source_file: 'crates/cce-storage/src/traits.rs', source_location: '9:0' },
-	{ id: '206', kind: 'struct', label: 'StorageConfig', source_file: 'crates/cce-storage/src/config.rs', source_location: '6:0' },
-	{ id: '301', kind: 'function', label: 'load_config', source_file: 'crates/cce-config/src/lib.rs', source_location: '14:0' },
-	{ id: '302', kind: 'function', label: 'validate_config', source_file: 'crates/cce-config/src/validate.rs', source_location: '25:0' },
-	{ id: '303', kind: 'struct', label: 'Config', source_file: 'crates/cce-config/src/model.rs', source_location: '4:0' }
+	{
+		id: '101',
+		kind: 'function',
+		label: 'group_entities',
+		source_file: 'crates/cce-parser/src/grouper.rs',
+		source_location: '45:0',
+	},
+	{
+		id: '102',
+		kind: 'function',
+		label: 'process_chunk',
+		source_file: 'crates/cce-parser/src/chunker.rs',
+		source_location: '20:0',
+	},
+	{
+		id: '103',
+		kind: 'function',
+		label: 'calculate_similarity',
+		source_file: 'crates/cce-parser/src/similarity.rs',
+		source_location: '15:0',
+	},
+	{
+		id: '104',
+		kind: 'function',
+		label: 'normalize_text',
+		source_file: 'crates/cce-parser/src/utils.rs',
+		source_location: '22:0',
+	},
+	{
+		id: '105',
+		kind: 'function',
+		label: 'parse_file',
+		source_file: 'crates/cce-parser/src/lib.rs',
+		source_location: '34:0',
+	},
+	{
+		id: '106',
+		kind: 'function',
+		label: 'batch_parse',
+		source_file: 'crates/cce-parser/src/batch.rs',
+		source_location: '67:0',
+	},
+	{
+		id: '107',
+		kind: 'function',
+		label: 'split_entities',
+		source_file: 'crates/cce-parser/src/splitter.rs',
+		source_location: '10:0',
+	},
+	{
+		id: '108',
+		kind: 'struct',
+		label: 'EntityGroup',
+		source_file: 'crates/cce-types/src/group.rs',
+		source_location: '8:0',
+	},
+	{
+		id: '109',
+		kind: 'struct',
+		label: 'Entity',
+		source_file: 'crates/cce-types/src/entity.rs',
+		source_location: '12:0',
+	},
+	{
+		id: '110',
+		kind: 'class',
+		label: 'Grouper',
+		source_file: 'crates/cce-parser/src/grouper.rs',
+		source_location: '120:0',
+	},
+	{
+		id: '111',
+		kind: 'interface',
+		label: 'ChunkStrategy',
+		source_file: 'crates/cce-parser/src/chunker.rs',
+		source_location: '5:0',
+	},
+	{
+		id: '112',
+		kind: 'class',
+		label: 'ParagraphChunker',
+		source_file: 'crates/cce-parser/src/chunker.rs',
+		source_location: '40:0',
+	},
+	{
+		id: '201',
+		kind: 'class',
+		label: 'StorageManager',
+		source_file: 'crates/cce-storage/src/manager.rs',
+		source_location: '30:0',
+	},
+	{
+		id: '202',
+		kind: 'class',
+		label: 'BaseManager',
+		source_file: 'crates/cce-storage/src/base.rs',
+		source_location: '10:0',
+	},
+	{
+		id: '203',
+		kind: 'class',
+		label: 'IndexedStorageManager',
+		source_file: 'crates/cce-storage/src/indexed.rs',
+		source_location: '18:0',
+	},
+	{
+		id: '204',
+		kind: 'interface',
+		label: 'Storable',
+		source_file: 'crates/cce-storage/src/traits.rs',
+		source_location: '3:0',
+	},
+	{
+		id: '205',
+		kind: 'interface',
+		label: 'Queryable',
+		source_file: 'crates/cce-storage/src/traits.rs',
+		source_location: '9:0',
+	},
+	{
+		id: '206',
+		kind: 'struct',
+		label: 'StorageConfig',
+		source_file: 'crates/cce-storage/src/config.rs',
+		source_location: '6:0',
+	},
+	{
+		id: '301',
+		kind: 'function',
+		label: 'load_config',
+		source_file: 'crates/cce-config/src/lib.rs',
+		source_location: '14:0',
+	},
+	{
+		id: '302',
+		kind: 'function',
+		label: 'validate_config',
+		source_file: 'crates/cce-config/src/validate.rs',
+		source_location: '25:0',
+	},
+	{
+		id: '303',
+		kind: 'struct',
+		label: 'Config',
+		source_file: 'crates/cce-config/src/model.rs',
+		source_location: '4:0',
+	},
 ];
 
 /** Mock edges before the deterministic id is attached. */
 const rawGraphEdges: Omit<GraphEdge, 'edge_id'>[] = [
 	// main component: parser pipeline
-	{ source: '106', target: '105', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '105', target: '107', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '105', target: '101', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '101', target: '102', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '101', target: '103', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '102', target: '104', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '103', target: '104', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '101', target: '108', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
-	{ source: '107', target: '109', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
-	{ source: '110', target: '101', relation: 'contains', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '112', target: '102', relation: 'contains', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '112', target: '111', relation: 'implementation', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '110', target: '112', relation: 'dependency.import.named', domain: 'dependency', confidence: 'inferred', weight: 0.6, cfg_condition: 'unix' },
-	{ source: '101', target: '104', relation: 'call.direct', domain: 'call', confidence: 'inferred', weight: 1 },
+	{
+		source: '106',
+		target: '105',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '105',
+		target: '107',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '105',
+		target: '101',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '101',
+		target: '102',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '101',
+		target: '103',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '102',
+		target: '104',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '103',
+		target: '104',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '101',
+		target: '108',
+		relation: 'type_reference',
+		domain: 'reference',
+		confidence: 'extracted',
+		weight: 0.3,
+	},
+	{
+		source: '107',
+		target: '109',
+		relation: 'type_reference',
+		domain: 'reference',
+		confidence: 'extracted',
+		weight: 0.3,
+	},
+	{
+		source: '110',
+		target: '101',
+		relation: 'contains',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '112',
+		target: '102',
+		relation: 'contains',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '112',
+		target: '111',
+		relation: 'implementation',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '110',
+		target: '112',
+		relation: 'dependency.import.named',
+		domain: 'dependency',
+		confidence: 'inferred',
+		weight: 0.6,
+		cfg_condition: 'unix',
+	},
+	{
+		source: '101',
+		target: '104',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'inferred',
+		weight: 1,
+	},
 	// bridge from parser to storage (external edge)
-	{ source: '106', target: '201', relation: 'call.direct', domain: 'call', confidence: 'external', weight: 1, is_external: true },
+	{
+		source: '106',
+		target: '201',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'external',
+		weight: 1,
+		is_external: true,
+	},
 	// storage component
-	{ source: '203', target: '202', relation: 'inheritance', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '201', target: '202', relation: 'inheritance', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '201', target: '204', relation: 'implementation', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '203', target: '205', relation: 'implementation', domain: 'structural', confidence: 'extracted', weight: 0.6 },
-	{ source: '201', target: '206', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
-	{ source: '201', target: '203', relation: 'contains', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{
+		source: '203',
+		target: '202',
+		relation: 'inheritance',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '201',
+		target: '202',
+		relation: 'inheritance',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '201',
+		target: '204',
+		relation: 'implementation',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '203',
+		target: '205',
+		relation: 'implementation',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '201',
+		target: '206',
+		relation: 'type_reference',
+		domain: 'reference',
+		confidence: 'extracted',
+		weight: 0.3,
+	},
+	{
+		source: '201',
+		target: '203',
+		relation: 'contains',
+		domain: 'structural',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
 	// config component
-	{ source: '301', target: '302', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
-	{ source: '301', target: '303', relation: 'parameter.binding', domain: 'template', confidence: 'extracted', weight: 0.6 },
-	{ source: '302', target: '303', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
+	{
+		source: '301',
+		target: '302',
+		relation: 'call.direct',
+		domain: 'call',
+		confidence: 'extracted',
+		weight: 1,
+	},
+	{
+		source: '301',
+		target: '303',
+		relation: 'parameter.binding',
+		domain: 'template',
+		confidence: 'extracted',
+		weight: 0.6,
+	},
+	{
+		source: '302',
+		target: '303',
+		relation: 'type_reference',
+		domain: 'reference',
+		confidence: 'extracted',
+		weight: 0.3,
+	},
 	// cross-component config usage
-	{ source: '206', target: '303', relation: 'dependency.import.named', domain: 'dependency', confidence: 'inferred', weight: 0.6 }
+	{
+		source: '206',
+		target: '303',
+		relation: 'dependency.import.named',
+		domain: 'dependency',
+		confidence: 'inferred',
+		weight: 0.6,
+	},
 ];
 
 /** Mock edges with the deterministic backend id attached, mirroring
@@ -355,42 +739,64 @@ const graphBase = { success: true, relation_epoch: 1 };
 export const mockGraphExport: GraphSubgraphResponse = {
 	...graphBase,
 	nodes: mockGraphNodes,
-	edges: mockGraphEdges
+	edges: mockGraphEdges,
 };
 
 /** Ego neighborhood around group_entities (101), depth 2, both directions. */
 export const mockGraphEgo: GraphSubgraphResponse = {
 	...graphBase,
 	nodes: mockGraphNodes.filter((n) =>
-		['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(n.id)
+		['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(
+			n.id,
+		),
 	),
 	edges: mockGraphEdges.filter(
-		(e) => ['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(e.source) &&
-			['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(e.target)
-	)
+		(e) =>
+			['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(
+				e.source,
+			) &&
+			['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(
+				e.target,
+			),
+	),
 };
 
 /** Shortest path from batch_parse (106) to normalize_text (104). */
 export const mockGraphPath: GraphPathResponse = {
 	...graphBase,
 	path_found: true,
-	nodes: mockGraphNodes.filter((n) => ['106', '105', '101', '104'].includes(n.id)),
+	nodes: mockGraphNodes.filter((n) =>
+		['106', '105', '101', '104'].includes(n.id),
+	),
 	edges: mockGraphEdges.filter(
 		(e) =>
 			(e.source === '106' && e.target === '105') ||
 			(e.source === '105' && e.target === '101') ||
-			(e.source === '101' && e.target === '104')
-	)
+			(e.source === '101' && e.target === '104'),
+	),
 };
 
 /** Connected components: parser pipeline, storage, config. */
 export const mockGraphComponents: GraphComponentsResponse = {
 	...graphBase,
 	components: [
-		['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112'],
+		[
+			'101',
+			'102',
+			'103',
+			'104',
+			'105',
+			'106',
+			'107',
+			'108',
+			'109',
+			'110',
+			'111',
+			'112',
+		],
 		['201', '202', '203', '204', '205', '206'],
-		['301', '302', '303']
-	]
+		['301', '302', '303'],
+	],
 };
 
 /** Impact of changing grouper.rs. */
@@ -399,7 +805,7 @@ export const mockGraphImpact: GraphImpactResponse = {
 	changed_file: 'crates/cce-parser/src/grouper.rs',
 	direct_dependents: ['105', '106', '110'],
 	indirect_dependents: ['105', '106', '110', '112'],
-	impact_score: 0.42
+	impact_score: 0.42,
 };
 
 // ─── Storage Mock Data ─────────────────────────────────────────────
@@ -412,27 +818,27 @@ export const mockStorageStatus: StorageStatusResponse = {
 			connected: true,
 			item_count: 12847,
 			disk_usage_mb: 245.6,
-			version: '1.8.0'
+			version: '1.8.0',
 		},
 		bm25_storage: {
 			backend: 'local',
 			connected: true,
 			item_count: 12847,
-			disk_usage_mb: 89.2
+			disk_usage_mb: 89.2,
 		},
 		relation_storage: {
 			backend: 'local',
 			connected: true,
 			item_count: 3421,
-			disk_usage_mb: 12.4
+			disk_usage_mb: 12.4,
 		},
 		total_disk_usage_mb: 393.0,
 		process_status: {
 			managed: true,
 			status: { type: 'Running' },
-			running: true
-		}
-	}
+			running: true,
+		},
+	},
 };
 
 // ─── Metrics Mock Data ─────────────────────────────────────────────
@@ -441,17 +847,17 @@ export const mockMetricsData: MetricsData = {
 	server: {
 		uptime_seconds: 86400,
 		total_requests: 15234,
-		active_connections: 3
+		active_connections: 3,
 	},
 	indexing: {
 		total_files_indexed: 342,
 		total_entities_extracted: 12847,
-		avg_processing_time_ms: 45.2
+		avg_processing_time_ms: 45.2,
 	},
 	storage: {
 		vector_count: 12847,
-		total_size_mb: 393.0
-	}
+		total_size_mb: 393.0,
+	},
 };
 
 // ─── Watch Mock Data ───────────────────────────────────────────────
@@ -460,7 +866,7 @@ export const mockWatchStatus: WatchStatus = {
 	active: true,
 	events_processed: 23,
 	watched_dirs: ['/home/user/projects/code-context-engine/src'],
-	started_at: '2024-03-20T14:30:00Z'
+	started_at: '2024-03-20T14:30:00Z',
 };
 
 // ─── Config Mock Data ──────────────────────────────────────────────
@@ -471,14 +877,14 @@ export const mockConfigInfo: ConfigInfoResponse = {
 	database: {
 		qdrant_url: 'http://localhost:6333',
 		qdrant_collection: 'cce_entities',
-		sqlite_path: '/data/cce.db'
+		sqlite_path: '/data/cce.db',
 	},
 	embedder: {
 		provider: 'openai',
 		model: 'text-embedding-3-small',
-		dimensions: 1536
+		dimensions: 1536,
 	},
-	project_count: 3
+	project_count: 3,
 };
 
 export const mockConfigValidation: ConfigValidateResponse = {
@@ -486,8 +892,13 @@ export const mockConfigValidation: ConfigValidateResponse = {
 	errors: [],
 	warnings: [],
 	dependency_warnings: [
-		{ field: 'storage.qdrant', depends_on: 'storage.backend = "qdrant"', severity: 'Info', suggestion: 'Qdrant version 1.8.0 detected' }
-	]
+		{
+			field: 'storage.qdrant',
+			depends_on: 'storage.backend = "qdrant"',
+			severity: 'Info',
+			suggestion: 'Qdrant version 1.8.0 detected',
+		},
+	],
 };
 
 // ─── Tools Mock Data ───────────────────────────────────────────────
@@ -499,8 +910,9 @@ export const mockCompressResult: CompressApiResponse = {
 		language: 'rust',
 		file_hash: 'abc123def456',
 		from_cache: false,
-		semantic_text: 'Module for grouping related code entities into logical clusters. Implements proximity-based and semantic similarity grouping algorithms.'
-	}
+		semantic_text:
+			'Module for grouping related code entities into logical clusters. Implements proximity-based and semantic similarity grouping algorithms.',
+	},
 };
 
 export const mockDiagnoseResult: DiagnoseApiResponse = {
@@ -509,10 +921,20 @@ export const mockDiagnoseResult: DiagnoseApiResponse = {
 		language: 'rust',
 		is_valid: false,
 		diagnostics: [
-			{ kind: 'TooLongFunction', message: 'Function `group_entities` is too long (23 lines)', position: { row: 45, column: 0 }, precision: 'Medium' },
-			{ kind: 'MissingDocs', message: 'Doc comment could be more detailed', position: { row: 44, column: 0 }, precision: 'Low' }
-		]
-	}
+			{
+				kind: 'TooLongFunction',
+				message: 'Function `group_entities` is too long (23 lines)',
+				position: { row: 45, column: 0 },
+				precision: 'Medium',
+			},
+			{
+				kind: 'MissingDocs',
+				message: 'Doc comment could be more detailed',
+				position: { row: 44, column: 0 },
+				precision: 'Low',
+			},
+		],
+	},
 };
 
 export const mockFoldResult: FoldResponse = {
@@ -524,7 +946,7 @@ export const mockFoldResult: FoldResponse = {
 	original_tokens: 120,
 	folded_tokens: 28,
 	kept_sections: 2,
-	dropped_sections: 0
+	dropped_sections: 0,
 };
 
 export const mockSymbolsResult: GetSymbolsResponse = {
@@ -538,13 +960,18 @@ export const mockSymbolsResult: GetSymbolsResponse = {
 				symbols: [
 					{ name: 'group_entities', kind: 'function', line: 45, end_line: 68 },
 					{ name: 'EntityGroup', kind: 'struct', line: 12, end_line: 18 },
-					{ name: 'calculate_proximity', kind: 'function', line: 72, end_line: 85 }
-				]
-			}
+					{
+						name: 'calculate_proximity',
+						kind: 'function',
+						line: 72,
+						end_line: 85,
+					},
+				],
+			},
 		],
 		success_count: 1,
-		fail_count: 0
-	}
+		fail_count: 0,
+	},
 };
 
 // ─── Summary Mock Data ─────────────────────────────────────────────
@@ -558,7 +985,8 @@ export const mockSummaryResult: SummaryResponse = {
 		{
 			file_path: 'crates/cce-parser/src/grouper.rs',
 			language: 'rust',
-			summary: 'Entity grouping module that clusters related code entities using proximity and semantic similarity.',
+			summary:
+				'Entity grouping module that clusters related code entities using proximity and semantic similarity.',
 			main_entities: ['group_entities', 'EntityGroup', 'calculate_proximity'],
 			imports: ['crate::types::Entity', 'crate::similarity::cosine_similarity'],
 			exports: ['group_entities', 'EntityGroup'],
@@ -566,12 +994,13 @@ export const mockSummaryResult: SummaryResponse = {
 			line_count: 120,
 			tags: ['grouping', 'core'],
 			importance_level: 'high',
-			success: true
+			success: true,
 		},
 		{
 			file_path: 'crates/cce-parser/src/chunker.rs',
 			language: 'rust',
-			summary: 'Code chunking module that splits source files into processable chunks.',
+			summary:
+				'Code chunking module that splits source files into processable chunks.',
 			main_entities: ['process_chunk', 'Chunk', 'ChunkConfig'],
 			imports: ['tree_sitter::Tree'],
 			exports: ['process_chunk', 'Chunk'],
@@ -579,12 +1008,13 @@ export const mockSummaryResult: SummaryResponse = {
 			line_count: 95,
 			tags: ['chunking'],
 			importance_level: 'medium',
-			success: true
+			success: true,
 		},
 		{
 			file_path: 'crates/cce-parser/src/ast_to_nl.rs',
 			language: 'rust',
-			summary: 'AST to natural language conversion module for generating human-readable code descriptions.',
+			summary:
+				'AST to natural language conversion module for generating human-readable code descriptions.',
 			main_entities: ['ast_to_natural_language', 'TraverseVisitor'],
 			imports: ['tree_sitter::Node'],
 			exports: ['ast_to_natural_language'],
@@ -592,22 +1022,22 @@ export const mockSummaryResult: SummaryResponse = {
 			line_count: 78,
 			tags: ['nl'],
 			importance_level: 'medium',
-			success: true
-		}
+			success: true,
+		},
 	],
 	elapsed_ms: 2340,
-	warnings: []
+	warnings: [],
 };
 
 // ─── Qdrant Process Mock Data ──────────────────────────────────────
 
 export const mockQdrantProcessStatus: QdrantProcessStatusResponse = {
 	managed: true,
-	status: { type: 'Running' }
+	status: { type: 'Running' },
 };
 
 export const mockQdrantActionResponse: QdrantActionResponse = {
 	success: true,
 	message: 'Qdrant process restarted successfully',
-	status: { type: 'Running' }
+	status: { type: 'Running' },
 };

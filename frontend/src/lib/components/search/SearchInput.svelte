@@ -25,7 +25,7 @@
 <div class="search-container">
 	<input
 		type="text"
-		class="search-input"
+		class="search-hero"
 		placeholder="Search codebase... (e.g., 'authentication function', 'database connection')"
 		bind:value={query}
 		onkeydown={handleKeydown}

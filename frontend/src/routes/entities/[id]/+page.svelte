@@ -11,6 +11,7 @@
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import { goto } from '$app/navigation';
@@ -218,64 +219,28 @@
 				</Button>
 			</div>
 
-			<!-- Tab Navigation -->
-			<div class="tab-navigation">
-				<Button
-					variant="tab"
-					size="xs"
-					active={currentTab === 'details'}
-					onclick={() => {
-						currentTab = 'details';
-						loadEntityDetailComponent();
-					}}
-				>
-					Details
-				</Button>
-				<Button
-					variant="tab"
-					size="xs"
-					active={currentTab === 'call-graph'}
-					onclick={() => {
-						currentTab = 'call-graph';
+			<Tabs
+				variant="segmented"
+				label="Entity views"
+				active={currentTab}
+				tabs={[
+					{ id: 'details', label: 'Details' },
+					{ id: 'call-graph', label: 'Call Graph' },
+					{ id: 'inheritance', label: 'Inheritance' },
+					{ id: 'call-chain', label: 'Call Chain' },
+					{ id: 'call-path', label: 'Call Path' },
+				]}
+				onSelect={(id) => {
+					currentTab = id;
+					if (id === 'details') loadEntityDetailComponent();
+					if (id === 'call-graph') {
 						loadCallGraphComponent();
 						loadCallChain('down');
-					}}
-				>
-					Call Graph
-				</Button>
-				<Button
-					variant="tab"
-					size="xs"
-					active={currentTab === 'inheritance'}
-					onclick={() => {
-						currentTab = 'inheritance';
-						loadInheritanceTreeComponent();
-					}}
-				>
-					Inheritance
-				</Button>
-				<Button
-					variant="tab"
-					size="xs"
-					active={currentTab === 'call-chain'}
-					onclick={() => {
-						currentTab = 'call-chain';
-						loadCallChain('down');
-					}}
-				>
-					Call Chain
-				</Button>
-				<Button
-					variant="tab"
-					size="xs"
-					active={currentTab === 'call-path'}
-					onclick={() => {
-						currentTab = 'call-path';
-					}}
-				>
-					Call Path
-				</Button>
-			</div>
+					}
+					if (id === 'inheritance') loadInheritanceTreeComponent();
+					if (id === 'call-chain') loadCallChain('down');
+				}}
+			/>
 
 			<!-- Tab Content -->
 			{#if currentTab === 'details'}
@@ -399,15 +364,6 @@
 </div>
 
 <style>
-	.tab-navigation {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 0.5rem;
-		margin-bottom: 2rem;
-		border-bottom: 1px solid var(--gray-200);
-		padding-bottom: 1rem;
-	}
-
 	.relation-filter {
 		display: flex;
 		flex-wrap: wrap;

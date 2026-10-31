@@ -168,7 +168,7 @@
 		<h5 class="subsection-title">
 			Structural relations
 			{#if query.stale}
-				<span class="stale-tag">stale</span>
+				<Badge variant="warning" label="Stale" />
 			{/if}
 		</h5>
 		<div class="structural-controls">
@@ -406,16 +406,6 @@
 		font-size: 0.78rem;
 		color: var(--gray-500);
 		font-style: italic;
-	}
-
-	.stale-tag {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--warning);
-		border: 1px solid var(--warning);
-		padding: 0.1rem 0.4rem;
 	}
 
 	.structural-list {

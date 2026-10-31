@@ -119,7 +119,7 @@
 	}
 
 	function selectProject(project: Project) {
-		projectStore.currentProjectId = (Number(project.id));
+		projectStore.currentProjectId = Number(project.id);
 	}
 </script>
 
@@ -190,7 +190,10 @@
 	{/if}
 
 	{#if projectStore.projects.length === 0}
-		<EmptyState padded message="No projects found. Create your first project above." />
+		<EmptyState
+			padded
+			message="No projects found. Create your first project above."
+		/>
 	{:else}
 		<div class="project-list">
 			{#each projectStore.projects as project (project.id)}
@@ -281,7 +284,6 @@
 	.header-actions {
 		margin-bottom: 1.5rem;
 	}
-
 
 	.project-list {
 		display: flex;

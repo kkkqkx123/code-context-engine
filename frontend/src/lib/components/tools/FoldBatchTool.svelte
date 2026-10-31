@@ -5,6 +5,8 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
+	import ToolActions from '$lib/components/tools/ToolActions.svelte';
 	import { toolsApi, type BatchFoldResponse } from '$lib/api/tools';
 
 	interface DraftItem {
@@ -67,7 +69,7 @@
 </script>
 
 <ToolShell {error}>
-	<div class="tool-form-row">
+	<ToolFormRow>
 		<ToolField label="Global language (optional)" wide>
 			<input
 				class="text-input"
@@ -96,7 +98,7 @@
 				placeholder="detailed or minimal"
 			/>
 		</ToolField>
-	</div>
+	</ToolFormRow>
 
 	{#each items as item, i (i)}
 		<div class="item">
@@ -117,7 +119,7 @@
 				rows="4"
 				bind:value={item.text}
 				placeholder="Raw source text"></textarea>
-			<div class="tool-form-row">
+			<ToolFormRow>
 				<ToolField label="Language (optional)" wide>
 					<input
 						class="text-input"
@@ -154,11 +156,11 @@
 						placeholder="detailed or minimal"
 					/>
 				</ToolField>
-			</div>
+			</ToolFormRow>
 		</div>
 	{/each}
 
-	<div class="tool-actions">
+	<ToolActions>
 		<Button variant="secondary" onclick={addItem}>+ Add item</Button>
 		<Button
 			onclick={handleFold}
@@ -166,7 +168,7 @@
 		>
 			{#if loading}Folding...{:else}Fold batch{/if}
 		</Button>
-	</div>
+	</ToolActions>
 
 	{#if result}
 		<div class="result-head">

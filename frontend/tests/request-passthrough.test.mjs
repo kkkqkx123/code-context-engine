@@ -10,7 +10,7 @@ const read = (rel) => readFileSync(join(root, rel), 'utf8');
 
 describe('request-layer passthrough', () => {
 	it('search store forwards intent and expand to both search modes', () => {
-		const text = read('src/lib/stores/search.ts');
+		const text = read('src/lib/stores/search.svelte.ts');
 		assert.match(text, /query_intent/);
 		assert.match(text, /expand/);
 		assert.match(text, /buildCommonFilterFields/);
@@ -72,7 +72,7 @@ describe('request-layer passthrough', () => {
 		const page = read('src/routes/graph/+page.svelte');
 		assert.ok(
 			page.includes(
-				'graphActions.expand(nodeId, 1, egoDirection, serverFilter())',
+				'graphStore.expand(nodeId, 1, egoDirection, serverFilter())',
 			),
 			'node expansion must carry the server-side filter',
 		);

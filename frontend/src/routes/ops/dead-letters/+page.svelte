@@ -4,8 +4,9 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
 	import {
 		deadLetterApi,
 		type DeadLetterFileEntry,
@@ -236,125 +237,116 @@
 					</Button>
 				</div>
 
-				<table class="dead-table">
-					<thead>
-						<tr>
-							<th></th>
-							<th>File</th>
-							<th>Modules</th>
-							<th>Guidance</th>
-							<th>Actions</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each files as file (file.file_path)}
-							{@const pending = file.modules.filter((m) => !m.acknowledged)}
-							{@const firstCode = pending[0]?.error_code}
-							{@const guidance = deadLetterGuidance(firstCode)}
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
 							<tr>
-								<td>
-									<input
-										type="checkbox"
-										checked={selected.has(file.file_path)}
-										onchange={() => toggleSelect(file.file_path)}
-									/>
-								</td>
-								<td>
-									<button
-										type="button"
-										class="file-link"
-										onclick={() => toggleExpand(file.file_path)}
-									>
-										{file.file_path}
-									</button>
-									<span class="version">v{file.version}</span>
-								</td>
-								<td class="modules">
-									{#each file.modules as m (m.module)}
-										<span class="module-chip" class:acked={m.acknowledged}>
-											{m.module} ×{m.retry_count}
-											{#if m.truncated}<em title="already truncate-retried"
-													>T</em
-												>{/if}
-											{#if m.acknowledged}<em title="acknowledged"
-													><Icon name="check" /></em
-												>{/if}
-										</span>
-									{/each}
-								</td>
-								<td class="guidance">{guidance.hint}</td>
-								<td class="actions">
-									<Button
-										variant={guidance.primary === 'retry'
-											? 'primary'
-											: 'secondary'}
-										disabled={busy || pending.length === 0}
-										onclick={() => runRetry([file.file_path])}
-									>
-										Retry
-									</Button>
-									<Button
-										variant="secondary"
-										disabled={busy || pending.length === 0}
-										onclick={() => (ackTarget = file)}
-									>
-										Acknowledge
-									</Button>
-								</td>
+								<th></th>
+								<th>File</th>
+								<th>Modules</th>
+								<th>Guidance</th>
+								<th>Actions</th>
 							</tr>
-							{#if expanded.has(file.file_path)}
-								<tr class="detail-row">
-									<td></td>
-									<td colspan="4">
+						</thead>
+						<tbody>
+							{#each files as file (file.file_path)}
+								{@const pending = file.modules.filter((m) => !m.acknowledged)}
+								{@const firstCode = pending[0]?.error_code}
+								{@const guidance = deadLetterGuidance(firstCode)}
+								<tr>
+									<td>
+										<input
+											type="checkbox"
+											checked={selected.has(file.file_path)}
+											onchange={() => toggleSelect(file.file_path)}
+										/>
+									</td>
+									<td>
+										<button
+											type="button"
+											class="file-link"
+											onclick={() => toggleExpand(file.file_path)}
+										>
+											{file.file_path}
+										</button>
+										<span class="version">v{file.version}</span>
+									</td>
+									<td class="modules">
 										{#each file.modules as m (m.module)}
-											<div class="module-detail">
-												<strong>{m.module}</strong>
-												<span class="code">{m.error_code ?? 'NO_CODE'}</span>
-												<span class="acked-flag"
-													>{m.acknowledged ? 'acknowledged' : 'pending'}</span
-												>
-												<p>{m.error_message ?? '(no message)'}</p>
-											</div>
+											<Badge variant={m.acknowledged ? 'inactive' : 'warning'}>
+												{m.module} ×{m.retry_count}
+												{#if m.truncated}
+													(truncated){/if}
+												{#if m.acknowledged}
+													(acked){/if}
+											</Badge>
 										{/each}
 									</td>
+									<td class="guidance">{guidance.hint}</td>
+									<td class="actions">
+										<Button
+											variant={guidance.primary === 'retry'
+												? 'primary'
+												: 'secondary'}
+											disabled={busy || pending.length === 0}
+											onclick={() => runRetry([file.file_path])}
+										>
+											Retry
+										</Button>
+										<Button
+											variant="secondary"
+											disabled={busy || pending.length === 0}
+											onclick={() => (ackTarget = file)}
+										>
+											Acknowledge
+										</Button>
+									</td>
 								</tr>
-							{/if}
-						{/each}
-					</tbody>
-				</table>
+								{#if expanded.has(file.file_path)}
+									<tr class="detail-row">
+										<td></td>
+										<td colspan="4">
+											{#each file.modules as m (m.module)}
+												<div class="module-detail">
+													<strong>{m.module}</strong>
+													<span class="code">{m.error_code ?? 'NO_CODE'}</span>
+													<span class="acked-flag"
+														>{m.acknowledged ? 'acknowledged' : 'pending'}</span
+													>
+													<p>{m.error_message ?? '(no message)'}</p>
+												</div>
+											{/each}
+										</td>
+									</tr>
+								{/if}
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			</Card>
 		{/if}
 	</div>
 </div>
 
 {#if ackTarget}
-	<div
-		class="modal-backdrop"
-		role="presentation"
-		onclick={() => (ackTarget = null)}
-	>
-		<div class="modal" role="dialog" aria-modal="true">
-			<h3>Acknowledge dead letter?</h3>
-			<p>{ackConfirmMessage()}</p>
-			<div class="modal-actions">
-				<Button variant="secondary" onclick={() => (ackTarget = null)}
-					>Cancel</Button
-				>
-				<Button
-					variant="danger"
-					disabled={busy}
-					onclick={() => runAcknowledge(ackTarget!.file_path)}
-				>
-					Acknowledge
-				</Button>
-			</div>
-		</div>
-	</div>
+	<Modal title="Acknowledge dead letter?" onClose={() => (ackTarget = null)}>
+		<p>{ackConfirmMessage()}</p>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={() => (ackTarget = null)}
+				>Cancel</Button
+			>
+			<Button
+				variant="danger"
+				disabled={busy}
+				onclick={() => runAcknowledge(ackTarget!.file_path)}>Acknowledge</Button
+			>
+		{/snippet}
+	</Modal>
 {/if}
 
 <style>
 	.empty {
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 		text-align: center;
 		padding: 2rem 0;
 	}
@@ -373,30 +365,19 @@
 		gap: 0.4rem;
 		font-size: 0.85rem;
 	}
-	.dead-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.875rem;
-	}
-	.dead-table th,
-	.dead-table td {
-		text-align: left;
-		padding: 0.5rem 0.6rem;
-		border-bottom: 1px solid var(--color-border, #333);
-		vertical-align: top;
-	}
 	.file-link {
 		background: none;
 		border: none;
-		color: var(--color-link, #6cb2ff);
+		color: var(--ops-link);
 		cursor: pointer;
 		padding: 0;
 		font: inherit;
 		word-break: break-all;
+		text-decoration: underline;
 	}
 	.version {
 		margin-left: 0.4rem;
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 		font-size: 0.75rem;
 	}
 	.modules {
@@ -405,26 +386,9 @@
 		gap: 0.3rem;
 		max-width: 220px;
 	}
-	.module-chip {
-		display: inline-flex;
-		gap: 0.25rem;
-		align-items: center;
-		padding: 0.1rem 0.45rem;
-		border-radius: 999px;
-		background: var(--color-surface-raised, #2a2a2a);
-		font-size: 0.75rem;
-	}
-	.module-chip.acked {
-		opacity: 0.5;
-	}
-	.module-chip em {
-		font-style: normal;
-		font-size: 0.7rem;
-		color: var(--color-warning, #e6b450);
-	}
 	.guidance {
 		max-width: 260px;
-		color: var(--color-text-muted, #aaa);
+		color: var(--ops-text-muted);
 	}
 	.actions {
 		display: flex;
@@ -432,7 +396,7 @@
 		white-space: nowrap;
 	}
 	.detail-row td {
-		background: var(--color-surface-raised, #222);
+		background: var(--ops-surface-raised);
 	}
 	.module-detail {
 		margin-bottom: 0.5rem;
@@ -441,40 +405,15 @@
 		margin-left: 0.5rem;
 		font-family: monospace;
 		font-size: 0.75rem;
-		color: var(--color-warning, #e6b450);
+		color: var(--warning);
 	}
 	.module-detail .acked-flag {
 		margin-left: 0.5rem;
 		font-size: 0.75rem;
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 	}
 	.module-detail p {
 		margin: 0.2rem 0 0;
-		color: var(--color-text-muted, #aaa);
-	}
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 100;
-	}
-	.modal {
-		background: var(--color-surface, #1e1e1e);
-		border-radius: 8px;
-		padding: 1.25rem 1.5rem;
-		max-width: 460px;
-		width: 90%;
-	}
-	.modal h3 {
-		margin: 0 0 0.5rem;
-	}
-	.modal-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
-		margin-top: 1rem;
+		color: var(--ops-text-muted);
 	}
 </style>

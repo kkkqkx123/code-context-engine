@@ -4,6 +4,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
 	import { toolsApi, type KeywordSearchResult } from '$lib/api/tools';
 	import { projectStore } from '$lib/stores/project.svelte';
 
@@ -48,7 +49,7 @@
 </script>
 
 <ToolShell {error}>
-	<div class="tool-form-row">
+	<ToolFormRow>
 		<ToolField label="Query" wide>
 			<input
 				class="text-input"
@@ -89,7 +90,7 @@
 		<Button onclick={handleSearch} disabled={!query.trim() || loading}>
 			{#if loading}Searching...{:else}Search{/if}
 		</Button>
-	</div>
+	</ToolFormRow>
 
 	{#if result}
 		<div class="result-head">

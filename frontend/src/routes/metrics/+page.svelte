@@ -55,7 +55,9 @@
 		return Number(value).toFixed(2);
 	}
 
-	function typeBadgeVariant(metricType: string): 'info' | 'success' | 'warning' {
+	function typeBadgeVariant(
+		metricType: string,
+	): 'info' | 'success' | 'warning' {
 		if (metricType === 'counter') return 'info';
 		if (metricType === 'gauge') return 'success';
 		return 'warning';

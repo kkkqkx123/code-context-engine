@@ -18,7 +18,8 @@ import { authStore } from '../stores/auth.svelte';
 import { isMockMode, mockDelay } from '../preview/mock/data';
 import { mockClient } from '../preview/mock/client';
 
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
+export const BASE_URL =
+	import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
 
 if (import.meta.env.MODE === 'preview' && !isMockMode) {
 	// Preview build without mock data enabled: requests would fall through to
@@ -35,7 +36,12 @@ export class ApiError extends Error {
 	/** Raw backend error payload, for structured details such as candidates. */
 	payload: unknown;
 
-	constructor(message: string, status: number, code?: string, payload?: unknown) {
+	constructor(
+		message: string,
+		status: number,
+		code?: string,
+		payload?: unknown,
+	) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
@@ -52,7 +58,9 @@ export class ApiError extends Error {
 			if (!Array.isArray(parsed)) return [];
 			return parsed.filter(
 				(c): c is SymbolCandidate =>
-					c && typeof c === 'object' && typeof (c as SymbolCandidate).stable_id === 'string',
+					c &&
+					typeof c === 'object' &&
+					typeof (c as SymbolCandidate).stable_id === 'string',
 			);
 		} catch {
 			return [];
@@ -151,7 +159,10 @@ interface CallOptions {
 }
 
 /** Fill a `{param}` path template with concrete values. */
-function concretePath(template: string, pathParams?: Record<string, string | number>): string {
+function concretePath(
+	template: string,
+	pathParams?: Record<string, string | number>,
+): string {
 	let out = template;
 	for (const [key, value] of Object.entries(pathParams ?? {})) {
 		out = out.replace(`{${key}}`, encodeURIComponent(String(value)));
@@ -169,10 +180,16 @@ async function dispatch(
 	opts?: CallOptions,
 ): Promise<{ data?: unknown; error?: unknown }> {
 	const real = (
-		realClient as unknown as Record<string, (p: string, o?: object) => Promise<unknown>>
+		realClient as unknown as Record<
+			string,
+			(p: string, o?: object) => Promise<unknown>
+		>
 	)[method];
 	if (!isMockMode) {
-		return (await real(path, opts ?? {})) as { data?: unknown; error?: unknown };
+		return (await real(path, opts ?? {})) as {
+			data?: unknown;
+			error?: unknown;
+		};
 	}
 	await mockDelay();
 	const endpoint = concretePath(path, opts?.params?.path);
@@ -186,12 +203,24 @@ async function dispatch(
 }
 
 export const client = {
-	GET: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+	GET: (
+		path: string,
+		opts?: CallOptions,
+	): Promise<{ data?: unknown; error?: unknown }> =>
 		dispatch('GET', path, opts),
-	POST: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+	POST: (
+		path: string,
+		opts?: CallOptions,
+	): Promise<{ data?: unknown; error?: unknown }> =>
 		dispatch('POST', path, opts),
-	PUT: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+	PUT: (
+		path: string,
+		opts?: CallOptions,
+	): Promise<{ data?: unknown; error?: unknown }> =>
 		dispatch('PUT', path, opts),
-	DELETE: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+	DELETE: (
+		path: string,
+		opts?: CallOptions,
+	): Promise<{ data?: unknown; error?: unknown }> =>
 		dispatch('DELETE', path, opts),
 };

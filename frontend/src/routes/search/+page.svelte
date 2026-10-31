@@ -8,6 +8,7 @@
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Notice from '$lib/components/ui/Notice.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { goto } from '$app/navigation';
@@ -115,28 +116,28 @@
 			</Toolbar>
 
 			{#if searchStore.failedSubQueries.length > 0}
-				<div class="warn-banner">
+				<Notice variant="warning">
 					Sub-queries failed (partial results): {searchStore.failedSubQueries.join(
 						', ',
 					)}
-				</div>
+				</Notice>
 			{/if}
 
 			{#if searchStore.stale}
-				<div class="stale-banner">
+				<Notice variant="warning">
 					Filters or query mode changed — results may be outdated. Re-run the
 					search to apply.
-				</div>
+				</Notice>
 			{/if}
 
 			{#if searchStore.relationStale}
-				<div class="warn-banner">
+				<Notice variant="warning">
 					Relation snapshot is stale
 					{#if searchStore.relationEpoch !== null}
 						<span>(epoch {searchStore.relationEpoch})</span>
 					{/if}
 					— results may be outdated. Re-run the search after indexing catches up.
-				</div>
+				</Notice>
 			{:else if searchStore.relationEpoch !== null}
 				<div class="relation-meta">
 					Relation epoch: {searchStore.relationEpoch}
@@ -191,24 +192,6 @@
 		font-size: 0.75rem;
 		font-weight: 400;
 		color: var(--gray-500);
-	}
-
-	.warn-banner {
-		padding: 0.75rem 1rem;
-		margin-bottom: 1rem;
-		background: var(--warning-bg, var(--gray-100));
-		border-left: 4px solid var(--warning, var(--gray-400));
-		color: var(--gray-700);
-		font-size: 0.85rem;
-	}
-
-	.stale-banner {
-		padding: 0.75rem 1rem;
-		margin-bottom: 1rem;
-		background: var(--info-bg);
-		border-left: 4px solid var(--info);
-		color: var(--gray-700);
-		font-size: 0.85rem;
 	}
 
 	.results-list {

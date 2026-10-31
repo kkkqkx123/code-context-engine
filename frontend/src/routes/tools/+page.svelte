@@ -3,6 +3,7 @@
 	import type { Component } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 
 	// Tab state
 	let activeTab = $state<
@@ -140,81 +141,23 @@
 			subtitle="Code analysis utilities and helpers"
 		/>
 
-		<!-- Tab Navigation -->
-		<div class="tab-nav">
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'compress'}
-				onclick={() => (activeTab = 'compress')}
-			>
-				Code Compression
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'diagnose'}
-				onclick={() => (activeTab = 'diagnose')}
-			>
-				Code Diagnosis
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'fold'}
-				onclick={() => (activeTab = 'fold')}
-			>
-				File Fold
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'fold-batch'}
-				onclick={() => (activeTab = 'fold-batch')}
-			>
-				Batch Fold
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'symbols'}
-				onclick={() => (activeTab = 'symbols')}
-			>
-				Symbol Lookup
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'references'}
-				onclick={() => (activeTab = 'references')}
-			>
-				References
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'definition'}
-				onclick={() => (activeTab = 'definition')}
-			>
-				Definition
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'keyword'}
-				onclick={() => (activeTab = 'keyword')}
-			>
-				Keyword Search
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeTab === 'batch'}
-				onclick={() => (activeTab = 'batch')}
-			>
-				Batch Compress
-			</button>
-		</div>
+		<Tabs
+			variant="underline"
+			label="Developer tools"
+			active={activeTab}
+			tabs={[
+				{ id: 'compress', label: 'Code Compression' },
+				{ id: 'diagnose', label: 'Code Diagnosis' },
+				{ id: 'fold', label: 'File Fold' },
+				{ id: 'fold-batch', label: 'Batch Fold' },
+				{ id: 'symbols', label: 'Symbol Lookup' },
+				{ id: 'references', label: 'References' },
+				{ id: 'definition', label: 'Definition' },
+				{ id: 'keyword', label: 'Keyword Search' },
+				{ id: 'batch', label: 'Batch Compress' },
+			]}
+			onSelect={(id) => (activeTab = id as typeof activeTab)}
+		/>
 
 		<!-- Code Compression Tool -->
 		{#if activeTab === 'compress'}

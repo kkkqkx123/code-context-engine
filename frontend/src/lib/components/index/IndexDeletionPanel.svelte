@@ -4,10 +4,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
-	import {
-		indexApi,
-		type DeleteFileResponse,
-	} from '$lib/api/index';
+	import { indexApi, type DeleteFileResponse } from '$lib/api/index';
 	import { projectStore } from '$lib/stores/project.svelte';
 
 	interface Props {
@@ -34,7 +31,10 @@
 		deleteFileBusy = true;
 		deleteFileError = '';
 		try {
-			deleteFileResult = await indexApi.deleteFile(path, projectStore.currentProjectId);
+			deleteFileResult = await indexApi.deleteFile(
+				path,
+				projectStore.currentProjectId,
+			);
 			deleteFileArmed = false;
 			deleteFilePath = '';
 			await onDeleted?.();
@@ -65,7 +65,10 @@
 		deleteEntityBusy = true;
 		deleteEntityError = '';
 		try {
-			const response = await indexApi.deleteEntity(id, projectStore.currentProjectId);
+			const response = await indexApi.deleteEntity(
+				id,
+				projectStore.currentProjectId,
+			);
 			deleteEntityMessage = response.message || `Entity ${id} deleted`;
 			deleteEntityArmed = false;
 			deleteEntityId = '';
@@ -108,10 +111,13 @@
 		batchBusy = true;
 		batchError = '';
 		try {
-			const response = await indexApi.batchDelete(projectStore.currentProjectId, {
-				file_paths: filePaths.length > 0 ? filePaths : undefined,
-				entity_ids: entityIds.length > 0 ? entityIds : undefined,
-			});
+			const response = await indexApi.batchDelete(
+				projectStore.currentProjectId,
+				{
+					file_paths: filePaths.length > 0 ? filePaths : undefined,
+					entity_ids: entityIds.length > 0 ? entityIds : undefined,
+				},
+			);
 			batchResult = {
 				files_deleted: response.files_deleted,
 				entities_deleted: response.entities_deleted,
@@ -234,7 +240,8 @@
 		<Button
 			variant={batchArmed ? 'danger' : 'secondary'}
 			onclick={runBatchDelete}
-			disabled={batchBusy || (!batchFilesText.trim() && !batchEntitiesText.trim())}
+			disabled={batchBusy ||
+				(!batchFilesText.trim() && !batchEntitiesText.trim())}
 		>
 			{#if batchBusy}Deleting...{:else if batchArmed}Confirm Batch Delete{:else}Batch
 				Delete{/if}
@@ -267,8 +274,6 @@
 		align-items: center;
 	}
 
-	
-	
 	.field {
 		display: flex;
 		flex-direction: column;

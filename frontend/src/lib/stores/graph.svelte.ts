@@ -41,6 +41,7 @@ import {
 	type GraphElement,
 } from '../utils/graph-elements';
 import { projectStore } from './project.svelte';
+import { SvelteSet } from 'svelte/reactivity';
 
 /** Maximum number of nodes held in memory before expansion is refused. */
 export const MAX_RENDERED_NODES = 800;
@@ -209,8 +210,8 @@ class GraphStore {
 			return nodes.length;
 		}
 
-		const knownNodes = new Set(this.nodes.map((node) => node.id));
-		const knownEdges = new Set(this.edges.map(edgeElementId));
+		const knownNodes = new SvelteSet(this.nodes.map((node) => node.id));
+		const knownEdges = new SvelteSet(this.edges.map(edgeElementId));
 
 		const freshNodes = nodes.filter((node) => !knownNodes.has(node.id));
 		const freshEdges = edges.filter(
@@ -619,7 +620,7 @@ export const graphStore = new GraphStore();
  * notion of "present" can never disagree with how an edge is actually drawn.
  */
 export function activeDomains(edges: GraphEdge[]): Set<RelationDomain> {
-	const domains = new Set<RelationDomain>();
+	const domains = new SvelteSet<RelationDomain>();
 	for (const edge of edges) {
 		domains.add(edgeDomain(edge));
 	}

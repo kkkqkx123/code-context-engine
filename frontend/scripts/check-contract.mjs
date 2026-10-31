@@ -13,14 +13,20 @@ const schemaPath = resolve(root, 'frontend/src/lib/api/schema.d.ts');
 const spec = JSON.parse(readFileSync(specPath, 'utf8'));
 const schema = readFileSync(schemaPath, 'utf8');
 
-const missing = Object.keys(spec.paths ?? {}).filter((path) => !schema.includes(`"${path}"`));
+const missing = Object.keys(spec.paths ?? {}).filter(
+	(path) => !schema.includes(`"${path}"`),
+);
 
 if (missing.length > 0) {
 	console.error(`schema.d.ts is out of date with the server OpenAPI spec.`);
 	console.error(`Missing paths (${missing.length}):`);
 	for (const path of missing) console.error(`  - ${path}`);
-	console.error(`Regenerate with: openapi-typescript tools/openapi-codegen/openapi.json -o frontend/src/lib/api/schema.d.ts`);
+	console.error(
+		`Regenerate with: openapi-typescript tools/openapi-codegen/openapi.json -o frontend/src/lib/api/schema.d.ts`,
+	);
 	process.exit(1);
 }
 
-console.log(`contract OK: ${Object.keys(spec.paths ?? {}).length} paths match schema.d.ts`);
+console.log(
+	`contract OK: ${Object.keys(spec.paths ?? {}).length} paths match schema.d.ts`,
+);

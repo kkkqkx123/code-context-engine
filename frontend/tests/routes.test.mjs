@@ -13,9 +13,9 @@ const KEY_PAGES = [
 	['dashboard', '+page.svelte', /PageHeader/],
 	['projects', 'projects/+page.svelte', /project/i],
 	['index', 'index/+page.svelte', /index/i],
-	['search', 'search/+page.svelte', /searchActions|searchApi/],
-	['entity detail', 'entities/[id]/+page.svelte', /entityActions/],
-	['graph', 'graph/+page.svelte', /graphActions/],
+	['search', 'search/+page.svelte', /searchStore|searchApi/],
+	['entity detail', 'entities/[id]/+page.svelte', /entityStore/],
+	['graph', 'graph/+page.svelte', /graphStore/],
 	['tools', 'tools/+page.svelte', /toolsApi|Fold|Compress/],
 	['config', 'config/+page.svelte', /configApi|config/i],
 ];

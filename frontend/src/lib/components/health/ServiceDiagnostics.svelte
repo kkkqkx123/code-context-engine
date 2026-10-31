@@ -27,8 +27,7 @@
 				{#if healthStore.qdrant.diagnostic?.version}
 					<div class="kv-row">
 						<span class="kv-label">Version</span>
-						<span class="kv-value"
-							>{healthStore.qdrant.diagnostic.version}</span
+						<span class="kv-value">{healthStore.qdrant.diagnostic.version}</span
 						>
 					</div>
 				{/if}

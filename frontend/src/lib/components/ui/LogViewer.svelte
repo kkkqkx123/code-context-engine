@@ -69,7 +69,9 @@
 					[{event.eventType.toUpperCase()}]
 				</span>
 				<span class="log-file-path">{event.filePath}</span>
-				<span class="log-action"><Icon name="arrow-right" /> {event.action}</span>
+				<span class="log-action"
+					><Icon name="arrow-right" /> {event.action}</span
+				>
 			</div>
 		{/each}
 	{/if}

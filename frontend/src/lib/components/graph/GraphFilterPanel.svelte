@@ -11,6 +11,8 @@
 		relationLineStyle,
 		type RelationDomain,
 	} from '$lib/utils/graph-domains';
+	import SelectChip from '$lib/components/ui/SelectChip.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
 
 	interface Props {
 		domains?: RelationDomain[];
@@ -50,7 +52,7 @@
 	<div class="panel-section">
 		<h4 class="panel-title">Find</h4>
 		<input
-			class="search-input"
+			class="text-input"
 			type="search"
 			placeholder="Node name…"
 			value={search}
@@ -82,14 +84,10 @@
 				{@const enabled = domains.includes(domain)}
 				{@const present = available.has(domain)}
 				<li>
-					<button
-						type="button"
-						class="domain-toggle"
-						class:active={enabled}
-						class:absent={!present}
+					<SelectChip
+						selected={enabled}
 						disabled={!present}
 						onclick={() => onToggleDomain(domain)}
-						aria-pressed={enabled}
 						title={present
 							? meta.description
 							: `${meta.description} (not present in this graph)`}
@@ -102,7 +100,7 @@
 						></span>
 						<span class="domain-name">{meta.label}</span>
 						<span class="domain-state">{enabled ? 'ON' : 'OFF'}</span>
-					</button>
+					</SelectChip>
 				</li>
 			{/each}
 		</ul>
@@ -110,14 +108,11 @@
 
 	<div class="panel-section">
 		<h4 class="panel-title">Labels</h4>
-		<label class="checkbox-row">
-			<input
-				type="checkbox"
-				checked={showEdgeLabels}
-				onchange={() => onToggleEdgeLabels()}
-			/>
-			<span>Show edge labels</span>
-		</label>
+		<Toggle
+			checked={showEdgeLabels}
+			label="Show edge labels"
+			onchange={() => onToggleEdgeLabels()}
+		/>
 		<p class="hint">
 			Render the relation type on each edge. Disable on large graphs to reduce
 			clutter.
@@ -172,21 +167,6 @@
 		margin: 0;
 	}
 
-	.search-input {
-		width: 100%;
-		height: 30px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
-	.search-input:focus {
-		outline: none;
-		border-color: var(--black);
-	}
-
 	.search-meta {
 		display: flex;
 		align-items: center;
@@ -223,34 +203,9 @@
 		gap: 0.25rem;
 	}
 
-	.domain-toggle {
+	.domain-list :global(.select-chip) {
 		display: grid;
 		grid-template-columns: auto 1fr auto;
-		align-items: center;
-		gap: 0.5rem;
-		width: 100%;
-		padding: 0.35rem 0.5rem;
-		background: none;
-		border: 1px solid transparent;
-		cursor: pointer;
-		text-align: left;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		color: var(--gray-500);
-		transition: all 0.15s;
-	}
-
-	.domain-toggle:hover:not(:disabled) {
-		border-color: var(--gray-300);
-	}
-
-	.domain-toggle.active {
-		color: var(--black);
-	}
-
-	.domain-toggle.absent {
-		opacity: 0.4;
-		cursor: not-allowed;
 	}
 
 	.domain-state {
@@ -265,16 +220,6 @@
 		border-top-width: 3px;
 		border-top-color: var(--swatch);
 		border-top-style: var(--line-style, solid);
-	}
-
-	.checkbox-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		color: var(--gray-600);
-		cursor: pointer;
 	}
 
 	.hint {

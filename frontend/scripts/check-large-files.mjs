@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 const LINE_BUDGET = 1000;
 const EXTENSIONS = new Set(['.ts', '.js', '.svelte', '.mjs', '.css', '.html']);
-const SKIP_DIRS = new Set(['node_modules', '.svelte-kit', 'build', 'dist', 'scripts']);
+const SKIP_DIRS = new Set([
+	'node_modules',
+	'.svelte-kit',
+	'build',
+	'dist',
+	'scripts',
+]);
 // Auto-generated files (openapi-typescript output) are exempt from the line
 // budget; their size tracks the server API surface, not hand-written code.
 const SKIP_FILES = new Set(['schema.d.ts']);
@@ -20,7 +26,10 @@ function* walk(dir) {
 		const stat = statSync(full);
 		if (stat.isDirectory()) {
 			if (!SKIP_DIRS.has(entry)) yield* walk(full);
-		} else if (!SKIP_FILES.has(entry) && EXTENSIONS.has(entry.slice(entry.lastIndexOf('.')))) {
+		} else if (
+			!SKIP_FILES.has(entry) &&
+			EXTENSIONS.has(entry.slice(entry.lastIndexOf('.')))
+		) {
 			yield full;
 		}
 	}
@@ -36,7 +45,8 @@ for (const file of walk(frontendRoot)) {
 
 if (offenders.length > 0) {
 	console.error(`Files exceeding the ${LINE_BUDGET}-line baseline:`);
-	for (const { file, lines } of offenders) console.error(`  ${file}: ${lines} lines`);
+	for (const { file, lines } of offenders)
+		console.error(`  ${file}: ${lines} lines`);
 	process.exit(1);
 }
 

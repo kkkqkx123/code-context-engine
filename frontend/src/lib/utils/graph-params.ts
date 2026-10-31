@@ -16,7 +16,11 @@ export function clampOverviewLimit(value: number): number {
  * Clamp a user-entered positive limit, falling back when non-finite.
  * Used by cycles / structural / impact depth inputs.
  */
-export function clampPositive(value: number, fallback: number, max: number): number {
+export function clampPositive(
+	value: number,
+	fallback: number,
+	max: number,
+): number {
 	if (!Number.isFinite(value)) return fallback;
 	return Math.min(max, Math.max(1, Math.floor(value)));
 }

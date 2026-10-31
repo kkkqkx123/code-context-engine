@@ -23,7 +23,9 @@ const DEFAULT_GUIDANCE: DeadLetterGuidance = {
 	primary: 'acknowledge',
 };
 
-export function deadLetterGuidance(errorCode?: string | null): DeadLetterGuidance {
+export function deadLetterGuidance(
+	errorCode?: string | null,
+): DeadLetterGuidance {
 	if (errorCode && errorCode in GUIDANCE) return GUIDANCE[errorCode];
 	return DEFAULT_GUIDANCE;
 }

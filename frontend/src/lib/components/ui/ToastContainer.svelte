@@ -25,7 +25,8 @@
 				<Icon name={getIcon(toast.type)} />
 			</span>
 			<span class="toast-message">{toast.message}</span>
-			<button type="button"
+			<button
+				type="button"
 				class="toast-dismiss"
 				onclick={() => toastStore.dismiss(toast.id)}
 				aria-label="Dismiss notification"

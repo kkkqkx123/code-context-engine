@@ -7,6 +7,8 @@
 	 */
 	import type { GraphModuleResponse } from '$lib/api/graph';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import SelectChip from '$lib/components/ui/SelectChip.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
 
 	interface Props {
 		data: GraphModuleResponse | null;
@@ -33,7 +35,10 @@
 	<div class="panel-head">
 		<h4 class="communities-title">Module relations</h4>
 		{#if stale}
-			<span class="stale-tag">Stale — index advanced to {watchEpoch}</span>
+			<Badge
+				variant="warning"
+				label={'Stale — index advanced to ' + watchEpoch}
+			/>
 		{/if}
 	</div>
 	{#if error}
@@ -57,14 +62,12 @@
 					<ul class="chip-list">
 						{#each data.exports as symbol (symbol)}
 							<li>
-								<button
-									type="button"
-									class="chip-btn mono"
+								<SelectChip
 									onclick={() => onFocusEntity(symbol)}
 									title="Load neighborhood for this symbol"
 								>
-									{symbol}
-								</button>
+									<span class="mono">{symbol}</span>
+								</SelectChip>
 							</li>
 						{/each}
 					</ul>
@@ -80,14 +83,12 @@
 					<ul class="chip-list">
 						{#each data.caller_files as file (file)}
 							<li>
-								<button
-									type="button"
-									class="chip-btn mono"
+								<SelectChip
 									onclick={() => onImpactFile(file)}
 									title="Run file impact analysis for this file"
 								>
-									{file}
-								</button>
+									<span class="mono">{file}</span>
+								</SelectChip>
 							</li>
 						{/each}
 					</ul>
@@ -141,16 +142,6 @@
 		margin: 0 0 0.25rem;
 	}
 
-	.stale-tag {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--warning);
-		border: 1px solid var(--warning);
-		padding: 0.1rem 0.4rem;
-	}
-
 	.panel-empty {
 		font-size: 0.78rem;
 		color: var(--gray-500);
@@ -189,22 +180,6 @@
 		padding: 0;
 		max-height: 260px;
 		overflow-y: auto;
-	}
-
-	.chip-btn {
-		width: 100%;
-		padding: 0.3rem 0.5rem;
-		background: var(--white);
-		border: 1px solid var(--gray-300);
-		cursor: pointer;
-		text-align: left;
-		word-break: break-all;
-		transition: all 0.15s;
-	}
-
-	.chip-btn:hover {
-		border-color: var(--black);
-		background: var(--gray-100);
 	}
 
 	.module-edge-list {

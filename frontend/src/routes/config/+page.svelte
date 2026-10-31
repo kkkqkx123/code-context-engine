@@ -9,6 +9,7 @@
 	 */
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import { onMount } from 'svelte';
 	import ConfigTokenCard from '$lib/components/config/ConfigTokenCard.svelte';
 	import ConfigGlobalCard from '$lib/components/config/ConfigGlobalCard.svelte';
@@ -468,28 +469,19 @@
 			<ErrorBanner message={error} onDismiss={() => (error = null)} />
 		{/if}
 
-		<!-- Scope Navigation -->
-		<div class="tab-nav">
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeScope === 'global'}
-				onclick={() => (activeScope = 'global')}
-			>
-				Global
-			</button>
-			<button
-				type="button"
-				class="tab-btn"
-				class:active={activeScope === 'project'}
-				onclick={() => {
-					activeScope = 'project';
-					ensureProjectLoaded();
-				}}
-			>
-				Project #{projectStore.currentProjectId}
-			</button>
-		</div>
+		<Tabs
+			variant="underline"
+			label="Configuration scope"
+			active={activeScope}
+			tabs={[
+				{ id: 'global', label: 'Global' },
+				{ id: 'project', label: `Project #${projectStore.currentProjectId}` },
+			]}
+			onSelect={(id) => {
+				activeScope = id as typeof activeScope;
+				if (id === 'project') ensureProjectLoaded();
+			}}
+		/>
 
 		{#if activeScope === 'global'}
 			<ConfigTokenCard

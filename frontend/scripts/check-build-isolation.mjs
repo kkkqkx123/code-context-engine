@@ -45,8 +45,12 @@ for (const file of files) {
 if (offenders.length > 0) {
 	console.error('Default build contains preview/mock code:');
 	for (const line of offenders) console.error(`  ${line}`);
-	console.error('Check that no shared module imports src/lib/preview or client.preview.ts.');
+	console.error(
+		'Check that no shared module imports src/lib/preview or client.preview.ts.',
+	);
 	process.exit(1);
 }
 
-console.log(`Build isolation check passed (${files.length} files, no preview/mock markers).`);
+console.log(
+	`Build isolation check passed (${files.length} files, no preview/mock markers).`,
+);

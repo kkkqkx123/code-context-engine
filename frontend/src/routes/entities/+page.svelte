@@ -121,7 +121,7 @@
 		<Card title="Search Entities" subtitle="FTS5 query over the entity index">
 			<div class="search-bar">
 				<input
-					class="search-input"
+					class="text-input"
 					type="text"
 					bind:value={query}
 					placeholder="e.g. authenticate OR parse_config"
@@ -297,22 +297,6 @@
 		flex-wrap: wrap;
 		gap: 0.75rem;
 		align-items: center;
-	}
-
-	.search-input {
-		flex: 1;
-		min-width: 220px;
-		padding: 0.55rem 0.75rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
-		color: var(--black);
-	}
-
-	.search-input:focus {
-		outline: none;
-		border-color: var(--accent);
 	}
 
 	.kind-select {

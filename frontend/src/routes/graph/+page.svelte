@@ -22,6 +22,8 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Notice from '$lib/components/ui/Notice.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import GraphCanvas, {
 		layoutOptions,
 		type GraphLayoutName,
@@ -476,9 +478,7 @@
 		{/if}
 
 		{#if impactMessage}
-			<div class="info-banner" aria-label="Impact result">
-				<span>{impactMessage}</span>
-			</div>
+			<Notice variant="info" label="Impact result" message={impactMessage} />
 		{/if}
 
 		{#if store.meta.impactDirect.length || store.meta.impactTransitive.length}
@@ -537,19 +537,19 @@
 		{/if}
 
 		{#if isStale}
-			<div class="warn-banner">
-				<span
-					>Relation index advanced to epoch {watchEpoch} (showing {store.meta
-						.epoch}). Reload rebuilds the current view from the seed.</span
-				>
-				<Button variant="ghost" onclick={runSeed}>Reload</Button>
-			</div>
+			<Notice variant="warning">
+				Relation index advanced to epoch {watchEpoch} (showing {store.meta
+					.epoch}). Reload rebuilds the current view from the seed.
+				{#snippet action()}
+					<Button variant="ghost" onclick={runSeed}>Reload</Button>
+				{/snippet}
+			</Notice>
 		{/if}
 
 		{#if store.truncated}
-			<div class="warn-banner">
+			<Notice variant="warning">
 				Node limit reached. Expand is disabled until you reload a smaller seed.
-			</div>
+			</Notice>
 		{/if}
 
 		<div class="workspace">
@@ -634,35 +634,17 @@
 
 		<details class="result-section" open>
 			<summary class="result-section-summary">Results</summary>
-			<div class="result-tabs" role="tablist" aria-label="Graph results">
-				<Button
-					variant="tab"
-					role="tab"
-					aria-selected={resultTab === 'communities'}
-					class={resultTab === 'communities' ? 'active' : ''}
-					onclick={() => loadResultTab('communities')}
-				>
-					Communities
-				</Button>
-				<Button
-					variant="tab"
-					role="tab"
-					aria-selected={resultTab === 'cycles'}
-					class={resultTab === 'cycles' ? 'active' : ''}
-					onclick={() => loadResultTab('cycles')}
-				>
-					Cycles
-				</Button>
-				<Button
-					variant="tab"
-					role="tab"
-					aria-selected={resultTab === 'module'}
-					class={resultTab === 'module' ? 'active' : ''}
-					onclick={() => loadResultTab('module')}
-				>
-					Module
-				</Button>
-			</div>
+			<Tabs
+				variant="segmented"
+				label="Graph results"
+				active={resultTab}
+				tabs={[
+					{ id: 'communities', label: 'Communities' },
+					{ id: 'cycles', label: 'Cycles' },
+					{ id: 'module', label: 'Module' },
+				]}
+				onSelect={(id) => loadResultTab(id as typeof resultTab)}
+			/>
 
 			{#if resultTab === 'communities' && GraphCommunitiesPanel}
 				<GraphCommunitiesPanel {communities} onLoad={openAsSubgraph} />
@@ -684,27 +666,6 @@
 </div>
 
 <style>
-	.info-banner,
-	.warn-banner {
-		padding: 0.6rem 0.75rem;
-		margin-bottom: 1rem;
-		border: 1px solid;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
-	}
-
-	.info-banner {
-		border-color: var(--gray-300);
-		background: var(--gray-100);
-		color: var(--gray-600);
-	}
-
-	.warn-banner {
-		border-color: var(--warning);
-		background: var(--warning-bg);
-		color: var(--warning);
-	}
-
 	.workspace {
 		display: grid;
 		grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(
@@ -737,15 +698,6 @@
 		font-family: 'Space Mono', monospace;
 		font-size: 0.62rem;
 		color: var(--gray-500);
-	}
-
-	.result-tabs {
-		display: flex;
-		gap: 0;
-		margin-bottom: 1rem;
-		border: 1px solid var(--black);
-		border-bottom: none;
-		background: var(--white);
 	}
 
 	.impact-dependents {

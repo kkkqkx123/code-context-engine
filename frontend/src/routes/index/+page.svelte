@@ -98,7 +98,6 @@
 		margin-top: 2rem;
 	}
 
-
 	@media (max-width: 1024px) {
 		.content-grid {
 			grid-template-columns: 1fr;

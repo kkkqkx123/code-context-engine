@@ -5,6 +5,7 @@
 	 * page retry with its stable id.
 	 */
 	import type { SymbolCandidate } from '$lib/api/client';
+	import SelectChip from '$lib/components/ui/SelectChip.svelte';
 
 	interface Props {
 		candidates: SymbolCandidate[];
@@ -22,16 +23,14 @@
 	<ul class="candidate-list">
 		{#each candidates as candidate (candidate.stable_id)}
 			<li>
-				<button
-					type="button"
-					class="candidate-btn"
-					onclick={() => onPick(candidate)}
-				>
-					<span class="candidate-name mono">{candidate.scoped_name}</span>
-					<span class="candidate-meta"
-						>{candidate.kind} · {candidate.file_path}</span
-					>
-				</button>
+				<SelectChip onclick={() => onPick(candidate)}>
+					<span class="candidate-text">
+						<span class="candidate-name mono">{candidate.scoped_name}</span>
+						<span class="candidate-meta"
+							>{candidate.kind} · {candidate.file_path}</span
+						>
+					</span>
+				</SelectChip>
 			</li>
 		{/each}
 	</ul>
@@ -68,22 +67,10 @@
 		padding: 0;
 	}
 
-	.candidate-btn {
+	.candidate-text {
 		display: flex;
 		flex-direction: column;
 		gap: 0.15rem;
-		width: 100%;
-		padding: 0.4rem 0.5rem;
-		background: var(--white);
-		border: 1px solid var(--gray-300);
-		cursor: pointer;
-		text-align: left;
-		transition: all 0.15s;
-	}
-
-	.candidate-btn:hover {
-		border-color: var(--black);
-		background: var(--gray-100);
 	}
 
 	.candidate-name {

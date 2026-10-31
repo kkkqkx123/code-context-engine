@@ -10,6 +10,7 @@
 	import { clampPositive } from '$lib/utils/graph-params';
 	import Button from '$lib/components/ui/Button.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
 
 	interface Props {
 		/** Called with a cycle's members to load them as an induced subgraph. */
@@ -41,9 +42,10 @@
 	<div class="panel-head">
 		<h4 class="communities-title">Dependency cycles</h4>
 		{#if query.stale}
-			<span class="stale-tag"
-				>Stale — index advanced to {watchStore.status?.relation_epoch}</span
-			>
+			<Badge
+				variant="warning"
+				label={'Stale — index advanced to ' + watchStore.status?.relation_epoch}
+			/>
 		{/if}
 	</div>
 	<div class="panel-controls">
@@ -147,16 +149,6 @@
 		letter-spacing: 0.08em;
 		color: var(--gray-600);
 		margin: 0 0 0.25rem;
-	}
-
-	.stale-tag {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--warning);
-		border: 1px solid var(--warning);
-		padding: 0.1rem 0.4rem;
 	}
 
 	.panel-controls {

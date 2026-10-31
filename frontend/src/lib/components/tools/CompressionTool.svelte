@@ -5,6 +5,7 @@
 	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
+	import ToolActions from '$lib/components/tools/ToolActions.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { CompressResult } from '$lib/api/tools';
@@ -50,7 +51,7 @@
 						class="text-input"
 					/>
 				</ToolField>
-				<div class="tool-actions">
+				<ToolActions>
 					<Toggle
 						checked={includeEntities}
 						label="Include entities"
@@ -67,7 +68,7 @@
 					>
 						{#if loading}Compressing...{:else}Compress{/if}
 					</Button>
-				</div>
+				</ToolActions>
 			</div>
 		{/snippet}
 
@@ -107,15 +108,6 @@
 		display: flex;
 		flex-direction: column;
 		padding: 1rem;
-	}
-
-	.tool-actions {
-		margin-top: 1rem;
-		display: flex;
-		justify-content: flex-end;
-		align-items: center;
-		gap: 1rem;
-		flex-wrap: wrap;
 	}
 
 	.compression-info {

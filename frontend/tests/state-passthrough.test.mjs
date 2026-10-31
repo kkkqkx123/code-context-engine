@@ -10,7 +10,7 @@ const read = (rel) => readFileSync(join(root, rel), 'utf8');
 
 describe('state-layer passthrough', () => {
 	it('entity actions accept a RelationFilter for calls and chains', () => {
-		const text = read('src/lib/stores/entities.ts');
+		const text = read('src/lib/stores/entities.svelte.ts');
 		assert.match(text, /loadFunction\(id: string, filter\?: RelationFilter\)/);
 		assert.match(text, /loadCallChain\(\s*id: string,/);
 		assert.ok(text.includes('entityApi.getCalls(projId, id, filter)'));
@@ -18,7 +18,7 @@ describe('state-layer passthrough', () => {
 	});
 
 	it('entity store exposes classification stats and detail', () => {
-		const text = read('src/lib/stores/entities.ts');
+		const text = read('src/lib/stores/entities.svelte.ts');
 		assert.ok(text.includes('loadClassificationStats'));
 		assert.ok(text.includes('loadRelationsByClassification'));
 		assert.ok(text.includes('classificationStats'));
@@ -27,7 +27,7 @@ describe('state-layer passthrough', () => {
 	});
 
 	it('graph actions accept a server-side filter', () => {
-		const text = read('src/lib/stores/graph.ts');
+		const text = read('src/lib/stores/graph.svelte.ts');
 		assert.ok(text.includes('filter?: GraphFilter'));
 		assert.ok(text.includes('...filter'));
 	});

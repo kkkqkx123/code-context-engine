@@ -5,15 +5,23 @@
 		label: string;
 		htmlFor?: string;
 		wide?: boolean;
+		inline?: boolean;
 		children?: Snippet;
 	}
 
-	let { label, htmlFor = '', wide = false, children }: Props = $props();
+	let {
+		label,
+		htmlFor = '',
+		wide = false,
+		inline = false,
+		children,
+	}: Props = $props();
 </script>
 
 <label
 	class="tool-field"
 	class:tool-field-wide={wide}
+	class:tool-field-inline={inline}
 	for={htmlFor || undefined}
 >
 	<span class="tool-field-label">{label}</span>
@@ -31,6 +39,12 @@
 	.tool-field-wide {
 		flex: 1;
 		min-width: 220px;
+		width: auto;
+	}
+
+	.tool-field-inline {
+		flex-direction: row;
+		align-items: center;
 		width: auto;
 	}
 

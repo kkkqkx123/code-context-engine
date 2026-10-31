@@ -6,6 +6,8 @@
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import ToolShell from '$lib/components/tools/ToolShell.svelte';
 	import ToolField from '$lib/components/tools/ToolField.svelte';
+	import ToolFormRow from '$lib/components/tools/ToolFormRow.svelte';
+	import ToolActions from '$lib/components/tools/ToolActions.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { FoldResponse } from '$lib/api/tools';
 
@@ -50,7 +52,7 @@
 	<SplitPane leftWidth={50}>
 		{#snippet left()}
 			<div class="tool-input">
-				<div class="tool-form-row">
+				<ToolFormRow>
 					<ToolField label="Language">
 						<select id="fold-language" class="text-input" bind:value={language}>
 							<option value="rust">Rust</option>
@@ -70,8 +72,8 @@
 							class="text-input"
 						/>
 					</ToolField>
-				</div>
-				<div class="tool-form-row">
+				</ToolFormRow>
+				<ToolFormRow>
 					<ToolField label="Max Tokens">
 						<input
 							id="fold-tokens"
@@ -88,16 +90,16 @@
 							<option value="minimal">Minimal</option>
 						</select>
 					</ToolField>
-				</div>
+				</ToolFormRow>
 				<textarea
 					bind:value={text}
 					placeholder="Enter code to fold into a symbol skeleton..."
 					class="code-textarea"></textarea>
-				<div class="tool-actions">
+				<ToolActions>
 					<Button onclick={handleFold} disabled={!text.trim() || loading}>
 						{#if loading}Folding...{:else}Fold{/if}
 					</Button>
-				</div>
+				</ToolActions>
 			</div>
 		{/snippet}
 
@@ -133,12 +135,6 @@
 		display: flex;
 		flex-direction: column;
 		padding: 1rem;
-	}
-
-	.tool-actions {
-		margin-top: 1rem;
-		display: flex;
-		justify-content: flex-end;
 	}
 
 	.fold-meta {

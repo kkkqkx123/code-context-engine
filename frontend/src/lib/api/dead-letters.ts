@@ -81,7 +81,9 @@ export const retryQueueApi = {
 		),
 
 	// Discard the dead-letter lists of the selected retry queues
-	clearDead: (projectId?: number | null): Promise<RetryQueueDeadClearResponse> =>
+	clearDead: (
+		projectId?: number | null,
+	): Promise<RetryQueueDeadClearResponse> =>
 		call(
 			client.DELETE('/api/retry-queue/dead', {
 				params: { query: { project_id: projectId ?? undefined } },

@@ -25,10 +25,16 @@
 			<p class="page-header-subtitle">{subtitle}</p>
 		{/if}
 		{#if projectStore.currentProject}
-			<p class="page-header-project" title={projectStore.currentProject.root_path}>
-				<span class="page-header-project-name">{projectStore.currentProject.name}</span>
+			<p
+				class="page-header-project"
+				title={projectStore.currentProject.root_path}
+			>
+				<span class="page-header-project-name"
+					>{projectStore.currentProject.name}</span
+				>
 				<span class="page-header-project-sep">·</span>
-				<span class="page-header-project-path">{projectStore.currentProject.root_path}</span
+				<span class="page-header-project-path"
+					>{projectStore.currentProject.root_path}</span
 				>
 			</p>
 		{/if}

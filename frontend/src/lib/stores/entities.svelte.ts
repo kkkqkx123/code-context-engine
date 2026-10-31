@@ -3,7 +3,6 @@
  * Rune-based replacement of the previous `writable<EntityState>` + `entityActions`
  * object. State is `$state` fields; actions are methods on the same instance.
  */
-import { errorMessage } from '../utils/errors';
 import {
 	entityApi,
 	type FunctionInfo,

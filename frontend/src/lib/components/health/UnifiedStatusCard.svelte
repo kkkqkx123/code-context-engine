@@ -12,7 +12,10 @@
 	import { serviceBadge } from '$lib/utils/health-badge';
 </script>
 
-<Card title="Unified Status" subtitle="Aggregated health across all external services">
+<Card
+	title="Unified Status"
+	subtitle="Aggregated health across all external services"
+>
 	{#if healthStore.unified}
 		<div class="service-grid">
 			<div class="service-item">

@@ -1,22 +1,19 @@
 <script lang="ts">
 	/**
 	 * Selector for the globally selected project.
-	 * Renders in the sidebar on desktop and in the topbar on narrow viewports,
-	 * where the sidebar collapses into a drawer.
+	 * Styling is driven by --chrome-* tokens set by the surrounding
+	 * layout context (sidebar drawer vs topbar), so the component itself
+	 * carries a single visual definition.
 	 */
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { projectStore } from '$lib/stores/project.svelte';
 
-	let { variant = 'sidebar' }: { variant?: 'sidebar' | 'topbar' } = $props();
-
-	let selectId = $derived(
-		variant === 'sidebar' ? 'project-select' : 'project-select-topbar',
-	);
+	let selectId = 'project-select';
 
 	function handleChange(event: Event) {
 		const target = event.currentTarget as HTMLSelectElement;
-		projectStore.currentProjectId = (Number(target.value));
+		projectStore.currentProjectId = Number(target.value);
 	}
 
 	function goToProjects(event: MouseEvent) {
@@ -25,10 +22,8 @@
 	}
 </script>
 
-<div class="project-selector" class:topbar={variant === 'topbar'}>
-	{#if variant === 'sidebar'}
-		<label class="project-label" for={selectId}>Current Project</label>
-	{/if}
+<div class="project-selector">
+	<label class="project-label" for={selectId}>Current Project</label>
 
 	{#if projectStore.projects.length === 0}
 		<a class="empty-link" href={resolve('/projects')} onclick={goToProjects}>
@@ -51,7 +46,7 @@
 				</option>
 			{/each}
 		</select>
-		{#if variant === 'sidebar' && projectStore.currentProject}
+		{#if projectStore.currentProject}
 			<p class="project-path" title={projectStore.currentProject.root_path}>
 				{projectStore.currentProject.root_path}
 			</p>
@@ -67,25 +62,20 @@
 		min-width: 0;
 	}
 
-	.project-selector.topbar {
-		flex-direction: row;
-		align-items: center;
-	}
-
 	.project-label {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.65rem;
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
-		color: var(--gray-500);
+		color: var(--chrome-muted, var(--gray-500));
 	}
 
 	.project-select {
 		width: 100%;
 		padding: 0.5rem;
-		background: var(--gray-900);
-		color: var(--white);
-		border: 1px solid var(--gray-700);
+		background: var(--chrome-input-bg, var(--gray-900));
+		color: var(--chrome-input-fg, var(--white));
+		border: 1px solid var(--chrome-input-border, var(--gray-700));
 		font-family: 'Space Mono', monospace;
 		font-size: 0.8rem;
 	}
@@ -95,17 +85,10 @@
 		border-color: var(--accent);
 	}
 
-	.topbar .project-select {
-		background: var(--white);
-		color: var(--black);
-		border: 1px solid var(--black);
-		max-width: 11rem;
-	}
-
 	.project-path {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.65rem;
-		color: var(--gray-500);
+		color: var(--chrome-muted, var(--gray-500));
 		margin: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -117,7 +100,7 @@
 		font-size: 0.75rem;
 		color: var(--accent);
 		text-decoration: none;
-		border: 1px dashed var(--gray-700);
+		border: 1px dashed var(--chrome-input-border, var(--gray-700));
 		padding: 0.5rem;
 		text-align: center;
 	}

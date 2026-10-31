@@ -21,6 +21,7 @@ import {
 	type SubQuery,
 } from '../api/search';
 import { projectStore, onProjectChange } from './project.svelte';
+import { SvelteURLSearchParams } from 'svelte/reactivity';
 
 export const QUERY_TYPES: readonly QueryType[] = [
 	'vector',
@@ -136,7 +137,7 @@ function filtersFromUrl(): SearchFilters {
 			expand: null,
 		};
 	}
-	const params = new URLSearchParams(window.location.search);
+	const params = new SvelteURLSearchParams(window.location.search);
 	return {
 		directory_prefix: params.get('dir') ?? '',
 		min_score: Number(params.get('min') ?? 0) || 0,
@@ -154,7 +155,7 @@ function filtersFromUrl(): SearchFilters {
 
 function modeFromUrl(): SearchMode {
 	if (typeof window === 'undefined') return AGGREGATED_TYPE;
-	const mode = new URLSearchParams(window.location.search).get('mode');
+	const mode = new SvelteURLSearchParams(window.location.search).get('mode');
 	if (mode === AGGREGATED_TYPE) return AGGREGATED_TYPE;
 	return (QUERY_TYPES as readonly string[]).includes(mode ?? '')
 		? (mode as QueryType)
@@ -319,12 +320,15 @@ class SearchStore {
 
 	/** Total number of client-side pages given the fetched result set. */
 	totalPages(): number {
-		return Math.max(1, Math.ceil(this.results.length / this.pagination.pageSize));
+		return Math.max(
+			1,
+			Math.ceil(this.results.length / this.pagination.pageSize),
+		);
 	}
 
 	#syncUrl(currentQuery: string) {
 		if (typeof window === 'undefined') return;
-		const params = new URLSearchParams();
+		const params = new SvelteURLSearchParams();
 		params.set('q', currentQuery);
 		params.set('mode', this.mode);
 		if (this.filters.directory_prefix)

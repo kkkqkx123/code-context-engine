@@ -3,6 +3,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import {
 		retryQueueApi,
@@ -150,49 +151,46 @@
 			{#if deadEntries.length === 0}
 				<p class="empty">No dead-lettered queries.</p>
 			{:else}
-				<table class="dead-table">
-					<thead>
-						<tr>
-							<th>Query</th>
-							<th>Retries</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each deadEntries as entry, i (i)}
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
 							<tr>
-								<td class="query">{entry.query}</td>
-								<td>{entry.retry_count}</td>
+								<th>Query</th>
+								<th>Retries</th>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each deadEntries as entry, i (i)}
+								<tr>
+									<td class="query">{entry.query}</td>
+									<td>{entry.retry_count}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			{/if}
 		</Card>
 	</div>
 </div>
 
 {#if clearConfirmOpen}
-	<div
-		class="modal-backdrop"
-		role="presentation"
-		onclick={() => (clearConfirmOpen = false)}
+	<Modal
+		title="Clear the dead list?"
+		onClose={() => (clearConfirmOpen = false)}
 	>
-		<div class="modal" role="dialog" aria-modal="true">
-			<h3>Clear the dead list?</h3>
-			<p>
-				All {deadEntries.length} dead-lettered query entries will be discarded. This
-				cannot be undone.
-			</p>
-			<div class="modal-actions">
-				<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}
-					>Cancel</Button
-				>
-				<Button variant="danger" disabled={busy} onclick={clearDead}
-					>Clear</Button
-				>
-			</div>
-		</div>
-	</div>
+		<p>
+			All {deadEntries.length} dead-lettered query entries will be discarded. This
+			cannot be undone.
+		</p>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}
+				>Cancel</Button
+			>
+			<Button variant="danger" disabled={busy} onclick={clearDead}>Clear</Button
+			>
+		{/snippet}
+	</Modal>
 {/if}
 
 <style>
@@ -204,7 +202,7 @@
 	}
 	.filter-row label {
 		font-size: 0.8rem;
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 	}
 	.filter-row select {
 		padding: 0.35rem 0.5rem;
@@ -225,7 +223,7 @@
 		font-weight: 600;
 	}
 	.stat-label {
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 	}
 	.toolbar {
 		display: flex;
@@ -241,52 +239,16 @@
 		flex: 1;
 	}
 	.note {
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 		font-size: 0.8rem;
 		margin: 0 0 1rem;
 	}
 	.empty {
-		color: var(--color-text-muted, #888);
+		color: var(--ops-text-muted);
 		text-align: center;
 		padding: 2rem 0;
 	}
-	.dead-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.875rem;
-	}
-	.dead-table th,
-	.dead-table td {
-		text-align: left;
-		padding: 0.5rem 0.6rem;
-		border-bottom: 1px solid var(--color-border, #333);
-	}
 	.query {
 		word-break: break-all;
-	}
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 100;
-	}
-	.modal {
-		background: var(--color-surface, #1e1e1e);
-		border-radius: 8px;
-		padding: 1.25rem 1.5rem;
-		max-width: 420px;
-		width: 90%;
-	}
-	.modal h3 {
-		margin: 0 0 0.5rem;
-	}
-	.modal-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
-		margin-top: 1rem;
 	}
 </style>

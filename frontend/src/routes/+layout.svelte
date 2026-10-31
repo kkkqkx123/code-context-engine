@@ -178,7 +178,7 @@
 					>{serverOk ? 'Server Online' : 'Server Offline'}</span
 				>
 			</div>
-			<ProjectSelector variant="sidebar" />
+			<ProjectSelector />
 		</div>
 
 		<nav class="nav" aria-label="Main navigation">
@@ -228,7 +228,8 @@
 
 	<div class="main">
 		<header class="topbar">
-			<button type="button"
+			<button
+				type="button"
 				class="menu-toggle"
 				onclick={toggleMobile}
 				aria-label="Toggle navigation menu"
@@ -245,7 +246,7 @@
 
 			<div class="topbar-right">
 				<div class="topbar-project">
-					<ProjectSelector variant="topbar" />
+					<ProjectSelector />
 				</div>
 				<div class="health-dots" title="Storage component health">
 					{#if metricsStore.storageStatus}
@@ -294,8 +295,8 @@
 	.sidebar {
 		width: 240px;
 		flex-shrink: 0;
-		background: var(--black);
-		color: var(--white);
+		background: var(--chrome-bg);
+		color: var(--chrome-fg);
 		position: sticky;
 		top: 0;
 		height: 100vh;
@@ -311,7 +312,7 @@
 		font-size: 1.35rem;
 		font-weight: 700;
 		letter-spacing: -0.03em;
-		color: var(--white);
+		color: var(--chrome-fg);
 		text-decoration: none;
 	}
 
@@ -360,6 +361,10 @@
 
 	.topbar-project {
 		display: none;
+		--chrome-input-bg: var(--white);
+		--chrome-input-fg: var(--black);
+		--chrome-input-border: var(--black);
+		--chrome-muted: var(--gray-600);
 	}
 
 	.nav {

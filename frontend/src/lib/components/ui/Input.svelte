@@ -30,7 +30,8 @@
 		...rest
 	}: Props = $props();
 
-	let inputEl: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined =
+	let inputEl:
+		HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined =
 		$state();
 
 	// Generate unique ID if not provided
@@ -54,7 +55,14 @@
 	{/if}
 
 	{#if type === 'select'}
-		<select bind:this={inputEl} id={inputId} class="select" {placeholder} bind:value {...rest}>
+		<select
+			bind:this={inputEl}
+			id={inputId}
+			class="select"
+			{placeholder}
+			bind:value
+			{...rest}
+		>
 			{#each options as opt (opt.value)}
 				<option value={opt.value}>{opt.label}</option>
 			{/each}

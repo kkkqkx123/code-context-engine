@@ -26,7 +26,12 @@ export class ApiError extends Error {
 	/** Raw backend error payload, for structured details such as candidates. */
 	payload: unknown;
 
-	constructor(message: string, status: number, code?: string, payload?: unknown) {
+	constructor(
+		message: string,
+		status: number,
+		code?: string,
+		payload?: unknown,
+	) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
@@ -43,7 +48,9 @@ export class ApiError extends Error {
 			if (!Array.isArray(parsed)) return [];
 			return parsed.filter(
 				(c): c is SymbolCandidate =>
-					c && typeof c === 'object' && typeof (c as SymbolCandidate).stable_id === 'string',
+					c &&
+					typeof c === 'object' &&
+					typeof (c as SymbolCandidate).stable_id === 'string',
 			);
 		} catch {
 			return [];

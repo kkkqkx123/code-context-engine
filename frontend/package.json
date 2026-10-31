@@ -13,6 +13,7 @@
 		"check:preview": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.preview.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"contract:check": "node scripts/check-contract.mjs",
+		"check:style": "node scripts/check-style-consistency.mjs",
 		"test": "node --test tests/*.test.mjs",
 		"baseline": "node scripts/check-large-files.mjs",
 		"lint": "eslint .",
