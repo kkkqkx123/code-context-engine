@@ -97,11 +97,7 @@ impl ExpansionPathFilter {
                 ..Default::default()
             };
             let kept = filter
-                .apply(
-                    vec![probe],
-                    &self.include_patterns,
-                    &self.exclude_patterns,
-                )
+                .apply(vec![probe], &self.include_patterns, &self.exclude_patterns)
                 .unwrap_or_default();
             if kept.is_empty() {
                 return false;
@@ -279,8 +275,7 @@ pub fn resolve_expansion_units_with_filter(
             if forward.len() >= forward_budget || !seen_forward.insert(callee.0) {
                 continue;
             }
-            if let Some(neighbour_file) =
-                searcher.query().index().get_file_path_by_entity(callee)
+            if let Some(neighbour_file) = searcher.query().index().get_file_path_by_entity(callee)
                 && !path_filter.allows(&neighbour_file)
             {
                 continue;

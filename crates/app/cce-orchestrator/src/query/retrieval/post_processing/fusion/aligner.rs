@@ -96,13 +96,7 @@ pub fn expand_multi_entity_results(results: Vec<SearchResult>) -> Vec<SearchResu
 /// Empty bodies yield no weak key and are kept as-is. The single source of
 /// truth for unkeyed collapsing across post-processing and aggregation.
 pub fn weak_post_key(result: &crate::query::types::SearchResult) -> Option<String> {
-    if alignment_key(
-        &result.entity_ids,
-        result.segment_id.as_deref(),
-        &result.id,
-    )
-    .is_some()
-    {
+    if alignment_key(&result.entity_ids, result.segment_id.as_deref(), &result.id).is_some() {
         return None;
     }
     if result.content.trim().is_empty() || result.file_path.is_empty() {
@@ -121,11 +115,7 @@ pub fn weak_post_key(result: &crate::query::types::SearchResult) -> Option<Strin
 /// Shared by single-search post-processing and aggregated merging so both
 /// collapse onto one key space.
 pub fn unified_dedup_key(result: &crate::query::types::SearchResult) -> Option<String> {
-    if let Some(key) = alignment_key(
-        &result.entity_ids,
-        result.segment_id.as_deref(),
-        &result.id,
-    ) {
+    if let Some(key) = alignment_key(&result.entity_ids, result.segment_id.as_deref(), &result.id) {
         return Some(key);
     }
     weak_post_key(result)

@@ -59,11 +59,15 @@ impl Bm25Strategy {
         query_filter: &QueryFilter,
     ) -> Result<Vec<SearchResult>> {
         // Step 1: Build retrieval options with native project_id and epoch filters.
-        // Glob patterns are applied locally inside the strategy with over-fetch
-        // so filtered slots are refilled before fusion.
+        // Glob patterns and excluded content types are applied locally inside
+        // the strategy with over-fetch so filtered slots are refilled before fusion.
+        // Storage only excludes test-marked rows; generated and dependency
+        // paths are filtered locally via path classification.
         let base_limit = options.config.vector.top_k.max(options.config.result.limit);
-        let has_glob = !options.include_patterns.is_empty() || !options.exclude_patterns.is_empty();
-        let limit = if has_glob {
+        let needs_over_fetch = !options.include_patterns.is_empty()
+            || !options.exclude_patterns.is_empty()
+            || !options.exclude_content_types.is_empty();
+        let limit = if needs_over_fetch {
             (base_limit.saturating_mul(3)).max(base_limit + 20).min(200)
         } else {
             base_limit
@@ -79,14 +83,9 @@ impl Bm25Strategy {
             } else {
                 Some(query_filter.excluded_files().to_vec())
             },
-            exclude_test: options.exclude_content_types.iter().any(|t| {
-                matches!(
-                    t,
-                    crate::query::types::ExcludableContentType::Test
-                        | crate::query::types::ExcludableContentType::Generated
-                        | crate::query::types::ExcludableContentType::Dependency
-                )
-            }),
+            exclude_test: options
+                .exclude_content_types
+                .contains(&crate::query::types::ExcludableContentType::Test),
             include_categories: options.include_categories.clone(),
             exclude_categories: options.exclude_categories.clone(),
             term_operator: options.config.bm25.term_operator,
@@ -147,7 +146,11 @@ impl Bm25Strategy {
                 }
             })
             .collect();
-        Ok(apply_bm25_strategy_filters(search_results, options, base_limit))
+        Ok(apply_bm25_strategy_filters(
+            search_results,
+            options,
+            base_limit,
+        ))
     }
 }
 
@@ -158,7 +161,11 @@ fn apply_bm25_strategy_filters(
 ) -> Vec<SearchResult> {
     use crate::query::retrieval::post_processing::GlobFilter;
     let filtered = GlobFilter::new()
-        .apply(results, &options.include_patterns, &options.exclude_patterns)
+        .apply(
+            results,
+            &options.include_patterns,
+            &options.exclude_patterns,
+        )
         .unwrap_or_default();
     let mut kept = Vec::with_capacity(filtered.len().min(limit));
     for item in filtered {

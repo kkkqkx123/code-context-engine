@@ -105,10 +105,21 @@ impl ExcludableContentType {
 /// Shared generated-output detector used by all query paths.
 fn is_generated_path(path: &str) -> bool {
     const DIR_MARKERS: &[&str] = &[
-        "target/", "build/", "dist/", "out/", "generated/", ".next/", "__pycache__/",
+        "target/",
+        "build/",
+        "dist/",
+        "out/",
+        "generated/",
+        ".next/",
+        "__pycache__/",
     ];
     const SUFFIX_MARKERS: &[&str] = &[
-        ".generated.", ".pb.", ".min.js", ".bundle.js", ".lock", ".rkyv",
+        ".generated.",
+        ".pb.",
+        ".min.js",
+        ".bundle.js",
+        ".lock",
+        ".rkyv",
     ];
     if DIR_MARKERS.iter().any(|m| path.contains(m)) {
         return true;
@@ -139,9 +150,7 @@ fn is_dependency_path(path: &str) -> bool {
 /// Whether a normalized path is excluded by any entry of the list.
 pub fn path_excluded_by_types(path: &str, types: &[ExcludableContentType]) -> bool {
     let normalized = cce_types::normalize_project_path(path);
-    types
-        .iter()
-        .any(|t| t.matches_path(&normalized))
+    types.iter().any(|t| t.matches_path(&normalized))
 }
 
 /// Query intent: describes the type of user query for determining fusion weights.
@@ -315,6 +324,20 @@ impl QueryOptions {
         self
     }
 
+    /// Exclude generated outputs (build/, target/, dist/, *.generated.*, etc.)
+    pub fn exclude_generated(mut self) -> Self {
+        self.exclude_content_types
+            .push(ExcludableContentType::Generated);
+        self
+    }
+
+    /// Exclude third-party dependencies (node_modules/, vendor/, etc.)
+    pub fn exclude_dependency(mut self) -> Self {
+        self.exclude_content_types
+            .push(ExcludableContentType::Dependency);
+        self
+    }
+
     /// Set include categories (only results whose category matches are kept)
     pub fn with_include_categories(mut self, categories: Vec<FileCategory>) -> Self {
         self.include_categories = categories;
@@ -366,8 +389,9 @@ impl QueryOptions {
 
     /// Convert to filter options for retrieval
     pub fn to_filter_options(&self) -> FilterOptions {
-        // Note: FilterOptions doesn't support exclude/include patterns yet.
-        // These are handled at a higher level in the search pipeline.
+        // FilterOptions carries only storage-pushdown fields. Glob patterns stay
+        // on QueryOptions and are applied inside the retrieval strategies with
+        // over-fetch refill, never inside the storage layer.
         FilterOptions {
             directory_prefix: self.directory_prefix.clone(),
             exclude_content_types: self.exclude_content_types.clone(),
@@ -522,6 +546,20 @@ impl QueryConfigBuilder {
     /// Exclude test files
     pub fn exclude_tests(mut self) -> Self {
         self.exclude_content_types.push(ExcludableContentType::Test);
+        self
+    }
+
+    /// Exclude generated outputs (build/, target/, dist/, *.generated.*, etc.)
+    pub fn exclude_generated(mut self) -> Self {
+        self.exclude_content_types
+            .push(ExcludableContentType::Generated);
+        self
+    }
+
+    /// Exclude third-party dependencies (node_modules/, vendor/, etc.)
+    pub fn exclude_dependency(mut self) -> Self {
+        self.exclude_content_types
+            .push(ExcludableContentType::Dependency);
         self
     }
 

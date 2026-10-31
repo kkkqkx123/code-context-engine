@@ -105,7 +105,9 @@ pub struct FulltextSearchOptions {
     /// deleted by the own generation). Only meaningful together with a
     /// two-element `epochs` chain.
     pub excluded_files: Option<Vec<String>>,
-    /// Exclude test chunks (documents marked `test: "true"`)
+    /// Exclude test-marked chunks only (documents marked `test: "true"`).
+    /// Generated outputs and third-party dependencies are filtered at the
+    /// retrieval strategy layer via path classification.
     pub exclude_test: bool,
     /// Include only chunks whose category matches one of these values
     pub include_categories: Vec<FileCategory>,

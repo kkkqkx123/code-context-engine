@@ -106,6 +106,32 @@ impl RelationQueryOptions {
         self
     }
 
+    /// Exclude generated outputs from results
+    pub fn with_exclude_generated(mut self, exclude: bool) -> Self {
+        if exclude
+            && !self
+                .exclude_content_types
+                .contains(&ExcludableContentType::Generated)
+        {
+            self.exclude_content_types
+                .push(ExcludableContentType::Generated);
+        }
+        self
+    }
+
+    /// Exclude third-party dependencies from results
+    pub fn with_exclude_dependency(mut self, exclude: bool) -> Self {
+        if exclude
+            && !self
+                .exclude_content_types
+                .contains(&ExcludableContentType::Dependency)
+        {
+            self.exclude_content_types
+                .push(ExcludableContentType::Dependency);
+        }
+        self
+    }
+
     /// Set exact file paths to exclude
     pub fn with_excluded_files(mut self, files: Vec<String>) -> Self {
         self.excluded_files = files;
@@ -129,9 +155,9 @@ impl RelationQueryOptions {
 ///
 /// The relation snapshot is a pure in-memory index (no storage-layer filter
 /// pushdown like Qdrant/tantivy), so filtering is applied on query output
-/// and direct-neighbor results. Test-file detection reuses the single
-/// authoritative rule set (`cce_types::TestInfo`), shared with the main
-/// query path.
+/// and direct-neighbor results. Content-type exclusion reuses the shared
+/// path classification (`path_excluded_by_types`), identical to the main
+/// query path and the expansion path filter.
 #[derive(Debug, Default, Clone)]
 struct RelationFileFilter {
     directory_prefix: Option<String>,

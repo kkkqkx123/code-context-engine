@@ -324,6 +324,12 @@ impl Validate for HybridFusionConfig {
                 ));
             }
         }
+        if self.require_strict_intersection && !self.include_single_path {
+            errors.push(ConfigValidationError::invalid_field(
+                "require_strict_intersection",
+                "strict intersection already drops all single-path keys; keep include_single_path enabled to avoid dead configuration",
+            ));
+        }
 
         if errors.is_empty() {
             Ok(())

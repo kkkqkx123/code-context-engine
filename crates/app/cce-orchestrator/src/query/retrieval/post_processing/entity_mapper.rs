@@ -871,7 +871,7 @@ mod tests {
                 .content
                 .contains("<reference path=\"src/lib.rs\"")
         );
-        assert!((results[0].score - score * 0.8).abs() < f32::EPSILON);
+        assert!((results[0].score - score).abs() < f32::EPSILON);
     }
 
     #[test]

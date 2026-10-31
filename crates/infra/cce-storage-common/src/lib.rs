@@ -72,7 +72,9 @@ pub struct SearchFilter {
     pub file_path: Option<String>,
     /// Directory prefix filter
     pub directory_prefix: Option<String>,
-    /// Exclude test files
+    /// Exclude test-marked rows only. Generated outputs and third-party
+    /// dependencies carry no storage marker and are filtered at the retrieval
+    /// strategy layer via path classification.
     pub exclude_test: bool,
     /// Include only specific categories
     pub include_categories: Option<Vec<FileCategory>>,

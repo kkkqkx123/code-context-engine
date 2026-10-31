@@ -449,13 +449,12 @@ impl<'a> SearchService<'a> {
             Ok(searcher) => {
                 annotation.enable_annotation = true;
                 annotation.expansion_enabled = true;
-                let path_filter =
-                    cce_orchestrator::query::expansion::ExpansionPathFilter {
-                        directory_prefix: query_opts.directory_prefix.clone(),
-                        exclude_content_types: query_opts.exclude_content_types.clone(),
-                        include_patterns: query_opts.include_patterns.clone(),
-                        exclude_patterns: query_opts.exclude_patterns.clone(),
-                    };
+                let path_filter = cce_orchestrator::query::expansion::ExpansionPathFilter {
+                    directory_prefix: query_opts.directory_prefix.clone(),
+                    exclude_content_types: query_opts.exclude_content_types.clone(),
+                    include_patterns: query_opts.include_patterns.clone(),
+                    exclude_patterns: query_opts.exclude_patterns.clone(),
+                };
                 Some(NeighbourResolver::with_filter(
                     searcher,
                     std::path::PathBuf::from(&entry.metadata.root_path),

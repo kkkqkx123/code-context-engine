@@ -329,8 +329,7 @@ fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
     let mut best: HashMap<String, SearchResult> = HashMap::new();
     let mut unkeyed = Vec::new();
     for item in results {
-        let Some(key) =
-            crate::query::retrieval::post_processing::fusion::unified_dedup_key(&item)
+        let Some(key) = crate::query::retrieval::post_processing::fusion::unified_dedup_key(&item)
         else {
             unkeyed.push(item);
             continue;
@@ -356,7 +355,9 @@ fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
 fn demote_references_for_sort(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
     results.sort_by(|a, b| {
         a.cmp_score_desc_then_stable(b).then_with(|| {
-            a.content_state.is_reference().cmp(&b.content_state.is_reference())
+            a.content_state
+                .is_reference()
+                .cmp(&b.content_state.is_reference())
         })
     });
     results

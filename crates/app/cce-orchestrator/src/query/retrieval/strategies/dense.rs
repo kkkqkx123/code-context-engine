@@ -60,11 +60,15 @@ impl DenseStrategy {
         let mut filter = build_search_filter(options, self.searcher.scope.project_group_id());
         filter = query_filter.apply_to_search_filter(filter);
 
-        // Step 3: Execute core dense search with over-fetch when glob
-        // patterns are present, then filter locally inside the strategy.
+        // Step 3: Execute core dense search with over-fetch when local
+        // path filtering may drop candidates, then filter locally inside
+        // the strategy. Storage only excludes test-marked rows; generated
+        // and dependency paths are filtered locally via path classification.
         let config = &options.config.vector;
-        let has_glob = !options.include_patterns.is_empty() || !options.exclude_patterns.is_empty();
-        let fetch_k = if has_glob {
+        let needs_over_fetch = !options.include_patterns.is_empty()
+            || !options.exclude_patterns.is_empty()
+            || !options.exclude_content_types.is_empty();
+        let fetch_k = if needs_over_fetch {
             (config.top_k.saturating_mul(GLOB_OVER_FETCH_FACTOR)).max(config.top_k + 20)
         } else {
             config.top_k
@@ -91,14 +95,9 @@ fn build_search_filter(options: &QueryOptions, group_id: &str) -> SearchFilter {
         point_type: Some(PointKind::Chunk),
         file_path: None,
         directory_prefix: options.directory_prefix.clone(),
-        exclude_test: options.exclude_content_types.iter().any(|t| {
-            matches!(
-                t,
-                crate::query::types::ExcludableContentType::Test
-                    | crate::query::types::ExcludableContentType::Generated
-                    | crate::query::types::ExcludableContentType::Dependency
-            )
-        }),
+        exclude_test: options
+            .exclude_content_types
+            .contains(&crate::query::types::ExcludableContentType::Test),
         include_categories: if options.include_categories.is_empty() {
             None
         } else {
@@ -131,7 +130,11 @@ fn apply_strategy_filters(
     use crate::query::retrieval::post_processing::GlobFilter;
     let filter = GlobFilter::new();
     let filtered = filter
-        .apply(results, &options.include_patterns, &options.exclude_patterns)
+        .apply(
+            results,
+            &options.include_patterns,
+            &options.exclude_patterns,
+        )
         .unwrap_or_default();
     let mut kept = Vec::with_capacity(filtered.len().min(limit));
     for item in filtered {
