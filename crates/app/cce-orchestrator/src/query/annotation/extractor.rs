@@ -80,6 +80,7 @@ impl SemanticUnitExtractor {
             is_stdlib: false,
             is_external: false,
             is_excerpt: false,
+            is_window: false,
         })
     }
 

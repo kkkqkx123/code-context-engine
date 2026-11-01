@@ -32,9 +32,10 @@ fn xml_escape_attr(value: &str) -> String {
 /// Structure-aware concatenator
 ///
 /// Concatenates code units into an XML-wrapped annotation document:
-/// `<annotation>` root, `<file>` grouping (multi-file results only), and
-/// `<unit>` fragments carrying relation/name/position as attributes, with
-/// code placed verbatim between the open and close tags.
+/// `<annotation>` root with self-locating `<unit>` fragments. The primary
+/// carries its `name`, expansions carry their `rel` direction, and every
+/// unit carries its file and line range in `location`, with code placed
+/// verbatim between the open and close tags.
 pub struct StructureConcatenator {
     config: RelationAnnotationConfig,
 }
@@ -91,23 +92,21 @@ impl StructureConcatenator {
         self.select_and_render(segments, primary_count)
     }
 
-    /// Relation key for an expansion unit, rendered as the `rel` attribute of
-    /// its fragment tag (e.g. `calls` / `called by:call.direct`). The edge
-    /// label carries the direction, so no separate arrow is needed.
+    /// Direction label for an expansion unit, rendered as the `rel` attribute
+    /// of its fragment tag (`calls` / `called by` / `constructed by`). Only
+    /// the coarse direction is rendered: the fine-grained relation type is
+    /// visible in the evidence body itself, so repeating it would tax every
+    /// unit for no additional signal.
     fn relation_key(unit: &ExpandedUnit) -> Option<String> {
         let default_label = match unit.origin {
             ExpansionOrigin::Primary => return None,
             ExpansionOrigin::Forward => "calls",
             ExpansionOrigin::Backward => "called by",
         };
-        let direction = if unit.edge_label.is_empty() {
-            default_label
+        Some(if unit.edge_label.is_empty() {
+            default_label.to_string()
         } else {
-            unit.edge_label.as_str()
-        };
-        Some(match &unit.relation_type {
-            Some(relation_type) => format!("{direction}:{relation_type}"),
-            None => direction.to_string(),
+            unit.edge_label.clone()
         })
     }
 
@@ -234,27 +233,11 @@ impl StructureConcatenator {
         order.extend(picked_rest);
 
         let mut result = String::new();
-        let mut current_file: Option<String> = None;
         let mut file_info_map: std::collections::HashMap<String, FileInfo> =
             std::collections::HashMap::new();
-        // XML style groups segments per file only when the result spans more
-        // than one file; single-file output skips the layer to save tokens.
-        let multi_file = order.len() > 1
-            && order
-                .iter()
-                .map(|index| segments[*index].file_path.as_str())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                > 1;
         result.push_str("<annotation>\n");
         for index in order {
-            self.render_segment(
-                &mut result,
-                &mut current_file,
-                &mut file_info_map,
-                &segments[index],
-                multi_file,
-            );
+            self.render_segment(&mut result, &mut file_info_map, &segments[index]);
         }
         result.push_str("</annotation>");
 
@@ -271,29 +254,19 @@ impl StructureConcatenator {
         (result, involved_files)
     }
 
-    /// Render one segment: a `<unit>` fragment tag carrying
-    /// relation, name, position, and state attributes, with the code placed
-    /// verbatim between the open and close tags. Reference segments render
-    /// as self-closing `<reference>` tags instead. File-level grouping
-    /// tags are emitted only when segments from more than one file appear
-    /// (single-file results skip the layer to save tokens).
+    /// Render one segment as a self-locating `<unit>` fragment: the primary
+    /// carries its `name`, expansions carry their `rel` direction, and every
+    /// unit carries its file and line range in `location`, with the code
+    /// placed verbatim between the open and close tags. Reference segments
+    /// render as self-closing `<reference>` tags instead. No file-grouping
+    /// layer is emitted: repeating the path per unit keeps every fragment
+    /// interpretable on its own, which is what grep-style consumers expect.
     fn render_segment(
         &self,
         result: &mut String,
-        current_file: &mut Option<String>,
         file_info_map: &mut std::collections::HashMap<String, FileInfo>,
         segment: &AggregatedSegment,
-        multi_file: bool,
     ) {
-        // Close the previous file group when crossing a file boundary.
-        if multi_file && current_file.as_deref() != Some(segment.file_path.as_str()) {
-            if current_file.is_some() {
-                result.push_str("</file>\n");
-            }
-            result.push_str(&format!("<file path=\"{}\">\n", segment.file_path));
-            *current_file = Some(segment.file_path.clone());
-        }
-
         file_info_map
             .entry(segment.file_path.clone())
             .or_insert_with(|| FileInfo::new(segment.file_path.clone()));
@@ -308,31 +281,8 @@ impl StructureConcatenator {
             ));
             result.push('\n');
         } else {
-            let rel = segment
-                .source_units
-                .first()
-                .and_then(Self::relation_key)
-                .map(|key| format!(" rel=\"{}\"", xml_escape_attr(&key)))
-                .unwrap_or_default();
-            let name = segment
-                .source_units
-                .first()
-                .map(|unit| unit.name.as_str())
-                .unwrap_or("");
-            let excerpt = segment
-                .source_units
-                .first()
-                .map(|unit| unit.is_excerpt)
-                .unwrap_or(false);
-            let excerpt_attr = if excerpt { " excerpt=\"true\"" } else { "" };
-            result.push_str(&format!(
-                "<unit{} name=\"{}\" lines=\"{}-{}\"{}>\n",
-                rel,
-                xml_escape_attr(name),
-                segment.start_line,
-                segment.end_line,
-                excerpt_attr
-            ));
+            result.push_str(&Self::open_tag(segment));
+            result.push('\n');
             result.push_str(&segment.code);
             result.push('\n');
             result.push_str("</unit>\n");
@@ -344,19 +294,50 @@ impl StructureConcatenator {
         }
     }
 
+    /// Open tag for one body segment, shared by rendering and cost
+    /// estimation so the two can never drift apart.
+    fn open_tag(segment: &AggregatedSegment) -> String {
+        let first = segment.source_units.first();
+        let location = format!(
+            "{}:{}-{}",
+            segment.file_path, segment.start_line, segment.end_line
+        );
+        let excerpt_attr = if first.map(|unit| unit.is_excerpt).unwrap_or(false) {
+            " excerpt=\"true\""
+        } else {
+            ""
+        };
+        match first.map(|unit| unit.origin) {
+            // The primary is the answer headline: it keeps its name.
+            Some(ExpansionOrigin::Primary) | None => {
+                let name = first.map(|unit| unit.name.as_str()).unwrap_or("");
+                format!(
+                    "<unit name=\"{}\" location=\"{}\"{excerpt_attr}>",
+                    xml_escape_attr(name),
+                    xml_escape_attr(&location),
+                )
+            }
+            // Expansions are edge evidence: direction plus location is the
+            // whole pointer. The neighbour name already shows in (or
+            // resolves unambiguously from) the evidence body.
+            _ => {
+                let rel = first.and_then(Self::relation_key).unwrap_or_default();
+                format!(
+                    "<unit rel=\"{}\" location=\"{}\"{excerpt_attr}>",
+                    xml_escape_attr(&rel),
+                    xml_escape_attr(&location),
+                )
+            }
+        }
+    }
+
     /// Standalone token cost of a segment body: fragment tags plus code.
-    ///
-    /// The file tag is always counted so selection stays order-independent
-    /// (single-file rendering elides it, so actual output is at most this
-    /// estimate).
     fn standalone_cost(&self, segment: &AggregatedSegment) -> usize {
         self.xml_segment_cost(segment)
     }
 
-    /// Token cost of a segment: open/close fragment tags, code, and the file
-    /// grouping tag counted per segment so the selection estimate matches the
-    /// actual multi-file output (actual single-file output is at most this
-    /// estimate).
+    /// Token cost of a segment: the exact open tag (shared with rendering),
+    /// code, and close tag, so selection measures what rendering emits.
     fn xml_segment_cost(&self, segment: &AggregatedSegment) -> usize {
         if let Some(reason) = segment.reference {
             let tag = reference_content(
@@ -368,29 +349,13 @@ impl StructureConcatenator {
             );
             return TokenEstimator::estimate(&tag) + 1;
         }
-        let name = segment
-            .source_units
-            .first()
-            .map(|unit| unit.name.as_str())
-            .unwrap_or("");
-        let rel = segment
-            .source_units
-            .first()
-            .and_then(Self::relation_key)
-            .unwrap_or_default();
-        let open = format!(
-            "<unit rel=\"{}\" name=\"{}\" lines=\"{}-{}\">",
-            rel, name, segment.start_line, segment.end_line
-        );
+        let open = Self::open_tag(segment);
         let close = "</unit>";
-        let file_tag = format!("<file path=\"{}\">", segment.file_path);
         TokenEstimator::estimate(&segment.code)
             + 1
             + TokenEstimator::estimate(&open)
             + 1
             + TokenEstimator::estimate(close)
-            + 1
-            + TokenEstimator::estimate(&file_tag)
             + 1
     }
 
@@ -436,10 +401,11 @@ mod tests {
 
         let (result, files) = concat.concatenate(&primary, &forward, &[]).await;
 
-        // Forward expansion is attached with its relation in the fragment tag
+        // Forward expansion is attached with its direction and location
         assert!(result.contains("multiply"));
         assert!(result.contains("fn add"));
-        assert!(result.contains("<unit rel=\"calls\" name=\"add\""));
+        assert!(result.contains("<unit name=\"multiply\" location=\"src/calc.rs:10-12\">"));
+        assert!(result.contains("<unit rel=\"calls\" location=\"src/math.rs:1-3\">"));
         assert_eq!(files.len(), 2);
     }
 
@@ -551,17 +517,20 @@ mod tests {
             .with_score(score)
     }
 
-    /// Standalone selection cost mirror: fragment tags + file tag + code.
+    /// Standalone selection cost mirror: fragment tags + code, matching the
+    /// render shapes (an empty `rel` marks the primary shape, which keeps
+    /// `name`; expansions keep `rel` with `location`).
     fn standalone_cost(code: &str, name: &str, rel: &str, path: &str) -> usize {
-        let open = format!("<unit rel=\"{}\" name=\"{}\" lines=\"1-3\">", rel, name);
-        let file_tag = format!("<file path=\"{}\">", path);
+        let open = if rel.is_empty() {
+            format!("<unit name=\"{name}\" location=\"{path}:1-3\">")
+        } else {
+            format!("<unit rel=\"{rel}\" location=\"{path}:1-3\">")
+        };
         TokenEstimator::estimate(code)
             + 1
             + TokenEstimator::estimate(&open)
             + 1
             + TokenEstimator::estimate("</unit>")
-            + 1
-            + TokenEstimator::estimate(&file_tag)
             + 1
     }
 
@@ -717,12 +686,12 @@ mod tests {
         let tail = &result[start + "tokens=\"~".len()..];
         let end = tail.find('"').expect("magnitude end");
         let omitted: usize = tail[..end].trim().parse().expect("magnitude number");
-        // The reported magnitude covers code plus fragment and file tags.
+        // The reported magnitude covers code plus fragment tags.
         assert!(omitted > TokenEstimator::estimate(low_code));
     }
 
     #[tokio::test]
-    async fn test_typed_marker_appends_relation_type() {
+    async fn test_relation_key_keeps_direction_only() {
         let concat = StructureConcatenator::new(RelationAnnotationConfig::new().enable(true));
         let primary = ExpandedUnit::new(
             "fn main() {}".to_string(),
@@ -736,7 +705,10 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[typed], &[]).await;
 
-        assert!(result.contains("rel=\"calls:call.constructor\""));
+        // Only the coarse direction renders; the fine-grained relation type
+        // already shows in the evidence body.
+        assert!(result.contains("<unit rel=\"calls\" location=\"src/lib.rs:1-3\">"));
+        assert!(!result.contains("call.constructor"));
     }
 
     #[tokio::test]
@@ -758,12 +730,12 @@ mod tests {
 
         assert!(!result.contains("fn main"));
         assert!(result.contains("fn high"));
-        assert!(result.contains("<unit rel=\"calls\" name=\"high\""));
+        assert!(result.contains("<unit rel=\"calls\" location=\"src/high.rs:1-3\">"));
         assert_eq!(files.len(), 1);
     }
 
     #[tokio::test]
-    async fn test_xml_style_three_layer_wrapping() {
+    async fn test_xml_style_flat_self_located_units() {
         let config = RelationAnnotationConfig::new().enable(true);
         let concat = StructureConcatenator::new(config);
         let primary = ExpandedUnit::new(
@@ -777,19 +749,19 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[high], &[]).await;
 
-        // Root layer wraps everything; per-file layers group fragments; each
-        // expansion fragment carries the relation as an attribute.
+        // Root layer wraps everything; every fragment carries its own
+        // file and range in `location`, so no file-grouping layer exists.
+        // Expansion fragments carry the edge direction in `rel`.
         assert!(result.starts_with("<annotation>\n"));
-        assert!(result.contains("<file path=\"src/main.rs\">"));
-        assert!(result.contains("<file path=\"src/high.rs\">"));
-        assert!(result.contains("rel=\"calls\""));
-        assert!(result.contains("<unit rel=\"calls\" name=\"high\" lines=\"1-3\">"));
+        assert!(!result.contains("<file"));
+        assert!(result.contains("<unit name=\"main\" location=\"src/main.rs:1-1\">"));
+        assert!(result.contains("<unit rel=\"calls\" location=\"src/high.rs:1-3\">"));
         assert!(result.contains("</unit>"));
         assert!(result.trim_end().ends_with("</annotation>"));
     }
 
     #[tokio::test]
-    async fn test_xml_style_single_file_omits_file_layer() {
+    async fn test_xml_style_no_file_layer() {
         let config = RelationAnnotationConfig::new().enable(true);
         let concat = StructureConcatenator::new(config);
         let primary = ExpandedUnit::new(
@@ -802,9 +774,10 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[], &[]).await;
 
-        // Single-file results skip the file grouping layer to save tokens.
+        // No file-grouping layer exists anymore: units always carry their
+        // own location, whether or not files are shared.
         assert!(!result.contains("<file"));
-        assert!(result.contains("<unit"));
+        assert!(result.contains("<unit name=\"main\" location=\"src/main.rs:1-1\">"));
         assert!(result.contains("fn main() {}"));
     }
 
@@ -842,13 +815,11 @@ mod tests {
     #[tokio::test]
     async fn test_xml_style_omitted_tag() {
         let primary_code = "fn main() {}";
-        // Comment-style mirror of the XML cost keeps the budget tight so the
+        // Mirror of the XML cost keeps the budget tight so the
         // expansion is dropped and reported through the omission tag.
         let budget = TokenEstimator::estimate(primary_code)
             + 1
-            + TokenEstimator::estimate("<file path=\"src/main.rs\">")
-            + 1
-            + TokenEstimator::estimate("<unit rel=\"\" name=\"main\" lines=\"1-1\">")
+            + TokenEstimator::estimate("<unit name=\"main\" location=\"src/main.rs:1-1\">")
             + 1
             + TokenEstimator::estimate("</unit>")
             + 1;
@@ -890,6 +861,31 @@ mod tests {
 
         // Windowed excerpts carry the excerpt state attribute; full bodies do not.
         assert!(result.contains("excerpt=\"true\""));
-        assert!(!result.contains("<unit rel=\"\" name=\"main\" excerpt=\"true\""));
+        assert!(
+            !result.contains("<unit name=\"main\" location=\"src/main.rs:1-1\" excerpt=\"true\"")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_xml_style_window_omits_excerpt_attribute() {
+        let config = RelationAnnotationConfig::new().enable(true);
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let window =
+            expansion_unit("callee", "src/main.rs", "    callee();", 0.9).with_window(true);
+
+        let (result, _) = concat.concatenate(&primary, &[window], &[]).await;
+
+        // Callsite windows are slices by construction; the narrow location
+        // and the edge direction identify them, so no excerpt attribute and
+        // no neighbour name are emitted.
+        assert!(!result.contains("excerpt="));
+        assert!(result.contains("<unit rel=\"calls\" location=\"src/main.rs:1-3\">"));
     }
 }

@@ -505,12 +505,12 @@ mod tests {
         assert!(
             result
                 .annotated_content
-                .contains("<unit rel=\"calls\" name=\"b\"")
+                .contains("<unit rel=\"calls\" location=\"src/b.rs:1-3\">")
         );
         assert!(
             result
                 .annotated_content
-                .contains("<unit rel=\"called by\" name=\"c\"")
+                .contains("<unit rel=\"called by\" location=\"src/c.rs:1-3\">")
         );
     }
 
@@ -860,9 +860,21 @@ mod tests {
             .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 3);
         assert_eq!(result.metadata.omitted_self_evident, 3);
-        assert!(!result.annotated_content.contains("name=\"call_b\""));
-        assert!(!result.annotated_content.contains("name=\"Foo::make\""));
-        assert!(!result.annotated_content.contains("name=\"Widget\""));
+        assert!(
+            !result
+                .annotated_content
+                .contains("location=\"src/call_b.rs\"")
+        );
+        assert!(
+            !result
+                .annotated_content
+                .contains("location=\"src/Foo::make.rs\"")
+        );
+        assert!(
+            !result
+                .annotated_content
+                .contains("location=\"src/Widget.rs\"")
+        );
         assert!(result.annotated_content.contains("fn ghost()"));
         assert!(result.annotated_content.contains("fn m()"));
         assert!(result.annotated_content.contains("fn u()"));

@@ -369,48 +369,79 @@ fn materialize(
     // Body materialization: read the live source, then apply the budget. The
     // reader indexes by zero-based row, so it keeps the raw chunk values while
     // `result` carries the one-based translation for presentation.
-    match read_source_lines_cached(
+    //
+    // A group span over budget narrows to the hit chunk's own span instead
+    // of degrading straight to a bare reference: the chunk is what matched
+    // the query, so its body is the most relevant answer available. Only a
+    // chunk that is itself over budget still becomes a reference.
+    let group_body = read_source_lines_cached(
         cache,
         project_root,
         &chunk.file_path,
         group_start.max(0) as u32,
         group_end.max(0) as u32,
-    ) {
-        None => {
-            result.content_state = ContentState::Reference(DowngradeReason::FileMissing);
-            result.content = reference_content(
-                &chunk.file_path,
-                result.start_line,
-                result.end_line,
-                0,
-                DowngradeReason::FileMissing,
-            );
+    );
+    let Some(group_body) = group_body else {
+        result.content_state = ContentState::Reference(DowngradeReason::FileMissing);
+        result.content = reference_content(
+            &chunk.file_path,
+            result.start_line,
+            result.end_line,
+            0,
+            DowngradeReason::FileMissing,
+        );
+        result.metadata.insert(
+            "downgrade".to_string(),
+            DowngradeReason::FileMissing.note().to_string(),
+        );
+        return;
+    };
+    let group_tokens = estimate_tokens(&group_body);
+    if group_tokens <= max_content_tokens {
+        result.content_state = ContentState::Full;
+        result.content = group_body;
+        return;
+    }
+    if chunk.start_line != group_start || chunk.end_line != group_end {
+        let chunk_body = read_source_lines_cached(
+            cache,
+            project_root,
+            &chunk.file_path,
+            chunk.start_line.max(0) as u32,
+            chunk.end_line.max(0) as u32,
+        );
+        if let Some(chunk_body) = chunk_body
+            && !chunk_body.trim().is_empty()
+            && estimate_tokens(&chunk_body) <= max_content_tokens
+        {
+            result.start_line = to_one_based_line(chunk.start_line);
+            result.end_line = to_one_based_line(chunk.end_line);
+            result.content_state = ContentState::Full;
+            result.content = chunk_body;
             result.metadata.insert(
-                "downgrade".to_string(),
-                DowngradeReason::FileMissing.note().to_string(),
+                "group_narrowed".to_string(),
+                format!(
+                    "group {}-{} (~{} tokens) over budget; showing hit chunk",
+                    to_one_based_line(group_start),
+                    to_one_based_line(group_end),
+                    group_tokens,
+                ),
             );
-        }
-        Some(source_text) => {
-            let tokens = estimate_tokens(&source_text);
-            if tokens > max_content_tokens {
-                result.content_state = ContentState::Reference(DowngradeReason::OverLimit);
-                result.content = reference_content(
-                    &chunk.file_path,
-                    result.start_line,
-                    result.end_line,
-                    tokens,
-                    DowngradeReason::OverLimit,
-                );
-                result.metadata.insert(
-                    "downgrade".to_string(),
-                    DowngradeReason::OverLimit.note().to_string(),
-                );
-            } else {
-                result.content_state = ContentState::Full;
-                result.content = source_text;
-            }
+            return;
         }
     }
+    result.content_state = ContentState::Reference(DowngradeReason::OverLimit);
+    result.content = reference_content(
+        &chunk.file_path,
+        result.start_line,
+        result.end_line,
+        group_tokens,
+        DowngradeReason::OverLimit,
+    );
+    result.metadata.insert(
+        "downgrade".to_string(),
+        DowngradeReason::OverLimit.note().to_string(),
+    );
 }
 
 /// Translate a stored zero-based row index into a one-based line number.
@@ -763,6 +794,59 @@ mod tests {
         assert!(results[0].content.contains("reason=\"over_limit\""));
         assert_eq!(results[0].start_line, 1);
         assert_eq!(results[0].end_line, 400);
+    }
+
+    #[test]
+    fn materialize_narrows_over_budget_group_to_hit_chunk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_source(
+            dir.path(),
+            "src/mixed.rs",
+            &(0..60)
+                .map(|i| format!("source line {i} with filler words"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+
+        // Two chunks share one segment: the hit covers 3 lines, the group
+        // covers the whole file and exceeds the budget.
+        let mut hit = ChunkRecord::new(
+            "chunk_hit".to_string(),
+            "src/mixed.rs".to_string(),
+            "code".to_string(),
+            10,
+            12,
+        );
+        hit.segment_id = "group_1".to_string();
+        let mut sibling = ChunkRecord::new(
+            "chunk_sibling".to_string(),
+            "src/mixed.rs".to_string(),
+            "code".to_string(),
+            0,
+            59,
+        );
+        sibling.segment_id = "group_1".to_string();
+        let records = HashMap::from([
+            ("chunk_hit".to_string(), hit),
+            ("chunk_sibling".to_string(), sibling),
+        ]);
+        let result = SearchResult {
+            id: "chunk_hit".to_string(),
+            ..Default::default()
+        };
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, Some(dir.path()), 50);
+
+        assert_eq!(results[0].content_state, ContentState::Full);
+        assert_eq!(results[0].start_line, 11);
+        assert_eq!(results[0].end_line, 13);
+        assert!(results[0].content.contains("source line 11"));
+        assert!(!results[0].content.contains("source line 0"));
+        assert!(
+            results[0].metadata.contains_key("group_narrowed"),
+            "narrowing must be recorded, got {:?}",
+            results[0].metadata
+        );
     }
 
     #[test]

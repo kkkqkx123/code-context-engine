@@ -119,8 +119,15 @@ pub struct ExpandedUnit {
     pub is_external: bool,
     /// True when the unit body is a windowed excerpt rather than the full
     /// definition; rendered as the `excerpt="true"` attribute in XML-style
-    /// output.
+    /// output. Only set on full-definition fallbacks truncated by the token
+    /// budget; callsite evidence windows (see `is_window`) never set it,
+    /// their narrow line range already marks them as slices.
     pub is_excerpt: bool,
+    /// True when the unit is a callsite evidence window: a fixed few lines
+    /// around the edge's call site, not the neighbour definition. Windows
+    /// render without the `excerpt` attribute; the narrow `lines` range
+    /// together with the `rel` edge label already identifies them as slices.
+    pub is_window: bool,
 }
 
 impl ExpandedUnit {
@@ -147,6 +154,7 @@ impl ExpandedUnit {
             is_stdlib: false,
             is_external: false,
             is_excerpt: false,
+            is_window: false,
         }
     }
 
@@ -198,9 +206,17 @@ impl ExpandedUnit {
     }
 
     /// Mark the unit body as a windowed excerpt rather than the full
-    /// definition (builder pattern).
+    /// definition (builder pattern). Only meaningful on full-definition
+    /// fallbacks; callsite windows use [`Self::with_window`] instead.
     pub fn with_excerpt(mut self, excerpt: bool) -> Self {
         self.is_excerpt = excerpt;
+        self
+    }
+
+    /// Mark the unit as a callsite evidence window (builder pattern).
+    /// Windows render without the `excerpt` attribute.
+    pub fn with_window(mut self, window: bool) -> Self {
+        self.is_window = window;
         self
     }
 

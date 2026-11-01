@@ -8,8 +8,11 @@
 //! Seeds resolve through the snapshot line-range lookup (the relation index ID
 //! space), not the hit's retrieval entity IDs (the SQLite row space), so
 //! method groups represented by their container still surface member edges.
-//! Snippets are full entity spans read from the live source tree, matching the
-//! production annotation contract (the 3-line reference window is review-only).
+//! Call-class edges become callsite windows: a few lines around the call site
+//! in the caller file, so the unit shows the edge evidence instead of the
+//! neighbour's full definition body. Only edges without a usable callsite
+//! (non-call edges, unavailable spans, unreadable windows) fall back to the
+//! full entity span.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -30,6 +33,12 @@ pub use super::expansion_scoring::ExpansionScoring;
 
 /// Maximum seeds taken from one hit's line range.
 const MAX_SEEDS: usize = 4;
+
+/// Lines kept on each side of a callsite anchor when rendering an expansion
+/// unit. The window covers the call span itself plus this much surrounding
+/// context, so one unit stays within a handful of lines no matter how large
+/// the caller or callee definition is.
+const CALLSITE_CONTEXT_LINES: usize = 1;
 
 /// Whole-body token budget for one expansion unit, estimated with the same
 /// [`TokenEstimator`](cce_utils::token_estimation::TokenEstimator) the
@@ -405,13 +414,18 @@ pub fn resolve_expansion_units_with_filter(
                 continue;
             }
             let score = scored_neighbour(searcher, &relation, callee, seed, &query_terms, scoring);
+            let name = neighbour_name(searcher, callee, Some(relation.callee_name.as_str()));
             if let Some(unit) = snippet_unit(
                 searcher,
                 project_root,
                 &mut cache,
-                callee,
-                ExpansionOrigin::Forward,
-                "calls",
+                SnippetParts {
+                    entity_id: callee,
+                    name,
+                    caller_file: file_path.as_str(),
+                    origin: ExpansionOrigin::Forward,
+                    edge_label: "calls",
+                },
                 ScoredEdge {
                     relation: &relation,
                     score,
@@ -442,10 +456,11 @@ pub fn resolve_expansion_units_with_filter(
                 if backward.len() >= backward_budget || !seen_backward.insert(caller.0) {
                     continue;
                 }
-                if let Some(neighbour_file) =
-                    searcher.query().index().get_file_path_by_entity(caller)
-                    && !path_filter.allows(&neighbour_file)
-                {
+                let Some(neighbour_file) = searcher.query().index().get_file_path_by_entity(caller)
+                else {
+                    continue;
+                };
+                if !path_filter.allows(&neighbour_file) {
                     continue;
                 }
                 let edge_label = if relation.relation_type.is_constructor_call() {
@@ -455,13 +470,21 @@ pub fn resolve_expansion_units_with_filter(
                 };
                 let score =
                     scored_neighbour(searcher, &relation, caller, seed, &query_terms, scoring);
+                let name = neighbour_name(searcher, caller, None);
+                // The callsite lives in the caller file, so the neighbour
+                // file already resolved for the path filter doubles as the
+                // window file; no second snapshot lookup is needed.
                 if let Some(unit) = snippet_unit(
                     searcher,
                     project_root,
                     &mut cache,
-                    caller,
-                    ExpansionOrigin::Backward,
-                    edge_label,
+                    SnippetParts {
+                        entity_id: caller,
+                        name,
+                        caller_file: neighbour_file.as_str(),
+                        origin: ExpansionOrigin::Backward,
+                        edge_label,
+                    },
                     ScoredEdge {
                         relation: &relation,
                         score,
@@ -540,29 +563,136 @@ fn overlap_len(
     }
 }
 
-/// Read one entity's full definition span as an annotator unit.
-///
-/// Returns `None` when the entity has no snapshot metadata or its source
-/// cannot be read; vanished files are the annotator's downgrade path, not an
-/// error here.
+/// What one expansion unit is built from: the neighbour identity plus the
+/// caller file holding the callsite span. Groups the snippet arguments so
+/// the builder stays within the argument-count guideline.
+struct SnippetParts<'a> {
+    entity_id: cce_types::EntityId,
+    name: String,
+    caller_file: &'a str,
+    origin: ExpansionOrigin,
+    edge_label: &'a str,
+}
+
+/// Resolve a neighbour's display name: snapshot entity name first, then the
+/// caller-supplied fallback (the forward edge's callee name), then a bare
+/// entity marker so units never render nameless.
+fn neighbour_name(
+    searcher: &RelationSearcher,
+    entity_id: cce_types::EntityId,
+    fallback: Option<&str>,
+) -> String {
+    if let Some(entity) = searcher
+        .query()
+        .index()
+        .get_function_by_entity_id(entity_id)
+        && !entity.name.is_empty()
+    {
+        return entity.name;
+    }
+    match fallback {
+        Some(name) if !name.is_empty() => name.to_string(),
+        _ => format!("entity:{}", entity_id.0),
+    }
+}
+
 /// Edge metadata with its resolved ordering score for snippet construction.
 struct ScoredEdge<'a> {
     relation: &'a cce_types::ResolvedRelation,
     score: f32,
 }
 
+/// Build one expansion unit for a neighbour edge.
+///
+/// Call-class edges with an available source span become callsite windows:
+/// a few lines around the call site in the caller file. Anything without a
+/// usable callsite (non-call edges, unavailable spans, unreadable windows)
+/// falls back to the neighbour's full definition span.
 fn snippet_unit(
     searcher: &RelationSearcher,
     project_root: &Path,
     cache: &mut SourceFileCache,
-    entity_id: cce_types::EntityId,
-    origin: ExpansionOrigin,
-    edge_label: &str,
+    parts: SnippetParts<'_>,
     edge: ScoredEdge<'_>,
 ) -> Option<ExpandedUnit> {
+    let ScoredEdge { relation, score } = edge;
+    if relation.relation_type.is_call()
+        && relation.span.is_available()
+        && let Some(unit) = callsite_window_unit(project_root, cache, &parts, relation, score)
+    {
+        return Some(unit);
+    }
+    full_body_unit(searcher, project_root, cache, &parts, relation, score)
+}
+
+/// Read the callsite window around an edge's source span as an annotator
+/// unit.
+///
+/// The anchor covers the whole call span (multi-line calls included) plus
+/// context lines on each side, read from the caller file. Returns `None`
+/// when the window cannot be read; vanished files are the annotator's
+/// downgrade path, not an error here. Windows render without the excerpt
+/// attribute: the narrow line range together with the edge label already
+/// identifies them as slices.
+fn callsite_window_unit(
+    project_root: &Path,
+    cache: &mut SourceFileCache,
+    parts: &SnippetParts<'_>,
+    relation: &cce_types::ResolvedRelation,
+    score: f32,
+) -> Option<ExpandedUnit> {
+    let anchor_start = relation.span.start_position.row;
+    let anchor_end = relation.span.end_position.row.max(anchor_start);
+    let start_row = anchor_start
+        .saturating_sub(CALLSITE_CONTEXT_LINES)
+        .min(u32::MAX as usize) as u32;
+    let end_row = anchor_end
+        .saturating_add(CALLSITE_CONTEXT_LINES)
+        .min(u32::MAX as usize) as u32;
+    let code = read_source_lines_cached(
+        cache,
+        Some(project_root),
+        parts.caller_file,
+        start_row,
+        end_row,
+    )?;
+    if code.trim().is_empty() {
+        return None;
+    }
+    Some(
+        ExpandedUnit::new(
+            code,
+            parts.caller_file.to_string(),
+            start_row + 1,
+            end_row + 1,
+            parts.name.clone(),
+        )
+        .with_expansion(parts.origin, parts.edge_label)
+        .with_entity_id(parts.entity_id)
+        .with_relation_type(relation.relation_type)
+        .with_external(relation.is_external)
+        .with_stdlib(relation.is_stdlib())
+        .with_score(score)
+        .with_window(true),
+    )
+}
+
+/// Read one entity's full definition span as an annotator unit.
+///
+/// Returns `None` when the entity has no snapshot metadata or its source
+/// cannot be read; vanished files are the annotator's downgrade path, not an
+/// error here.
+fn full_body_unit(
+    searcher: &RelationSearcher,
+    project_root: &Path,
+    cache: &mut SourceFileCache,
+    parts: &SnippetParts<'_>,
+    relation: &cce_types::ResolvedRelation,
+    score: f32,
+) -> Option<ExpandedUnit> {
     let snapshot = searcher.query().index();
-    let entity = snapshot.get_function_by_entity_id(entity_id)?;
-    let file_path = snapshot.get_file_path_by_entity(entity_id)?;
+    let entity = snapshot.get_function_by_entity_id(parts.entity_id)?;
+    let file_path = snapshot.get_file_path_by_entity(parts.entity_id)?;
     let start_row = entity.span.start_position.row as u32;
     let end_row = entity
         .span
@@ -576,7 +706,6 @@ fn snippet_unit(
     // Oversized bodies become window excerpts; the whole-body fallback would
     // only crowd out the rest of the expansion budget or degrade entirely.
     // Excerpted bodies carry the marker so renderers stay honest about the cut.
-    let ScoredEdge { relation, score } = edge;
     let (code, excerpt) = match window_excerpt(&code) {
         Some(excerpt) => (excerpt, true),
         None => (code, false),
@@ -587,10 +716,10 @@ fn snippet_unit(
             file_path,
             start_row + 1,
             end_row + 1,
-            entity.name.clone(),
+            parts.name.clone(),
         )
-        .with_expansion(origin, edge_label)
-        .with_entity_id(entity_id)
+        .with_expansion(parts.origin, parts.edge_label)
+        .with_entity_id(parts.entity_id)
         .with_relation_type(relation.relation_type)
         .with_external(relation.is_external)
         .with_stdlib(relation.is_stdlib())
@@ -1069,5 +1198,210 @@ mod tests {
         };
         assert_eq!(relation_of(2), Some(RelationType::DirectCall));
         assert_eq!(relation_of(4), Some(RelationType::TypeReference));
+    }
+
+    fn scored_index_relation_at(
+        caller: u64,
+        callee: u64,
+        relation_type: cce_types::RelationType,
+        call_row_0: usize,
+    ) -> cce_types::ResolvedRelation {
+        let mut relation = scored_index_relation(caller, callee, relation_type, 1);
+        relation.span = cce_types::Span::new(0, 0, call_row_0, 0, call_row_0, 8);
+        relation
+    }
+
+    fn numbered_lines(prefix: &str, count: usize) -> String {
+        (0..count)
+            .map(|i| format!("{prefix} line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn expansion_request(
+        file: &str,
+        start_line: u32,
+        end_line: u32,
+        forward: usize,
+        backward: usize,
+    ) -> ExpansionRequest {
+        ExpansionRequest {
+            file_path: file.to_string(),
+            start_line,
+            end_line,
+            forward_budget: forward,
+            backward_budget: backward,
+            include_callers: backward > 0,
+            domains: vec!["call".to_string()],
+            path_filter: ExpansionPathFilter::default(),
+            primary_score: 0.9,
+            query_terms: Vec::new(),
+            scoring: ExpansionScoring::default(),
+        }
+    }
+
+    #[test]
+    fn test_forward_callsite_window_replaces_callee_body() {
+        use cce_codegraph::index::EntityIndexOps;
+        use cce_types::RelationType;
+
+        // Caller spans 21 lines; the callee body is large on purpose to
+        // prove the window comes from the caller file, not the callee.
+        let base = cce_codegraph::RelationIndex::new();
+        base.add_function_with_path(
+            cce_types::EntityId(1),
+            scored_index_entity(1, "caller", 0, 20),
+            "src/main.rs".to_string(),
+        );
+        base.add_function_with_path(
+            cce_types::EntityId(2),
+            scored_index_entity(2, "big_callee", 0, 60),
+            "src/lib.rs".to_string(),
+        );
+        base.add_resolved_relation(scored_index_relation_at(1, 2, RelationType::DirectCall, 10));
+        let searcher = RelationSearcher::new(std::sync::Arc::new(
+            cce_codegraph::CallChainQuery::from_index(base),
+        ));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("src/main.rs"), numbered_lines("caller", 21))
+            .expect("caller file");
+        std::fs::write(dir.path().join("src/lib.rs"), numbered_lines("callee", 61))
+            .expect("callee file");
+
+        let (forward, backward) = resolve_expansion_units_with_filter(
+            &searcher,
+            dir.path(),
+            expansion_request("src/main.rs", 1, 21, 8, 0),
+        );
+        assert!(backward.is_empty());
+        assert_eq!(forward.len(), 1);
+        let unit = &forward[0];
+        assert_eq!(unit.entity_id, Some(cce_types::EntityId(2)));
+        assert_eq!(unit.name, "big_callee");
+        assert_eq!(unit.file_path, "src/main.rs");
+        assert_eq!((unit.start_line, unit.end_line), (10, 12));
+        assert!(unit.code.contains("caller line 10"));
+        assert!(!unit.code.contains("callee line"));
+        assert!(unit.is_window);
+        assert!(!unit.is_excerpt);
+    }
+
+    #[test]
+    fn test_backward_callsite_window_comes_from_caller_file() {
+        use cce_codegraph::index::EntityIndexOps;
+        use cce_types::RelationType;
+
+        let base = cce_codegraph::RelationIndex::new();
+        base.add_function_with_path(
+            cce_types::EntityId(5),
+            scored_index_entity(5, "caller", 0, 20),
+            "src/main.rs".to_string(),
+        );
+        base.add_function_with_path(
+            cce_types::EntityId(6),
+            scored_index_entity(6, "callee", 0, 5),
+            "src/lib.rs".to_string(),
+        );
+        base.add_resolved_relation(scored_index_relation_at(5, 6, RelationType::DirectCall, 15));
+        let searcher = RelationSearcher::new(std::sync::Arc::new(
+            cce_codegraph::CallChainQuery::from_index(base),
+        ));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("src/main.rs"), numbered_lines("caller", 21))
+            .expect("caller file");
+        std::fs::write(dir.path().join("src/lib.rs"), numbered_lines("callee", 6))
+            .expect("callee file");
+
+        let (forward, backward) = resolve_expansion_units_with_filter(
+            &searcher,
+            dir.path(),
+            expansion_request("src/lib.rs", 1, 6, 0, 8),
+        );
+        assert!(forward.is_empty());
+        assert_eq!(backward.len(), 1);
+        let unit = &backward[0];
+        assert_eq!(unit.entity_id, Some(cce_types::EntityId(5)));
+        assert_eq!(unit.name, "caller");
+        assert_eq!(unit.file_path, "src/main.rs");
+        assert_eq!((unit.start_line, unit.end_line), (15, 17));
+        assert!(unit.code.contains("caller line 15"));
+        assert!(unit.is_window);
+        assert!(!unit.is_excerpt);
+    }
+
+    #[test]
+    fn test_unavailable_span_falls_back_to_full_body() {
+        use cce_codegraph::index::EntityIndexOps;
+        use cce_types::RelationType;
+
+        // A call edge without a source span has no anchor, so the
+        // neighbour's full definition span is kept.
+        let base = cce_codegraph::RelationIndex::new();
+        base.add_function_with_path(
+            cce_types::EntityId(1),
+            scored_index_entity(1, "caller", 0, 9),
+            "src/main.rs".to_string(),
+        );
+        base.add_function_with_path(
+            cce_types::EntityId(2),
+            scored_index_entity(2, "callee", 0, 2),
+            "src/lib.rs".to_string(),
+        );
+        let mut relation = scored_index_relation(1, 2, RelationType::DirectCall, 1);
+        relation.span = cce_types::Span::default();
+        base.add_resolved_relation(relation);
+        let searcher = RelationSearcher::new(std::sync::Arc::new(
+            cce_codegraph::CallChainQuery::from_index(base),
+        ));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("src/main.rs"), numbered_lines("caller", 10))
+            .expect("caller file");
+        std::fs::write(dir.path().join("src/lib.rs"), numbered_lines("callee", 3))
+            .expect("callee file");
+
+        let (forward, _) = resolve_expansion_units_with_filter(
+            &searcher,
+            dir.path(),
+            expansion_request("src/main.rs", 1, 10, 8, 0),
+        );
+        assert_eq!(forward.len(), 1);
+        let unit = &forward[0];
+        assert_eq!(unit.file_path, "src/lib.rs");
+        assert_eq!((unit.start_line, unit.end_line), (1, 3));
+        assert!(unit.code.contains("callee line 0"));
+        assert!(!unit.is_excerpt);
+    }
+
+    #[test]
+    fn test_neighbour_name_fallbacks() {
+        use cce_codegraph::index::EntityIndexOps;
+
+        let base = cce_codegraph::RelationIndex::new();
+        base.add_function_with_path(
+            cce_types::EntityId(1),
+            scored_index_entity(1, "known", 0, 2),
+            "src/main.rs".to_string(),
+        );
+        let searcher = RelationSearcher::new(std::sync::Arc::new(
+            cce_codegraph::CallChainQuery::from_index(base),
+        ));
+        assert_eq!(
+            neighbour_name(&searcher, cce_types::EntityId(1), Some("fallback")),
+            "known"
+        );
+        assert_eq!(
+            neighbour_name(&searcher, cce_types::EntityId(9), Some("fallback")),
+            "fallback"
+        );
+        assert_eq!(
+            neighbour_name(&searcher, cce_types::EntityId(9), None),
+            "entity:9"
+        );
     }
 }
