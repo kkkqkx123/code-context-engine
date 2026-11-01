@@ -14,7 +14,7 @@
 //! (non-call edges, unavailable spans, unreadable windows) fall back to the
 //! full entity span.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use cce_storage_metadb_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
@@ -410,7 +410,7 @@ pub fn resolve_expansion_units_with_filter(
     let options = RelationQueryOptions {
         relation_domains: domains,
         include_external: false,
-        limit: fetch.max(8),
+        limit: (fetch.saturating_mul(4)).clamp(16, 64),
         ..RelationQueryOptions::default()
     };
 
@@ -431,12 +431,12 @@ pub fn resolve_expansion_units_with_filter(
     let seed_set: HashSet<cce_types::EntityId> = seeds.iter().copied().collect();
 
     let mut cache = SourceFileCache::new();
-    let mut forward = Vec::new();
-    let mut seen_forward = HashSet::new();
+    let mut forward_scored: HashMap<
+        cce_types::EntityId,
+        (f32, cce_types::ResolvedRelation, String, usize),
+    > = HashMap::new();
+    let mut forward_discovery: usize = 0;
     for (seed_rank, entity_id) in seeds.iter().enumerate() {
-        if forward.len() >= forward_budget {
-            break;
-        }
         let seed = seed_weight(
             primary_score,
             seed_overlap_ratio(*entity_id, first_row, last_row, snapshot),
@@ -449,9 +449,6 @@ pub fn resolve_expansion_units_with_filter(
             if seed_set.contains(&callee) {
                 continue;
             }
-            if forward.len() >= forward_budget || !seen_forward.insert(callee.0) {
-                continue;
-            }
             if let Some(neighbour_file) = searcher.query().index().get_file_path_by_entity(callee)
                 && !path_filter.allows(&neighbour_file)
             {
@@ -459,35 +456,65 @@ pub fn resolve_expansion_units_with_filter(
             }
             let score = scored_neighbour(searcher, &relation, callee, seed, &query_terms, scoring);
             let name = neighbour_name(searcher, callee, Some(relation.callee_name.as_str()));
-            if let Some(unit) = snippet_unit(
-                searcher,
-                project_root,
-                &mut cache,
-                SnippetParts {
-                    entity_id: callee,
-                    name,
-                    caller_file: file_path.as_str(),
-                    origin: ExpansionOrigin::Forward,
-                    edge_label: "calls",
-                },
-                ScoredEdge {
-                    relation: &relation,
-                    score,
-                },
-                shaping,
-            ) {
-                forward.push(unit);
+            forward_discovery += 1;
+            let discovery = forward_discovery;
+            match forward_scored.get(&callee) {
+                Some((existing_score, _, _, _)) if *existing_score >= score => {}
+                _ => {
+                    forward_scored.insert(callee, (score, relation, name, discovery));
+                }
             }
+        }
+    }
+    let mut forward_ranked: Vec<(
+        cce_types::EntityId,
+        (f32, cce_types::ResolvedRelation, String, usize),
+    )> = forward_scored.into_iter().collect();
+    forward_ranked.sort_by(|a, b| {
+        b.1.0
+            .total_cmp(&a.1.0)
+            .then_with(|| a.1.3.cmp(&b.1.3))
+    });
+    let mut forward = Vec::new();
+    for (callee, (score, relation, name, _)) in &forward_ranked {
+        if forward.len() >= forward_budget {
+            break;
+        }
+        if let Some(unit) = snippet_unit(
+            searcher,
+            project_root,
+            &mut cache,
+            SnippetParts {
+                entity_id: *callee,
+                name: name.clone(),
+                caller_file: file_path.as_str(),
+                origin: ExpansionOrigin::Forward,
+                edge_label: "calls",
+            },
+            ScoredEdge {
+                relation,
+                score: *score,
+            },
+            shaping,
+        ) {
+            forward.push(unit);
         }
     }
 
     let mut backward = Vec::new();
     if include_callers && backward_budget > 0 {
-        let mut seen_backward = HashSet::new();
+        let mut backward_scored: HashMap<
+            cce_types::EntityId,
+            (
+                f32,
+                cce_types::ResolvedRelation,
+                String,
+                String,
+                usize,
+            ),
+        > = HashMap::new();
+        let mut backward_discovery: usize = 0;
         for (seed_rank, entity_id) in seeds.iter().enumerate() {
-            if backward.len() >= backward_budget {
-                break;
-            }
             let seed = seed_weight(
                 primary_score,
                 seed_overlap_ratio(*entity_id, first_row, last_row, snapshot),
@@ -498,46 +525,75 @@ pub fn resolve_expansion_units_with_filter(
                 if seed_set.contains(&caller) {
                     continue;
                 }
-                if backward.len() >= backward_budget || !seen_backward.insert(caller.0) {
-                    continue;
-                }
-                let Some(neighbour_file) = searcher.query().index().get_file_path_by_entity(caller)
+                let Some(neighbour_file) =
+                    searcher.query().index().get_file_path_by_entity(caller)
                 else {
                     continue;
                 };
                 if !path_filter.allows(&neighbour_file) {
                     continue;
                 }
-                let edge_label = if relation.relation_type.is_constructor_call() {
-                    "constructed by"
-                } else {
-                    "called by"
-                };
                 let score =
                     scored_neighbour(searcher, &relation, caller, seed, &query_terms, scoring);
                 let name = neighbour_name(searcher, caller, None);
-                // The callsite lives in the caller file, so the neighbour
-                // file already resolved for the path filter doubles as the
-                // window file; no second snapshot lookup is needed.
-                if let Some(unit) = snippet_unit(
-                    searcher,
-                    project_root,
-                    &mut cache,
-                    SnippetParts {
-                        entity_id: caller,
-                        name,
-                        caller_file: neighbour_file.as_str(),
-                        origin: ExpansionOrigin::Backward,
-                        edge_label,
-                    },
-                    ScoredEdge {
-                        relation: &relation,
-                        score,
-                    },
-                    shaping,
-                ) {
-                    backward.push(unit);
+                backward_discovery += 1;
+                let discovery = backward_discovery;
+                match backward_scored.get(&caller) {
+                    Some((existing_score, _, _, _, _)) if *existing_score >= score => {}
+                    _ => {
+                        backward_scored.insert(
+                            caller,
+                            (score, relation, name, neighbour_file, discovery),
+                        );
+                    }
                 }
+            }
+        }
+        let mut backward_ranked: Vec<(
+            cce_types::EntityId,
+            (
+                f32,
+                cce_types::ResolvedRelation,
+                String,
+                String,
+                usize,
+            ),
+        )> = backward_scored.into_iter().collect();
+        backward_ranked.sort_by(|a, b| {
+            b.1.0
+                .total_cmp(&a.1.0)
+                .then_with(|| a.1.4.cmp(&b.1.4))
+        });
+        for (caller, (score, relation, name, neighbour_file, _)) in &backward_ranked {
+            if backward.len() >= backward_budget {
+                break;
+            }
+            let edge_label = if relation.relation_type.is_constructor_call() {
+                "constructed by"
+            } else {
+                "called by"
+            };
+            // The callsite lives in the caller file, so the neighbour
+            // file already resolved for the path filter doubles as the
+            // window file; no second snapshot lookup is needed.
+            if let Some(unit) = snippet_unit(
+                searcher,
+                project_root,
+                &mut cache,
+                SnippetParts {
+                    entity_id: *caller,
+                    name: name.clone(),
+                    caller_file: neighbour_file.as_str(),
+                    origin: ExpansionOrigin::Backward,
+                    edge_label,
+                },
+                ScoredEdge {
+                    relation,
+                    score: *score,
+                },
+                shaping,
+            ) {
+                backward.push(unit);
             }
         }
     }
@@ -1492,5 +1548,56 @@ mod tests {
             neighbour_name(&searcher, cce_types::EntityId(9), None),
             "entity:9"
         );
+    }
+
+    #[test]
+    fn test_forward_global_score_order_across_seeds() {
+        use cce_codegraph::index::EntityIndexOps;
+        use cce_types::RelationType;
+
+        let base = cce_codegraph::RelationIndex::new();
+        base.add_function_with_path(
+            cce_types::EntityId(1),
+            scored_index_entity(1, "seed_early", 0, 2),
+            "src/main.rs".to_string(),
+        );
+        base.add_function_with_path(
+            cce_types::EntityId(2),
+            scored_index_entity(2, "seed_late", 0, 2),
+            "src/main.rs".to_string(),
+        );
+        base.add_function_with_path(
+            cce_types::EntityId(10),
+            scored_index_entity(10, "weak_callee", 0, 2),
+            "src/lib.rs".to_string(),
+        );
+        base.add_function_with_path(
+            cce_types::EntityId(11),
+            scored_index_entity(11, "strong_callee", 0, 2),
+            "src/lib.rs".to_string(),
+        );
+        base.add_resolved_relation(scored_index_relation(1, 10, RelationType::DirectCall, 1));
+        base.add_resolved_relation(scored_index_relation(2, 11, RelationType::DirectCall, 4));
+        let searcher = RelationSearcher::new(std::sync::Arc::new(
+            cce_codegraph::CallChainQuery::from_index(base),
+        ));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("src/main.rs"), numbered_lines("seed", 3))
+            .expect("seed file");
+        std::fs::write(
+            dir.path().join("src/lib.rs"),
+            "fn weak_callee() {}\nfn strong_callee() {}\nfn tail() {}\n",
+        )
+        .expect("neighbour file");
+
+        let (forward, _) = resolve_expansion_units_with_filter(
+            &searcher,
+            dir.path(),
+            expansion_request("src/main.rs", 1, 3, 1, 0),
+        );
+        assert_eq!(forward.len(), 1);
+        assert_eq!(forward[0].entity_id, Some(cce_types::EntityId(11)));
     }
 }
