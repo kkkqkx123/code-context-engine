@@ -12,6 +12,7 @@ use crate::symbol_table::ResolutionContext;
 use crate::symbol_table::project::OverloadContext;
 
 use cce_types::entity::EntityId;
+use cce_types::entity::EntityKind;
 use cce_types::{ParsedFile, language::Language};
 use std::collections::HashMap;
 
@@ -188,11 +189,7 @@ impl RelationResolver {
         let resolved_entity_id: Option<EntityId> = symbol_ref
             .as_ref()
             .and_then(|symbol_ref| {
-                // Try to find EntityId from local symbols first
-                parsed
-                    .local_symbols
-                    .get(name)
-                    .and_then(|ids| ids.first().copied())
+                Self::local_definition_id(parsed, name)
                     .map(to_global_id)
                     .or_else(|| {
                         // Qualified names (`obj.method`, `Foo::new`) do
@@ -207,11 +204,7 @@ impl RelationResolver {
                         }
                         self.last_segment_for_resolution(name, is_stdlib)
                             .and_then(|last| {
-                                parsed
-                                    .local_symbols
-                                    .get(last)
-                                    .and_then(|ids| ids.first().copied())
-                                    .map(to_global_id)
+                                Self::local_definition_id(parsed, last).map(to_global_id)
                             })
                     })
                     .or_else(|| {
@@ -331,5 +324,20 @@ impl RelationResolver {
                 is_stdlib,
                 receiver_type_known,
             )
+    }
+
+    fn local_definition_id(parsed: &ParsedFile, name: &str) -> Option<EntityId> {
+        let ids = parsed.local_symbols.get(name)?;
+        for id in ids {
+            let is_import = parsed
+                .entities
+                .iter()
+                .find(|entity| entity.id == *id)
+                .is_some_and(|entity| entity.kind == EntityKind::Import);
+            if !is_import {
+                return Some(*id);
+            }
+        }
+        None
     }
 }

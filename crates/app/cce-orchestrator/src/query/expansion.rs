@@ -422,6 +422,7 @@ pub fn resolve_expansion_units_with_filter(
         overlap_len(*a, first_row, last_row, snapshot)
             .cmp(&overlap_len(*b, first_row, last_row, snapshot))
             .reverse()
+            .then_with(|| span_len(*a, snapshot).cmp(&span_len(*b, snapshot)))
             .then_with(|| a.0.cmp(&b.0))
     });
     seeds.truncate(shaping.max_seeds.max(1));
@@ -644,6 +645,19 @@ fn seed_overlap_ratio(
 }
 
 /// Overlap length between an entity span and the hit row range.
+fn span_len(
+    entity_id: cce_types::EntityId,
+    snapshot: &cce_codegraph::LayeredSnapshotIndex,
+) -> u64 {
+    use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
+    snapshot
+        .get_function_by_entity_id(entity_id)
+        .map(|entity| {
+            entity.span.end_byte.saturating_sub(entity.span.start_byte) as u64
+        })
+        .unwrap_or(u64::MAX)
+}
+
 fn overlap_len(
     entity_id: cce_types::EntityId,
     first_row: usize,

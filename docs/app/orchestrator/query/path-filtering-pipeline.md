@@ -2,424 +2,172 @@
 
 ## 1. 概述
 
-本文档描述 `code-context-engine` 查询功能中的文件路径过滤机制。路径过滤分布在两个阶段：**检索阶段**（向量存储层过滤）和 **后处理阶段**（结果集层面的应用层过滤），形成双层过滤流水线。
+本文档描述 code-context-engine 查询链路中的文件路径过滤机制。过滤已重构为**多层下推**结构：epoch 视图与内容类型排除下推到存储层（向量后端与 BM25 索引），Glob 过滤前移到检索策略内部并配合超量召回回填（over-fetch refill），SQLite enrichment 在融合之后对存活候选集一次性执行。
 
 ### 核心目标
 
-- 允许用户按目录和预定义内容类型（测试/生成/第三方）过滤搜索结果
-- 支持灵活的 Glob 模式自定义包含/排除规则
-- 对不同检索策略（向量、BM25、混合）提供一致的过滤行为
+- 允许按目录前缀、预定义内容类型（测试/生成/第三方）与文件类别（category）过滤结果
+- 支持用户自定义 Glob 包含/排除规则，且在融合与 enrichment **之前**生效，避免无效候选进入后续阶段
+- 保证所有查询只能看到已发布 generation 的 epoch 视图（版本隔离）
 
 ---
 
 ## 2. 请求路径总览
 
 ```
-SearchRequest (HTTP API)
+SearchRequest (API)
     │
-    ▼
-handle_search()                         ← src/api/handlers/search.rs
-    │  • 验证 Glob 模式合法性 (validate_glob_patterns)
-    │  • 解析 query_type → SearchSources
-    │  • 映射 FilterOptions → QueryOptions
     ▼
 Searcher::search()
-    │
+    │  每请求一次：load_active_query_filter(_from_store)
+    │  → QueryFilter { own_epoch, parent_epoch, excluded_files }
     ▼
 execute_search_flow()
     │
-    ├─ Step 1: Retrieval (检索) ─────────────────── 存储层过滤
-    │   ├─ HybridFusion  → Qdrant 过滤器 (filter.must / must_not)
-    │   ├─ VectorOnly    → Qdrant 过滤器
-    │   └─ Bm25Only      → SQLite 回填 file_path
+    ├─ Step 1: Retrieval（检索策略内部过滤）────────────
+    │   ├─ DenseStrategy   → SearchFilter 下推（epoch/排除文件/目录/类别）
+    │   └─ Bm25Strategy    → FulltextSearchOptions 下推 + 策略内 GlobFilter
     │
-    ├─ Step 2: BM25 Consensus Fusion
-    ├─ Step 3: Score Normalization
+    ├─ Step 2: Hybrid 融合（dense + bm25 在融合层组合，无独立 hybrid 策略）
+    │   └─ expand_multi_entity_results → fuse_hybrid_results
     │
-    └─ Step 4: Post-processing ───────────────────── 应用层过滤
-        ├─ 4.1 Reranking      (LLM reranker)
-        ├─ 4.2 Score Sorting  (ScoreSorter)
-        ├─ 4.3 Threshold      (ThresholdFilter)
-        └─ 4.4 Glob Filter    (GlobFilter) ← include_patterns / exclude_patterns
+    ├─ Step 3: 可选分数归一化（config.score.enable）
+    │
+    ├─ Step 4: SQLite enrichment（对存活候选集一次性回填）
+    │
+    └─ Step 5: 后处理（rerank → sort → threshold filter → 标注）
 ```
+
+过滤位置与旧版的关键差异：Glob 过滤不再位于后处理流水线末端，而是在**检索策略内部**、在融合与 enrichment 之前执行。
 
 ---
 
-## 3. 过滤字段总览
+## 3. QueryFilter：epoch 视图下推
 
-| 字段 | API 类型 | 作用范围 | 实现层 | 过滤方式 |
-|------|---------|---------|--------|---------|
-| `directory_prefix` | `Option<String>` | 向量搜索 | Qdrant `must[].wildcard` | 目录边界通配匹配（`{prefix}/*`） |
-| `exclude_content_types` | `Vec<ExcludableContentType>` | 向量搜索 | Qdrant `must_not[].wildcard` | Wildcard 排除 |
-| `include_patterns` | `Vec<String>` | 全部策略 | GlobFilter (globset) | Post-retrieval |
-| `exclude_patterns` | `Vec<String>` | 全部策略 | GlobFilter (globset) | Post-retrieval |
+**文件**：`crates/app/cce-orchestrator/src/query/filter.rs`
 
-### 3.1 字段间交互关系
+`QueryFilter` 携带活动发布的完整可见视图：
 
-```
-                      QueryOptions
-                     ┌───────────┐
-                     │directory_prefix│───→ Qdrant must match (向量层)
-                     │exclude_content │───→ Qdrant must_not   (向量层)
-                     │include_patterns│───→ GlobFilter include (应用层)
-                     │exclude_patterns│───→ GlobFilter exclude (应用层)
-                     └───────────┘
+- `own_epoch`：活动 generation 自身写入的数据 epoch
+- `parent_epoch`：继承的父 generation（其行保持可见，除非被覆盖）
+- `excluded_files`：在 `generation_overrides` 中登记的文件，其父代行不可见
 
- 向量层过滤条件 = must(directory wildcard)
-                 AND must_not(content_type_exclude)
+可见数据 = 自有行 ∪ 父代行 − 被覆盖文件。视图每次请求从 SQLite 活动清单（或经 `RelationStore` 的后端中立契约）重新推导，不做进程内缓存，保证发布切换（adopt/rollback）对下一次查询立即可见。
 
- 应用层过滤条件 = (include_patterns 为空 OR 匹配至少一个)
-                 AND (exclude_patterns 为空 OR 不匹配任何模式)
-```
+两个下推入口：
+
+- `to_search_filter()`：构造携带完整 epoch 视图的 `cce_storage_common::SearchFilter`（`epochs` + `excluded_files`），用于向量检索。
+- `apply_to_search_filter(filter)`：把 epoch 视图合并进已存在的 `SearchFilter`（覆盖原有 epoch 字段）。
+
+BM25 侧不经过 `SearchFilter`，而是由 `Bm25Strategy` 把 `query_filter.epochs()` 与 `excluded_files()` 直接写入 `FulltextSearchOptions`。
 
 ---
 
-## 4. 数据流分层详解
+## 4. 检索策略与过滤下推
 
-### 4.1 请求层 → 查询选项映射
+检索策略位于 `crates/app/cce-orchestrator/src/query/retrieval/strategies/`，只有两个实现：`dense.rs` 与 `bm25.rs`，由 `strategy_enum.rs` 的 `RecallAlgorithm::{Dense, Bm25}` 静态分发。**不存在 hybrid.rs**：混合检索由融合层把 dense 与 bm25 两条召回组合，策略层只负责单路径召回。
 
-**文件**: `src/api/handlers/search.rs` (L48-241)
+### 4.1 Dense 策略
 
-`handle_search()` 将 `SearchRequest` 转换为 `QueryOptions`：
+**文件**：`strategies/dense.rs`
 
-```rust
-// 关键映射：
-request.directory_prefix  → query_opts.with_directory_prefix(prefix)
-request.exclude_patterns  → query_opts.with_exclude_patterns(patterns)
-request.include_patterns  → query_opts.with_include_patterns(patterns)
-request.exclude_content_types → query_opts.add_exclude_content_type(...)
-```
+策略内部 `build_search_filter()` 直接构造 `cce_storage_common::SearchFilter`：
 
-输入验证（搜索前执行）：
-- `validate_glob_patterns()` — 校验 Glob 语法
+| 字段 | 来源 |
+|---|---|
+| `group_id` | 项目作用域 `project_group_id()` |
+| `point_type` | 固定 `PointKind::Chunk` |
+| `directory_prefix` | `options.directory_prefix` |
+| `exclude_test` / `exclude_generated` / `exclude_dependency` | `exclude_content_types` 是否含对应 `ExcludableContentType` |
+| `include_categories` / `exclude_categories` | `QueryOptions.include_categories` / `exclude_categories` |
+| `epochs` / `excluded_files` | 经 `query_filter.apply_to_search_filter()` 注入 |
+| `raw_filter` | 恒为 `None`（见 4.3） |
 
-### 4.2 检索阶段过滤
+随后以超量召回（over-fetch）弥补 Glob 过滤的候选损失：仅当存在 include/exclude Glob 模式时按 `GLOB_OVER_FETCH_FACTOR = 3`（且至少 `top_k + 20`）超取，策略内 `apply_strategy_filters()` 用 `GlobFilter` 本地过滤后截断回 `top_k`。内容类型排除是已索引的标记，直接下推到存储层，无需超取。
 
-#### 4.2.1 Hybrid 混合检索
+底层检索在 `retrieval/core/dense.rs` 的 `DenseRetrieval::search()`，把 `SearchFilter` 附着到 `DenseSearchQuery` 交给向量后端（后端翻译为原生过滤谓词或 Qdrant filter JSON）。
 
-**文件**: `src/orchestrator/query/retrieval/strategies/hybrid.rs`
+### 4.2 BM25 策略
 
-混合检索构建完整的 Qdrant 过滤器，同时用于 Dense + Sparse 搜索：
+**文件**：`strategies/bm25.rs`
 
-```rust
-// 1. 从 QueryOptions 构建 FilterOptions（统一了路径和内容类型过滤）
-let filter_options = options.to_filter_options();
+BM25 召回侧同样应用过滤：构造 `cce_storage_common::FulltextSearchOptions`，携带 `project_id`、`epochs`、`excluded_files`、`exclude_test/generated/dependency`、`include_categories/exclude_categories`、`field_weights`、`term_operator`，经 `FulltextStorage` 契约执行搜索（本地 Tantivy 与远程 search-service 分支共享同一读路径）。epoch 过滤与被覆盖文件排除在 BM25 索引内部以 `BooleanQuery` 组合完成（见 tantivy 文档）。
 
-// 2. 将 FilterOptions 编译为 Qdrant JSON filter
-let qdrant_filter = VectorRetrieval::build_search_filter_from_options(&filter_options);
+召回侧超取：存在 Glob 模式或 `directory_prefix` 时按 3 倍（至少 `+20`，上限 200）超取。策略内 `apply_bm25_strategy_filters()` 依次执行：
 
-// 3. 通过 raw_filter 传递给 QdrantRetrieval
-let filter = qdrant_filter.map(|raw| SearchFilter {
-    directory_prefix: options.directory_prefix.clone(),
-    raw_filter: Some(raw),
-});
+1. `GlobFilter`（include/exclude 模式）
+2. `term_weight_threshold` 召回侧成本阀（原始词权重域，默认 0.0 关闭）
+3. `directory_prefix_allows`：BM25 索引无前缀字段，目录前缀在查询时按规范化路径做斜杠边界前缀检查
+4. 截断回 `base_limit`
 
-// 4. Dense + Sparse 并行搜索使用同一过滤器
-let (dense_results, sparse_results) = tokio::join!(
-    qdrant.search_dense(DenseSearchQuery { vector, limit, filter: filter.clone() }),
-    qdrant.search_sparse(SparseSearchQuery { sparse_vector, limit, filter }),
-);
-```
+### 4.3 raw_filter：调试逃生口
 
-生成的 Qdrant 过滤器 JSON 结构示例（`directory_prefix` 经规范化后按目录边界匹配）：
+`SearchFilter.raw_filter` 是面向后端调试的原始过滤器逃生口。业务查询路径被显式拒绝：`DenseRetrieval::search()`（`retrieval/core/dense.rs`）开头调用 `filter.is_business_query()`，携带 `raw_filter` 的请求返回 `QueryError::InvalidQuery`。业务代码一律通过结构化字段构造过滤器。
 
-```json
-{
-    "must": [
-        {"key": "file_path", "wildcard": "src/main/*"}
-    ],
-    "must_not": [
-        {"key": "file_path", "wildcard": "*test*"},
-        {"key": "file_path", "wildcard": "*vendor/*"}
-    ]
-}
-```
+---
 
-#### 4.2.2 纯向量检索 (VectorOnly)
+## 5. Glob 过滤的位置与实现
 
-通过 `Searcher::build_filter_options()` 构建 `FilterOptions`，然后调用 `VectorRetrieval::search()` → `build_search_filter_from_options()` 生成同样的 Qdrant 过滤器。
+**文件**：`crates/app/cce-orchestrator/src/query/retrieval/post_processing/glob_filter.rs`
 
-**注意**: 纯向量检索通过传统的 `VectorRetrieval` API（HTTP 直接调用 Qdrant），而 Hybrid 通过 `QdrantRetrieval`（trait 实现）。两者最终使用相同的 `build_search_filter_from_options()` 构建过滤器。
-
-#### 4.2.3 BM25 纯文本检索
-
-**文件**: `src/orchestrator/query/retrieval/strategies/bm25_only.rs`
-
-BM25 索引将 `file_path` 视为遗留字段（不索引），路径数据来自 SQLite `ChunkRecord`：
-
-```rust
-// 1. 从 BM25 获取 chunk_ids
-let chunk_ids: Vec<String> = bm25_results.iter().map(|r| r.document_id.clone()).collect();
-
-// 2. EntityMapper 从 SQLite 批量查询
-let chunk_records = EntityMapper::get_chunk_records(&conn, &chunk_ids, pid)?;
-
-// 3. 构建 SearchResult 时，优先从 SQLite 获取 file_path
-let file_path = chunk_records
-    .get(&r.document_id)
-    .map(|chunk| chunk.file_path.clone())
-    .unwrap_or_else(|| r.fields.get("file_path").cloned().unwrap_or_default());
-```
-
-**关键**: BM25 检索**不由存储层过滤路径** — 所有过滤依赖于后处理阶段的 `GlobFilter`。
-
-### 4.3 SQLite 回填文件路径
-
-**文件**: `src/orchestrator/query/retrieval/strategies/entity_mapper.rs`
-
-`EntityMapper::enrich_from_chunk()` 确保所有检索策略的结果最终都有正确的 `file_path`：
-
-```rust
-pub fn enrich_from_chunk(result: &mut SearchResult, chunk_records: &HashMap<String, ChunkRecord>) {
-    if let Some(chunk) = chunk_records.get(&result.id) {
-        result.snippet = Some(chunk.raw_code.clone());
-        result.content = chunk.raw_code.clone();
-        result.file_path = chunk.file_path.clone();   // ← 回填 file_path
-        result.start_line = chunk.start_line as u32;
-        result.end_line = chunk.end_line as u32;
-        result.kind = chunk.chunk_type.clone();
-        // ...
-    }
-}
-```
-
-该函数在以下检索策略的末尾被调用：
-- **HybridRetrieval** — 对融合后结果逐条回填
-- **Bm25OnlyRetrieval** — 在 `SearchResult` 构造时直接使用，并再次通过 enrichment 确保正确
-- **VectorOnlyRetrieval** — 同样通过 enrichment 回填
-
-### 4.4 后处理阶段 Glob 过滤
-
-**文件**: `src/orchestrator/query/ranking/glob_filter.rs`
-
-在后处理流水线的最后一步（Step 5.4），对所有检索策略的结果统一应用 Glob 过滤：
-
-```rust
-// Searcher::execute_search_flow() 中:
-let glob_filtered_results = self
-    .glob_filter
-    .apply(final_results, &options.include_patterns, &options.exclude_patterns)?;
-```
-
-**GlobFilter 行为**：
+`GlobFilter` 使用 `globset::GlobSet` 把所有模式编译为单个 DFA，对结果 `file_path` 执行匹配：
 
 | 条件 | 行为 |
 |------|------|
-| `include_patterns` 为空, `exclude_patterns` 为空 | 全部结果通过 |
-| `include_patterns` 非空, `exclude_patterns` 为空 | 只保留匹配至少一个 include 模式的结果 |
-| `include_patterns` 为空, `exclude_patterns` 非空 | 移除匹配任意 exclude 模式的结果 |
-| 两者均非空 | include 筛选后移除 exclude 匹配项 |
+| include 与 exclude 均为空 | 全部通过（快速路径） |
+| include 非空 | 只保留匹配至少一个 include 模式的结果 |
+| exclude 非空 | 移除匹配任意 exclude 模式的结果 |
+| 两者均非空 | include 筛选后再排除 |
 
-**实现**: 使用 `globset::GlobSet` 编译所有模式为 DFA，对所有结果的 `file_path` 字段执行 `is_match()`。
-
-**性能**: GlobMatch 复杂度为 O(n × m)，其中 n 为结果数，m 为模式数。GlobSet 内部将多模式编译为单个 DFA，单次匹配复杂度接近 O(len(path))。
+**管线位置**：Glob 过滤在检索策略内部执行（dense 的 `apply_strategy_filters`、bm25 的 `apply_bm25_strategy_filters`），配合超取回填被过滤掉的名额，发生在融合与 enrichment **之前**；`GlobFilter::apply` 的直接调用仅保留给绕过策略的调用方作为兜底。
 
 ---
 
-## 5. Qdrant 过滤器构建
+## 6. SQLite enrichment
 
-**文件**: `src/orchestrator/query/retrieval/vector.rs` — `build_search_filter_from_options()` (L269-428)
+**文件**：`crates/app/cce-orchestrator/src/query/searcher/searcher_core.rs`
 
-构建逻辑：
-
-```
-Algorithm build_qdrant_filter(options):
-    must = []
-    must_not = []
-
-    // directory_prefix → must wildcard（目录边界匹配）
-    // 前缀先经 normalize_project_path 规范化（折叠 .、解析 ..），
-    // 再生成 {prefix}/* 通配符；空前缀退化为 *
-    if options.directory_prefix:
-        normalized = normalize(directory_prefix)
-        must.push({key: "file_path", wildcard: "{normalized}/*"})
-
-    // exclude_content_types → must_not wildcard
-    for each exclude_type in options.exclude_content_types:
-        match exclude_type:
-            Test → add wildcard patterns for test files
-            Generated → add wildcard patterns for generated files
-            Vendor → add wildcard patterns for vendor files
-
-    return {must, must_not} if non-empty
-```
-
-### `SearchFilter` 传递链：
-
-```rust
-// 存储层接口 (src/storage/vector_retrieval.rs)
-pub struct SearchFilter {
-    pub directory_prefix: Option<String>,
-    pub raw_filter: Option<serde_json::Value>,  // 预构建的完整 Qdrant 过滤器 JSON
-}
-
-// QdrantRetrieval 使用 (src/storage/qdrant/retrieval.rs)
-fn build_filter(filter: Option<&SearchFilter>) -> Option<serde_json::Value> {
-    filter.and_then(|f| {
-        if let Some(raw) = &f.raw_filter {
-            return Some(raw.clone());  // 优先使用 raw_filter（包含完整过滤条件）
-        }
-        // 降级到 directory_prefix 的 wildcard 目录边界过滤
-        f.directory_prefix.as_ref().map(|prefix| {
-            json!({"must": [{"key": "file_path", "wildcard": "{normalized}/*"}]})
-        })
-    })
-}
-```
+enrichment（内容、snippet、行号、实体映射回填）是融合之后、后处理之前的最后一个数据塑形步骤。融合与过滤只需索引携带字段（分数、entity/segment id、file_path），因此昂贵的 SQLite 内容查找只对存活候选集执行一次。hybrid 流程中：多实体展开 → 融合 → 归一化 → enrichment → 后处理（rerank、排序、阈值过滤、标注）。
 
 ---
 
-## 6. 检索策略覆盖矩阵
+## 7. 类别与内容类型
 
-| 过滤字段 | VectorOnly | Hybrid | Bm25Only |
-|---------|-----------|--------|----------|
-| `directory_prefix` | ✅ Qdrant wildcard | ✅ Qdrant wildcard | 仅 Glob 过滤 |
-| `exclude_content_types` | ✅ Qdrant must_not | ✅ Qdrant must_not | 仅 Glob 过滤 |
-| `include_patterns` | ✅ GlobFilter | ✅ GlobFilter | ✅ GlobFilter |
-| `exclude_patterns` | ✅ GlobFilter | ✅ GlobFilter | ✅ GlobFilter |
+**文件**：`crates/app/cce-orchestrator/src/query/types/query_options.rs`
 
-- ✅ **向量检索**（VectorOnly + Hybrid）在 Qdrant 层完成精确过滤，结果准确且高效
-- ⚠️ **BM25Only** 的路径过滤完全依赖后处理的 GlobFilter，在数据量大时结果数可能远多于预期
+- `ExcludableContentType` 枚举为 `{ Test, Generated, Dependency }`，`matches_path()` 对规范化项目相对路径做模式匹配。
+- `QueryOptions` 新增 `include_categories: Vec<FileCategory>` 与 `exclude_categories: Vec<FileCategory>`，与内容类型排除一起下推到向量 `SearchFilter` 与 BM25 `FulltextSearchOptions`。
 
----
+### 覆盖矩阵（当前）
 
-## 7. 验证与错误处理
-
-### 7.1 输入验证
-
-| 验证 | 位置 | 检查内容 |
-|------|------|---------|
-| Glob 语法校验 | `search.rs` → `validate_glob_patterns()` | `*?[]{}!` 等特殊字符的合法性 |
-| 查询非空 | `search.rs` | query 不可为空或空白 |
-| Limit 上限 | `search.rs` | 最大 100 |
-
-### 7.2 运行时错误处理
-
-| 错误场景 | 处理方式 |
-|---------|---------|
-| Glob 编译失败 | 返回 `QueryError::invalid()`，包含具体模式错误信息 |
-| SQLite 连接失败 | 记录 warning，回退到 BM25 fields 中的 file_path |
-| Qdrant 查询失败 | 返回 `QueryError::Vector` 或 `QueryError::Bm25` |
+| 过滤字段 | Dense | BM25 | 生效位置 |
+|---------|-------|------|---------|
+| epoch 视图 / excluded_files | ✅ 下推 | ✅ 下推（索引内 BooleanQuery） | 存储层 |
+| `directory_prefix` | ✅ 下推 | ✅ 查询时前缀检查（配合超取） | 策略/存储层 |
+| `exclude_test/generated/dependency` | ✅ 下推 | ✅ 下推 | 存储层 |
+| `include/exclude_categories` | ✅ 下推 | ✅ 下推 | 存储层 |
+| include/exclude Glob 模式 | ✅ 策略内 GlobFilter + 超取 | ✅ 策略内 GlobFilter + 超取 | 策略层（融合前） |
 
 ---
 
-## 8. 潜在问题与注意事项
+## 8. 验证与错误处理
 
-### 8.1 双重路径过滤（向量检索）
-
-对于向量检索，路径可能被过滤两次：
-1. **Qdrant 层**：`directory_prefix` 和 `exclude_content_types` 通过 match/wildcard 过滤
-2. **GlobFilter 层**：`include_patterns`/`exclude_patterns` 再次过滤
-
-这可能导致 `include_patterns` 与 `directory_prefix` 组合使用时，`include_patterns` 的作用域被 `directory_prefix` 预先缩小。属于**预期的叠加效果**而非 Bug。
-
-### 8.2 BM25 无存储层过滤
-
-BM25 检索不应用任何 Qdrant 风格的过滤器。这意味着：
-- 如果有大量文档的 BM25 分数超过 `bm25_min_score`，`GlobFilter` 可能丢弃大部分结果
-- `directory_prefix` 对 BM25 检索仅为软约束（通过 GlobFilter）
-
-### 8.3 双重排除机制
-
-有两个途径可以实现排除：
-- `exclude_content_types` — 预定义的硬编码 wildcard 模式（测试/生成/第三方）
-- `exclude_patterns` — 用户自定义 Glob 模式
-
-两者语义重叠但可独立共存，最终效果为所有排除规则的并集。
-
-### 8.4 路径大小写敏感性
-
-当前实现假定文件路径大小写敏感（Linux 默认行为）。在 Windows 平台，Qdrant 的 `match` 和 `wildcard` 操作默认大小写敏感，可能导致遗漏匹配。
-
-### 8.5 directory_prefix 语义与限制
-
-`directory_prefix` 在 Qdrant 中使用 wildcard 进行**目录边界匹配**（`{prefix}/*`）：
-
-- 前缀会先经 `normalize_project_path` 规范化（`\`→`/`、折叠 `.`、解析 `..`）。
-- 目录边界语义确保 `docs` 不会误匹配 `docs2/` 下的文件。
-- **通配符限制**：Qdrant wildcard 不支持转义，前缀本身含 `*`/`?`/`[` 时会被当作通配符解释（如目录名含 `*` 会破坏过滤语义），属用户输入约束。
-- **文件级匹配**：若需对单个文件或更复杂的路径模式过滤，请使用 `include_patterns`/`exclude_patterns`（GlobFilter 层）。
-- 对极深路径（>5 层），需注意前缀范围可能过窄，从而导致结果为空。
+| 场景 | 处理 |
+|------|------|
+| Glob 编译失败 | `GlobFilter::apply` 返回 `QueryError::invalid()`；策略侧对错误模式 `unwrap_or_default()` 降级为空结果 |
+| 业务路径携带 raw_filter | `DenseRetrieval::search` 直接拒绝（`QueryError::InvalidQuery`） |
+| BM25 运行时失败（I/O、损坏 segment 等） | `classify_bm25_error` 归类为可重试 `QueryError::Retryable`；配置类错误（如 BM25 未启用）为 `Config` |
+| SQLite 连接失败 | enrichment 记录告警，保留索引携带字段 |
 
 ---
 
-## 9. 测试覆盖
+## 9. 注意事项
 
-### 单元测试
-
-| 测试文件 | 测试项 | 数量 |
-|---------|--------|------|
-| `ranking/glob_filter.rs` | include/exclude 组合、空结果、无匹配 | 6 |
-| `retrieval/strategies/mod.rs` | 过滤器构建 | 2+ |
-| `qdrant/retrieval.rs` | SearchFilter 构建 | 2 |
-| `types/query_options.rs` | 序列化、构建器 | 8+ |
-
-### 关键测试场景
-
-```
-include_patterns=["src/**"] → 只保留 src/ 下的结果
-exclude_patterns=["tests/**"] → 排除 tests/ 下的结果
-include=["**/*.rs"] + exclude=["**/lib.rs"] → 所有 .rs 文件排除 lib.rs
-include 为空 + exclude 为空 → 全部通过
-include=["*.py"] + 结果都是 .rs → 空结果
-空结果列表 → 空结果
-```
+1. **内容类型排除与 Glob 排除语义可叠加**：前者是索引标记的下推过滤，后者是策略层模式过滤，最终效果为所有排除规则的并集。
+2. **include_patterns 与 directory_prefix 组合**：目录前缀先缩小候选域，Glob 在其结果上过滤，属预期的叠加。
+3. **超取上限**：BM25 侧超取有 200 的硬上限，极端过滤条件下可能回填不足。
+4. **路径大小写敏感性**：沿用文件系统语义（Linux 大小写敏感）；GlobSet 匹配对大小写敏感。
 
 ---
 
-## 10. 架构图
-
-```
-┌───────────────┐
-│  SearchRequest │  directory_prefix, exclude_content_types,
-│  (API)         │  include_patterns, exclude_patterns
-└───────┬───────┘
-        │
-        ▼
-┌───────────────────────────────────────┐
-│  handle_search()                      │
-│  • 验证 Glob 语法                     │
-│  • 映射到 QueryOptions                │
-└───────────────┬───────────────────────┘
-                │
-                ▼
-┌──────────────────────────────────────────────────────────────┐
-│  execute_search_flow()                                       │
-│                                                              │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
-│  │  HybridFusion   │  │  VectorOnly     │  │  Bm25Only   │  │
-│  │  ↓              │  │  ↓              │  │  ↓          │  │
-│  │ Qdrant filter   │  │ Qdrant filter   │  │ SQLite      │  │
-│  │ (must/must_not) │  │ (must/must_not) │  │ file_path   │  │
-│  └────────┬────────┘  └────────┬────────┘  └──────┬──────┘  │
-│           │                    │                   │         │
-│           └────────┬───────────┴───────────────────┘         │
-│                    │                                          │
-│                    ▼                                          │
-│           ┌──────────────────┐                               │
-│           │  EntityMapper    │ ← SQLite ChunkRecord 回填     │
-│           │  enrich_from_    │    (snippet, content,         │
-│           │  chunk()         │     file_path, line numbers)  │
-│           └────────┬─────────┘                               │
-│                    │                                          │
-│                    ▼                                          │
-│           ┌──────────────────┐                               │
-│           │  Post-processing │                               │
-│           │  5.1 Rerank      │                               │
-│           │  5.2 Sort        │                               │
-│           │  5.3 Threshold   │                               │
-│           │  5.4 GlobFilter  │ ← include/exclude patterns    │
-│           └────────┬─────────┘                               │
-│                    │                                          │
-│                    ▼                                          │
-│           ┌──────────────────┐                               │
-│           │  SearchResult    │                               │
-│           └──────────────────┘                               │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
-*文档日期: 2025-07*  
-*最后更新: 2025-07*  
-*相关分析: [docs/analysis/file-path-filtering-analysis.md](../../analysis/file-path-filtering-analysis.md)*
+*相关文档：[hybrid-fusion-design.md](hybrid-fusion-design.md)、[tantivy-path-filter-capability.md](tantivy-path-filter-capability.md)*

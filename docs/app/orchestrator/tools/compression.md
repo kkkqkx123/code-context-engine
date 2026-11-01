@@ -2,22 +2,23 @@
 
 ## 概述
 
-语义压缩模块 (`src/orchestrator/query/tools/compression`) 提供代码文件的按需语义压缩功能,面向外部 API,为人和 LLM 提供可读的语义化文本。
+语义压缩模块（`crates/app/cce-orchestrator/src/tools/compression.rs` + `compression/types.rs`，单文件实现，无 `compression/` 目录）提供代码文件的按需语义压缩功能,面向外部 API,为人和 LLM 提供可读的语义化文本。
 
 ## 核心特性
 
 - **纯语义输出**: 仅生成纯自然语言描述,移除所有代码符号
 - **按需处理**: 单文件处理,不执行向量嵌入、不缓存、不存储
-- **缓存复用**: 优先使用已索引项目的缓存数据
-- **批处理支持**: 支持并发处理多个文件
+- **无缓存查询**: 不做任何缓存命中判断,`from_cache` 恒为 `false`
+- **批处理支持**: `compress_batch` 顺序逐文件处理（见下文说明）
 - **文件大小限制**: 最大支持 10MB 文件
 
 ## 模块结构
 
 ```
-src/orchestrator/query/tools/compression/
-├── mod.rs              # 核心逻辑和 CompressionRetrieval 实现
-└── types.rs            # 类型定义 (请求、响应、错误)
+crates/app/cce-orchestrator/src/tools/
+├── compression.rs      # 核心逻辑和 CompressionRetrieval 实现
+└── compression/
+    └── types.rs        # 类型定义 (请求、响应、错误)
 ```
 
 ## 核心 API
@@ -29,8 +30,8 @@ src/orchestrator/query/tools/compression/
 ```rust
 // 创建实例
 let retrieval = CompressionRetrieval::new()
-    .with_sqlite_client(sqlite_client)
-    .with_state_tracker(state_tracker);
+    .with_state_tracker(state_tracker)
+    .with_preprocessing_config(nest_processor_config);
 
 // 单文件处理
 let request = CompressionRequest::new("src/main.rs")
@@ -49,6 +50,8 @@ let batch_request = BatchCompressionRequest::new(vec![
 
 let batch_response = retrieval.compress_batch(batch_request).await;
 ```
+
+注：`BatchCompressionRequest` 有 `max_concurrency` 字段（默认 4，`with_max_concurrency` 可设置），但当前实现**未消费该字段**——`compress_batch` 是顺序 for 循环，逐文件调用 `compress`。文档与调用方应按"顺序执行"理解；并发化是未来的方向。
 
 ### CompressionRequest
 
@@ -97,30 +100,25 @@ pub struct CompressionResponse {
 ```text
 输入: 文件路径
   │
-  ├─→ 1. 文件验证
-  │     - 检查文件存在性
+  ├─→ 1. 文件验证 (validate_file)
+  │     - 路径 canonicalize + is_file 检查
   │     - 检查文件大小 (≤ 10MB)
-  │     - 检查文件类型
-  │     - 检测编程语言
+  │     - FileProcessor 处理（文本检测 + 语言检测，Unknown 拒绝）
+  │     - 读取源码
   │
-  ├─→ 2. 检查已索引项目
-  │     - 查询 UpdateStateTracker
-  │     - 如果已索引,进入步骤 3
-  │     - 否则,跳到步骤 4
+  ├─→ 2. 完整解析
+  │     ├─→ AST 解析 (ParseCoordinator::parse_with_language_info，实例在批处理中复用)
+  │     ├─→ 实体分组 (PreprocessingPipeline::with_config)
+  │     └─→ 语义转换 (PresentationConverter::convert_entity_groups，
+  │                  展平各 group 的 header/member 转换，取 embedding_text 拼接)
   │
-  ├─→ 3. 检查缓存
-  │     - 计算文件哈希
-  │     - 查询 CacheRepository
-  │     - 如果命中,跳到步骤 5
-  │
-  ├─→ 4. 完整解析
-  │     ├─→ AST 解析 (ParseCoordinator)
-  │     ├─→ 实体分组 (PreprocessingPipeline)
-  │     └─→ 语义转换 (AstToNlConverter, Embedding 模式)
-  │
-  └─→ 5. 构建响应
+  └─→ 3. 构建响应
+        - file_hash = SHA-256，from_cache = false（恒定）
+        - 按请求返回 entities / groups
         - 返回纯自然语言语义文本
 ```
+
+注：没有缓存检查步骤——`compress` 每次都完整解析，`from_cache` 恒为 `false`，不存在 `CacheRepository`。
 
 ## 设计决策
 
@@ -148,9 +146,9 @@ pub struct CompressionResponse {
 ## 性能考虑
 
 - **文件大小限制**: 10MB,防止内存溢出
-- **缓存复用**: 优先使用已索引项目的缓存
-- **批处理并发**: 可配置最大并发数
-- **实例复用**: ParseCoordinator 在批处理中复用
+- **无缓存**: 每次请求完整解析（from_cache 恒为 false）
+- **批处理**: 顺序执行；`max_concurrency` 字段存在但未被消费
+- **实例复用**: ParseCoordinator 在批处理中通过 `Arc<Mutex<...>>` 复用
 
 ## 错误处理
 

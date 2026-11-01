@@ -12,16 +12,19 @@
 
 ## 现有设计分析
 
-### 当前方案：路径内 Min-Max 归一化
+### 当前方案：路径内 Min-Max 归一化（WeightedMinMaxFuser，默认算法）
 
-```rust
-// 每条路径独立归一化到 [0, 1]
-let normalized_vector = minmax_normalize(&vector_scores);  // [0.0, 1.0]
-let normalized_bm25 = minmax_normalize(&bm25_scores);      // [0.0, 1.0]
+融合层实现在 `crates/app/cce-orchestrator/src/query/retrieval/post_processing/fusion/merger.rs` 的 `WeightedMinMaxFuser`。每条路径在对齐键粒度独立归一化到 [0, 1]，随后做**带归一除法**的加权和（约 343 行附近）：
 
-// 加权融合
-fused_score = alpha * norm_vector + beta * norm_bm25;
+```text
+fused_score = (alpha * norm_vector + beta * norm_bm25) / (alpha + beta)
 ```
+
+归一除法保证权重对不必和为 1 时分数仍落在 [0, 1] 量级（配置校验仍要求权重对和为 1）。
+
+### 权重来源：静态配置 + 查询意图自适应
+
+除静态 `vector_weight` / `bm25_weight` 外，`HybridFusionConfig`（`crates/core/cce-config/src/modules/search.rs`）提供 `intent_weights`（semantic/keyword/hybrid/entity 四组权重对）与 `enable_intent_based_weights`（默认开启）。开启时 `ExecutionStrategy::from_options`（`query/types/execution_strategy.rs`）按查询意图选取权重对；意图自适应只切换权重，从不隐式切换算法。
 
 ### 优点
 
@@ -61,26 +64,16 @@ normalized = sigmoid(z_score);  // 映射到 [0, 1]
 
 **适用场景**：有稳定查询负载的生产环境
 
-### 方案 2：Rank-Based 融合 (RRF)
+### 已落地方案：Rank-Based 融合（RRF / BordaCount）
 
-```rust
-// 完全避免分数比较，只用排名
-reciprocal_rank = 1.0 / (rank + k);
-fused_score = alpha * rr_vector + beta * rr_bm25;
-```
+排名融合不再是纸面替代方案，已作为运行时可选算法落地（与 WeightedMinMax 共享同一融合管线）：
 
-**优点**：
-- 完全规避分数分布问题
-- 实现简单，无需统计信息
-- 对离群值不敏感
+- `RecallFusionAlgorithm::Rrf { k }`（`cce-config src/modules/search.rs`，TOML 形式 `{ rrf = { k = 60 } }`）：`score = w_v/(k+rank_v) + w_b/(k+rank_b)`，只用排名，对原始分数分布偏斜鲁棒；配置校验要求 `k > 0`。
+- `RecallFusionAlgorithm::BordaCount`：权重感知 Borda，每路径按 `(key_count - rank + 1) / key_count` 给点，融合分为加权点积，与 WeightedMinMax 同量纲；线性衰减使深排名持续贡献，而非像 RRF 双曲衰减到零。
 
-**缺点**：
-- 丢失分数幅度信息（top1=0.99 和 top1=0.51 的置信度差异被忽略）
-- 排名相近的结果区分度降低
+两者经 `create_fusion_algorithm` 工厂（`fusion/merger.rs`）实例化为 `RrfFuser` / `BordaFuser`，同样受 `min_score`、`dedup_by_chunk`、单路径快速路径等统一管线约束。
 
-**适用场景**：分数量纲差异极大且无法校准的场景
-
-### 方案 3：Learned Calibration（学习式校准）
+### 方案 3：Learned Calibration（学习式校准，未实现）
 
 ```rust
 // 使用标注数据学习每个路径的校准函数
@@ -124,15 +117,16 @@ normalized = if results.len() > 1 {
 
 ### 短期（当前系统）
 
-**保持现有 Min-Max 方案**，原因：
+**保持 Min-Max 为默认方案**，原因：
 
-1. **权重配置已提供调优手段**：`vector_weight` 和 `bm25_weight` 允许用户根据实际效果调整路径重要性
+1. **权重配置已提供调优手段**：静态权重与意图自适应权重表（`intent_weights` + `enable_intent_based_weights`，默认开启）允许按查询类型调整路径重要性
 2. **问题影响有限**：单结果场景在实际查询中占比较低
 3. **无免费午餐**：任何归一化方案都有 trade-off，Min-Max 的简单性是优势
+4. **排名融合可按需切换**：对分数分布偏斜明显的项目，可在配置中把 `algorithm` 切到 `Rrf{k}` 或 `borda_count`，无需改代码
 
 **建议补充**：
 - 在配置中添加注释，说明单结果路径的行为
-- 提供 `min_score` 阈值过滤低置信度融合结果
+- 提供 `min_score` 阈值过滤低置信度融合结果（已实现；融合侧 `min_score` 为 hygiene 阈值，业务阈值在 `result.min_score`）
 
 ### 中期（如有需求）
 
@@ -171,9 +165,11 @@ impl ScoreNormalizer {
 
 ## 结论
 
-当前 Min-Max 方案是**工程上的合理折中**：
-- 简单性 > 理论最优
-- 配置权重已提供足够的调优空间
-- 真正的问题是跨路径分数分布差异，这需要架构级的校准方案，而非参数调整
+当前 WeightedMinMax 方案是**工程上的合理折中**：
 
-**不需要修改当前实现**。如果未来有检索质量瓶颈，再考虑引入 Z-Score 或学习式校准。
+- 简单性 > 理论最优
+- 静态权重 + 意图自适应权重已提供足够的调优空间
+- 归一除法使融合分稳定在 [0, 1] 量级
+- 真正的问题是跨路径分数分布差异；对受此困扰的部署，`Rrf{k}` 与 `borda_count` 已可作为运行时替代算法
+
+**默认无需修改当前实现**。若检索质量出现分布偏斜瓶颈，优先尝试切换排名融合算法，其次再考虑 Z-Score 或学习式校准。

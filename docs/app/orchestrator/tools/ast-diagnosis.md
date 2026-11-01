@@ -102,47 +102,63 @@ string_content [2, 14] - [2, 20]
 
 ## 二、核心处理逻辑设计
 
+### 2.0 模块结构
+
+实现位于 `crates/app/cce-orchestrator/src/tools/ast_diagnosis/`：
+
+```
+ast_diagnosis/
+├── mod.rs                 # 请求/响应类型（DiagnosisRequest/Response、Diagnostic、DiagnosticKind 等）
+├── diagnosis.rs           # 主流程 AstDiagnosis::diagnose
+├── error_collector.rs     # ErrorCandidate / ErrorCandidateKind / ErrorCollector
+└── strategies/
+    ├── strategies.rs（父级）  # refine_diagnostics 静态分发入口
+    ├── c_family.rs        # C / C++ / Java / C#
+    ├── rust.rs            # Rust
+    ├── python.rs          # Python（专门策略）
+    ├── javascript.rs      # JavaScript / TypeScript
+    └── common.rs          # 其他语言的兜底策略
+```
+
 ### 2.1 总体流程
 
 ```
-源代码文件
+源代码文本（DiagnosisRequest { code, language?, file_name?, include_ast? }）
     │
     ▼
-[语言识别] → 根据扩展名/shebang 确定语言
+[语言识别] → 显式 language 优先，其次按 file_name 扩展名检测；两者皆无则报错
     │
     ▼
-[语言配置] → 检查是否支持 tree-sitter（Python 直接跳过/返回空）
+[语言支持检查] → AstParser::is_supported，不支持则返回 UnsupportedLanguage
     │
     ▼
-[解析] → 调用对应语言的 tree-sitter 解析器，得到语法树
+[解析] → AstParser::parse_with_tree 得到 tree-sitter 语法树与内部 AST
     │
     ▼
-[遍历收集] → 深度优先遍历，收集所有 ERROR 节点 + missing token 节点
+[遍历收集] → ErrorCollector::collect：深度优先遍历，
+             收集 ERROR 节点（ErrorCandidateKind::Error）
+             与 missing token（ErrorCandidateKind::Missing）
     │
     ▼
-[最内层过滤] → 如果 ERROR 节点内部包含子 ERROR 节点，只保留最内层
+[统一细化] → strategies::refine_diagnostics 按语言静态分发到
+             c_family::refine / rust::refine / python::refine /
+             javascript::refine / common::refine
+             （各策略内部完成最内层过滤、去重、排序与位置细化）
     │
     ▼
-[位置提取] → 对每个保留的节点，提取起始行列号
-    │
-    ▼
-[语言特定细化]（可选）→ 针对某些语言（如 C++）调整位置（如从大范围 ERROR 中提取真正出错点）
-    │
-    ▼
-[去重 & 排序] → 按行号、列号排序，移除重复位置
-    │
-    ▼
-[输出] → 打印或返回 JSON 格式的错误点列表
+[输出] → DiagnosisResponse { language, is_valid, diagnostics, ast? }
+         is_valid = diagnostics.is_empty()
 ```
+
+此外提供轻量入口 `AstDiagnosis::is_valid(code, language)`：仅检查是否存在 ERROR/missing 节点，不产出诊断明细。
 
 尽量复用项目已有功能
 
 ### 2.2 关键模块详解
 
-#### (1) 语言识别与配置
-- 支持通过文件扩展名映射（`.c`→`c`，`.cpp`→`cpp`，`.js`→`javascript` 等）。
-- 支持通过 shebang 行（如 `#!/usr/bin/env node`）识别。
-- 配置表记录每个语言是否启用 tree-sitter、解析器名称、是否有细化器模块。
+#### (1) 语言识别与支持检查
+- `DiagnosisRequest::with_language` 显式指定优先；否则按 `file_name` 扩展名经 `LanguageInfo::detect_from_path` 检测；两者皆无则返回 `LanguageDetection` 错误。
+- `AstParser::is_supported` 决定该语言是否可诊断；`AstDiagnosis::supported_languages()` 列出全部支持语言（C、C++、C#、JavaScript、TypeScript、Rust、Go、Java、Python）。
 
 #### (2) tree-sitter 解析调用
 - 使用 tree-sitter 的 `parser` 对象，设置语言，解析源代码为字节流。
@@ -152,15 +168,14 @@ string_content [2, 14] - [2, 20]
 - 递归遍历每个节点：
   - 若节点类型为 `"ERROR"`，将其加入候选列表。
   - 若节点有 `missing` 标记（通过检查子节点或字段），单独记录。
-- 遍历完成后，对候选列表进行**嵌套过滤**：
-  - 对于任意两个 `ERROR` 节点 A 和 B，若 B 完全包含在 A 的内部（`start >= A.start && end <= A.end`），且 B 不是 A 本身，则移除 A（保留更内层的 B）。
+- 遍历与后处理集中在 `ErrorCollector`：`collect` 收集候选后由 `collect_and_process` 依次执行 `filter_innermost`（最内层过滤）、`deduplicate`、`sort_by_position`。
 
 #### (4) 位置提取
 - 使用节点提供的 `start_point`（行、列）和 `end_point`。
 - 对于 `missing` token，其位置通常为预期位置（如分号应出现的位置），直接提取。
 
-#### (5) 语言特定细化（可选）
-- 针对不同特征给出细化的策略，例如括号平衡检查，各个语言的实现组合需要的策略。
+#### (5) 语言特定细化
+- 由 `strategies::refine_diagnostics` 统一入口按语言静态分发到各语言的 `refine` 实现；各语言策略内部组合所需的细化手段（如括号平衡检查、token 级位置修正）。
 
 #### (6) 去重与排序
 - 将位置转换为元组 `(line, column)`，放入集合去重。
@@ -168,20 +183,14 @@ string_content [2, 14] - [2, 20]
 
 ### 2.3 输出格式
 
-每行一个错误位置（或 JSON），示例：
+统一输出结构化的 `DiagnosisResponse`（不再有 `file:line:column` 文本与 JSON 二选一的格式）：
 
-```
-/path/to/file.cpp:3:10: syntax error
-/path/to/file.cpp:5:0: syntax error
-```
+- `language`：诊断使用的语言
+- `is_valid`：布尔值，等价于 `diagnostics` 为空
+- `diagnostics`：`Vec<Diagnostic>`，每项含 `message`、`kind`（`DiagnosticKind`）、`precision`（`DiagnosticPrecision`）及可选 `span`
+- `ast`：请求 `include_ast = true` 时返回完整 AST 树，否则为 `None`
 
-或结构化 JSON：
-```json
-[
-  {"file": "test.cpp", "line": 3, "column": 10},
-  {"file": "test.cpp", "line": 5, "column": 0}
-]
-```
+**说明**：Python 不再"跳过"——`strategies/python.rs` 提供了专门的 `python::refine` 策略。只是 tree-sitter-python 对缩进错误通常不产生 `ERROR` 节点（见第一节的说明），Python 策略在此基础上处理其候选特征。
 
 ### 2.4 边界情况处理
 
@@ -200,24 +209,23 @@ string_content [2, 14] - [2, 20]
 - 新增语言：添加专门的实现，组合各个策略。
 - 策略实现：每个语法特征可独立实现(例如py的缩进问题只会产生混乱的ast节点，不会生成ERROR节点。可以基于缩进计数来判断)
 
-组合示例：
+组合方式：错误候选由 `ErrorCandidateKind::{Error, Missing}` 统一建模，语言特定的细化逻辑组合在各语言策略（`strategies/{c_family,rust,python,javascript}.rs`）内部完成，由 `refine_diagnostics` 按语言静态分发（零动态分发开销）：
 
-初步候选（来自 tree-sitter）
+```
+初步候选（ErrorCollector::collect，来自 tree-sitter ERROR / missing）
     │
     ▼
-[ IllegalToken 检测器 ]   → 可能删除重复、添加细粒度位置
+[refine_diagnostics 按语言分发]
+    │
+    ├─ C/C++/Java/C# → c_family::refine（含 IllegalToken、字符串未闭合、
+    │                    括号平衡、缺少分号等策略组合）
+    ├─ Rust           → rust::refine
+    ├─ Python         → python::refine（专门策略，不再跳过）
+    ├─ JS/TS          → javascript::refine
+    └─ 其他           → common::refine（兜底）
     │
     ▼
-[ StringUnclosed 检测器 ] → 补充字符串未闭合位置
-    │
-    ▼
-[ BracketBalance 检测器 ] → 修正括号不匹配的大范围错误，替换为精确缺失点
-    │
-    ▼
-[ MissingSemicolon 检测器 ] → 补充缺少分号的位置
-    │
-    ▼
-最终候选（去重、排序后输出）
+最终候选（去重、排序后输出为 Vec<Diagnostic>）
 
 ---
 

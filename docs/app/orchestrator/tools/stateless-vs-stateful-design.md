@@ -2,7 +2,7 @@
 
 ## 概述
 
-`orchestrator/src/tools/` 提供两类工具：**无状态（Stateless）** 和 **有状态（Stateful）**。本文档说明两者的区别、使用场景和设计原则，作为后续开发的参考。
+`crates/app/cce-orchestrator/src/tools/` 提供两类工具：**无状态（Stateless）** 和 **有状态（Stateful）**。本文档说明两者的区别、使用场景和设计原则，作为后续开发的参考。
 
 ---
 
@@ -15,10 +15,10 @@
 | **无状态** | `diagnose` (AST 诊断) | ❌ | ✅ 不需要 | 源代码文本 |
 | **无状态** | `fold` (文件折叠) | ❌ | ✅ 不需要 | 源代码文本 |
 | **无状态** | `foldBatch` (批量文件折叠) | ❌ | ✅ 不需要 | 源代码文本数组，与单条语义等价 |
-| **有状态** | `getSymbols` (符号查找) | ✅ | ✅ 必填 | SQLite Symbol Table |
-| **有状态** | `findReferences` (引用查找) | ✅ | ✅ 必填 | SQLite Relation Graph |
-| **有状态** | `gotoDefinition` (跳转定义) | ✅ | ✅ 必填 | SQLite Symbol Table + Relations |
-| **有状态** | `keywordSearch` (关键词搜索) | ✅ | ✅ 必填 | BM25 Index |
+| **有状态** | `getSymbols` (符号查找) | ✅ | ✅ 必填 | LayeredSnapshotIndex（内存快照） |
+| **有状态** | `findReferences` (引用查找) | ✅ | ✅ 必填 | LayeredSnapshotIndex；SQLite 仅 snippet |
+| **有状态** | `gotoDefinition` (跳转定义) | ✅ | ✅ 必填 | LayeredSnapshotIndex；SQLite 仅函数体 |
+| **有状态** | `keywordSearch` (关键词搜索) | ✅ | ✅ 必填 | FulltextStore 契约 + relation-store chunk 元数据 |
 
 ---
 
@@ -165,7 +165,7 @@ items[id, text, option: language, file_name, max_tokens, mode] + 全局默认值
 ### 设计原则
 
 1. **Project Context Required**: 必须指定 `project_id`
-2. **Database Backed**: 查询 SQLite 存储的关系图、符号表
+2. **Snapshot Index Backed**: 主查询走 `LayeredSnapshotIndex`（`cce_codegraph::index`）内存快照；SQLite（`RelationStore`）仅用于 snippet / chunk 正文读取
 3. **Cross-File Analysis**: 需要跨文件解析能力
 4. **Index Dependent**: 依赖项目索引状态
 
@@ -178,7 +178,8 @@ Input: project_id + path/line/query
   │
   ├─→ 1. Validate project existence
   │
-  ├─→ 2. Query SQLite (Symbol Table / Relation Graph / BM25 Index)
+  ├─→ 2. Query LayeredSnapshotIndex (entities / relations)
+  │       (SQLite 仅在需要 snippet / 函数体时读取)
   │
   ├─→ 3. Resolve cross-file references
   │
@@ -232,36 +233,36 @@ impl StatefulTool {
 **功能**: 获取项目中指定文件的所有符号信息
 
 **依赖**:
-- SQLite `symbol_table` 表
-- SQLite `entity` 表
+- `LayeredSnapshotIndex`（按文件实体查询 + parent 树构建）
 
 **流程**:
 ```
 project_id + paths[]
-  → Load symbol table from SQLite
-  → Filter by paths
+  → Query snapshot index by file
+  → Build symbol tree from entity parents
   → Return {path, symbols[], symbol_count}
 ```
 
 **关键点**:
-- 符号表在索引过程中构建
-- 需要处理名称冲突（overloading）
-- 可选返回父子层级结构
+- 索引无数据时直接返回失败结果，无实时解析回退
+- 符号类型经 `From<EntityKind> for SymbolKind` 统一映射
+- 返回父子层级结构
 
 #### 2. Find References (`findReferences`)
 
 **功能**: 查找符号的调用者/被调用者
 
 **依赖**:
-- SQLite `relation_graph` 表
-- Entity metadata
+- `LayeredSnapshotIndex`（反向 callers 索引 + resolved relations）
+- `QueryCache` LRU 缓存
+- SQLite（仅 `include_snippet` 时的正文读取）
 
 **流程**:
 ```
 project_id + path + line + symbol
-  → Load relation edges from SQLite
-  → Filter by entity context
-  → Resolve cross-file targets
+  → Resolve symbol on snapshot (call site vs definition site)
+  → Get callers by callee entity (snapshot, LRU cached)
+  → Expand relation spans to reference locations
   → Return {references[], callee_info?, caller_info?}
 ```
 
@@ -275,40 +276,43 @@ project_id + path + line + symbol
 **功能**: 跳转到符号的定义位置
 
 **依赖**:
-- SQLite `symbol_table` 表
-- Relation graph for implementations
+- `LayeredSnapshotIndex`（定义定位）
+- SQLite chunk 存储（`include_body` 时的函数体读取，两阶段 epoch 解析）
 
 **流程**:
 ```
 project_id + path + line + symbol
-  → Find definition in SQLite
-  → Resolve interface implementations
+  → Resolve symbol on snapshot (call site vs definition site)
+  → Find definition location via snapshot
+  → Optionally read body from SQLite chunks
   → Return {definitions[], code, signature}
 ```
 
 **关键点**:
-- 接口实现可能有多个定义点
+- 函数体读取仅在配置了 SQLite 后端时可用，失败时回退实体签名
 - 可选返回完整函数体（vs 仅签名）
-- 需要计算精确的行号范围
 
 #### 4. Keyword Search (`keywordSearch`)
 
 **功能**: BM25 全文检索
 
 **依赖**:
-- Tantivy BM25 index（每个项目独立）
+- `FulltextStore` 契约（BM25 召回，经枚举契约调用）
+- relation-store chunk 元数据（epoch 视图与 chunk 定位；**非 Tantivy stored fields**）
 
 **流程**:
 ```
 project_id + query + top_n
-  → Query Tantivy index
-  → Score matches
+  → FulltextStore BM25 search → chunk_ids
+  → Relation-store chunk metadata lookup (epoch view)
   → Read raw source snippets
+  → Sort by BM25 score
   → Return {results[], total_count, snippets[]}
 ```
 
 **关键点**:
-- BM25 index per-project
+- BM25 召回通过 `FulltextStore` 契约，与具体存储后端解耦
+- 正文来自 relation-store chunk 元数据对应的源码读取，不使用 Tantivy stored fields
 - 支持 OR/AND term operator
 - 返回原始源码片段与行号，供调用方直接检索或阅读
 
@@ -319,9 +323,9 @@ project_id + query + top_n
 | 维度 | 无状态工具 | 有状态工具 |
 |------|-----------|-----------|
 | **输入要求** | 文件路径 / 源代码 | `project_id` + 路径/行号/查询 |
-| **数据来源** | 实时读取本地文件 | SQLite / Tantivy |
+| **数据来源** | 实时读取本地文件 | LayeredSnapshotIndex / SQLite chunk |
 | **计算复杂度** | O(n) 解析 + 转换 | O(m) 数据库查询 + 关系解析 |
-| **缓存策略** | ❌ 从不缓存 | ✅ 可缓存（SQL 查询结果） |
+| **缓存策略** | ❌ 从不缓存 | ✅ 进程内 LRU（`QueryCache`，findReferences callers 结果） |
 | **跨文件能力** | ❌ 仅限单文件 | ✅ 原生支持 |
 | **性能瓶颈** | Parser / Converter | DB queries / Index access |
 | **扩展方向** | 添加语言后端 | 添加新索引类型 |
@@ -434,7 +438,7 @@ pub async fn process_tool(
 
 **实现步骤**:
 1. 定义 Request/Response 模型（含 `project_id`）
-2. 添加 SQLite/Tantivy 查询逻辑
+2. 基于 LayeredSnapshotIndex / SQLite chunk 实现查询逻辑
 3. 处理跨文件引用解析
 4. 考虑缓存策略（Redis/Memcache）
 
@@ -461,15 +465,17 @@ pub enum CompressionError {
     ParseError(String),
 }
 
-// Stateful: 项目/数据库相关错误
+// Stateful: 符号/索引相关错误（节选，实际定义见 symbol_lookup_types.rs）
 #[derive(Error, Debug)]
 pub enum SymbolLookupError {
-    #[error("Project not found: {0}")]
-    ProjectNotFound(i64),
-    #[error("SQLite error: {0}")]
-    DatabaseError(#[from] sqlite::Error),
-    #[error("Relation graph unavailable")]
-    RelationGraphUnavailable,
+    #[error("Symbol not found")]
+    SymbolNotFound,
+    #[error("No symbol at position")]
+    NoSymbolAtPosition,
+    #[error("Index not available")]
+    IndexNotAvailable,
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 ```
 

@@ -691,7 +691,10 @@ impl RelationResolver {
                 .next()
                 .unwrap_or(&raw_data.dst_name);
             let is_name_match = caller_name == callee_name && last_segment == caller_name;
-            if (effective == global_src || is_name_match) && relation_type.is_call() {
+            let is_self_loop = effective == global_src;
+            let is_structural_self_loop = is_self_loop && relation_type.is_structural();
+            let is_call_self_loop = (is_self_loop || is_name_match) && relation_type.is_call();
+            if is_structural_self_loop || is_call_self_loop {
                 let is_explicit_self = raw_data.dst_name.starts_with("Self::")
                     || raw_data.dst_name.starts_with("Self.")
                     || raw_data.dst_name == "self"
