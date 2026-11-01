@@ -457,9 +457,15 @@ impl<'a> SearchService<'a> {
             Ok(searcher) => {
                 annotation.enable_annotation = true;
                 annotation.expansion_enabled = true;
+                let mut domains = annotation.expansion_domains.clone();
+                if !annotation.allow_structural_edges {
+                    domains.retain(|domain| domain == "call");
+                }
                 let path_filter = cce_orchestrator::query::expansion::ExpansionPathFilter {
                     directory_prefix: query_opts.directory_prefix.clone(),
                     exclude_content_types: query_opts.exclude_content_types.clone(),
+                    include_categories: query_opts.include_categories.clone(),
+                    exclude_categories: query_opts.exclude_categories.clone(),
                     include_patterns: query_opts.include_patterns.clone(),
                     exclude_patterns: query_opts.exclude_patterns.clone(),
                 };
@@ -468,11 +474,14 @@ impl<'a> SearchService<'a> {
                         searcher,
                         std::path::PathBuf::from(&entry.metadata.root_path),
                         path_filter,
-                        annotation.expansion_domains.clone(),
+                        domains,
                     )
                     .with_query(&query_opts.query)
-                    .with_scoring(
-                        cce_orchestrator::query::expansion::ExpansionScoring::from(&*annotation),
+                    .with_scoring(cce_orchestrator::query::expansion::ExpansionScoring::from(
+                        &*annotation,
+                    ))
+                    .with_shaping(
+                        cce_orchestrator::query::expansion::ExpansionShaping::from(&*annotation),
                     ),
                 )
             }
@@ -649,6 +658,8 @@ impl<'a> SearchService<'a> {
             path_filter: ExpansionPathFilter {
                 directory_prefix: spec.directory_prefix.clone(),
                 exclude_content_types: spec.exclude_content_types.clone(),
+                include_categories: Vec::new(),
+                exclude_categories: Vec::new(),
                 include_patterns: spec.include_patterns.clone(),
                 exclude_patterns: spec.exclude_patterns.clone(),
             },

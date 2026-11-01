@@ -31,19 +31,39 @@ use cce_codegraph::index::snapshot_query::{
 
 pub use super::expansion_scoring::ExpansionScoring;
 
-/// Maximum seeds taken from one hit's line range.
-const MAX_SEEDS: usize = 4;
+/// Shaping parameters for expansion unit rendering.
+///
+/// Carries the configurable counterparts of the former hard-coded limits so
+/// projects tune recall width and per-unit cost without code changes.
+#[derive(Debug, Clone, Copy)]
+pub struct ExpansionShaping {
+    /// Maximum seed entities taken from one hit line range.
+    pub max_seeds: usize,
+    /// Lines kept on each side of a callsite anchor.
+    pub context_lines: usize,
+    /// Whole-body token budget for one expansion unit.
+    pub max_unit_tokens: usize,
+}
 
-/// Lines kept on each side of a callsite anchor when rendering an expansion
-/// unit. The window covers the call span itself plus this much surrounding
-/// context, so one unit stays within a handful of lines no matter how large
-/// the caller or callee definition is.
-const CALLSITE_CONTEXT_LINES: usize = 1;
+impl Default for ExpansionShaping {
+    fn default() -> Self {
+        Self {
+            max_seeds: 4,
+            context_lines: 1,
+            max_unit_tokens: 512,
+        }
+    }
+}
 
-/// Whole-body token budget for one expansion unit, estimated with the same
-/// [`TokenEstimator`](cce_utils::token_estimation::TokenEstimator) the
-/// concatenation budget uses, so both stages measure cost in the same unit.
-const MAX_UNIT_TOKENS: usize = 512;
+impl From<&RelationAnnotationConfig> for ExpansionShaping {
+    fn from(config: &RelationAnnotationConfig) -> Self {
+        Self {
+            max_seeds: config.max_seeds_per_hit.max(1),
+            context_lines: config.callsite_context_lines,
+            max_unit_tokens: config.max_expansion_unit_tokens.max(1),
+        }
+    }
+}
 /// Head lines kept in a window excerpt (signature + first statements).
 const EXCERPT_HEAD_LINES: usize = 24;
 /// Tail lines kept in a window excerpt.
@@ -89,9 +109,9 @@ fn is_call_like_line(line: &str) -> bool {
 /// up to [`EXCERPT_CALL_LINES`] call-shaped lines from the dropped middle
 /// as behaviour context. Each dropped run is replaced by its own marker
 /// line, so renderers stay honest about every cut.
-fn window_excerpt(code: &str) -> Option<String> {
+fn window_excerpt(code: &str, max_tokens: usize) -> Option<String> {
     use cce_utils::token_estimation::TokenEstimator;
-    if TokenEstimator::estimate(code) <= MAX_UNIT_TOKENS {
+    if TokenEstimator::estimate(code) <= max_tokens.max(1) {
         return None;
     }
     let lines: Vec<&str> = code.lines().collect();
@@ -156,12 +176,15 @@ fn window_excerpt(code: &str) -> Option<String> {
 /// Path filter inherited from the main query for expansion neighbours.
 ///
 /// Neighbours whose file fails this filter never occupy budget. Mirrors the
-/// main-path semantics: directory prefix, content-type exclusion and
-/// include/exclude glob patterns share one implementation.
+/// main-path semantics: directory prefix, content-type exclusion, file
+/// category include/exclude and include/exclude glob patterns share one
+/// implementation.
 #[derive(Clone, Debug, Default)]
 pub struct ExpansionPathFilter {
     pub directory_prefix: Option<String>,
     pub exclude_content_types: Vec<crate::query::types::ExcludableContentType>,
+    pub include_categories: Vec<cce_types::FileCategory>,
+    pub exclude_categories: Vec<cce_types::FileCategory>,
     pub include_patterns: Vec<String>,
     pub exclude_patterns: Vec<String>,
 }
@@ -180,6 +203,15 @@ impl ExpansionPathFilter {
             &self.exclude_content_types,
         ) {
             return false;
+        }
+        if !self.include_categories.is_empty() || !self.exclude_categories.is_empty() {
+            let category = cce_types::FileCategory::determine_from_path(&normalized);
+            if !self.include_categories.is_empty() && !self.include_categories.contains(&category) {
+                return false;
+            }
+            if self.exclude_categories.contains(&category) {
+                return false;
+            }
         }
         if !self.include_patterns.is_empty() || !self.exclude_patterns.is_empty() {
             let filter = crate::query::retrieval::post_processing::GlobFilter::new();
@@ -215,6 +247,7 @@ pub struct NeighbourResolver {
     pub domains: Vec<String>,
     query_terms: Vec<String>,
     scoring: ExpansionScoring,
+    shaping: ExpansionShaping,
 }
 
 impl std::fmt::Debug for NeighbourResolver {
@@ -238,6 +271,7 @@ impl NeighbourResolver {
             domains: vec!["call".to_string()],
             query_terms: Vec::new(),
             scoring: ExpansionScoring::default(),
+            shaping: ExpansionShaping::default(),
         }
     }
 
@@ -255,6 +289,7 @@ impl NeighbourResolver {
             domains,
             query_terms: Vec::new(),
             scoring: ExpansionScoring::default(),
+            shaping: ExpansionShaping::default(),
         }
     }
 
@@ -267,6 +302,12 @@ impl NeighbourResolver {
     /// Override the scoring switches (defaults follow the annotation config).
     pub fn with_scoring(mut self, scoring: ExpansionScoring) -> Self {
         self.scoring = scoring;
+        self
+    }
+
+    /// Override the unit shaping parameters (defaults follow the annotation config).
+    pub fn with_shaping(mut self, shaping: ExpansionShaping) -> Self {
+        self.shaping = shaping;
         self
     }
 
@@ -287,6 +328,7 @@ impl NeighbourResolver {
             primary_score: hit.primary_score,
             query_terms: self.query_terms.clone(),
             scoring: self.scoring,
+            shaping: self.shaping,
         };
         resolve_expansion_units_with_filter(&self.searcher, &self.project_root, request)
     }
@@ -325,6 +367,7 @@ pub struct ExpansionRequest {
     pub primary_score: f32,
     pub query_terms: Vec<String>,
     pub scoring: ExpansionScoring,
+    pub shaping: ExpansionShaping,
 }
 
 /// Resolve neighbour units for one search hit with explicit budgets, domains
@@ -350,6 +393,7 @@ pub fn resolve_expansion_units_with_filter(
         primary_score,
         query_terms,
         scoring,
+        shaping,
     } = request;
     if forward_budget == 0 && (!include_callers || backward_budget == 0) {
         return (Vec::new(), Vec::new());
@@ -380,7 +424,7 @@ pub fn resolve_expansion_units_with_filter(
             .reverse()
             .then_with(|| a.0.cmp(&b.0))
     });
-    seeds.truncate(MAX_SEEDS);
+    seeds.truncate(shaping.max_seeds.max(1));
     if seeds.is_empty() {
         return (Vec::new(), Vec::new());
     }
@@ -430,6 +474,7 @@ pub fn resolve_expansion_units_with_filter(
                     relation: &relation,
                     score,
                 },
+                shaping,
             ) {
                 forward.push(unit);
             }
@@ -489,6 +534,7 @@ pub fn resolve_expansion_units_with_filter(
                         relation: &relation,
                         score,
                     },
+                    shaping,
                 ) {
                     backward.push(unit);
                 }
@@ -614,15 +660,25 @@ fn snippet_unit(
     cache: &mut SourceFileCache,
     parts: SnippetParts<'_>,
     edge: ScoredEdge<'_>,
+    shaping: ExpansionShaping,
 ) -> Option<ExpandedUnit> {
     let ScoredEdge { relation, score } = edge;
     if relation.relation_type.is_call()
         && relation.span.is_available()
-        && let Some(unit) = callsite_window_unit(project_root, cache, &parts, relation, score)
+        && let Some(unit) =
+            callsite_window_unit(project_root, cache, &parts, relation, score, shaping)
     {
         return Some(unit);
     }
-    full_body_unit(searcher, project_root, cache, &parts, relation, score)
+    full_body_unit(
+        searcher,
+        project_root,
+        cache,
+        &parts,
+        relation,
+        score,
+        shaping,
+    )
 }
 
 /// Read the callsite window around an edge's source span as an annotator
@@ -640,14 +696,15 @@ fn callsite_window_unit(
     parts: &SnippetParts<'_>,
     relation: &cce_types::ResolvedRelation,
     score: f32,
+    shaping: ExpansionShaping,
 ) -> Option<ExpandedUnit> {
     let anchor_start = relation.span.start_position.row;
     let anchor_end = relation.span.end_position.row.max(anchor_start);
     let start_row = anchor_start
-        .saturating_sub(CALLSITE_CONTEXT_LINES)
+        .saturating_sub(shaping.context_lines)
         .min(u32::MAX as usize) as u32;
     let end_row = anchor_end
-        .saturating_add(CALLSITE_CONTEXT_LINES)
+        .saturating_add(shaping.context_lines)
         .min(u32::MAX as usize) as u32;
     let code = read_source_lines_cached(
         cache,
@@ -689,6 +746,7 @@ fn full_body_unit(
     parts: &SnippetParts<'_>,
     relation: &cce_types::ResolvedRelation,
     score: f32,
+    shaping: ExpansionShaping,
 ) -> Option<ExpandedUnit> {
     let snapshot = searcher.query().index();
     let entity = snapshot.get_function_by_entity_id(parts.entity_id)?;
@@ -706,7 +764,7 @@ fn full_body_unit(
     // Oversized bodies become window excerpts; the whole-body fallback would
     // only crowd out the rest of the expansion budget or degrade entirely.
     // Excerpted bodies carry the marker so renderers stay honest about the cut.
-    let (code, excerpt) = match window_excerpt(&code) {
+    let (code, excerpt) = match window_excerpt(&code, shaping.max_unit_tokens) {
         Some(excerpt) => (excerpt, true),
         None => (code, false),
     };
@@ -760,7 +818,8 @@ pub async fn annotate_hits_with_expansion(
         project_root.to_path_buf(),
     )
     .with_query(query)
-    .with_scoring(ExpansionScoring::from(config));
+    .with_scoring(ExpansionScoring::from(config))
+    .with_shaping(ExpansionShaping::from(config));
     annotate_hits_with_resolver(&resolver, items, config).await;
 }
 
@@ -993,7 +1052,8 @@ mod tests {
             .map(|i| format!("line {i}: {}", "x".repeat(30)))
             .collect::<Vec<_>>()
             .join("\n");
-        let excerpt = window_excerpt(&body).expect("oversized body must be windowed");
+        let excerpt = window_excerpt(&body, ExpansionShaping::default().max_unit_tokens)
+            .expect("oversized body must be windowed");
         assert!(excerpt.starts_with("line 0"));
         assert!(excerpt.contains("line 59"));
         assert!(excerpt.contains("excerpt: lines 25-56 of 60 omitted"));
@@ -1017,7 +1077,8 @@ mod tests {
             }
         }
         let body = parts.join("\n");
-        let excerpt = window_excerpt(&body).expect("oversized body must be windowed");
+        let excerpt = window_excerpt(&body, ExpansionShaping::default().max_unit_tokens)
+            .expect("oversized body must be windowed");
         assert!(excerpt.contains("    do_work(arg);"));
         assert!(excerpt.contains("    let value = compute(other);"));
         assert!(excerpt.contains("excerpt: lines 25-30 of 60 omitted"));
@@ -1035,7 +1096,32 @@ mod tests {
             .map(|_| ";".repeat(38))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(window_excerpt(&body).is_some());
+        assert!(window_excerpt(&body, ExpansionShaping::default().max_unit_tokens).is_some());
+    }
+
+    #[test]
+    fn test_path_filter_enforces_categories() {
+        use cce_types::FileCategory;
+        let filter = ExpansionPathFilter {
+            include_categories: vec![FileCategory::Code],
+            ..Default::default()
+        };
+        assert!(filter.allows("src/main.rs"));
+        assert!(!filter.allows("README.md"));
+        let excluded = ExpansionPathFilter {
+            exclude_categories: vec![FileCategory::Config],
+            ..Default::default()
+        };
+        assert!(!excluded.allows("Cargo.toml"));
+        assert!(excluded.allows("src/main.rs"));
+    }
+
+    #[test]
+    fn test_shaping_defaults_match_legacy_budgets() {
+        let shaping = ExpansionShaping::default();
+        assert_eq!(shaping.max_seeds, 4);
+        assert_eq!(shaping.context_lines, 1);
+        assert_eq!(shaping.max_unit_tokens, 512);
     }
 
     #[test]
@@ -1051,12 +1137,13 @@ mod tests {
 
     #[test]
     fn test_window_excerpt_passes_short_body_through() {
-        assert_eq!(window_excerpt("fn a() {}"), None);
+        let budget = ExpansionShaping::default().max_unit_tokens;
+        assert_eq!(window_excerpt("fn a() {}", budget), None);
         let short: String = (0..10)
             .map(|i| format!("line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
-        assert_eq!(window_excerpt(&short), None);
+        assert_eq!(window_excerpt(&short, budget), None);
     }
 
     fn scored_index_entity(
@@ -1174,6 +1261,7 @@ mod tests {
             primary_score: 0.9,
             query_terms: Vec::new(),
             scoring: ExpansionScoring::default(),
+            shaping: ExpansionShaping::default(),
         };
         let (forward, backward) =
             resolve_expansion_units_with_filter(&searcher, dir.path(), request);
@@ -1237,6 +1325,7 @@ mod tests {
             primary_score: 0.9,
             query_terms: Vec::new(),
             scoring: ExpansionScoring::default(),
+            shaping: ExpansionShaping::default(),
         }
     }
 

@@ -410,6 +410,35 @@ impl Default for ResultFilterConfig {
     }
 }
 
+impl Validate for ResultFilterConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if self.limit == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "limit",
+                "must be greater than 0",
+            ));
+        }
+        if !self.min_score.is_finite() || self.min_score < 0.0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "min_score",
+                "must be finite and >= 0.0",
+            ));
+        }
+        if self.max_content_tokens == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_content_tokens",
+                "must be greater than 0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
 /// Score normalization configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -701,6 +730,16 @@ pub struct RelationAnnotationConfig {
     /// Off keeps the factor neutral (1.0).
     #[serde(default = "default_true")]
     pub expansion_fanin_scoring: bool,
+    /// Maximum seed entities taken from one hit line range for expansion.
+    /// Seeds are ordered by overlap with the hit range; larger values widen
+    /// recall but cost more relation lookups per hit.
+    pub max_seeds_per_hit: usize,
+    /// Lines kept on each side of a callsite anchor when rendering an
+    /// expansion unit. Covers the call span plus surrounding context.
+    pub callsite_context_lines: usize,
+    /// Whole-body token budget for one expansion unit. Oversized bodies
+    /// become windowed excerpts instead of full definitions.
+    pub max_expansion_unit_tokens: usize,
     /// Workspace root for file existence checks. Relative segment paths
     /// resolve against it; absolute paths are checked directly. Missing files
     /// are downgraded to references. `None` skips the check entirely.
@@ -735,6 +774,9 @@ impl Default for RelationAnnotationConfig {
             expansion_scoring: true,
             expansion_query_scoring: true,
             expansion_fanin_scoring: true,
+            max_seeds_per_hit: 4,
+            callsite_context_lines: 1,
+            max_expansion_unit_tokens: 512,
             workspace_root: None,
         }
     }
@@ -842,6 +884,24 @@ impl RelationAnnotationConfig {
         self
     }
 
+    /// Set the maximum seed entities taken from one hit line range.
+    pub fn with_max_seeds_per_hit(mut self, max_seeds: usize) -> Self {
+        self.max_seeds_per_hit = max_seeds;
+        self
+    }
+
+    /// Set the callsite context lines kept around an expansion anchor.
+    pub fn with_callsite_context_lines(mut self, lines: usize) -> Self {
+        self.callsite_context_lines = lines;
+        self
+    }
+
+    /// Set the whole-body token budget for one expansion unit.
+    pub fn with_max_expansion_unit_tokens(mut self, tokens: usize) -> Self {
+        self.max_expansion_unit_tokens = tokens;
+        self
+    }
+
     /// Set the workspace root for file existence checks (builder pattern).
     pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(root.into());
@@ -882,6 +942,18 @@ impl Validate for RelationAnnotationConfig {
             errors.push(ConfigValidationError::invalid_field(
                 "forward_max_expanded_units",
                 "at least one direction must be greater than 0 when expansion is enabled",
+            ));
+        }
+        if self.max_seeds_per_hit == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_seeds_per_hit",
+                "must be greater than 0",
+            ));
+        }
+        if self.max_expansion_unit_tokens == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_expansion_unit_tokens",
+                "must be greater than 0",
             ));
         }
 
@@ -967,6 +1039,12 @@ impl Validate for SearchModuleConfig {
             errors.push(e);
         }
         if let Err(e) = self.fusion.validate_structured() {
+            errors.push(e);
+        }
+        if let Err(e) = self.result.validate_structured() {
+            errors.push(e);
+        }
+        if let Err(e) = self.annotation.validate_structured() {
             errors.push(e);
         }
 

@@ -347,18 +347,30 @@ fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
     deduped
 }
 
+/// Score tolerance inside which a full body outranks a reference.
+///
+/// Fusion and rerank scores carry float noise, so exact ties almost never
+/// occur; without a tolerance a reference can win by a negligible margin.
+/// The band is small enough to preserve genuine relevance gaps.
+const REFERENCE_SCORE_TOLERANCE: f32 = 0.01;
+
 /// Stable demotion for reference results.
 ///
-/// Keeps the score order intact while ensuring full bodies precede references
-/// when scores tie. Threshold filtering runs on the same scores, so demotion
-/// only affects tie order, never exclusion.
+/// Full bodies precede references when their scores differ by no more than
+/// the tolerance; larger gaps still follow score order. Threshold filtering
+/// runs on the same scores, so demotion only affects near-tie order, never
+/// exclusion.
 fn demote_references_for_sort(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
     results.sort_by(|a, b| {
-        a.cmp_score_desc_then_stable(b).then_with(|| {
-            a.content_state
-                .is_reference()
-                .cmp(&b.content_state.is_reference())
-        })
+        let a_reference = a.content_state.is_reference();
+        let b_reference = b.content_state.is_reference();
+        if a_reference != b_reference && (a.score - b.score).abs() <= REFERENCE_SCORE_TOLERANCE {
+            return a_reference
+                .cmp(&b_reference)
+                .then_with(|| a.cmp_score_desc_then_stable(b));
+        }
+        a.cmp_score_desc_then_stable(b)
+            .then_with(|| a_reference.cmp(&b_reference))
     });
     results
 }
@@ -686,7 +698,7 @@ pub(crate) async fn apply_result_filter_chain(
 
 #[cfg(test)]
 mod tests {
-    use super::dedup_by_alignment_key;
+    use super::{dedup_by_alignment_key, demote_references_for_sort};
     use crate::query::types::SearchResult;
 
     fn hit(id: &str, entity: u64, score: f32) -> SearchResult {
@@ -725,5 +737,33 @@ mod tests {
         let results = vec![unkeyed, hit("group_1_bm25_0", 7, 1.0)];
         let deduped = dedup_by_alignment_key(results);
         assert_eq!(deduped.len(), 2);
+    }
+
+    fn reference_hit(id: &str, score: f32) -> SearchResult {
+        SearchResult {
+            id: id.to_string(),
+            score,
+            original_score: score,
+            content_state: crate::query::types::ContentState::Reference(
+                crate::query::types::DowngradeReason::OverLimit,
+            ),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn demote_prefers_full_body_within_tolerance() {
+        let full = hit("full", 1, 0.80);
+        let reference = reference_hit("reference", 0.805);
+        let sorted = demote_references_for_sort(vec![reference, full]);
+        assert_eq!(sorted[0].id, "full");
+    }
+
+    #[test]
+    fn demote_keeps_score_order_beyond_tolerance() {
+        let full = hit("full", 1, 0.70);
+        let reference = reference_hit("reference", 0.90);
+        let sorted = demote_references_for_sort(vec![full, reference]);
+        assert_eq!(sorted[0].id, "reference");
     }
 }

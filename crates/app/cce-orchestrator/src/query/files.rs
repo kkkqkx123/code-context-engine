@@ -37,10 +37,10 @@ pub struct FileHit {
     pub line_count: Option<u64>,
 }
 
-/// Options for file search, reusing the query-side path判定.
+/// Options for file search, reusing the query-side path filter.
 ///
-/// The path filter (directory prefix, content-type exclusion, glob
-/// include/exclude) is the same [`ExpansionPathFilter`] the expansion and
+/// The path filter (directory prefix, content-type exclusion, category
+/// include/exclude, glob include/exclude) is the same [`ExpansionPathFilter`] the expansion and
 /// relation paths enforce, so a file hidden from semantic recall is hidden
 /// from file search too. `respect_ignore` mirrors the indexer default:
 /// `.gitignore`/`.indexignore` rules at every directory level prune the walk,
@@ -49,7 +49,7 @@ pub struct FileHit {
 /// listing cache is unaffected because path filters apply after the walk.
 #[derive(Clone, Debug)]
 pub struct FileSearchOptions {
-    /// Directory-prefix, content-type and glob判定 shared with query paths.
+    /// Directory-prefix, content-type, category and glob filter shared with query paths.
     pub path_filter: ExpansionPathFilter,
     /// Observe ignore files during the walk (default on).
     pub respect_ignore: bool,

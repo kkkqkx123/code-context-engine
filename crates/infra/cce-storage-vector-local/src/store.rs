@@ -74,8 +74,7 @@ impl LocalVectorStore {
                     engine
                         .delete_collection(&collection)
                         .map_err(map_simvec_error)?;
-                    let mut collection_config =
-                        CollectionConfig::new(config.vector_size, distance);
+                    let mut collection_config = CollectionConfig::new(config.vector_size, distance);
                     if let Some(hnsw) = build_hnsw_config(config) {
                         collection_config = collection_config.with_hnsw(hnsw);
                     }
@@ -130,8 +129,7 @@ impl LocalVectorStore {
                     engine
                         .delete_collection(&collection)
                         .map_err(map_simvec_error)?;
-                    let mut collection_config =
-                        CollectionConfig::new(config.vector_size, distance);
+                    let mut collection_config = CollectionConfig::new(config.vector_size, distance);
                     if let Some(hnsw) = build_hnsw_config(config) {
                         collection_config = collection_config.with_hnsw(hnsw);
                     }
@@ -643,13 +641,7 @@ impl VectorStorage for LocalVectorStore {
             let current = offset.clone();
             let (points, next) = tokio::task::spawn_blocking(move || {
                 engine
-                    .scroll(
-                        &collection,
-                        PAGE,
-                        current.as_ref(),
-                        Some(true),
-                        Some(true),
-                    )
+                    .scroll(&collection, PAGE, current.as_ref(), Some(true), Some(true))
                     .map_err(map_simvec_error)
             })
             .await
@@ -684,13 +676,7 @@ impl VectorStorage for LocalVectorStore {
             let current = offset.clone();
             let (points, next) = tokio::task::spawn_blocking(move || {
                 engine
-                    .scroll(
-                        &collection,
-                        PAGE,
-                        current.as_ref(),
-                        Some(true),
-                        Some(false),
-                    )
+                    .scroll(&collection, PAGE, current.as_ref(), Some(true), Some(false))
                     .map_err(map_simvec_error)
             })
             .await

@@ -587,6 +587,10 @@ impl QueryCoordinator {
     /// multiply the load on Qdrant / the embedder by the sub-query count.
     const AGGREGATED_SUB_QUERY_CONCURRENCY: usize = 4;
 
+    /// Upper bound for one sub-query limit after inflation. Keeps the merged
+    /// recall cost predictable when many sub-queries run at once.
+    const MAX_SUBQUERY_LIMIT: usize = 100;
+
     /// Runs sub-queries concurrently against one shared epoch view and
     /// merges the results, deduplicating by entity ID and sorting by score.
     /// Each sub-query's `weight` scales its candidates' scores before the
@@ -780,7 +784,8 @@ impl QueryCoordinator {
             config.annotation.expansion_enabled = false;
         }
         // Threshold-free sub-queries with inflated limit: the merged list
-        // applies the single global threshold after weighting.
+        // applies the single global threshold after weighting. The per-query
+        // cap bounds the worst-case recall cost when many sub-queries run.
         config.result.min_score = 0.0;
         let inflated = agg_options
             .global_config
@@ -788,7 +793,7 @@ impl QueryCoordinator {
             .limit
             .saturating_mul(agg_options.sub_queries.len().max(1))
             .max(agg_options.global_config.result.limit);
-        config.result.limit = inflated.max(10);
+        config.result.limit = inflated.clamp(10, Self::MAX_SUBQUERY_LIMIT);
         QueryOptions {
             query: sub_query.text.clone(),
             project_id: agg_options.project_id,
