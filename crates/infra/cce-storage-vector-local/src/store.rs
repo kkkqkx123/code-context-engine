@@ -11,8 +11,8 @@ use cce_storage_common::{
 use cce_types::{PointKind, StorageError};
 use simvec::{
     CollectionConfig, DistanceMetric as SimDistance, FilterCondition, HnswConfig as SimHnsw,
-    LocalVectorEngine, SearchQuery as SimQuery, VectorFilter as SimFilter, VectorPoint as SimPoint,
-    error::VectorSearchError,
+    LocalVectorEngine, PointId, SearchQuery as SimQuery, VectorFilter as SimFilter,
+    VectorPoint as SimPoint, error::VectorSearchError,
 };
 
 /// Embedded local vector store (single collection, group-isolated).
@@ -54,15 +54,36 @@ impl LocalVectorStore {
                 .create_collection(&collection, &collection_config)
                 .map_err(map_simvec_error)?;
         } else {
-            let existing = engine
-                .collection_config(&collection)
-                .map_err(map_simvec_error)?
-                .ok_or_else(|| StorageError::not_found(format!("collection {collection}")))?;
-            if existing.vector_size != config.vector_size {
-                return Err(StorageError::validation(format!(
-                    "local vector dimension mismatch: collection has {}, config wants {} (rebuild required)",
-                    existing.vector_size, config.vector_size
-                )));
+            match engine.collection_config(&collection) {
+                Ok(Some(existing)) => {
+                    if existing.vector_size != config.vector_size {
+                        return Err(StorageError::validation(format!(
+                            "local vector dimension mismatch: collection has {}, config wants {} (rebuild required)",
+                            existing.vector_size, config.vector_size
+                        )));
+                    }
+                }
+                Ok(None) => {
+                    return Err(StorageError::not_found(format!("collection {collection}")));
+                }
+                Err(VectorSearchError::CorruptData(reason)) => {
+                    tracing::warn!(
+                        reason = %reason,
+                        "local collection metadata incompatible with current simvec format; rebuilding"
+                    );
+                    engine
+                        .delete_collection(&collection)
+                        .map_err(map_simvec_error)?;
+                    let mut collection_config =
+                        CollectionConfig::new(config.vector_size, distance);
+                    if let Some(hnsw) = build_hnsw_config(config) {
+                        collection_config = collection_config.with_hnsw(hnsw);
+                    }
+                    engine
+                        .create_collection(&collection, &collection_config)
+                        .map_err(map_simvec_error)?;
+                }
+                Err(other) => return Err(map_simvec_error(other)),
             }
         }
         Ok(Self {
@@ -89,15 +110,36 @@ impl LocalVectorStore {
                 .create_collection(&collection, &collection_config)
                 .map_err(map_simvec_error)?;
         } else {
-            let existing = engine
-                .collection_config(&collection)
-                .map_err(map_simvec_error)?
-                .ok_or_else(|| StorageError::not_found(format!("collection {collection}")))?;
-            if existing.vector_size != config.vector_size {
-                return Err(StorageError::validation(format!(
-                    "local vector dimension mismatch: collection has {}, config wants {} (rebuild required)",
-                    existing.vector_size, config.vector_size
-                )));
+            match engine.collection_config(&collection) {
+                Ok(Some(existing)) => {
+                    if existing.vector_size != config.vector_size {
+                        return Err(StorageError::validation(format!(
+                            "local vector dimension mismatch: collection has {}, config wants {} (rebuild required)",
+                            existing.vector_size, config.vector_size
+                        )));
+                    }
+                }
+                Ok(None) => {
+                    return Err(StorageError::not_found(format!("collection {collection}")));
+                }
+                Err(VectorSearchError::CorruptData(reason)) => {
+                    tracing::warn!(
+                        reason = %reason,
+                        "local collection metadata incompatible with current simvec format; rebuilding"
+                    );
+                    engine
+                        .delete_collection(&collection)
+                        .map_err(map_simvec_error)?;
+                    let mut collection_config =
+                        CollectionConfig::new(config.vector_size, distance);
+                    if let Some(hnsw) = build_hnsw_config(config) {
+                        collection_config = collection_config.with_hnsw(hnsw);
+                    }
+                    engine
+                        .create_collection(&collection, &collection_config)
+                        .map_err(map_simvec_error)?;
+                }
+                Err(other) => return Err(map_simvec_error(other)),
             }
         }
         Ok(Self {
@@ -594,7 +636,7 @@ impl VectorStorage for LocalVectorStore {
     async fn scroll_all_points(&self) -> Result<Vec<VectorPoint>, StorageError> {
         const PAGE: usize = 5000;
         let mut out = Vec::new();
-        let mut offset: Option<String> = None;
+        let mut offset: Option<PointId> = None;
         loop {
             let engine = Arc::clone(&self.engine);
             let collection = self.collection.clone();
@@ -604,7 +646,7 @@ impl VectorStorage for LocalVectorStore {
                     .scroll(
                         &collection,
                         PAGE,
-                        current.as_deref(),
+                        current.as_ref(),
                         Some(true),
                         Some(true),
                     )
@@ -635,7 +677,7 @@ impl VectorStorage for LocalVectorStore {
         // fetched, so peak memory stays at one page instead of O(N*d).
         const PAGE: usize = 5000;
         let mut count = 0;
-        let mut offset: Option<String> = None;
+        let mut offset: Option<PointId> = None;
         loop {
             let engine = Arc::clone(&self.engine);
             let collection = self.collection.clone();
@@ -645,7 +687,7 @@ impl VectorStorage for LocalVectorStore {
                     .scroll(
                         &collection,
                         PAGE,
-                        current.as_deref(),
+                        current.as_ref(),
                         Some(true),
                         Some(false),
                     )
