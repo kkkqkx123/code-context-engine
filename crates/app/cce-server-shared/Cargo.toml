@@ -29,7 +29,7 @@ cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
 cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
 cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
-cce-plugin-runtime = { version = "0.1.0", path = "../cce-plugin-runtime" }
+cce-plugin-runtime = { version = "0.1.0", path = "../cce-plugin-runtime", optional = true }
 cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
 cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
@@ -44,3 +44,10 @@ cce-api = { version = "0.1.0", path = "../cce-api" }
 
 [dev-dependencies]
 llm-suite-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-rerank", features = ["mock"] }
+
+[features]
+default = []
+# Lua/native plugin loading via `.cce/plugins.json` (pulls in mlua +
+# libloading). Opt-in: the default build excludes the scripting runtime so
+# lightweight consumers do not pay for it.
+plugins = ["dep:cce-plugin-runtime"]

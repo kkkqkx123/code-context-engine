@@ -34,7 +34,7 @@ use crate::path_tracker::PathTracker;
 use crate::pattern_matcher::{PatternLoadOptions, PatternMatcher};
 use cce_config::ScannerConfig;
 use cce_metrics::ScannerMetrics;
-use cce_plugin_runtime::default_timeout_for;
+use cce_plugin::default_timeout_for;
 use cce_types::error::common;
 
 /// Scan options for file system scanning
@@ -598,7 +598,7 @@ impl<'a> DirectoryWalker<'a> {
             let plugin_id = plugin.metadata().id.clone();
             let plugin = plugin.clone();
             let path_str = path.to_string_lossy().to_string();
-            let result = cce_plugin_runtime::execute_with_timeout_blocking(
+            let result = cce_plugin::execute_with_timeout_blocking(
                 move |_| plugin.filter_file(&path_str, is_directory, size),
                 default_timeout_for("filter_file"),
                 &plugin_id,
@@ -669,7 +669,7 @@ impl<'a> DirectoryWalker<'a> {
             let plugin_id = plugin.metadata().id.clone();
             let plugin = plugin.clone();
             let path_str = path.to_string_lossy().to_string();
-            let result = cce_plugin_runtime::execute_with_timeout_blocking(
+            let result = cce_plugin::execute_with_timeout_blocking(
                 move |_| plugin.filter_file(&path_str, is_directory, size),
                 default_timeout_for("filter_file"),
                 &plugin_id,

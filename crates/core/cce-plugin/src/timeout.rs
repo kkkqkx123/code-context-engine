@@ -1,10 +1,44 @@
+//! Blocking-execution timeout helpers shared by plugin loaders and callers.
+//!
+//! Pure `std` + `tracing` — no scripting engine dependencies, so any crate
+//! that invokes plugin operations (including ones without `mlua`) can use
+//! them without pulling the plugin runtime.
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tracing::warn;
 
-use super::error::PluginError;
+use crate::PluginError;
+
+/// Default timeout for lightweight operations (filter_file, rewrite_query, etc.)
+const LIGHTWEIGHT_TIMEOUT_MS: u64 = 1_000;
+/// Default timeout for standard operations (single NL generation, parse, etc.)
+const STANDARD_TIMEOUT_MS: u64 = 5_000;
+/// Default timeout for heavyweight operations (batch generation, relation extract, etc.)
+const HEAVYWEIGHT_TIMEOUT_MS: u64 = 30_000;
+
+/// Return the default timeout in milliseconds for a given operation.
+///
+/// Three tiers:
+/// - Lightweight (1s): filter_file, rewrite_query, classify_stdlib, is_test_file, entity_kind, vocabulary
+/// - Standard (5s): generate_bm25, generate_embedding, parse_document, post_group, chunk, rerank, filter_results, fusion_weights
+/// - Heavyweight (30s): generate_bm25_batch, generate_embedding_batch, extract_entities, extract_symbols, extract_relations, extract_imports, extract_exports
+pub fn default_timeout_for(operation: &str) -> u64 {
+    match operation {
+        "filter_file" | "rewrite_query" | "classify_stdlib" | "is_test_file" | "entity_kind"
+        | "vocabulary" => LIGHTWEIGHT_TIMEOUT_MS,
+        "generate_bm25_batch"
+        | "generate_embedding_batch"
+        | "extract_entities"
+        | "extract_symbols"
+        | "extract_relations"
+        | "extract_imports"
+        | "extract_exports" => HEAVYWEIGHT_TIMEOUT_MS,
+        _ => STANDARD_TIMEOUT_MS,
+    }
+}
 
 /// A handle that allows the caller to signal a running blocking
 /// operation that it should be cancelled.
@@ -86,6 +120,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_default_timeout_for_tiers() {
+        assert_eq!(default_timeout_for("filter_file"), 1_000);
+        assert_eq!(default_timeout_for("generate_bm25"), 5_000);
+        assert_eq!(default_timeout_for("generate_embedding_batch"), 30_000);
+        assert_eq!(default_timeout_for("unknown_operation"), 5_000);
+    }
+
+    #[test]
     fn test_cancellation_token_starts_uncancelled() {
         let token = CancellationToken::new();
         assert!(!token.is_cancelled());
@@ -100,10 +142,9 @@ mod tests {
 
     #[test]
     fn test_cancellation_token_clone_shares_state() {
-        let token = CancellationToken::new();
-        let clone = token.clone();
+        let clone = CancellationToken::new().clone();
         assert!(!clone.is_cancelled());
-        token.cancel();
+        clone.cancel();
         // The clone observes the cancellation (cross-thread visibility is
         // exercised by the timeout path below).
         assert!(clone.is_cancelled());

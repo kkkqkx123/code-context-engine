@@ -9,14 +9,14 @@ use crate::error::PluginError;
 use crate::loader::lua_mapping::entity_group_to_lua_table;
 use crate::pattern::{CompiledPattern, PatternDeclaration, compile_patterns};
 use crate::types::PluginMetadata;
-use crate::utils::CancellationToken;
+use cce_plugin::CancellationToken;
 use cce_metrics::PluginMetrics;
 use cce_types::QueryType;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use super::lua_helpers::{capability_label, parse_query_type, read_lua_priority};
 use super::lua_vm_pool::LuaVmPool;
-use crate::default_timeout_for;
+use cce_plugin::default_timeout_for;
 
 const DEFAULT_MEMORY_LIMIT_KB: usize = 64 * 1024;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 10_000;

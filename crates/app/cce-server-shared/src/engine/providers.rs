@@ -6,7 +6,9 @@ use super::builders::{build_chat_handle, build_rerank_handler, build_summary_gen
 use cce_codegraph::CallChainQuery;
 use cce_config::project_registry::{ProjectEntry, ProjectScope};
 use cce_metrics::RelationMetrics;
-use cce_metrics::{PluginMetrics, QueryMetrics, SearchMetrics, WatchMetrics};
+use cce_metrics::{QueryMetrics, SearchMetrics, WatchMetrics};
+#[cfg(feature = "plugins")]
+use cce_metrics::PluginMetrics;
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
@@ -16,6 +18,7 @@ use cce_orchestrator::query::searcher::Searcher;
 use cce_orchestrator::query::{IndexCapabilities, QueryCoordinator, RelationSearcher};
 use cce_parser::summary::SummaryGenerator;
 use cce_plugin::PluginRegistry;
+#[cfg(feature = "plugins")]
 use cce_plugin_runtime::FilePluginSource;
 use tokio::sync::Mutex;
 
@@ -295,6 +298,7 @@ impl super::CodeContextEngine {
     /// Returns `None` when plugins are disabled, none load, or loading fails.
     /// `AstLanguage` plugins are registered into the global language tables
     /// exactly once per load.
+    #[cfg(feature = "plugins")]
     pub(crate) async fn load_plugin_registry(
         &self,
         project_id: i64,
@@ -364,6 +368,17 @@ impl super::CodeContextEngine {
             .insert(project_id, registry.clone())
             .await;
         Some(registry)
+    }
+
+    /// Compiled without the `plugins` feature: no plugin registry can be
+    /// loaded, so per-project plugin support is absent in this build.
+    #[cfg(not(feature = "plugins"))]
+    pub(crate) async fn load_plugin_registry(
+        &self,
+        _project_id: i64,
+        _project_entry: &ProjectEntry,
+    ) -> Option<Arc<PluginRegistry>> {
+        None
     }
 
     /// Load (or fetch from cache) the plugin registry for a project.

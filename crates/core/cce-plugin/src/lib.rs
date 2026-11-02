@@ -13,13 +13,16 @@ mod registry;
 
 /// Domain terminology table of the `Vocabulary` capability.
 pub mod vocabulary;
+/// Blocking-execution timeout helpers (pure std, no scripting engine).
+pub mod timeout;
+
+pub use registry::PluginRegistry;
+pub use timeout::{CancellationToken, default_timeout_for, execute_with_timeout_blocking};
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-
-pub use registry::PluginRegistry;
 
 // ---------------------------------------------------------------------------
 // PluginError – merged from cce_infrastructure variants

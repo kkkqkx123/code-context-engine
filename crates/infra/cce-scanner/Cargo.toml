@@ -14,7 +14,6 @@ cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 encoding-guess = { path = "../../encoding-guess" }
 cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
 cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
-cce-plugin-runtime = { version = "0.1.0", path = "../../app/cce-plugin-runtime" }
 
 serde = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }

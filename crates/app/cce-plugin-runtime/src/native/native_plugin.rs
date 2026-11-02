@@ -58,10 +58,10 @@ use std::time::{Duration, Instant};
 use libloading::Library;
 use tracing::{error, warn};
 
-use crate::default_timeout_for;
+use cce_plugin::default_timeout_for;
 use crate::error::PluginError;
 use crate::types::PluginMetadata;
-use crate::utils::execute_with_timeout_blocking;
+use cce_plugin::execute_with_timeout_blocking;
 use cce_metrics::PluginMetrics;
 
 use super::ffi_helpers::{
