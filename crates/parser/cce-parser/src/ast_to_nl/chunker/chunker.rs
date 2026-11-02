@@ -272,10 +272,14 @@ impl GroupChunker {
                 && budget.pre_injection_limit != usize::MAX
                 && budget.decoration_cost >= budget.pre_injection_limit
             {
-                return Err(ParseError::code_splitting(format!(
-                    "decoration exceeds the pre-injection budget (path={name}, decoration={}, pre={})",
-                    budget.decoration_cost, budget.pre_injection_limit
-                )));
+                tracing::warn!(
+                    file = file_path,
+                    group = group.group_id.as_str(),
+                    path = name,
+                    decoration = budget.decoration_cost,
+                    pre = budget.pre_injection_limit,
+                    "decoration reaches the pre-injection budget; keeping a minimal body and relying on hard-limit truncation"
+                );
             }
         }
         let config = self.config.clone();
@@ -408,14 +412,7 @@ impl GroupChunker {
             let stats = self.inject_vocabulary(&mut all_chunks.chunks, &vocabulary);
             all_chunks.vocabulary.absorb(stats);
         }
-        super::limits::enforce_hard_limit(
-            &mut all_chunks.chunks,
-            &self.config,
-            file_path,
-            infra.has_vocabulary,
-            infra.emb_budget.decoration_cost,
-            infra.bm25_budget.decoration_cost,
-        )?;
+        super::limits::enforce_hard_limit(&mut all_chunks.chunks, &self.config, file_path)?;
 
         let first_emb = all_chunks
             .chunks
@@ -491,14 +488,7 @@ impl GroupChunker {
             let stats = self.inject_vocabulary(&mut output.chunks, &vocabulary);
             output.vocabulary.absorb(stats);
         }
-        super::limits::enforce_hard_limit(
-            &mut output.chunks,
-            &self.config,
-            file_path,
-            infra.has_vocabulary,
-            infra.emb_budget.decoration_cost,
-            infra.bm25_budget.decoration_cost,
-        )?;
+        super::limits::enforce_hard_limit(&mut output.chunks, &self.config, file_path)?;
         let first_emb = output
             .chunks
             .iter()
@@ -569,28 +559,7 @@ impl GroupChunker {
         } else {
             self.chunk_groups_builtin(group_conversions, file_path)?
         };
-        let has_vocabulary =
-            self.batch_mentions_vocabulary(group_conversions, file_path, language.as_deref());
-        let mut emb_dec = 0usize;
-        let mut bm25_dec = 0usize;
-        for gc in group_conversions {
-            emb_dec = emb_dec.max(ChunkBuilder::decoration_allowance(
-                &gc.group,
-                ChunkPath::Embedding,
-            ));
-            bm25_dec = bm25_dec.max(ChunkBuilder::decoration_allowance(
-                &gc.group,
-                ChunkPath::Bm25,
-            ));
-        }
-        super::limits::enforce_hard_limit(
-            &mut output.chunks,
-            &self.config,
-            file_path,
-            has_vocabulary,
-            emb_dec,
-            bm25_dec,
-        )?;
+        super::limits::enforce_hard_limit(&mut output.chunks, &self.config, file_path)?;
 
         Ok(output)
     }

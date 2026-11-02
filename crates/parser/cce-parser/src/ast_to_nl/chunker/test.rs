@@ -1247,4 +1247,153 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "BELOW-FALLBACK");
     }
+
+    #[test]
+    fn test_direct_like_block_between_body_and_pre_fits_hard() {
+        use smallvec::SmallVec;
+        let config = ChunkingConfig {
+            max_tokens: 256,
+            max_bm25_terms: 200,
+            min_chunk_tokens: 10,
+            ..Default::default()
+        };
+        let mut group = create_small_group();
+        group.group_id = CompactString::from("group_1474");
+        group.group_type = GroupType::ClassWithMethods;
+        group.kind = EntityKind::Class;
+        group.name = CompactString::from("PipelineTests");
+        group.header = Some(GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Class,
+            "PipelineTests".to_string(),
+            "class PipelineTests".to_string(),
+        ));
+        group.header_id = Some(EntityId(1));
+        group.members = SmallVec::from_vec(vec![GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Method,
+            "TestMethod".to_string(),
+            "void TestMethod()".to_string(),
+        )]);
+        group.member_ids = SmallVec::from_vec(vec![EntityId(2)]);
+        let decoration = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let budget = config.budget(ChunkPath::Embedding, false, decoration);
+        assert!(budget.body_limit > 1 && budget.body_limit < budget.pre_injection_limit);
+        let over = budget.body_limit.saturating_add(5);
+        let mut member_text = (0..200)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        member_text =
+            cce_text::truncate_to_cost(&member_text, cce_text::ChunkUnit::Tokens, over).to_string();
+        assert!(
+            config.cost(&member_text, ChunkPath::Embedding) > budget.body_limit,
+            "fixture must sit between body and pre-injection"
+        );
+        assert!(
+            config.cost(&member_text, ChunkPath::Embedding) <= budget.pre_injection_limit,
+            "fixture must fit the pre-injection budget"
+        );
+        let header_conv = ConversionResult {
+            entity_id: EntityId(1),
+            kind: EntityKind::Class,
+            name: "PipelineTests".to_string(),
+            file_path: "PipelineTests.cs".to_string(),
+            bm25_text: Some("PipelineTests".to_string()),
+            embedding_text: Some("PipelineTests".to_string()),
+            ..Default::default()
+        };
+        let member_conv = ConversionResult {
+            entity_id: EntityId(2),
+            kind: EntityKind::Method,
+            name: "TestMethod".to_string(),
+            file_path: "PipelineTests.cs".to_string(),
+            bm25_text: Some(member_text.clone()),
+            embedding_text: Some(member_text),
+            ..Default::default()
+        };
+        let conversions = vec![GroupConversions {
+            group: group.clone(),
+            header_conversion: Some(header_conv),
+            member_conversions: vec![member_conv],
+        }];
+        let chunker = GroupChunker::new(config.clone());
+        let output = chunker
+            .chunk_groups(&conversions, "PipelineTests.cs")
+            .expect("between-body-and-pre block must not fail the file");
+        assert!(!output.chunks.is_empty(), "file must keep its chunks");
+        for chunk in &output.chunks {
+            assert!(
+                config.cost(&chunk.text, chunk.path) <= config.limit(chunk.path),
+                "chunk {} exceeds the hard limit",
+                chunk.chunk_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_tiny_budget_keeps_file_despite_large_decoration() {
+        use smallvec::SmallVec;
+        let config = ChunkingConfig {
+            max_tokens: 40,
+            max_bm25_terms: 40,
+            min_chunk_tokens: 5,
+            min_chunk_bm25_terms: 5,
+            ..Default::default()
+        };
+        let mut group = create_small_group();
+        group.group_id = CompactString::from("tiny_group");
+        group.group_type = GroupType::ClassWithMethods;
+        group.kind = EntityKind::Class;
+        group.name = CompactString::from("Tiny");
+        group.header = Some(GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Class,
+            "Tiny".to_string(),
+            "class Tiny".to_string(),
+        ));
+        group.header_id = Some(EntityId(1));
+        group.members = SmallVec::from_vec(vec![GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Method,
+            "run".to_string(),
+            "void run()".to_string(),
+        )]);
+        group.member_ids = SmallVec::from_vec(vec![EntityId(2)]);
+        let header_conv = ConversionResult {
+            entity_id: EntityId(1),
+            kind: EntityKind::Class,
+            name: "Tiny".to_string(),
+            file_path: "tiny.cs".to_string(),
+            bm25_text: Some("Tiny".to_string()),
+            embedding_text: Some("Tiny".to_string()),
+            ..Default::default()
+        };
+        let member_conv = ConversionResult {
+            entity_id: EntityId(2),
+            kind: EntityKind::Method,
+            name: "run".to_string(),
+            file_path: "tiny.cs".to_string(),
+            bm25_text: Some("run body here".to_string()),
+            embedding_text: Some("run body here".to_string()),
+            ..Default::default()
+        };
+        let conversions = vec![GroupConversions {
+            group: group.clone(),
+            header_conversion: Some(header_conv),
+            member_conversions: vec![member_conv],
+        }];
+        let chunker = GroupChunker::new(config.clone());
+        let output = chunker
+            .chunk_groups(&conversions, "tiny.cs")
+            .expect("decoration over reserve must not drop the file");
+        assert!(!output.chunks.is_empty(), "file must keep its chunks");
+        for chunk in &output.chunks {
+            assert!(
+                config.cost(&chunk.text, chunk.path) <= config.limit(chunk.path),
+                "chunk {} exceeds the hard limit",
+                chunk.chunk_id
+            );
+        }
+    }
 }

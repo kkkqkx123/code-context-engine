@@ -2,9 +2,9 @@
 //!
 //! The pre-injection check is advisory: it records a violation but keeps the
 //! chunk, because the injection is still bounded by the absolute hard limit.
-//! The hard-limit check is enforcing: a chunk that crosses its configured
-//! hard limit is a deterministic splitting or plugin bug and must not reach
-//! storage.
+//! The hard-limit check truncates the tail so storage never receives an
+//! oversized chunk; the truncation is warned, therefore not silent, and it
+//! keeps the file instead of dropping it.
 
 use cce_types::ParseError;
 
@@ -18,7 +18,8 @@ use super::result::{ChunkPath, ChunkedResult};
 /// wrong or a future assembly path bypassed the body budget. The violation
 /// is reported as a warning with full budget context; the chunk is kept to
 /// avoid dropping the whole file, because injection is still bounded by the
-/// absolute hard limit.
+/// absolute hard limit. Chunks that already exceed the hard limit are left
+/// to the hard-limit handler so one cause is not warned about twice.
 pub(crate) fn enforce_pre_injection_limit(
     chunks: Vec<ChunkedResult>,
     budget: cce_config::modules::ChunkBudget,
@@ -30,7 +31,9 @@ pub(crate) fn enforce_pre_injection_limit(
     }
     for chunk in &chunks {
         let actual = budget.unit.cost(&chunk.text);
-        if actual > budget.pre_injection_limit {
+        if actual > budget.pre_injection_limit
+            && (budget.hard_limit == 0 || actual <= budget.hard_limit)
+        {
             tracing::warn!(
                 file = file_path,
                 group = group_id,
@@ -44,33 +47,108 @@ pub(crate) fn enforce_pre_injection_limit(
     Ok(chunks)
 }
 
-/// Reject any chunk that still exceeds its configured hard limit.
+/// Truncate any chunk that still exceeds its configured hard limit.
 ///
-/// Injection is bounded by the absolute final text, so this is a guard
-/// against a plugin-produced chunk, an incorrect budget, or a future
-/// assembly path that bypasses the pre-injection check. It runs in release
-/// builds as well; a silent overflow is not an acceptable degradation.
+/// The splitter and the decoration cap keep compliant assembly within the
+/// hard limit. This is the last resort for a plugin-produced chunk or a
+/// future assembly path that bypassed the body budget: the tail is cut to
+/// the hard limit with a warning, so the file is kept and storage never
+/// receives an oversized chunk. Truncated chunks carry the truncated flag
+/// so callers know the tail was lost.
 pub(crate) fn enforce_hard_limit(
     chunks: &mut [ChunkedResult],
     config: &ChunkingConfig,
     file_path: &str,
-    _has_vocabulary: bool,
-    _emb_decoration: usize,
-    _bm25_decoration: usize,
 ) -> Result<(), ParseError> {
     for chunk in chunks {
         let limit = config.limit(chunk.path);
         let actual = config.cost(&chunk.text, chunk.path);
         if limit > 0 && actual > limit {
-            return Err(ParseError::code_splitting(format!(
-                "chunk exceeds the hard limit (file={}, group={}, chunk={}, path={}, cost={}, hard={})",
-                file_path, chunk.source_group_id, chunk.chunk_id, chunk.path, actual, limit
-            )));
+            tracing::warn!(
+                file = file_path,
+                group = chunk.source_group_id.as_str(),
+                chunk = %chunk.chunk_id,
+                cost = actual,
+                hard = limit,
+                "chunk exceeds the hard limit; truncating tail to keep the file"
+            );
+            let truncated = cce_text::truncate_to_cost(&chunk.text, config.unit(chunk.path), limit);
+            chunk.text = truncated.to_string();
+            chunk.truncated = true;
         }
-        chunk.token_count = actual;
+        let fitted = config.cost(&chunk.text, chunk.path);
+        chunk.token_count = fitted;
         if chunk.metadata.bm25_word_count.is_some() {
             chunk.metadata.bm25_word_count = Some(config.cost(&chunk.text, ChunkPath::Bm25));
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_config::modules::ChunkingConfig;
+
+    fn words(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn test_hard_limit_truncates_tail_and_keeps_file() {
+        let config = ChunkingConfig {
+            max_tokens: 512,
+            ..Default::default()
+        };
+        let text = words(600);
+        assert!(
+            config.cost(&text, ChunkPath::Embedding) > 512,
+            "fixture must exceed the hard limit"
+        );
+        let mut chunk = ChunkedResult::new(
+            "group_1474_emb_0".to_string(),
+            "group_1474".to_string(),
+            ChunkPath::Embedding,
+            0,
+            1,
+        );
+        chunk.text = text;
+        let mut chunks = vec![chunk];
+        super::enforce_hard_limit(&mut chunks, &config, "PipelineTests.cs")
+            .expect("hard limit must not drop the file");
+        assert_eq!(chunks.len(), 1);
+        assert!(
+            config.cost(&chunks[0].text, ChunkPath::Embedding) <= 512,
+            "truncated chunk must fit the hard limit"
+        );
+        assert!(!chunks[0].text.is_empty(), "truncation must keep the head");
+        assert!(
+            chunks[0].truncated,
+            "truncation must set the truncated flag"
+        );
+    }
+
+    #[test]
+    fn test_hard_limit_compliant_chunk_passes_through() {
+        let config = ChunkingConfig::default();
+        let mut chunk = ChunkedResult::new(
+            "g_emb_0".to_string(),
+            "g".to_string(),
+            ChunkPath::Embedding,
+            0,
+            1,
+        );
+        chunk.text = words(10);
+        let mut chunks = vec![chunk];
+        super::enforce_hard_limit(&mut chunks, &config, "a.cs").expect("compliant chunk must pass");
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].text.contains("w9"));
+        assert!(
+            !chunks[0].truncated,
+            "compliant chunk must not set the truncated flag"
+        );
+    }
 }

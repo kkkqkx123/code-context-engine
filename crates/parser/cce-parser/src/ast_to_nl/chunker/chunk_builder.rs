@@ -317,13 +317,15 @@ impl ChunkBuilder {
 
     /// Identity prefix for a continuation segment.
     ///
-    /// Continuation segments start mid-entity, so they repeat the identity
-    /// of the entities they actually cover (kind plus owner-qualified name)
-    /// instead of anonymous fragment counters. Fragment numbers and
-    /// continuation markers describe split history, not content, and carry
-    /// no retrieval signal, so they are not emitted. Parts whose qualified
-    /// name already opens the segment are skipped: a split that falls
-    /// exactly on an entity boundary needs no repeated identity.
+    /// Continuation segments start mid-entity, so they repeat one identity
+    /// anchor (kind plus owner-qualified name) instead of anonymous fragment
+    /// counters. Only the earliest covered entity is anchored: the anchor must
+    /// stay within the decoration allowance the splitter reserved, and a
+    /// multi-entity prefix would exceed that single-line upper bound.
+    /// Fragment numbers and continuation markers describe split history, not
+    /// content, and carry no retrieval signal, so they are not emitted. An
+    /// anchor whose qualified name already opens the segment is skipped: a
+    /// split that falls exactly on an entity boundary needs no repeated identity.
     fn continuation_identity(
         group: &EntityGroup,
         entity_ids: &[EntityId],
@@ -335,7 +337,6 @@ impl ChunkBuilder {
         let owner = Self::resolve_owner(group, parent);
         let unit = unit(path);
         let mut seen = std::collections::HashSet::new();
-        let mut parts = Vec::new();
         for id in Self::sorted_content_ids(group, entity_ids) {
             if !seen.insert(id) {
                 continue;
@@ -355,59 +356,33 @@ impl ChunkBuilder {
             }
             let identity = Self::identity_line(kind, &qualified);
             let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
-            if !identity.trim().is_empty() {
-                parts.push(identity.to_string());
+            if identity.trim().is_empty() {
+                continue;
             }
+            return Some(format!("{identity}\n\n"));
         }
-        if parts.is_empty() {
-            return None;
-        }
-        Some(parts.join("\n") + "\n\n")
+        None
     }
 
     /// Upper bound of the text appended after splitting for one group.
     ///
     /// The splitter works on a body limit; this allowance protects the lines
-    /// assembly adds back: the identity line of the first chunk, the identity
-    /// anchor of every continuation chunk, and the synthetic head that names
-    /// the members of a later block. It counts only decoration that can
-    /// actually appear for this group, because every token reserved here is a
-    /// token the body cannot use.
+    /// assembly adds back: the identity line of the first chunk and the
+    /// identity anchor of every continuation chunk. The anchor is truncated
+    /// to a fixed cap, so the allowance uses that cap instead of enumerating
+    /// group names: a parent-qualified anchor must fit the same room. The
+    /// synthetic head names members inside the body text and is already
+    /// covered by the body budget, so it needs no extra room here.
     pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath) -> usize {
-        let unit = unit(path);
-        // A synthetic head exists only where member blocks are built, which is
-        // the header path of a container group. A standalone group is split
-        // into fragments of its own body and never gets a block head.
-        let head_cap = if group.group_type.is_container() {
-            SYNTHETIC_HEAD_COST_CAP
-        } else {
-            0
-        };
         let first_line = format!("{} ({}).\n", group.name, group.kind.kind_label());
         let first = if path == ChunkPath::Embedding {
             cost(&first_line, path)
         } else {
             0
         };
-        let mut continuation = 0usize;
-        for id in group.all_entity_ids() {
-            let Some((name, kind)) = Self::entity_name_and_kind(group, id) else {
-                continue;
-            };
-            if name.is_empty() {
-                continue;
-            }
-            let qualified = if group.name.is_empty() || name == group.name {
-                name.clone()
-            } else {
-                format!("{}.{}", group.name, name)
-            };
-            let identity = Self::identity_line(kind, &qualified);
-            let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
-            continuation = continuation.max(cost(identity, path).saturating_add(2));
-        }
-        continuation = continuation.max(cost(&first_line, path).saturating_add(2));
-        first.max(continuation).saturating_add(head_cap)
+        let universal = IDENTITY_COST_CAP.saturating_add(2);
+        let continuation = universal.max(cost(&first_line, path).saturating_add(2));
+        first.max(continuation)
     }
 
     /// Identity line for one continued entity.
@@ -1491,6 +1466,67 @@ mod tests {
         assert!(
             !identity.contains("unsigned short"),
             "the signature must not be repeated: {identity}"
+        );
+    }
+
+    #[test]
+    fn test_continuation_identity_anchors_single_entity() {
+        let mut group = method_group();
+        group.group_type = GroupType::ClassWithMethods;
+        group.name = CompactString::from("Engine");
+        group.kind = EntityKind::Class;
+        group.header = Some(GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Method,
+            "first".to_string(),
+            "first()".to_string(),
+        ));
+        group.members = smallvec::smallvec![GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Method,
+            "second".to_string(),
+            "second()".to_string(),
+        )];
+        let identity = ChunkBuilder::continuation_identity(
+            &group,
+            &[EntityId(1), EntityId(2)],
+            "tail body without names",
+            None,
+            ChunkPath::Embedding,
+        )
+        .expect("continuation must anchor the covered entities");
+        let trimmed = identity.trim_end().to_string();
+        assert!(
+            !trimmed.contains('\n'),
+            "multi-entity prefix would exceed the single-line allowance, got: {identity}"
+        );
+        assert!(
+            trimmed.contains("first") || trimmed.contains("second"),
+            "anchor must name one covered entity, got: {identity}"
+        );
+        let allowance = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        assert!(
+            crate::ast_to_nl::chunker::boundary::cost(&identity, ChunkPath::Embedding) <= allowance,
+            "anchor must fit the reserved decoration room"
+        );
+    }
+
+    #[test]
+    fn test_long_parent_anchor_fits_universal_allowance() {
+        let group = method_group();
+        let long_parent = "VeryLongParentModuleNameThatKeepsGrowingAndGrowing";
+        let identity = ChunkBuilder::continuation_identity(
+            &group,
+            &[EntityId(2)],
+            "tail body without names",
+            Some(long_parent),
+            ChunkPath::Embedding,
+        )
+        .expect("parent-qualified anchor must still be produced");
+        let allowance = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        assert!(
+            crate::ast_to_nl::chunker::boundary::cost(&identity, ChunkPath::Embedding) <= allowance,
+            "parent-qualified anchor must fit the parent-independent room, got: {identity}"
         );
     }
 

@@ -614,6 +614,34 @@ fn test_merge_small_chunks_empty() {
 }
 
 #[test]
+fn test_merge_two_chunks_propagates_truncated_flag() {
+    let mut first = make_test_chunk(
+        "g1_emb_0",
+        "g1",
+        ChunkPath::Embedding,
+        "first",
+        5,
+        vec![],
+        Span::default(),
+    );
+    first.truncated = true;
+    let second = make_test_chunk(
+        "g2_emb_0",
+        "g2",
+        ChunkPath::Embedding,
+        "second",
+        6,
+        vec![],
+        Span::default(),
+    );
+    let merged = super::merge_two_chunks(&first, &second, 11);
+    assert!(
+        merged.truncated,
+        "merging a truncated side must keep the loss signal"
+    );
+}
+
+#[test]
 fn test_merge_small_chunks_fragment_fields_cleared() {
     let config = ChunkingConfig {
         min_chunk_tokens: 150,

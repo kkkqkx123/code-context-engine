@@ -302,12 +302,13 @@ impl TextSplitter {
             let piece_cost = self
                 .config
                 .cost(&text[boundary.start_byte..boundary.end_byte], path);
-            // A single piece that fits the pre-injection budget is kept whole:
-            // it absorbs decoration without crossing the hard limit, and
-            // splitting it only strands a tiny tail fragment next to a full
-            // block. The output stays one segment, so no continuation
-            // identity is appended on top of it.
-            if budget.body_limit == 0 || piece_cost <= budget.pre_injection_limit {
+            // A single piece is kept whole only when it fits the body limit:
+            // the assembly still appends decoration on top, so keeping a
+            // body-overflowing piece would push the final chunk over the
+            // pre-injection and hard limits whenever the reserve is smaller
+            // than the decoration. Splitting here may strand a tail, but it
+            // keeps the hard limit reachable.
+            if budget.body_limit == 0 || piece_cost <= budget.body_limit {
                 return Ok(vec![boundary]);
             }
             return self.split_range_at(
@@ -1033,7 +1034,7 @@ mod tests {
     }
 
     #[test]
-    fn test_single_piece_between_body_and_pre_injection_kept_whole() {
+    fn test_single_piece_between_body_and_pre_injection_subdivided() {
         let config = ChunkingConfig {
             max_bm25_terms: 150,
             ..Default::default()
@@ -1056,12 +1057,21 @@ mod tests {
                 &[],
             )
             .expect("test splitter input must be valid");
-        // 50 < 140 <= 150: above the body limit but within the pre-injection
-        // budget, so the single entity piece is kept whole instead of being
-        // cut into a full block plus a stranded tail.
-        assert_eq!(boundaries.len(), 1, "over-body piece should be kept whole");
-        assert_eq!(boundaries[0].start_byte, 0);
-        assert_eq!(boundaries[0].end_byte, text.len());
+        // 50 < 140 <= 150: above the body limit, so the single piece is
+        // subdivided even though it fits the pre-injection budget. Keeping it
+        // whole would leave no room for the decoration appended later.
+        assert!(
+            boundaries.len() >= 2,
+            "over-body piece must be subdivided, got {}",
+            boundaries.len()
+        );
+        assert_partition(&text, &boundaries);
+        for b in &boundaries {
+            assert!(
+                text[b.start_byte..b.end_byte].split_whitespace().count() <= 50,
+                "piece exceeds the body limit"
+            );
+        }
     }
 
     #[test]

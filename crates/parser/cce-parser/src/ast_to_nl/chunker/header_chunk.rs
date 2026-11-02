@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enforce_segment_retained_between_body_and_pre_injection() {
+    fn test_enforce_segment_between_body_and_pre_injection_resplit() {
         let cfg = ChunkingConfig {
             max_bm25_terms: 150,
             ..Default::default()
@@ -563,8 +563,9 @@ mod tests {
         };
         let group = test_group();
         let nlb: [NlEntityBoundary; 0] = [];
-        // 50 < 140 <= 150: above the body limit but within the pre-injection
-        // limit, matching the splitter's small over-limit retention.
+        // 50 < 140 <= 150: above the body limit, so the segment is re-split
+        // even though it fits the pre-injection budget. Decoration appended
+        // later needs the reserved room.
         let text = n_words(140);
         let seg = ChunkSegment::new(
             ChunkBoundary::new(0, text.len(), SplitReason::MemberBoundary),
@@ -578,8 +579,17 @@ mod tests {
             &nlb,
         )
         .expect("segment split must succeed");
-        assert_eq!(result.len(), 1, "over-body segment must be kept");
-        assert_eq!(result[0].text, text);
+        assert!(
+            result.len() >= 2,
+            "over-body segment must be re-split, got {}",
+            result.len()
+        );
+        for s in &result {
+            assert!(
+                s.text.split_whitespace().count() <= 50,
+                "piece exceeds the body limit"
+            );
+        }
     }
 
     #[test]
