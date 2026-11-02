@@ -337,7 +337,8 @@ impl RelationResolver {
         let has_overload = symbol_table.has_overload_candidates(simple_name);
         let is_bare = !raw_data.dst_name.contains('.') && !raw_data.dst_name.contains(':');
         let receiver_type = self
-            .extract_receiver_from_name(&raw_data.dst_name)
+            .extract_promoted_receiver_type(&raw_data.dst_name, symbol_table)
+            .or_else(|| self.extract_receiver_from_name(&raw_data.dst_name))
             .or_else(|| {
                 if has_overload || !is_bare {
                     self.extract_receiver_type(raw_data, parsed, symbol_table, entity_index)
@@ -398,11 +399,14 @@ impl RelationResolver {
             );
         let mut symbol_ref: Option<SymbolRef> = None;
         let mut resolved_entity_id: Option<EntityId> = None;
+        let promoted_name = self.promoted_candidate_name(&raw_data.dst_name, symbol_table);
+        let mut via_promoted = false;
         if !locally_bound {
-            for name in self.resolution_names(&raw_data.dst_name, parsed) {
+            for name in self.ordered_resolution_names(&raw_data.dst_name, parsed, symbol_table) {
                 let (candidate_ref, candidate_id) =
                     self.resolve_name_candidate(&name, is_stdlib, &candidate_ctx);
                 if candidate_id.is_some() {
+                    via_promoted = promoted_name.as_deref().is_some_and(|p| p == name.as_str());
                     symbol_ref = candidate_ref;
                     resolved_entity_id = candidate_id;
                     break;
@@ -531,6 +535,18 @@ impl RelationResolver {
 
         let mut effective_callee_id = callee_id;
         let mut overload_signature: Option<String> = None;
+        // Function references name a value, not a call site, so normal
+        // affinity resolution often ties: a prototype declaration shares
+        // the definition's name and directory. Retry by definition — the
+        // definition carries a body and therefore the largest span among
+        // function-like candidates. Unknown names and non-functions still
+        // resolve to nothing and are dropped below.
+        if effective_callee_id.is_none()
+            && raw_data.relation_type == cce_types::relation::RelationType::FunctionReference
+        {
+            effective_callee_id =
+                self.resolve_function_definition(&raw_data.dst_name, entity_index);
+        }
         // Determine owner_type and call_context using TypeMemberIndex
         let (owner_type, call_context, relation_type) = if let Some(callee_id) = effective_callee_id
         {
@@ -605,6 +621,19 @@ impl RelationResolver {
                 }
                 other => other,
             };
+            // Function references survive only when tied to a real function:
+            // initializer lists also hold macro constants and enum values
+            // that are syntactically indistinguishable, and an unresolved or
+            // non-function target carries no review value as an external edge.
+            if relation_type == cce_types::relation::RelationType::FunctionReference
+                && !effective_callee_id.is_some_and(|id| {
+                    entity_index
+                        .get_function_by_entity_id(id)
+                        .is_some_and(|callee| callee.kind.is_function_like())
+                })
+            {
+                return None;
+            }
             let call_context = match relation_type {
                 cce_types::relation::RelationType::InstanceMethodCall => {
                     if let Some(ref owner) = owner_type {
@@ -693,7 +722,8 @@ impl RelationResolver {
             let is_name_match = caller_name == callee_name && last_segment == caller_name;
             let is_self_loop = effective == global_src;
             let is_structural_self_loop = is_self_loop && relation_type.is_structural();
-            let is_call_self_loop = (is_self_loop || is_name_match) && relation_type.is_call();
+            let is_call_self_loop =
+                (is_self_loop || (is_name_match && !via_promoted)) && relation_type.is_call();
             if is_structural_self_loop || is_call_self_loop {
                 let is_explicit_self = raw_data.dst_name.starts_with("Self::")
                     || raw_data.dst_name.starts_with("Self.")
@@ -717,6 +747,16 @@ impl RelationResolver {
             }
         }
 
+        // Unresolved function references carry no review value: the
+        // initializer also holds constants, and an external edge to an
+        // unknown name only bloats the graph. Resolved non-function
+        // targets are dropped earlier; this covers the unresolved rest.
+        if relation_type == cce_types::relation::RelationType::FunctionReference
+            && effective_callee_id.is_none()
+        {
+            return None;
+        }
+
         Some(ResolvedRelation {
             caller: raw_data.src,
             callee_id: effective_callee_id,
@@ -737,6 +777,102 @@ impl RelationResolver {
                 .filter(|predicate| !predicate.is_empty())
                 .cloned(),
         })
+    }
+
+    /// Resolve a function-reference name to its definition entity.
+    ///
+    /// Prototype declarations share the definition's name, so directory
+    /// affinity cannot tell them apart; the definition carries a body and
+    /// therefore the largest span. Only function-like candidates qualify.
+    fn resolve_function_definition(
+        &self,
+        name: &str,
+        entity_index: &RelationIndex,
+    ) -> Option<EntityId> {
+        entity_index
+            .get_function_ids_by_name(name)
+            .iter()
+            .copied()
+            .filter(|id| {
+                entity_index
+                    .get_function_by_entity_id(*id)
+                    .is_some_and(|entity| entity.kind.is_function_like())
+            })
+            .max_by_key(|id| {
+                entity_index
+                    .get_function_by_entity_id(*id)
+                    .map(|entity| entity.span.end_byte.saturating_sub(entity.span.start_byte))
+                    .unwrap_or(0)
+            })
+    }
+
+    /// Promoted-receiver rewrite (`engine.RouterGroup.Use` ->
+    /// `RouterGroup.Use`) when the trailing field type owns the method.
+    fn promoted_candidate_name(
+        &self,
+        dst_name: &str,
+        symbol_table: &ProjectSymbolTable,
+    ) -> Option<String> {
+        let owner = self.extract_promoted_receiver_type(dst_name, symbol_table)?;
+        let method = dst_name.rsplit('.').next()?;
+        let promoted = format!("{owner}.{method}");
+        (promoted != dst_name).then_some(promoted)
+    }
+
+    /// Candidate resolution names with the promoted-receiver rewrite first.
+    ///
+    /// A dotted field-access path (`engine.RouterGroup.Use`) otherwise
+    /// resolves through the raw literal, which degrades to the head
+    /// variable's type (`Engine.Use`, a self-loop here) before the
+    /// refined receiver can disambiguate. The rewritten `Type.Method`
+    /// candidate dispatches through type-member resolution to the real
+    /// owner; it only exists on a verified type-member match.
+    fn ordered_resolution_names(
+        &self,
+        callee_name: &str,
+        parsed: &ParsedFile,
+        symbol_table: &ProjectSymbolTable,
+    ) -> Vec<String> {
+        let mut names = Vec::new();
+        if let Some(promoted) = self.promoted_candidate_name(callee_name, symbol_table) {
+            names.push(promoted);
+        }
+        names.extend(self.resolution_names(callee_name, parsed));
+        names
+    }
+
+    /// Receiver type for dotted field-access paths (`engine.RouterGroup.Use`).
+    ///
+    /// The trailing field access refines the receiver to the embedded
+    /// field's type. When that segment names a project type owning the
+    /// called method, it wins over the head variable's type so
+    /// promoted-method calls resolve to the real owner instead of
+    /// degrading to the outer type (which self-loop filtering then
+    /// drops). Only fires on a verified type-member match.
+    fn extract_promoted_receiver_type(
+        &self,
+        dst_name: &str,
+        symbol_table: &ProjectSymbolTable,
+    ) -> Option<String> {
+        let mut segments: Vec<&str> = dst_name.split('.').collect();
+        if segments.len() < 3 {
+            return None;
+        }
+        let method = segments.pop();
+        let field_type = segments.pop();
+        let (Some(method), Some(field_type)) = (method, field_type) else {
+            return None;
+        };
+        let type_index = symbol_table.global_type_index();
+        let owns_method = type_index
+            .get_type_by_simple(field_type)
+            .iter()
+            .any(|entry| {
+                type_index
+                    .get_members(&entry.key.qualified, method)
+                    .is_some()
+            });
+        owns_method.then(|| field_type.to_string())
     }
 
     /// Extract receiver type from instance method call name

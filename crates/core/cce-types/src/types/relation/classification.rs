@@ -307,6 +307,11 @@ pub enum RelationType {
     /// Field access (obj.field)
     #[serde(rename = "field_access")]
     FieldAccess,
+    /// Function reference (function designator in initializer, function
+    /// pointer target). Never a call: it records that a function value is
+    /// used, not that it is invoked.
+    #[serde(rename = "reference.function")]
+    FunctionReference,
 
     // === Template/Markup Domain ===
     /// Element containment (parent/child DOM structure)
@@ -364,6 +369,7 @@ impl std::fmt::Display for RelationType {
             // Reference domain
             RelationType::TypeReference => write!(f, "type_reference"),
             RelationType::FieldAccess => write!(f, "field_access"),
+            RelationType::FunctionReference => write!(f, "reference.function"),
             // Template/Markup domain
             RelationType::ElementContains => write!(f, "contains.element"),
             RelationType::TemplateReference => write!(f, "reference.template"),
@@ -416,6 +422,7 @@ impl std::str::FromStr for RelationType {
             // Reference domain
             "type_reference" => Ok(RelationType::TypeReference),
             "field_access" => Ok(RelationType::FieldAccess),
+            "reference.function" => Ok(RelationType::FunctionReference),
             // Template/Markup domain
             "contains.element" => Ok(RelationType::ElementContains),
             "reference.template" => Ok(RelationType::TemplateReference),
@@ -480,11 +487,14 @@ impl RelationType {
         )
     }
 
-    /// Check if this is a reference relation (type reference, field access)
+    /// Check if this is a reference relation (type reference, field access,
+    /// function reference)
     pub fn is_reference(&self) -> bool {
         matches!(
             self,
-            RelationType::TypeReference | RelationType::FieldAccess
+            RelationType::TypeReference
+                | RelationType::FieldAccess
+                | RelationType::FunctionReference
         )
     }
 

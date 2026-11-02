@@ -31,6 +31,11 @@ use cce_codegraph::index::snapshot_query::{
 
 pub use super::expansion_scoring::ExpansionScoring;
 
+/// Scored forward-expansion candidate: score, edge, neighbour name, discovery order.
+type ForwardCandidate = (f32, cce_types::ResolvedRelation, String, usize);
+/// Scored backward-expansion candidate: score, edge, neighbour name, neighbour file, discovery order.
+type BackwardCandidate = (f32, cce_types::ResolvedRelation, String, String, usize);
+
 /// Shaping parameters for expansion unit rendering.
 ///
 /// Carries the configurable counterparts of the former hard-coded limits so
@@ -432,10 +437,7 @@ pub fn resolve_expansion_units_with_filter(
     let seed_set: HashSet<cce_types::EntityId> = seeds.iter().copied().collect();
 
     let mut cache = SourceFileCache::new();
-    let mut forward_scored: HashMap<
-        cce_types::EntityId,
-        (f32, cce_types::ResolvedRelation, String, usize),
-    > = HashMap::new();
+    let mut forward_scored: HashMap<cce_types::EntityId, ForwardCandidate> = HashMap::new();
     let mut forward_discovery: usize = 0;
     for (seed_rank, entity_id) in seeds.iter().enumerate() {
         let seed = seed_weight(
@@ -467,15 +469,9 @@ pub fn resolve_expansion_units_with_filter(
             }
         }
     }
-    let mut forward_ranked: Vec<(
-        cce_types::EntityId,
-        (f32, cce_types::ResolvedRelation, String, usize),
-    )> = forward_scored.into_iter().collect();
-    forward_ranked.sort_by(|a, b| {
-        b.1.0
-            .total_cmp(&a.1.0)
-            .then_with(|| a.1.3.cmp(&b.1.3))
-    });
+    let mut forward_ranked: Vec<(cce_types::EntityId, ForwardCandidate)> =
+        forward_scored.into_iter().collect();
+    forward_ranked.sort_by(|a, b| b.1.0.total_cmp(&a.1.0).then_with(|| a.1.3.cmp(&b.1.3)));
     let mut forward = Vec::new();
     for (callee, (score, relation, name, _)) in &forward_ranked {
         if forward.len() >= forward_budget {
@@ -504,16 +500,7 @@ pub fn resolve_expansion_units_with_filter(
 
     let mut backward = Vec::new();
     if include_callers && backward_budget > 0 {
-        let mut backward_scored: HashMap<
-            cce_types::EntityId,
-            (
-                f32,
-                cce_types::ResolvedRelation,
-                String,
-                String,
-                usize,
-            ),
-        > = HashMap::new();
+        let mut backward_scored: HashMap<cce_types::EntityId, BackwardCandidate> = HashMap::new();
         let mut backward_discovery: usize = 0;
         for (seed_rank, entity_id) in seeds.iter().enumerate() {
             let seed = seed_weight(
@@ -526,8 +513,7 @@ pub fn resolve_expansion_units_with_filter(
                 if seed_set.contains(&caller) {
                     continue;
                 }
-                let Some(neighbour_file) =
-                    searcher.query().index().get_file_path_by_entity(caller)
+                let Some(neighbour_file) = searcher.query().index().get_file_path_by_entity(caller)
                 else {
                     continue;
                 };
@@ -542,29 +528,15 @@ pub fn resolve_expansion_units_with_filter(
                 match backward_scored.get(&caller) {
                     Some((existing_score, _, _, _, _)) if *existing_score >= score => {}
                     _ => {
-                        backward_scored.insert(
-                            caller,
-                            (score, relation, name, neighbour_file, discovery),
-                        );
+                        backward_scored
+                            .insert(caller, (score, relation, name, neighbour_file, discovery));
                     }
                 }
             }
         }
-        let mut backward_ranked: Vec<(
-            cce_types::EntityId,
-            (
-                f32,
-                cce_types::ResolvedRelation,
-                String,
-                String,
-                usize,
-            ),
-        )> = backward_scored.into_iter().collect();
-        backward_ranked.sort_by(|a, b| {
-            b.1.0
-                .total_cmp(&a.1.0)
-                .then_with(|| a.1.4.cmp(&b.1.4))
-        });
+        let mut backward_ranked: Vec<(cce_types::EntityId, BackwardCandidate)> =
+            backward_scored.into_iter().collect();
+        backward_ranked.sort_by(|a, b| b.1.0.total_cmp(&a.1.0).then_with(|| a.1.4.cmp(&b.1.4)));
         for (caller, (score, relation, name, neighbour_file, _)) in &backward_ranked {
             if backward.len() >= backward_budget {
                 break;
@@ -645,16 +617,11 @@ fn seed_overlap_ratio(
 }
 
 /// Overlap length between an entity span and the hit row range.
-fn span_len(
-    entity_id: cce_types::EntityId,
-    snapshot: &cce_codegraph::LayeredSnapshotIndex,
-) -> u64 {
+fn span_len(entity_id: cce_types::EntityId, snapshot: &cce_codegraph::LayeredSnapshotIndex) -> u64 {
     use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
     snapshot
         .get_function_by_entity_id(entity_id)
-        .map(|entity| {
-            entity.span.end_byte.saturating_sub(entity.span.start_byte) as u64
-        })
+        .map(|entity| entity.span.end_byte.saturating_sub(entity.span.start_byte) as u64)
         .unwrap_or(u64::MAX)
 }
 

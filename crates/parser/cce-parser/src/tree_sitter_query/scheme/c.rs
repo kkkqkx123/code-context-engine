@@ -328,6 +328,23 @@ pub fn call_query() -> &'static str {
     field: (field_identifier) @call.method.chained.to
   )
 ) @call.method.chained
+
+; ============================================
+; 4. Function References
+; ============================================
+
+; Function designator directly inside an initializer list, e.g. a
+; dispatch-table row `{ TAG, KIND, handler }`. The macro tag and the
+; constant are identifiers too; non-function targets are dropped at
+; resolution time so only real function references survive.
+(initializer_list
+  (identifier) @call.funcref.name
+)
+
+; Designated initializer value, e.g. `{ .handler = handler }`.
+(initializer_pair
+  value: (identifier) @call.funcref.name
+)
 "#
 }
 

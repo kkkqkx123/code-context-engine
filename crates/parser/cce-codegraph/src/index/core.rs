@@ -872,6 +872,21 @@ impl RelationIndex {
         }
     }
 
+    /// Rebuild the file-caller reverse index from the file relation sets.
+    ///
+    /// Copy-only reconstruction (`materialize_merged_index`) leaves this
+    /// map empty; re-deriving it here keeps file-level referrer queries
+    /// working on materialized indexes.
+    pub fn rebuild_file_caller_index(&self) {
+        self.file_callers_by_callee.clear();
+        for entry in self.file_relation_index.iter() {
+            let file_path = entry.key();
+            for rel in entry.value().iter() {
+                self.track_file_caller(rel.callee_id, file_path);
+            }
+        }
+    }
+
     /// Resolved file-level relations of a normalized file path.
     pub fn file_relations(&self, file_path: &str) -> Option<Vec<ResolvedRelation>> {
         self.file_relation_index

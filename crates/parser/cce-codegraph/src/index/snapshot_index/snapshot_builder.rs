@@ -286,8 +286,11 @@ impl LayeredSnapshotIndex {
         }
         // Reverse lookups (`get_callers_by_callee_*`) walk the reverse callee
         // index, which copy-only reconstruction leaves empty; rebuild it from
-        // the merged forward relations.
+        // the merged forward relations. The same holds for the file-caller
+        // reverse index (`get_file_callers_of`): re-derive it from the merged
+        // file relation sets so file-level referrers survive materialization.
         merged.rebuild_reverse_callee_index();
+        merged.rebuild_file_caller_index();
         merged
     }
 

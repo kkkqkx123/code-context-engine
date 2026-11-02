@@ -1114,3 +1114,61 @@ fn test_typescript_import_require_clause_detected() {
         "TS import-require must be detected as an import edge: {relations:?}"
     );
 }
+
+#[test]
+fn test_c_dispatch_table_function_reference() {
+    // A dispatch-table row mentions the handler without calling it: the row
+    // must yield a file-level FunctionReference edge for the handler. The
+    // macro tag and the constant in the same row are captured raw as well;
+    // non-function targets are dropped later at resolution time.
+    let mut ast_parser = AstParser::new();
+    let entity_extractor = EntityExtractor::new();
+    let relation_extractor = RelationExtractor::new();
+
+    let code = "static int handle_stts(void);\nstatic int KIND;\nstatic void *table[] = {\n    { 1, KIND, handle_stts },\n};\n";
+    let tree = ast_parser
+        .parse_with_tree(code, &Language::C)
+        .expect("parse")
+        .0;
+    let entities = entity_extractor
+        .extract(&tree, code, &Language::C)
+        .expect("extract entities");
+    let relations = relation_extractor
+        .extract(&tree, code, &Language::C, &entities, Some(1))
+        .expect("extract relations");
+
+    let funcrefs: Vec<_> = relations
+        .iter()
+        .filter(|r| r.relation_type == RelationType::FunctionReference)
+        .collect();
+    let handler = funcrefs
+        .iter()
+        .find(|r| r.dst_name() == "handle_stts")
+        .expect("table handler must be a FunctionReference edge");
+    assert_eq!(
+        handler.caller_level,
+        cce_types::RelationLevel::File,
+        "file-scope table edge must be file-level"
+    );
+
+    // A table built inside a function body attributes the edge to that function.
+    let scoped = "int handle(void);\nint run(void) {\n    int (*h[])(void) = { handle };\n    return 0;\n}\n";
+    let tree = ast_parser
+        .parse_with_tree(scoped, &Language::C)
+        .expect("parse")
+        .0;
+    let entities = entity_extractor
+        .extract(&tree, scoped, &Language::C)
+        .expect("extract entities");
+    let relations = relation_extractor
+        .extract(&tree, scoped, &Language::C, &entities, Some(1))
+        .expect("extract relations");
+    assert!(
+        relations
+            .iter()
+            .any(|r| r.relation_type == RelationType::FunctionReference
+                && r.dst_name() == "handle"
+                && r.caller_level == cce_types::RelationLevel::Entity),
+        "in-function table edge must be entity-level: {relations:?}"
+    );
+}

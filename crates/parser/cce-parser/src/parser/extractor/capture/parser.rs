@@ -330,25 +330,27 @@ fn main_expects_body(main_name: &str) -> bool {
         || lower.contains("setter")
 }
 
-/// Extract full entity signature text from source.
+/// Outcome of signature extraction, computed without side effects.
 ///
-/// Priority:
-/// 1. Compose from signature sub-captures in source order.
-/// 2. Transitional: slice the header before the body capture for patterns
-///    that predate signature aliases. No cleaning and no truncation.
-/// 3. Bodiless entities (module, import, macro, and friends): the full
-///    main text is the header, capped at [`MAX_SIGNATURE_LEN`] chars so
-///    giant initializers cannot leak unbounded data downstream.
-///    Otherwise return empty and count the gap instead of fabricating text.
-pub fn extract_signature(mat: &QueryMatch, source: &str) -> String {
+/// The missing decision is a pure function of the match inputs so tests
+/// can assert it deterministically; the process-global missing counter is
+/// only bumped by [`extract_signature`], never by concurrent test threads
+/// racing on the same counter value.
+#[derive(Debug, PartialEq, Eq)]
+enum SignatureOutcome {
+    Present(String),
+    Missing,
+}
+
+/// Decide the signature outcome without recording metrics.
+fn extract_signature_outcome(mat: &QueryMatch, source: &str) -> SignatureOutcome {
     let composed = reconstruct_signature_from_subcaptures(mat, source);
     if !composed.trim().is_empty() {
-        return composed;
+        return SignatureOutcome::Present(composed);
     }
 
     let Some(main) = find_main_capture(mat) else {
-        record_signature_missing();
-        return String::new();
+        return SignatureOutcome::Missing;
     };
 
     let mut header_end = main.end_byte;
@@ -364,21 +366,39 @@ pub fn extract_signature(mat: &QueryMatch, source: &str) -> String {
         let sliced = utils::extract_text_from_source(source, main.start_byte, header_end);
         let header = sliced.trim();
         if !header.is_empty() {
-            return header.to_string();
+            return SignatureOutcome::Present(header.to_string());
         }
-        record_signature_missing();
-        return String::new();
+        return SignatureOutcome::Missing;
     }
 
     if main_expects_body(&main.name) {
-        record_signature_missing();
-        return String::new();
+        return SignatureOutcome::Missing;
     }
-    truncate_fallback_signature(
+    SignatureOutcome::Present(truncate_fallback_signature(
         utils::extract_text_from_source(source, main.start_byte, main.end_byte)
             .trim()
             .to_string(),
-    )
+    ))
+}
+
+/// Extract full entity signature text from source.
+///
+/// Priority:
+/// 1. Compose from signature sub-captures in source order.
+/// 2. Transitional: slice the header before the body capture for patterns
+///    that predate signature aliases. No cleaning and no truncation.
+/// 3. Bodiless entities (module, import, macro, and friends): the full
+///    main text is the header, capped at [`MAX_SIGNATURE_LEN`] chars so
+///    giant initializers cannot leak unbounded data downstream.
+///    Otherwise return empty and count the gap instead of fabricating text.
+pub fn extract_signature(mat: &QueryMatch, source: &str) -> String {
+    match extract_signature_outcome(mat, source) {
+        SignatureOutcome::Present(signature) => signature,
+        SignatureOutcome::Missing => {
+            record_signature_missing();
+            String::new()
+        }
+    }
 }
 
 /// Extract parameters from match, returning (name, optional_type) pairs
@@ -1095,7 +1115,6 @@ mod tests {
     #[test]
     fn test_extract_signature_enum_variant_returns_full_text() {
         let source = "Some(x)";
-        let before = signature_missing_count();
         let mat = make_match(vec![make_capture(
             "entity.enum_variant",
             source,
@@ -1103,9 +1122,11 @@ mod tests {
             source.len(),
         )]);
         assert_eq!(extract_signature(&mat, source), "Some(x)");
-        assert_eq!(
-            signature_missing_count(),
-            before,
+        assert!(
+            matches!(
+                extract_signature_outcome(&mat, source),
+                SignatureOutcome::Present(_)
+            ),
             "variant-like kinds must not count as missing"
         );
     }
@@ -1113,15 +1134,16 @@ mod tests {
     #[test]
     fn test_extract_signature_lambda_returns_full_text() {
         let source = "double = lambda x: x * 2";
-        let before = signature_missing_count();
         let mat = make_match(vec![
             make_capture("entity.lambda", source, 0, source.len()),
             make_capture("entity.lambda.name", "double", 0, 6),
         ]);
         assert_eq!(extract_signature(&mat, source), source);
-        assert_eq!(
-            signature_missing_count(),
-            before,
+        assert!(
+            matches!(
+                extract_signature_outcome(&mat, source),
+                SignatureOutcome::Present(_)
+            ),
             "inline lambda must keep its full text"
         );
     }
@@ -1130,7 +1152,6 @@ mod tests {
     fn test_extract_signature_bodiless_fallback_truncates() {
         let filler = "x".repeat(MAX_SIGNATURE_LEN + 100);
         let source = format!("data = [{filler}]");
-        let before = signature_missing_count();
         let mat = make_match(vec![make_capture(
             "entity.variable",
             source.as_str(),
@@ -1143,9 +1164,11 @@ mod tests {
             source.starts_with(&signature),
             "truncation must keep the declaration head"
         );
-        assert_eq!(
-            signature_missing_count(),
-            before,
+        assert!(
+            matches!(
+                extract_signature_outcome(&mat, source.as_str()),
+                SignatureOutcome::Present(_)
+            ),
             "truncated fallback must not count as missing"
         );
     }

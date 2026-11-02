@@ -45,6 +45,8 @@ crate::capture_enum! {
         Associated,
         #[serde(rename = "reference")]
         Reference,
+        #[serde(rename = "funcref")]
+        Funcref,
         #[serde(rename = "super")]
         Super,
         #[serde(rename = "yield")]

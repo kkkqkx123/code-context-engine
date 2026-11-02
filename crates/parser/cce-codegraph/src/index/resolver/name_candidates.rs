@@ -189,6 +189,17 @@ impl RelationResolver {
         let resolved_entity_id: Option<EntityId> = symbol_ref
             .as_ref()
             .and_then(|symbol_ref| {
+                // A receiver-qualified call (`engine.RouterGroup.Use`)
+                // that the symbol table resolved to another file must not
+                // be captured by a same-name local (here `Engine.Use` in
+                // the caller file): the receiver selects the method, so
+                // the local same-name method is a different function.
+                // Bare names keep local priority.
+                let symbol_remote_target = name.contains('.')
+                    && !cce_types::path::normalized_equals(
+                        symbol_ref.metadata.location.file_path.as_ref(),
+                        &parsed.path,
+                    );
                 Self::local_definition_id(parsed, name)
                     .map(to_global_id)
                     .or_else(|| {
@@ -199,7 +210,9 @@ impl RelationResolver {
                         // For Rust, suppress fallback when the receiver is a
                         // generic local variable (e.g., `value.clone` where
                         // `value: T: Clone`) to avoid spurious self-loops.
-                        if self.should_block_last_segment_fallback(name, is_stdlib, ctx) {
+                        if symbol_remote_target
+                            || self.should_block_last_segment_fallback(name, is_stdlib, ctx)
+                        {
                             return None;
                         }
                         self.last_segment_for_resolution(name, is_stdlib)

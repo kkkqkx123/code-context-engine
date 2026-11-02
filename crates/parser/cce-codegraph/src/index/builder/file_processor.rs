@@ -623,7 +623,9 @@ impl<'a> FileProcessor<'a> {
             | RelationType::ImplAssociation
             | RelationType::Embedding
             | RelationType::Mixin => 80,
-            RelationType::TypeReference | RelationType::FieldAccess => 60,
+            RelationType::TypeReference
+            | RelationType::FieldAccess
+            | RelationType::FunctionReference => 60,
             RelationType::ImportStandard
             | RelationType::ImportNamed
             | RelationType::ImportDefault

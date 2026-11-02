@@ -471,6 +471,9 @@ pub(crate) fn determine_call_relation_type(capture_name: &str) -> RelationType {
         // Associated function calls (Rust)
         (Some(CallCategory::Associated), _) => RelationType::DirectCall,
 
+        // Function reference (C function designator in initializer)
+        (Some(CallCategory::Funcref), _) => RelationType::FunctionReference,
+
         // Reference calls (Java method reference)
         (Some(CallCategory::Reference), _) => RelationType::CallbackCall,
 

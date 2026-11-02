@@ -100,11 +100,14 @@ pub(crate) fn process_call_match(
 /// generic `call.callback` matches any `f(x)` alongside the precise
 /// `call.direct`, and JS/TS `call.hof` captures the callee as a whole
 /// member expression (`app.use`) while `call.method` captures only the
-/// property identifier (`use`). Two edges belong to the same call site
-/// when they share caller and callee name and their spans overlap; keep
-/// one per site, preferring the higher-priority relation type and, on a
-/// tie, the shorter (more precise) span, so the call graph has no
-/// duplicate rows and downstream span matching stays consistent.
+/// property identifier (`use`). The duplicates may carry different raw
+/// names for the same site (`group.combineHandlers` from the method path
+/// versus bare `combineHandlers` from the callback path), so grouping is by
+/// caller plus the normalized trailing name segment; only spans that
+/// overlap merge into one site. Keep one edge per site, preferring the
+/// higher-priority relation type and, on a tie, the shorter (more precise)
+/// span, so the call graph has no duplicate rows and downstream span
+/// matching stays consistent.
 pub(crate) fn deduplicate_call_relations(relations: &mut Vec<Relation>) {
     use std::collections::{HashMap, HashSet};
     if relations.len() <= 1 {
@@ -131,13 +134,20 @@ pub(crate) fn deduplicate_call_relations(relations: &mut Vec<Relation>) {
     fn span_len(rel: &Relation) -> usize {
         rel.span.end_byte.saturating_sub(rel.span.start_byte)
     }
+    fn trailing_segment(name: &str) -> &str {
+        let end = name.rfind(['.', ':']).map(|pos| pos + 1).unwrap_or(0);
+        &name[end.min(name.len())..]
+    }
 
-    // Group call-relation indices by (caller, callee name).
+    // Group call-relation indices by (caller, trailing name segment).
+    // Raw names differ per capture path for one site, so the trailing
+    // segment after the last receiver separator is the grouping key;
+    // distinct call sites still separate out via the span-overlap sweep.
     let mut groups: HashMap<(i64, &str), Vec<usize>> = HashMap::new();
     for (idx, rel) in relations.iter().enumerate() {
         if rel.relation_type.is_call() {
             groups
-                .entry((rel.caller_id, rel.dst_name()))
+                .entry((rel.caller_id, trailing_segment(rel.dst_name())))
                 .or_default()
                 .push(idx);
         }

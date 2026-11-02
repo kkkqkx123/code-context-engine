@@ -277,10 +277,9 @@ impl PatternMatcher {
         }
 
         // Check ignore files (stacked when nested rules are respected)
-        if self.gitignore.is_some() || self.ignore_stack.is_some() {
-            if self.is_ignored_cached(path) {
-                return true;
-            }
+        if (self.gitignore.is_some() || self.ignore_stack.is_some()) && self.is_ignored_cached(path)
+        {
+            return true;
         }
 
         false

@@ -63,6 +63,25 @@ impl RelationResolver {
     ) -> Option<EntityId> {
         let target_name = symbol_ref.metadata.name_str();
         let target_file = symbol_ref.metadata.location.file_path.as_ref();
+        // When the symbol carries a concrete source span (e.g. synthesized
+        // from a type-member entry), match the entity by span first: name +
+        // file alone cannot tell an interface declaration from its
+        // implementation in the same file.
+        let symbol_span = symbol_ref.metadata.location.span;
+        if symbol_span.is_available() && !target_file.is_empty() {
+            let ids = entity_index.get_function_ids_by_name(target_name);
+            if let Some(id) = ids.iter().copied().find(|id| {
+                entity_index
+                    .get_file_path_by_entity(*id)
+                    .as_deref()
+                    .is_some_and(|p| Self::paths_equivalent(p, target_file))
+                    && entity_index
+                        .get_function_by_entity_id(*id)
+                        .is_some_and(|entity| entity.span == symbol_span)
+            }) {
+                return Some(id);
+            }
+        }
         self.resolve_entity_by_name(
             target_name,
             Some(target_file),
