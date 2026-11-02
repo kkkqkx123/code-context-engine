@@ -57,7 +57,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.86"
-license = "GPL-3.0-only"
+license = "Apache-2.0"
 repository = "https://github.com/kkkqkx123/code-context-engine"
 
 [workspace.dependencies]
