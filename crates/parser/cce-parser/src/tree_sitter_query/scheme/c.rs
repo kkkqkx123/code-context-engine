@@ -345,6 +345,24 @@ pub fn call_query() -> &'static str {
 (initializer_pair
   value: (identifier) @call.funcref.name
 )
+
+; ============================================
+; 5. Function References via Assignment
+; ============================================
+
+; `handler = foo;` — the right-hand identifier is a function value.
+; Variable-to-variable copies and constants are dropped at resolution
+; time by the function-kind gate, so no operator or type constraint is
+; needed here: capture broadly, filter precisely.
+(assignment_expression
+  right: (identifier) @call.funcref.name)
+
+; `fp = &foo;` — address-of form. The operator is deliberately left
+; unconstrained: dereference rvalues resolve to variables and are
+; dropped downstream by the same gate.
+(assignment_expression
+  right: (pointer_expression
+    argument: (identifier) @call.funcref.name))
 "#
 }
 

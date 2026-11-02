@@ -1172,3 +1172,68 @@ fn test_c_dispatch_table_function_reference() {
         "in-function table edge must be entity-level: {relations:?}"
     );
 }
+
+#[test]
+fn test_c_assignment_function_reference() {
+    // `h = foo;` and `h = &foo;` use the function value without calling
+    // it: both must yield entity-level FunctionReference edges. A plain
+    // variable copy carries no function and is captured raw as well;
+    // the function-kind gate drops it at resolution time.
+    let mut ast_parser = AstParser::new();
+    let entity_extractor = EntityExtractor::new();
+    let relation_extractor = RelationExtractor::new();
+
+    let code = "int foo(void);\nint use(void) {\n    int (*h)(void);\n    h = foo;\n    h = &foo;\n    return 0;\n}\n";
+    let tree = ast_parser
+        .parse_with_tree(code, &Language::C)
+        .expect("parse")
+        .0;
+    let entities = entity_extractor
+        .extract(&tree, code, &Language::C)
+        .expect("extract entities");
+    let relations = relation_extractor
+        .extract(&tree, code, &Language::C, &entities, Some(1))
+        .expect("extract relations");
+
+    let funcrefs: Vec<_> = relations
+        .iter()
+        .filter(|r| r.relation_type == RelationType::FunctionReference && r.dst_name() == "foo")
+        .collect();
+    assert_eq!(
+        funcrefs.len(),
+        2,
+        "both assignment forms must be captured: {relations:?}"
+    );
+    assert!(
+        funcrefs
+            .iter()
+            .all(|r| r.caller_level == cce_types::RelationLevel::Entity),
+        "in-function assignments must be entity-level: {relations:?}"
+    );
+}
+
+#[test]
+fn test_cpp_qualified_member_pointer_reference() {
+    // `&S::bar` in an initializer names the member without calling it.
+    let mut ast_parser = AstParser::new();
+    let entity_extractor = EntityExtractor::new();
+    let relation_extractor = RelationExtractor::new();
+
+    let code = "struct S { static void bar(); };\nvoid (*h)() = &S::bar;\n";
+    let tree = ast_parser
+        .parse_with_tree(code, &Language::Cpp)
+        .expect("parse")
+        .0;
+    let entities = entity_extractor
+        .extract(&tree, code, &Language::Cpp)
+        .expect("extract entities");
+    let relations = relation_extractor
+        .extract(&tree, code, &Language::Cpp, &entities, Some(1))
+        .expect("extract relations");
+
+    assert!(
+        relations.iter().any(|r| r.relation_type == RelationType::FunctionReference
+            && r.dst_name() == "S::bar"),
+        "qualified member pointer must be a FunctionReference: {relations:?}"
+    );
+}

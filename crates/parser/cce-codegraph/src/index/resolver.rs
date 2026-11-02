@@ -536,16 +536,17 @@ impl RelationResolver {
         let mut effective_callee_id = callee_id;
         let mut overload_signature: Option<String> = None;
         // Function references name a value, not a call site, so normal
-        // affinity resolution often ties: a prototype declaration shares
-        // the definition's name and directory. Retry by definition — the
-        // definition carries a body and therefore the largest span among
-        // function-like candidates. Unknown names and non-functions still
+        // resolution often yields nothing when symbol coverage gaps; retry
+        // directly against the entity-name index. Internal-linkage
+        // candidates from other files can never be the target of a
+        // cross-file reference, so they are excluded before the
+        // largest-span choice. Unknown names and non-functions still
         // resolve to nothing and are dropped below.
         if effective_callee_id.is_none()
             && raw_data.relation_type == cce_types::relation::RelationType::FunctionReference
         {
             effective_callee_id =
-                self.resolve_function_definition(&raw_data.dst_name, entity_index);
+                self.resolve_function_definition(&raw_data.dst_name, &parsed.path, entity_index);
         }
         // Determine owner_type and call_context using TypeMemberIndex
         let (owner_type, call_context, relation_type) = if let Some(callee_id) = effective_callee_id
@@ -781,12 +782,17 @@ impl RelationResolver {
 
     /// Resolve a function-reference name to its definition entity.
     ///
-    /// Prototype declarations share the definition's name, so directory
-    /// affinity cannot tell them apart; the definition carries a body and
-    /// therefore the largest span. Only function-like candidates qualify.
+    /// Only function-like candidates qualify. A free function carrying the
+    /// `static` storage class has internal linkage and is invisible outside
+    /// its own file, so foreign static candidates are excluded: they can
+    /// never be the target of a cross-file reference. Class-scoped `static`
+    /// (C++ static members) keeps external linkage and is never excluded.
+    /// The winner is the largest span; definitions carry bodies while any
+    /// same-name duplicate is ordered deterministically.
     fn resolve_function_definition(
         &self,
         name: &str,
+        caller_file: &str,
         entity_index: &RelationIndex,
     ) -> Option<EntityId> {
         entity_index
@@ -796,7 +802,20 @@ impl RelationResolver {
             .filter(|id| {
                 entity_index
                     .get_function_by_entity_id(*id)
-                    .is_some_and(|entity| entity.kind.is_function_like())
+                    .is_some_and(|entity| {
+                        if !entity.kind.is_function_like() {
+                            return false;
+                        }
+                        if entity.kind == cce_types::EntityKind::Function
+                            && entity.modifiers.iter().any(|m| m == "static")
+                        {
+                            return entity_index
+                                .get_file_path_by_entity(*id)
+                                .as_deref()
+                                .is_some_and(|f| Self::paths_equivalent(f, caller_file));
+                        }
+                        true
+                    })
             })
             .max_by_key(|id| {
                 entity_index

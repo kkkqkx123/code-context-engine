@@ -263,6 +263,34 @@ pub fn call_query() -> String {
   )
   arguments: (argument_list) @call.template.method.arguments
 ) @call.template.method
+
+; ============================================
+; Qualified Member-Pointer References (C++ specific)
+; ============================================
+
+; `&Foo::bar` in an initializer list (dispatch tables of member
+; pointers). Only the qualified name is captured; resolution dispatches
+; through the qualified path, and overloads without arity information
+; are dropped. The operator is left unconstrained for the same reason
+; as the C assignment patterns: non-function rvalues never survive the
+; function-kind gate.
+(initializer_list
+  (pointer_expression
+    argument: (qualified_identifier) @call.funcref.name))
+
+; Bare `Foo::bar` in an initializer list (decayed static member).
+(initializer_list
+  (qualified_identifier) @call.funcref.name)
+
+; Designated `.cb = &Foo::bar`.
+(initializer_pair
+  value: (pointer_expression
+    argument: (qualified_identifier) @call.funcref.name))
+
+; `handler = &Foo::bar;`
+(assignment_expression
+  right: (pointer_expression
+    argument: (qualified_identifier) @call.funcref.name))
 "#,
     );
 
