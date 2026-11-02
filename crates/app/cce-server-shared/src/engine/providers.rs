@@ -5,10 +5,10 @@ use super::EngineError;
 use super::builders::{build_chat_handle, build_rerank_handler, build_summary_generator};
 use cce_codegraph::CallChainQuery;
 use cce_config::project_registry::{ProjectEntry, ProjectScope};
-use cce_metrics::RelationMetrics;
-use cce_metrics::{QueryMetrics, SearchMetrics, WatchMetrics};
 #[cfg(feature = "plugins")]
 use cce_metrics::PluginMetrics;
+use cce_metrics::RelationMetrics;
+use cce_metrics::{QueryMetrics, SearchMetrics, WatchMetrics};
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};

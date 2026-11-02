@@ -1,7 +1,8 @@
 //! OpenAPI document assembly and drift guards.
 //!
-//! `ApiDoc` collects every `#[utoipa::path]` annotation into a single
-//! document. Referenced schemas are pulled in automatically by the derive,
+//! `BaseApiDoc` collects the common `#[utoipa::path]` annotations into a
+//! single document; the `admission` feature merges the gateway/admission
+//! paths on top. Referenced schemas are pulled in automatically by the derive,
 //! so this module only lists paths and tags. Two tests pin the contract:
 //! the serialized snapshot under `tools/openapi-codegen/openapi.json` must match, and
 //! every route registered in `router.rs` must have a matching annotation.
@@ -12,7 +13,6 @@ use utoipa::OpenApi;
 
 use super::handlers;
 
-#[cfg(feature = "admission")]
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -100,6 +100,32 @@ use super::handlers;
         handlers::health::handle_retry_queue_clear,
         handlers::health::handle_retry_queue_dead_list,
         handlers::health::handle_retry_queue_dead_clear,
+    ),
+    tags(
+        (name = "Index", description = "Indexing and parsing operations"),
+        (name = "Summary", description = "Ephemeral summary generation"),
+        (name = "Storage", description = "Index storage lifecycle management"),
+        (name = "Project", description = "Project registry and project-scoped indexing"),
+        (name = "Entity", description = "Entity detail and relation queries"),
+        (name = "Graph", description = "Graph traversal over the relation snapshot"),
+        (name = "Metrics", description = "Metrics export and retention"),
+        (name = "Watch", description = "Hot-reload file watching"),
+        (name = "Config", description = "Server configuration management"),
+        (name = "Qdrant", description = "Embedded Qdrant process lifecycle"),
+        (name = "Search", description = "Vector, BM25 and aggregated search"),
+        (name = "Tools", description = "Programming-task tools with in-band errors"),
+        (name = "Health", description = "Health checks and retry-queue management"),
+    )
+)]
+struct BaseApiDoc;
+
+/// Gateway/admission endpoints, merged into the document only in
+/// `admission` builds. `info` is omitted on purpose: utoipa's
+/// `OpenApi::merge` never takes `info` from the merged document.
+#[cfg(feature = "admission")]
+#[derive(OpenApi)]
+#[openapi(
+    paths(
         handlers::ingest::manifest::handle_ingest_manifest,
         handlers::ingest::batch::handle_ingest_batch,
         handlers::ingest::commit::handle_ingest_commit,
@@ -107,139 +133,27 @@ use super::handlers;
         handlers::ingest::admission::handle_admission_stats,
     ),
     tags(
-        (name = "Index", description = "Indexing and parsing operations"),
-        (name = "Summary", description = "Ephemeral summary generation"),
-        (name = "Storage", description = "Index storage lifecycle management"),
-        (name = "Project", description = "Project registry and project-scoped indexing"),
-        (name = "Entity", description = "Entity detail and relation queries"),
-        (name = "Graph", description = "Graph traversal over the relation snapshot"),
-        (name = "Metrics", description = "Metrics export and retention"),
-        (name = "Watch", description = "Hot-reload file watching"),
-        (name = "Config", description = "Server configuration management"),
-        (name = "Qdrant", description = "Embedded Qdrant process lifecycle"),
-        (name = "Search", description = "Vector, BM25 and aggregated search"),
-        (name = "Tools", description = "Programming-task tools with in-band errors"),
-        (name = "Health", description = "Health checks and retry-queue management"),
         (name = "Ingest", description = "Gateway file supply and remote indexing"),
         (name = "Admission", description = "Token admission and quota auditing"),
     )
 )]
-struct ApiDoc;
+struct AdmissionApiDoc;
 
-#[cfg(not(feature = "admission"))]
-#[derive(OpenApi)]
-#[openapi(
-    info(
-        title = "CCE API",
-        description = "Code context engine: indexing, search, relations and tool endpoints",
-        version = "1.0.0"
-    ),
-    paths(
-        handlers::index::execute::handle_index,
-        handlers::index::incremental::handle_incremental,
-        handlers::index::parse::handle_parse,
-        handlers::summary::handle_summary,
-        handlers::storage::handle_clear_index,
-        handlers::storage::handle_delete_file,
-        handlers::storage::handle_delete_entity,
-        handlers::storage::handle_batch_delete,
-        handlers::storage::handle_index_stats,
-        handlers::storage::handle_storage_status,
-        handlers::project::management::handle_create_project,
-        handlers::project::query::handle_list_projects,
-        handlers::project::query::handle_get_project,
-        handlers::project::management::handle_update_project,
-        handlers::project::management::handle_delete_project,
-        handlers::project::indexing::handle_project_index,
-        handlers::project::indexing::handle_dead_letter_list,
-        handlers::project::indexing::handle_dead_letter_files_retry,
-        handlers::project::indexing::handle_dead_letter_acknowledge,
-        handlers::project::config::handle_reload_project_config,
-        handlers::project::config::handle_get_project_config,
-        handlers::project::config::handle_update_project_config,
-        handlers::project::config::handle_get_project_llm_overview,
-        handlers::project::config::handle_update_project_llm_config,
-        handlers::project::config::handle_test_project_llm,
-        handlers::entity::detail::handle_function_detail,
-        handlers::entity::calls::handle_function_calls,
-        handlers::entity::calls::handle_function_callers,
-        handlers::entity::relation::handle_call_chain,
-        handlers::entity::relation::handle_call_path,
-        handlers::entity::relation::handle_class_inheritance,
-        handlers::entity::relation::handle_class_implementations,
-        handlers::entity::classification::get_classification_stats,
-        handlers::entity::classification::get_relations_by_classification,
-        handlers::graph::handle_graph_ego,
-        handlers::graph::handle_graph_path,
-        handlers::graph::handle_graph_subgraph,
-        handlers::graph::handle_graph_components,
-        handlers::graph::handle_graph_export,
-        handlers::graph::handle_graph_impact,
-        handlers::graph::handle_graph_entity_impact,
-        handlers::graph::handle_graph_cycles,
-        handlers::graph::handle_graph_structural,
-        handlers::graph::handle_graph_module,
-        handlers::metrics::handle_get_metrics,
-        handlers::metrics::handle_get_metrics_json,
-        handlers::metrics::handle_get_metrics_history,
-        handlers::metrics::handle_cleanup_metrics,
-        handlers::watch::handle_start_watch,
-        handlers::watch::handle_stop_watch,
-        handlers::watch::handle_watch_status,
-        handlers::config::handle_config_reload,
-        handlers::config::handle_config_info,
-        handlers::config::handle_config_validate,
-        handlers::qdrant_admin::handle_qdrant_process_status,
-        handlers::qdrant_admin::handle_qdrant_process_start,
-        handlers::qdrant_admin::handle_qdrant_process_stop,
-        handlers::qdrant_admin::handle_qdrant_process_restart,
-        handlers::search::handle_search,
-        handlers::search::handle_aggregated_search,
-        handlers::entity_search::handle_entity_search,
-        handlers::tools::compression::handle_compress,
-        handlers::tools::compression::handle_compress_batch,
-        handlers::tools::diagnosis::handle_diagnose,
-        handlers::tools::fold::handle_fold,
-        handlers::tools::fold::handle_fold_batch,
-        handlers::tools::keyword::handle_keyword_search,
-        handlers::tools::symbol::handle_get_symbols,
-        handlers::tools::symbol::handle_find_references,
-        handlers::tools::symbol::handle_goto_definition,
-        handlers::health::handle_health,
-        handlers::health::handle_qdrant_health,
-        handlers::health::handle_embedding_health,
-        handlers::health::handle_bm25_health,
-        handlers::health::handle_retry_queue_status,
-        handlers::health::handle_retry_queue_process,
-        handlers::health::handle_retry_queue_clear,
-        handlers::health::handle_retry_queue_dead_list,
-        handlers::health::handle_retry_queue_dead_clear,
-    ),
-    tags(
-        (name = "Index", description = "Indexing and parsing operations"),
-        (name = "Summary", description = "Ephemeral summary generation"),
-        (name = "Storage", description = "Index storage lifecycle management"),
-        (name = "Project", description = "Project registry and project-scoped indexing"),
-        (name = "Entity", description = "Entity detail and relation queries"),
-        (name = "Graph", description = "Graph traversal over the relation snapshot"),
-        (name = "Metrics", description = "Metrics export and retention"),
-        (name = "Watch", description = "Hot-reload file watching"),
-        (name = "Config", description = "Server configuration management"),
-        (name = "Qdrant", description = "Embedded Qdrant process lifecycle"),
-        (name = "Search", description = "Vector, BM25 and aggregated search"),
-        (name = "Tools", description = "Programming-task tools with in-band errors"),
-        (name = "Health", description = "Health checks and retry-queue management"),
-    )
-)]
-struct ApiDoc;
+/// Assemble the full document: base paths plus gateway/admission paths in
+/// admission builds.
+fn build_api_doc() -> utoipa::openapi::OpenApi {
+    let mut doc = BaseApiDoc::openapi();
+    #[cfg(feature = "admission")]
+    doc.merge(AdmissionApiDoc::openapi());
+    doc
+}
 
 /// Serialize the OpenAPI document, cached after the first call.
 pub fn openapi_json() -> String {
     static CACHE: OnceLock<String> = OnceLock::new();
     CACHE
         .get_or_init(|| {
-            serde_json::to_string_pretty(&ApiDoc::openapi())
-                .expect("OpenAPI document must serialize")
+            serde_json::to_string_pretty(&build_api_doc()).expect("OpenAPI document must serialize")
         })
         .clone()
 }

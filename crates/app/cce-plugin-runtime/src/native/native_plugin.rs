@@ -58,11 +58,11 @@ use std::time::{Duration, Instant};
 use libloading::Library;
 use tracing::{error, warn};
 
-use cce_plugin::default_timeout_for;
 use crate::error::PluginError;
 use crate::types::PluginMetadata;
-use cce_plugin::execute_with_timeout_blocking;
 use cce_metrics::PluginMetrics;
+use cce_plugin::default_timeout_for;
+use cce_plugin::execute_with_timeout_blocking;
 
 use super::ffi_helpers::{
     AbiVersionFn, CreateContextFn, DestroyContextFn, FilterFileFn, FreeStringFn, FusionWeightsFn,

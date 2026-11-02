@@ -9,8 +9,8 @@ use crate::error::PluginError;
 use crate::loader::lua_mapping::entity_group_to_lua_table;
 use crate::pattern::{CompiledPattern, PatternDeclaration, compile_patterns};
 use crate::types::PluginMetadata;
-use cce_plugin::CancellationToken;
 use cce_metrics::PluginMetrics;
+use cce_plugin::CancellationToken;
 use cce_types::QueryType;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

@@ -625,9 +625,12 @@ fn default_extensions() -> Vec<String> {
 /// Markup, style and template languages (Html, Css, Scss, Less, Vue, Svelte,
 /// Ejs) stay opt-in so default runs do not sweep view and template assets
 /// into the code index. Previously-default languages keep their exact
-/// historical sets so existing indexes do not churn.
+/// historical sets so existing indexes do not churn; every other registry
+/// language contributes its full extension set, so newly added languages
+/// enter the default range without touching this list.
 fn default_code_extensions() -> Vec<String> {
     use cce_types::language::Language;
+    use std::collections::HashSet;
 
     let mut extensions = vec![
         "rs".to_string(),
@@ -639,24 +642,39 @@ fn default_code_extensions() -> Vec<String> {
         "java".to_string(),
         "go".to_string(),
     ];
-    for language in [
-        Language::CSharp,
-        Language::Jsx,
-        Language::Tsx,
-        Language::Kotlin,
-        Language::Scala,
-        Language::Php,
-        Language::Ruby,
-        Language::Dart,
-        Language::Bash,
-        Language::Lua,
-    ] {
-        extensions.extend(
-            language
-                .common_extensions()
-                .iter()
-                .map(|ext| ext.to_string()),
-        );
+    let mut seen: HashSet<String> = extensions.iter().cloned().collect();
+    let historical: HashSet<Language> = [
+        Language::Rust,
+        Language::Python,
+        Language::JavaScript,
+        Language::TypeScript,
+        Language::C,
+        Language::Cpp,
+        Language::Java,
+        Language::Go,
+    ]
+    .into_iter()
+    .collect();
+    let opt_out: HashSet<Language> = [
+        Language::Html,
+        Language::Css,
+        Language::Scss,
+        Language::Less,
+        Language::Vue,
+        Language::Svelte,
+        Language::Ejs,
+    ]
+    .into_iter()
+    .collect();
+    for language in Language::ast_parsable_languages() {
+        if historical.contains(language) || opt_out.contains(language) {
+            continue;
+        }
+        for ext in language.common_extensions() {
+            if seen.insert((*ext).to_string()) {
+                extensions.push((*ext).to_string());
+            }
+        }
     }
     extensions
 }
@@ -746,5 +764,55 @@ mod tests {
         let config = IndexerConfig::default();
         assert!(!config.store_vectors);
         assert!(config.build_relations);
+    }
+
+    #[test]
+    fn test_default_extensions_track_registry() {
+        use cce_types::language::Language;
+        use std::collections::HashSet;
+        let defaults: HashSet<String> = default_code_extensions().into_iter().collect();
+        for language in Language::ast_parsable_languages() {
+            let is_opt_out = matches!(
+                language,
+                Language::Html
+                    | Language::Css
+                    | Language::Scss
+                    | Language::Less
+                    | Language::Vue
+                    | Language::Svelte
+                    | Language::Ejs
+            );
+            if is_opt_out {
+                for ext in language.common_extensions() {
+                    assert!(
+                        !defaults.contains(*ext),
+                        "opt-out language {language:?} must stay out of defaults"
+                    );
+                }
+                continue;
+            }
+            for ext in language.common_extensions() {
+                let is_historical_variant =
+                    matches!(
+                        language,
+                        Language::Rust
+                            | Language::Python
+                            | Language::JavaScript
+                            | Language::TypeScript
+                            | Language::C
+                            | Language::Cpp
+                            | Language::Java
+                            | Language::Go
+                    ) && !["rs", "py", "js", "ts", "c", "cpp", "java", "go"].contains(ext);
+                if is_historical_variant {
+                    continue;
+                }
+                assert!(
+                    defaults.contains(*ext),
+                    "registry language {language:?} extension {ext} must be in defaults"
+                );
+            }
+        }
+        assert!(defaults.contains("cs"));
     }
 }
