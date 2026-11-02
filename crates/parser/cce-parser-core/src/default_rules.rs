@@ -95,6 +95,14 @@ impl LanguageRules for DefaultLanguageRules {
                     find_capture_by_suffix(captures, ".reference").map(|c| c.text.clone())
                 },
             },
+            // Function references: handler in a dispatch table or assignment
+            CaptureRule {
+                required: &[".funcref.name"],
+                optional: &[],
+                extract: |captures| {
+                    find_capture_by_suffix(captures, ".funcref.name").map(|c| c.text.clone())
+                },
+            },
             // Generic .name capture (excluding type names, paths, etc.)
             CaptureRule {
                 required: &[".name"],
@@ -233,4 +241,33 @@ impl LanguageRules for DefaultLanguageRules {
 /// Get the default language rules.
 pub fn default_language_rules() -> impl LanguageRules {
     DefaultLanguageRules
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture_rules::CapturedItem;
+
+    fn captured(name: &str, text: &str) -> CapturedItem {
+        CapturedItem {
+            name: name.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn funcref_capture_resolves_through_its_own_rule() {
+        // A dispatch-table row carries only the funcref capture; the rule
+        // must match without depending on the generic `.name` fallback.
+        let captures = vec![captured("@call.funcref.name", "handle_stts")];
+        let rules = DefaultLanguageRules.call_rules();
+        let hit = rules
+            .iter()
+            .find(|rule| rule.required == [".funcref.name"])
+            .expect("funcref rule must be declared");
+        assert_eq!(
+            crate::capture_rules::apply_capture_rule(&captures, hit),
+            Some("handle_stts".to_string())
+        );
+    }
 }

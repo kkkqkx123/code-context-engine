@@ -400,13 +400,26 @@ impl RelationResolver {
         let mut symbol_ref: Option<SymbolRef> = None;
         let mut resolved_entity_id: Option<EntityId> = None;
         let promoted_name = self.promoted_candidate_name(&raw_data.dst_name, symbol_table);
+        let embedded_name = self.embedded_promoted_candidate_name(
+            &raw_data.dst_name,
+            receiver_type.as_deref(),
+            entity_index,
+            symbol_table,
+        );
         let mut via_promoted = false;
         if !locally_bound {
-            for name in self.ordered_resolution_names(&raw_data.dst_name, parsed, symbol_table) {
+            for name in self.ordered_resolution_names(
+                &raw_data.dst_name,
+                parsed,
+                symbol_table,
+                entity_index,
+                receiver_type.as_deref(),
+            ) {
                 let (candidate_ref, candidate_id) =
                     self.resolve_name_candidate(&name, is_stdlib, &candidate_ctx);
                 if candidate_id.is_some() {
-                    via_promoted = promoted_name.as_deref().is_some_and(|p| p == name.as_str());
+                    via_promoted = promoted_name.as_deref().is_some_and(|p| p == name.as_str())
+                        || embedded_name.as_deref().is_some_and(|p| p == name.as_str());
                     symbol_ref = candidate_ref;
                     resolved_entity_id = candidate_id;
                     break;
@@ -467,7 +480,7 @@ impl RelationResolver {
         // Determine external call type if this is an external reference.
         // the stdlib decision is post-resolution — internally-resolved
         // callees are kept even when their name looks like a stdlib name.
-        let external_type = if is_external {
+        let mut external_type = if is_external {
             if is_stdlib {
                 if self.filter_stdlib_calls {
                     self.filtered_count
@@ -528,7 +541,7 @@ impl RelationResolver {
         // in `raw_target` and in the canonical snapshot. External/unresolved
         // edges keep the full written path so stdlib detection and external
         // classification stay intact.
-        let callee_name = callee_id
+        let mut callee_name = callee_id
             .and_then(|id| entity_index.get_function_by_entity_id(id))
             .map(|entity| entity.name.clone())
             .unwrap_or_else(|| raw_data.dst_name.clone());
@@ -545,9 +558,25 @@ impl RelationResolver {
         if effective_callee_id.is_none()
             && raw_data.relation_type == cce_types::relation::RelationType::FunctionReference
         {
-            effective_callee_id =
-                self.resolve_function_definition(&raw_data.dst_name, &parsed.path, entity_index);
+            effective_callee_id = self.resolve_function_definition(
+                &raw_data.dst_name,
+                &parsed.path,
+                entity_index,
+                symbol_table,
+            );
         }
+        // A recovered internal target flips the earlier external verdict:
+        // classification ran before the retry, so refresh the canonical
+        // name and drop the Unknown marker the edge no longer deserves.
+        if effective_callee_id.is_some() && callee_id.is_none() {
+            if let Some(id) = effective_callee_id {
+                if let Some(entity) = entity_index.get_function_by_entity_id(id) {
+                    callee_name = entity.name.clone();
+                }
+            }
+            external_type = None;
+        }
+        let is_external = effective_callee_id.is_none();
         // Determine owner_type and call_context using TypeMemberIndex
         let (owner_type, call_context, relation_type) = if let Some(callee_id) = effective_callee_id
         {
@@ -787,42 +816,192 @@ impl RelationResolver {
     /// its own file, so foreign static candidates are excluded: they can
     /// never be the target of a cross-file reference. Class-scoped `static`
     /// (C++ static members) keeps external linkage and is never excluded.
-    /// The winner is the largest span; definitions carry bodies while any
-    /// same-name duplicate is ordered deterministically.
+    /// Candidates from the caller's own file win over foreign ones; within
+    /// one partition the largest span wins, since definitions carry bodies.
+    /// Scoped names (`Scope::member`) additionally require a verified owner:
+    /// exactly one candidate owned by the named scope resolves, anything
+    /// ambiguous is dropped rather than guessed.
     fn resolve_function_definition(
         &self,
         name: &str,
         caller_file: &str,
         entity_index: &RelationIndex,
+        symbol_table: &ProjectSymbolTable,
     ) -> Option<EntityId> {
+        if let Some((scope, simple)) = Self::split_funcref_scope(name) {
+            return self.resolve_scoped_funcref(
+                name,
+                scope,
+                simple,
+                caller_file,
+                entity_index,
+                symbol_table,
+            );
+        }
+        let visible = entity_index.get_function_ids_by_name(name).into_iter().filter(|id| {
+            self.is_visible_funcref_candidate(*id, caller_file, entity_index)
+        });
+        Self::pick_funcref_winner(visible, caller_file, entity_index)
+    }
+
+    /// Split a scoped reference (`Scope::member`) into its parts.
+    ///
+    /// Returns `None` for bare names, which take the visibility-partitioned
+    /// largest-span path instead of scope verification.
+    fn split_funcref_scope(name: &str) -> Option<(&str, &str)> {
+        let (scope, simple) = name.rsplit_once("::")?;
+        if scope.is_empty() || simple.is_empty() || simple.contains(':') {
+            return None;
+        }
+        Some((scope, simple))
+    }
+
+    /// Whether an entity may be the target of a cross-file function value.
+    ///
+    /// Function-like kinds only; free `static` functions are confined to
+    /// their own file while every other shape keeps external visibility.
+    fn is_visible_funcref_candidate(
+        &self,
+        id: EntityId,
+        caller_file: &str,
+        entity_index: &RelationIndex,
+    ) -> bool {
         entity_index
+            .get_function_by_entity_id(id)
+            .is_some_and(|entity| {
+                if !entity.kind.is_function_like() {
+                    return false;
+                }
+                if entity.kind == cce_types::EntityKind::Function
+                    && entity.modifiers.iter().any(|m| m == "static")
+                {
+                    return entity_index
+                        .get_file_path_by_entity(id)
+                        .as_deref()
+                        .is_some_and(|f| Self::paths_equivalent(f, caller_file));
+                }
+                true
+            })
+    }
+
+    /// Winner among visible candidates: the caller's own file first, then
+    /// the largest span. First candidate wins ties, and the index yields
+    /// insertion order, so the outcome is deterministic for one build.
+    fn pick_funcref_winner(
+        ids: impl Iterator<Item = EntityId>,
+        caller_file: &str,
+        entity_index: &RelationIndex,
+    ) -> Option<EntityId> {
+        let mut best_same: Option<(EntityId, usize)> = None;
+        let mut best_foreign: Option<(EntityId, usize)> = None;
+        for id in ids {
+            let size = entity_index
+                .get_function_by_entity_id(id)
+                .map(|entity| entity.span.end_byte.saturating_sub(entity.span.start_byte))
+                .unwrap_or(0);
+            let same_file = entity_index
+                .get_file_path_by_entity(id)
+                .as_deref()
+                .is_some_and(|f| Self::paths_equivalent(f, caller_file));
+            let slot = if same_file {
+                &mut best_same
+            } else {
+                &mut best_foreign
+            };
+            let replace = slot.is_none_or(|(_, current)| size > current);
+            if replace {
+                *slot = Some((id, size));
+            }
+        }
+        best_same.or(best_foreign).map(|(id, _)| id)
+    }
+
+    /// Resolve a scoped function reference through its owning type.
+    ///
+    /// Backends registering qualified names keep working through the direct
+    /// hit path. Otherwise the trailing segment supplies candidates and the
+    /// type-member owner decides: a single owner match resolves, zero or
+    /// several matches drop the edge instead of guessing an overload.
+    fn resolve_scoped_funcref(
+        &self,
+        name: &str,
+        scope: &str,
+        simple: &str,
+        caller_file: &str,
+        entity_index: &RelationIndex,
+        symbol_table: &ProjectSymbolTable,
+    ) -> Option<EntityId> {
+        let direct: Vec<EntityId> = entity_index
             .get_function_ids_by_name(name)
+            .into_iter()
+            .filter(|id| self.is_visible_funcref_candidate(*id, caller_file, entity_index))
+            .collect();
+        if !direct.is_empty() {
+            return Self::pick_funcref_winner(direct.into_iter(), caller_file, entity_index);
+        }
+        let mut owned: Vec<EntityId> = entity_index
+            .get_function_ids_by_name(simple)
+            .into_iter()
+            .filter(|id| self.is_visible_funcref_candidate(*id, caller_file, entity_index))
+            .filter(|id| self.funcref_owned_by_scope(*id, scope, entity_index, symbol_table))
+            .collect();
+        owned.sort();
+        owned.dedup();
+        if owned.len() == 1 {
+            owned.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    /// Whether the candidate entity is recorded as a member of the scope.
+    ///
+    /// Compares by member name, span and file path instead of entity id:
+    /// the type index is built from parse-local ids while candidates arrive
+    /// in index-global space, so id comparison cannot bridge the two.
+    fn funcref_owned_by_scope(
+        &self,
+        id: EntityId,
+        scope: &str,
+        entity_index: &RelationIndex,
+        symbol_table: &ProjectSymbolTable,
+    ) -> bool {
+        let (Some(candidate), Some(candidate_file)) = (
+            entity_index.get_function_by_entity_id(id),
+            entity_index.get_file_path_by_entity(id),
+        ) else {
+            return false;
+        };
+        let type_index = symbol_table.global_type_index();
+        type_index
+            .get_type_by_simple(scope)
             .iter()
-            .copied()
-            .filter(|id| {
-                entity_index
-                    .get_function_by_entity_id(*id)
-                    .is_some_and(|entity| {
-                        if !entity.kind.is_function_like() {
-                            return false;
-                        }
-                        if entity.kind == cce_types::EntityKind::Function
-                            && entity.modifiers.iter().any(|m| m == "static")
-                        {
-                            return entity_index
-                                .get_file_path_by_entity(*id)
-                                .as_deref()
-                                .is_some_and(|f| Self::paths_equivalent(f, caller_file));
-                        }
-                        true
-                    })
+            .filter(|entry| {
+                entry.key.simple == scope
+                    || Self::scope_matches_owner(&entry.key.qualified, scope)
             })
-            .max_by_key(|id| {
-                entity_index
-                    .get_function_by_entity_id(*id)
-                    .map(|entity| entity.span.end_byte.saturating_sub(entity.span.start_byte))
-                    .unwrap_or(0)
+            .filter_map(|entry| entry.members.get(&candidate.name))
+            .flatten()
+            .any(|member| {
+                member.span == candidate.span
+                    && Self::paths_equivalent(&member.file_path, &candidate_file)
             })
+    }
+
+    /// Whether a type-member owner satisfies a reference scope.
+    ///
+    /// Accepts the full qualified name as well as its trailing segment in
+    /// either separator style, so `pkg::S` and `pkg.S` scopes both match an
+    /// owner recorded as `pkg::S` or `pkg.S`.
+    fn scope_matches_owner(owner_qualified: &str, scope: &str) -> bool {
+        if owner_qualified == scope {
+            return true;
+        }
+        let simple = owner_qualified.rsplit("::").next().unwrap_or(owner_qualified);
+        if simple == scope {
+            return true;
+        }
+        simple.rsplit('.').next().unwrap_or(simple) == scope
     }
 
     /// Promoted-receiver rewrite (`engine.RouterGroup.Use` ->
@@ -838,26 +1017,168 @@ impl RelationResolver {
         (promoted != dst_name).then_some(promoted)
     }
 
-    /// Candidate resolution names with the promoted-receiver rewrite first.
+    /// Candidate resolution names with the promoted-receiver rewrites first.
     ///
     /// A dotted field-access path (`engine.RouterGroup.Use`) otherwise
     /// resolves through the raw literal, which degrades to the head
     /// variable's type (`Engine.Use`, a self-loop here) before the
     /// refined receiver can disambiguate. The rewritten `Type.Method`
     /// candidate dispatches through type-member resolution to the real
-    /// owner; it only exists on a verified type-member match.
+    /// owner; it only exists on a verified type-member match. The
+    /// embedded variant covers the two-segment shape (`engine.Use`) where
+    /// the receiver's own type lacks the method and an embedded field's
+    /// type provides it.
     fn ordered_resolution_names(
         &self,
         callee_name: &str,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
+        entity_index: &RelationIndex,
+        receiver_type: Option<&str>,
     ) -> Vec<String> {
         let mut names = Vec::new();
         if let Some(promoted) = self.promoted_candidate_name(callee_name, symbol_table) {
             names.push(promoted);
+        } else if let Some(embedded) = self.embedded_promoted_candidate_name(
+            callee_name,
+            receiver_type,
+            entity_index,
+            symbol_table,
+        ) {
+            names.push(embedded);
         }
         names.extend(self.resolution_names(callee_name, parsed));
         names
+    }
+
+    /// Promoted-receiver rewrite for the two-segment shape (`engine.Use`).
+    ///
+    /// Fires only when the inferred receiver type is known, names a real
+    /// type that lacks the method itself, and an embedded field's type owns
+    /// it. The rewritten `Owner.method` candidate then dispatches through
+    /// type-member resolution exactly like the explicit field-path variant.
+    fn embedded_promoted_candidate_name(
+        &self,
+        dst_name: &str,
+        receiver_type: Option<&str>,
+        entity_index: &RelationIndex,
+        symbol_table: &ProjectSymbolTable,
+    ) -> Option<String> {
+        if dst_name.contains("::") {
+            return None;
+        }
+        let (head, method) = dst_name.split_once('.')?;
+        if head.is_empty() || method.is_empty() || method.contains('.') {
+            return None;
+        }
+        let owner =
+            self.embedded_method_owner(receiver_type?, method, entity_index, symbol_table)?;
+        let promoted = format!("{owner}.{method}");
+        (promoted != dst_name).then_some(promoted)
+    }
+
+    /// Owner type reached through anonymous embedded fields.
+    ///
+    /// Returns `None` when the receiver type is unknown, names no indexed
+    /// type, or owns the method itself: promotion only fills the gap the
+    /// receiver's own type leaves. Embedded sources are struct field
+    /// children without a type annotation (the shape of an anonymous
+    /// embedded field); every name is verified against the type index
+    /// before it is followed, so ordinary named fields never open a
+    /// promotion path. Breadth-first with a visited set and depth cap so
+    /// cyclic embeddings terminate.
+    fn embedded_method_owner(
+        &self,
+        receiver_type: &str,
+        method: &str,
+        entity_index: &RelationIndex,
+        symbol_table: &ProjectSymbolTable,
+    ) -> Option<String> {
+        const MAX_PROMOTION_DEPTH: usize = 8;
+        if method.is_empty() {
+            return None;
+        }
+        let start = Self::normalize_receiver_type_name(receiver_type);
+        if start.is_empty() {
+            return None;
+        }
+        let type_index = symbol_table.global_type_index();
+        let owns_method = |name: &str| {
+            type_index.get_type_by_simple(name).iter().any(|entry| {
+                type_index.get_members(&entry.key.qualified, method).is_some()
+            })
+        };
+        if owns_method(&start) {
+            return None;
+        }
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut frontier: Vec<String> = vec![start];
+        let mut depth = 0;
+        while !frontier.is_empty() && depth < MAX_PROMOTION_DEPTH {
+            depth += 1;
+            let mut next: Vec<String> = Vec::new();
+            for name in frontier.drain(..) {
+                let mut fresh = false;
+                for entry in type_index.get_type_by_simple(&name) {
+                    fresh |= visited.insert(entry.key.qualified.clone());
+                }
+                if !fresh {
+                    continue;
+                }
+                for host_id in entity_index.get_function_ids_by_name(&name) {
+                    let Some(host) = entity_index.get_function_by_entity_id(host_id) else {
+                        continue;
+                    };
+                    if !matches!(
+                        host.kind,
+                        cce_types::EntityKind::Struct
+                            | cce_types::EntityKind::Interface
+                            | cce_types::EntityKind::TypeAlias
+                            | cce_types::EntityKind::Class
+                    ) {
+                        continue;
+                    }
+                    for child_id in &host.children {
+                        let Some(child) = entity_index.get_function_by_entity_id(*child_id)
+                        else {
+                            continue;
+                        };
+                        if child.kind != cce_types::EntityKind::Field
+                            || child.get_metadata("type_annotation").is_some()
+                        {
+                            continue;
+                        }
+                        let field_type = child.name.trim();
+                        if field_type.is_empty()
+                            || field_type == name
+                            || next.iter().any(|n| n == field_type)
+                        {
+                            continue;
+                        }
+                        if owns_method(field_type) {
+                            return Some(field_type.to_string());
+                        }
+                        if type_index.get_type_by_simple(field_type).is_empty() {
+                            continue;
+                        }
+                        next.push(field_type.to_string());
+                    }
+                }
+            }
+            frontier = next;
+        }
+        None
+    }
+
+    /// Strip pointer, package and generic decorations to a simple type name.
+    ///
+    /// Mirrors the receiver normalization of the type-index backends so the
+    /// walk keys agree with the index: `*pkg.Engine[T]` becomes `Engine`.
+    fn normalize_receiver_type_name(raw: &str) -> String {
+        let decorated = raw.trim().trim_start_matches(['*', ' ']).trim();
+        let simple = decorated.rsplit('.').next().unwrap_or(decorated);
+        let simple = simple.split('[').next().unwrap_or(simple);
+        simple.split('<').next().unwrap_or(simple).trim().to_string()
     }
 
     /// Receiver type for dotted field-access paths (`engine.RouterGroup.Use`).

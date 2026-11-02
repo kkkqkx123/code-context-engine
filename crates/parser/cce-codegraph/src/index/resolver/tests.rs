@@ -880,3 +880,332 @@ fn test_funcref_ignores_larger_foreign_static() {
         "foreign static must not win over the visible definition, got {file}"
     );
 }
+
+/// Caller file holds its own small static `foo` plus a file-level reference;
+/// a larger extern `foo` lives elsewhere. Same-file linkage wins over span.
+#[test]
+fn test_funcref_prefers_same_file_static_over_larger_foreign() {
+    let mut caller = ParsedFile::new(Language::C, "caller.c".to_string(), "");
+    caller.add_relation(RawRelationData {
+        src: EntityId(0u32.into()),
+        level: cce_types::RelationLevel::File,
+        dst_name: "foo".to_string(),
+        relation_type: RelationType::FunctionReference,
+        span: Span::default(),
+        stdlib_category: None,
+    });
+    let mut own_entity = create_test_entity(1, "foo", EntityKind::Function);
+    own_entity.span = Span::new(0, 50, 0, 0, 2, 0);
+    own_entity.modifiers = vec!["static".to_string()];
+    caller.add_entity(own_entity);
+    let mut foreign_file = ParsedFile::new(Language::C, "def.c".to_string(), "");
+    let mut foreign_entity = create_test_entity(2, "foo", EntityKind::Function);
+    foreign_entity.span = Span::new(0, 900, 0, 0, 30, 0);
+    foreign_file.add_entity(foreign_entity);
+
+    let files = [&caller, &foreign_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+
+    let resolver = RelationResolver::new();
+    let resolved = resolver
+        .resolve_batch(&caller.raw_relations, &caller, &symbols, &index)
+        .into_iter()
+        .next()
+        .expect("funcref must resolve to the same-file definition");
+    let callee = resolved
+        .callee_id
+        .expect("funcref must have an internal callee");
+    let file = index
+        .get_file_path_by_entity(callee)
+        .expect("callee must have a file");
+    assert!(
+        file.ends_with("caller.c"),
+        "same-file static must win over the larger foreign definition, got {file}"
+    );
+}
+
+/// Two-file Go project: `Engine` embeds `RouterGroup`, which owns `Use`.
+/// The caller file holds `setup` calling `engine.Use` on a variable typed
+/// `*Engine`.
+fn go_engine_project() -> (ParsedFile, ParsedFile) {
+    let mut engine_file = ParsedFile::new(Language::Go, "engine.go".to_string(), "");
+    let mut engine = create_test_entity(10, "Engine", EntityKind::Struct);
+    engine.children = vec![EntityId(11)];
+    engine_file.add_entity(engine);
+    let mut embedded = create_test_entity(11, "RouterGroup", EntityKind::Field);
+    embedded.parent = Some(EntityId(10));
+    engine_file.add_entity(embedded);
+    engine_file.add_entity(create_test_entity(12, "setup", EntityKind::Function));
+    let mut engine_var = create_test_entity(13, "engine", EntityKind::Variable);
+    engine_var.set_metadata("type_annotation", "*Engine");
+    engine_file.add_entity(engine_var);
+    engine_file.add_relation(RawRelationData {
+        src: EntityId(12),
+        level: cce_types::RelationLevel::Entity,
+        dst_name: "engine.Use".to_string(),
+        relation_type: RelationType::InstanceMethodCall,
+        span: Span::default(),
+        stdlib_category: None,
+    });
+    let mut router_file = ParsedFile::new(Language::Go, "router.go".to_string(), "");
+    router_file.add_entity(create_test_entity(20, "RouterGroup", EntityKind::Struct));
+    let mut use_method = create_test_entity(21, "Use", EntityKind::Method);
+    use_method.span = Span::new(0, 200, 0, 0, 6, 0);
+    use_method.set_metadata("receiver_type", "*RouterGroup");
+    router_file.add_entity(use_method);
+    (engine_file, router_file)
+}
+
+fn build_go_engine_project() -> (
+    ParsedFile,
+    ProjectSymbolTable,
+    crate::index::core::RelationIndex,
+) {
+    let (engine_file, router_file) = go_engine_project();
+    let files = [&engine_file, &router_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+    (engine_file, symbols, index)
+}
+
+#[test]
+fn test_go_embedded_promotion_rewrites_candidate() {
+    // The two-segment call must gain an owner-qualified candidate before the
+    // raw literal, so type-member resolution reaches the embedded owner.
+    let (engine_file, symbols, index) = build_go_engine_project();
+    let resolver = RelationResolver::new();
+    let names = resolver.ordered_resolution_names(
+        "engine.Use",
+        &engine_file,
+        &symbols,
+        &index,
+        Some("*Engine"),
+    );
+    assert_eq!(
+        names.first().map(String::as_str),
+        Some("RouterGroup.Use"),
+        "embedded owner must lead the candidates, got {names:?}"
+    );
+}
+
+#[test]
+fn test_go_embedded_call_resolves_to_owner() {
+    // End to end: `engine.Use` on an `*Engine` receiver resolves to the
+    // `RouterGroup.Use` method instead of degrading to Unknown.
+    let (engine_file, symbols, index) = build_go_engine_project();
+    let resolver = RelationResolver::new();
+    let resolved = resolver
+        .resolve_batch(&engine_file.raw_relations, &engine_file, &symbols, &index)
+        .into_iter()
+        .next()
+        .expect("embedded call must produce a relation");
+    assert!(
+        !resolved.is_external,
+        "embedded call must resolve internally, got {:?}",
+        resolved.external_type
+    );
+    assert_eq!(resolved.callee_name, "Use");
+    let callee = resolved.callee_id.expect("must have an internal callee");
+    let file = index
+        .get_file_path_by_entity(callee)
+        .expect("callee must have a file");
+    assert!(
+        file.ends_with("router.go"),
+        "call must land on the embedded owner, got {file}"
+    );
+}
+
+#[test]
+fn test_embedded_walk_stops_when_outer_owns_method() {
+    // Promotion only fills the gap the receiver's own type leaves: when the
+    // outer type owns the method, no embedded candidate may be produced.
+    let (mut engine_file, router_file) = go_engine_project();
+    let mut own_use = create_test_entity(14, "Use", EntityKind::Method);
+    own_use.set_metadata("receiver_type", "*Engine");
+    engine_file.add_entity(own_use);
+    let files = [&engine_file, &router_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+    let resolver = RelationResolver::new();
+    assert_eq!(
+        resolver.embedded_method_owner("*Engine", "Use", &index, &symbols),
+        None,
+        "outer owner must suppress promotion"
+    );
+}
+
+#[test]
+fn test_embedded_walk_ignores_typed_named_fields() {
+    // A named field carrying a type annotation is not an anonymous embedded
+    // field and must never open a promotion path, even when its type owns
+    // the called method.
+    let (mut engine_file, router_file) = go_engine_project();
+    for entity in engine_file.entities.iter_mut() {
+        if entity.name == "RouterGroup" && entity.kind == EntityKind::Field {
+            entity.name = "group".to_string();
+            entity.set_metadata("type_annotation", "RouterGroup");
+        }
+    }
+    let files = [&engine_file, &router_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+    let resolver = RelationResolver::new();
+    assert_eq!(
+        resolver.embedded_method_owner("*Engine", "Use", &index, &symbols),
+        None,
+        "named fields must not promote"
+    );
+}
+
+#[test]
+fn test_embedded_walk_terminates_on_cycle() {
+    // Mutual embedding with no owner must return empty instead of looping.
+    let mut a_file = ParsedFile::new(Language::Go, "a.go".to_string(), "");
+    let mut struct_a = create_test_entity(30, "A", EntityKind::Struct);
+    struct_a.children = vec![EntityId(31)];
+    a_file.add_entity(struct_a);
+    let mut field_b = create_test_entity(31, "B", EntityKind::Field);
+    field_b.parent = Some(EntityId(30));
+    a_file.add_entity(field_b);
+    let mut b_file = ParsedFile::new(Language::Go, "b.go".to_string(), "");
+    let mut struct_b = create_test_entity(40, "B", EntityKind::Struct);
+    struct_b.children = vec![EntityId(41)];
+    b_file.add_entity(struct_b);
+    let mut field_a = create_test_entity(41, "A", EntityKind::Field);
+    field_a.parent = Some(EntityId(40));
+    b_file.add_entity(field_a);
+    let files = [&a_file, &b_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+    let resolver = RelationResolver::new();
+    assert_eq!(
+        resolver.embedded_method_owner("*A", "Ping", &index, &symbols),
+        None,
+        "cyclic embedding must terminate empty"
+    );
+}
+
+/// Single-owner C++ project: class `S` owns one `bar`, referenced as
+/// `S::bar` from another file.
+fn cpp_single_owner_project() -> (ParsedFile, ParsedFile) {
+    let mut user_file = ParsedFile::new(Language::Cpp, "user.cpp".to_string(), "");
+    user_file.add_relation(RawRelationData {
+        src: EntityId(0u32.into()),
+        level: cce_types::RelationLevel::File,
+        dst_name: "S::bar".to_string(),
+        relation_type: RelationType::FunctionReference,
+        span: Span::default(),
+        stdlib_category: None,
+    });
+    let mut def_file = ParsedFile::new(Language::Cpp, "s.cpp".to_string(), "");
+    let mut class_s = create_test_entity(50, "S", EntityKind::Class);
+    class_s.children = vec![EntityId(51)];
+    def_file.add_entity(class_s);
+    let mut bar = create_test_entity(51, "bar", EntityKind::Method);
+    bar.parent = Some(EntityId(50));
+    bar.span = Span::new(0, 120, 0, 0, 4, 0);
+    def_file.add_entity(bar);
+    (user_file, def_file)
+}
+
+fn build_cpp_project(
+    user_file: &ParsedFile,
+    def_file: &ParsedFile,
+) -> (ProjectSymbolTable, crate::index::core::RelationIndex) {
+    let files = [user_file, def_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    (symbols, builder.build())
+}
+
+#[test]
+fn test_scoped_funcref_resolves_single_owner() {
+    // Exactly one candidate owned by the named scope resolves.
+    let (user_file, def_file) = cpp_single_owner_project();
+    let (symbols, index) = build_cpp_project(&user_file, &def_file);
+    let resolver = RelationResolver::new();
+    let callee = resolver
+        .resolve_scoped_funcref("S::bar", "S", "bar", "user.cpp", &index, &symbols)
+        .expect("single owner must resolve");
+    let entity = index
+        .get_function_by_entity_id(callee)
+        .expect("callee must exist");
+    assert_eq!(entity.name, "bar");
+}
+
+#[test]
+fn test_scoped_funcref_resolves_end_to_end() {
+    // The file-level member-pointer reference lands on the member method.
+    let (user_file, def_file) = cpp_single_owner_project();
+    let (symbols, index) = build_cpp_project(&user_file, &def_file);
+    let resolver = RelationResolver::new();
+    let resolved = resolver
+        .resolve_batch(&user_file.raw_relations, &user_file, &symbols, &index)
+        .into_iter()
+        .next()
+        .expect("scoped funcref must produce a relation");
+    assert!(!resolved.is_external, "scoped funcref must resolve internally");
+    assert_eq!(resolved.callee_name, "bar");
+}
+
+#[test]
+fn test_scoped_funcref_drops_overload_ambiguity() {
+    // Two same-owner overloads cannot be told apart without arity: drop.
+    let (user_file, mut def_file) = cpp_single_owner_project();
+    let mut second = create_test_entity(52, "bar", EntityKind::Method);
+    second.parent = Some(EntityId(50));
+    second.span = Span::new(200, 320, 0, 6, 10, 0);
+    def_file.add_entity(second);
+    if let Some(class_s) = def_file.entities.iter_mut().find(|e| e.name == "S") {
+        class_s.children.push(EntityId(52));
+    }
+    let (symbols, index) = build_cpp_project(&user_file, &def_file);
+    let resolver = RelationResolver::new();
+    assert_eq!(
+        resolver.resolve_scoped_funcref("S::bar", "S", "bar", "user.cpp", &index, &symbols),
+        None,
+        "overload ambiguity must be dropped"
+    );
+}
+
+#[test]
+fn test_scoped_funcref_drops_wrong_scope() {
+    // A member of another scope is never the target of this reference.
+    let (user_file, mut def_file) = cpp_single_owner_project();
+    for entity in def_file.entities.iter_mut() {
+        if entity.name == "S" {
+            entity.name = "Other".to_string();
+        }
+    }
+    let (symbols, index) = build_cpp_project(&user_file, &def_file);
+    let resolver = RelationResolver::new();
+    assert_eq!(
+        resolver.resolve_scoped_funcref("S::bar", "S", "bar", "user.cpp", &index, &symbols),
+        None,
+        "foreign scope must not resolve"
+    );
+}

@@ -668,6 +668,7 @@ mod tests {
             "protocol_implementation",
             "type_reference",
             "field_access",
+            "reference.function",
             "contains.element",
             "reference.template",
             "parameter.binding",
