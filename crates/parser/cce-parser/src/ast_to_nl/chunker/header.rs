@@ -150,11 +150,15 @@ impl<'a> HeaderHelper<'a> {
         };
 
         // The header is fixed for the whole group; the member budget therefore
-        // excludes the header cost AND the "\n\n" separator that
-        // `assemble_combined_text` inserts between them. Keeping the two
-        // values distinct lets `below_min` pack up to the member maximum
-        // without ever pushing the combined text past the path limit.
-        let member_max_limit = first_budget.saturating_sub(2).max(1);
+        // excludes the header cost AND the separator that
+        // `assemble_combined_text` inserts between them. The separator is
+        // measured in the path unit instead of using a fixed constant, so a
+        // path whose tokenizer counts no term for blank lines keeps the full
+        // budget. Keeping the two values distinct lets `below_min` pack up
+        // to the member maximum without ever pushing the combined text past
+        // the path limit.
+        let separator_cost = cost("\n\n", path);
+        let member_max_limit = first_budget.saturating_sub(separator_cost).max(1);
 
         let mut groups = Vec::new();
         let mut current_group = Vec::new();
@@ -190,7 +194,7 @@ impl<'a> HeaderHelper<'a> {
             let effective_max = if groups.is_empty() {
                 member_max_limit
             } else {
-                continuation_budget.saturating_sub(2).max(1)
+                continuation_budget.saturating_sub(separator_cost).max(1)
             };
             if !current_group.is_empty() {
                 let mut candidate = current_text.clone();

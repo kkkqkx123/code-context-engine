@@ -177,39 +177,72 @@ impl GroupChunker {
         Some(vocabulary)
     }
 
-    /// Whether the group needs room reserved for terminology.
+    /// The measured terminology reserve for one group and one path.
     ///
-    /// A file-level table alone does not consume room. Only groups whose
-    /// text actually mentions a table term pay the reserve, so groups
-    /// without terms keep the full body limit.
-    fn group_mentions_vocabulary(
+    /// The group text and the vocabulary table are both known before
+    /// splitting, so the expansion cost of the terms the group actually
+    /// mentions is summed instead of using the proportional estimate. The
+    /// sum is capped to a single chunk worth of injections: at most
+    /// `glossary_max_entries` terms can land in one chunk, so the most
+    /// expensive terms bound the room any chunk of the group needs. Groups
+    /// that mention few terms keep more body room; the residual unevenness
+    /// across chunks is digested by the exact capping inside the injection.
+    pub(crate) fn measured_terminology_reserve(
         &self,
         file_path: &str,
         language: Option<&str>,
         texts: &[&str],
-    ) -> bool {
+        path: ChunkPath,
+    ) -> usize {
         let Some(vocabulary) = self.terminology(file_path, language) else {
-            return false;
+            return 0;
         };
         if texts.is_empty() {
-            return true;
+            return 0;
         }
-        !vocabulary.matched_entries(texts).is_empty()
+        let matched = vocabulary.matched_entries(texts);
+        if matched.is_empty() {
+            return 0;
+        }
+        let unit = self.config.unit(path);
+        let mut costs: Vec<usize> = matched
+            .iter()
+            .map(|entry| {
+                let block = match path {
+                    ChunkPath::Bm25 => format!(" [{} = {}]", entry.token, entry.expansion),
+                    ChunkPath::Embedding => format!(" ({})", entry.expansion),
+                };
+                unit.cost(&block)
+            })
+            .collect();
+        costs.sort_unstable_by(|a, b| b.cmp(a));
+        let take = self.config.glossary_max_entries.max(1).min(costs.len());
+        let sum: usize = costs.iter().take(take).sum();
+        let limit = self.config.limit(path);
+        if limit == 0 {
+            0
+        } else {
+            sum.min(limit.saturating_sub(1))
+        }
     }
 
-    /// Whether any conversion in the batch mentions the file terminology.
+    /// The largest measured terminology reserve across a batch, per path.
     ///
-    /// Used for the shared cross-group merge config, which must stay
-    /// conservative when at least one group needs the reserve.
-    fn batch_mentions_vocabulary(
+    /// The cross-group merge config is shared by every group of the file, so
+    /// it keeps the most conservative room any group needs. The merge inputs
+    /// are already verified chunks and the merge ceiling never exceeds the
+    /// pre-injection limit, so the merge itself needs no repair.
+    pub(crate) fn batch_measured_reserves(
         &self,
         group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
         file_path: &str,
         language: Option<&str>,
-    ) -> bool {
+    ) -> (usize, usize) {
         let Some(vocabulary) = self.terminology(file_path, language) else {
-            return false;
+            return (0, 0);
         };
+        let mut emb_max = 0usize;
+        let mut bm25_max = 0usize;
         for gc in group_conversions {
             let mut texts: Vec<&str> = Vec::new();
             if let Some(header) = gc.header_conversion.as_ref() {
@@ -228,21 +261,52 @@ impl GroupChunker {
                     texts.push(text);
                 }
             }
-            if !vocabulary.matched_entries(&texts).is_empty() {
-                return true;
+            let matched = vocabulary.matched_entries(&texts);
+            if matched.is_empty() {
+                continue;
+            }
+            for path in [ChunkPath::Embedding, ChunkPath::Bm25] {
+                let unit = self.config.unit(path);
+                let mut costs: Vec<usize> = matched
+                    .iter()
+                    .map(|entry| {
+                        let block = match path {
+                            ChunkPath::Bm25 => {
+                                format!(" [{} = {}]", entry.token, entry.expansion)
+                            }
+                            ChunkPath::Embedding => format!(" ({})", entry.expansion),
+                        };
+                        unit.cost(&block)
+                    })
+                    .collect();
+                costs.sort_unstable_by(|a, b| b.cmp(a));
+                let take = self.config.glossary_max_entries.max(1).min(costs.len());
+                let sum: usize = costs.iter().take(take).sum();
+                let limit = self.config.limit(path);
+                let capped = if limit == 0 {
+                    0
+                } else {
+                    sum.min(limit.saturating_sub(1))
+                };
+                match path {
+                    ChunkPath::Embedding => emb_max = emb_max.max(capped),
+                    ChunkPath::Bm25 => bm25_max = bm25_max.max(capped),
+                }
             }
         }
-        false
+        (emb_max, bm25_max)
     }
 
     /// The configuration used to split one group.
     ///
-    /// Files that carry a terminology table reserve room for the injected
-    /// expansions only when the group actually mentions a term. Every group
-    /// additionally reserves the decoration its chunks will carry (identity
-    /// lines, topic lines, synthetic block heads), so the splitter works on
-    /// a body limit and the assembly does not push the final chunk over the
-    /// pre-injection limit.
+    /// Files that carry a terminology table reserve the measured expansion
+    /// cost of the terms the group actually mentions instead of the
+    /// proportional estimate. Every group additionally reserves the measured
+    /// decoration its chunks will carry, so the splitter works on a body
+    /// limit and the assembly does not push the final chunk over the
+    /// pre-injection limit. The first pass uses the per-group measured
+    /// decoration; the rare parent-qualified overflow is covered by the
+    /// bounded repair pass instead of by a permanent conservative reserve.
     fn group_config(
         &self,
         group: &EntityGroup,
@@ -258,15 +322,20 @@ impl GroupChunker {
         ParseError,
     > {
         use cce_config::modules::ChunkBudget;
-        let has_vocabulary = self.group_mentions_vocabulary(file_path, language, texts);
+        let emb_reserve =
+            self.measured_terminology_reserve(file_path, language, texts, ChunkPath::Embedding);
+        let bm25_reserve =
+            self.measured_terminology_reserve(file_path, language, texts, ChunkPath::Bm25);
         let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
         let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25);
-        let emb_budget: ChunkBudget =
-            self.config
-                .budget(ChunkPath::Embedding, has_vocabulary, embedding_decoration);
+        let emb_budget: ChunkBudget = self.config.budget_with_reserve(
+            ChunkPath::Embedding,
+            emb_reserve,
+            embedding_decoration,
+        );
         let bm25_budget: ChunkBudget =
             self.config
-                .budget(ChunkPath::Bm25, has_vocabulary, bm25_decoration);
+                .budget_with_reserve(ChunkPath::Bm25, bm25_reserve, bm25_decoration);
         for (budget, name) in [(&emb_budget, "embedding"), (&bm25_budget, "bm25")] {
             if budget.hard_limit > 0
                 && budget.pre_injection_limit != usize::MAX
@@ -673,18 +742,18 @@ impl GroupChunker {
         // The type system guarantees Bm25Chunk cannot enter this path.
         let emb_chunks_inner: Vec<ChunkedResult> =
             emb_chunks.into_iter().map(|c| c.into_inner()).collect();
-        let merge_has_vocabulary =
-            self.batch_mentions_vocabulary(group_conversions, file_path, language.as_deref());
+        let (emb_merge_reserve, bm25_merge_reserve) =
+            self.batch_measured_reserves(group_conversions, file_path, language.as_deref());
         let mut merge_config = self.config.clone();
         if self.config.limit(ChunkPath::Embedding) > 0 {
             merge_config.max_tokens = self
                 .config
-                .pre_injection_limit(ChunkPath::Embedding, merge_has_vocabulary);
+                .pre_injection_limit_with_reserve(ChunkPath::Embedding, emb_merge_reserve);
         }
         if self.config.limit(ChunkPath::Bm25) > 0 {
             merge_config.max_bm25_terms = self
                 .config
-                .pre_injection_limit(ChunkPath::Bm25, merge_has_vocabulary);
+                .pre_injection_limit_with_reserve(ChunkPath::Bm25, bm25_merge_reserve);
         }
         let merged_emb_chunks = super::merge::merge_small_chunks_cross_group(
             emb_chunks_inner,

@@ -369,10 +369,14 @@ impl ChunkBuilder {
     /// The splitter works on a body limit; this allowance protects the lines
     /// assembly adds back: the identity line of the first chunk and the
     /// identity anchor of every continuation chunk. The anchor is truncated
-    /// to a fixed cap, so the allowance uses that cap instead of enumerating
-    /// group names: a parent-qualified anchor must fit the same room. The
-    /// synthetic head names members inside the body text and is already
-    /// covered by the body budget, so it needs no extra room here.
+    /// to a fixed cap and measured per group from the entities the group
+    /// actually holds, using the group name as the qualifier. A
+    /// parent-qualified anchor that exceeds this room is rare and is covered
+    /// by the bounded repair pass instead of by a permanent conservative
+    /// reserve, so the common case keeps more body room. The synthetic head
+    /// names members inside the body text and is already covered by the
+    /// body budget, so it needs no extra room here. The separator is
+    /// measured in the path unit instead of using a fixed constant.
     pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath) -> usize {
         let first_line = format!("{} ({}).\n", group.name, group.kind.kind_label());
         let first = if path == ChunkPath::Embedding {
@@ -380,9 +384,37 @@ impl ChunkBuilder {
         } else {
             0
         };
-        let universal = IDENTITY_COST_CAP.saturating_add(2);
-        let continuation = universal.max(cost(&first_line, path).saturating_add(2));
+        let separator = cost("\n\n", path);
+        let mut continuation = cost(&first_line, path).saturating_add(separator);
+        for id in group.all_entity_ids() {
+            let Some((name, kind)) = Self::entity_name_and_kind(group, id) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            let qualified = if group.name.is_empty() || name == group.name.as_str() {
+                name.clone()
+            } else {
+                format!("{}.{}", group.name, name)
+            };
+            let identity = Self::identity_line(kind, &qualified);
+            let capped = truncate_to_cost(&identity, unit(path), IDENTITY_COST_CAP);
+            continuation = continuation.max(cost(capped, path).saturating_add(separator));
+        }
         first.max(continuation)
+    }
+
+    /// The parent-independent universal upper bound of the decoration.
+    ///
+    /// The per-group allowance above is measured from the group name alone;
+    /// this bound is the fixed cap the continuation anchor is truncated to
+    /// plus the fixed separator, so it holds regardless of how long group or
+    /// parent names grow. It is the reference the measured allowance is
+    /// compared against, not the room the splitter reserves.
+    #[cfg(test)]
+    pub(crate) fn universal_decoration_upper_bound() -> usize {
+        IDENTITY_COST_CAP.saturating_add(2)
     }
 
     /// Identity line for one continued entity.
@@ -1512,7 +1544,7 @@ mod tests {
     }
 
     #[test]
-    fn test_long_parent_anchor_fits_universal_allowance() {
+    fn test_measured_allowance_below_universal_and_repair_covers_parent() {
         let group = method_group();
         let long_parent = "VeryLongParentModuleNameThatKeepsGrowingAndGrowing";
         let identity = ChunkBuilder::continuation_identity(
@@ -1523,10 +1555,19 @@ mod tests {
             ChunkPath::Embedding,
         )
         .expect("parent-qualified anchor must still be produced");
-        let allowance = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let measured = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let universal = ChunkBuilder::universal_decoration_upper_bound();
         assert!(
-            crate::ast_to_nl::chunker::boundary::cost(&identity, ChunkPath::Embedding) <= allowance,
-            "parent-qualified anchor must fit the parent-independent room, got: {identity}"
+            measured < universal,
+            "per-group measured room must stay below the universal bound, got measured={measured} universal={universal}"
+        );
+        assert!(
+            crate::ast_to_nl::chunker::boundary::cost(&identity, ChunkPath::Embedding) > measured,
+            "long parent anchor must exceed the measured room so repair is required, got: {identity}"
+        );
+        assert!(
+            crate::ast_to_nl::chunker::boundary::cost(&identity, ChunkPath::Embedding) <= universal,
+            "parent-qualified anchor must still fit the universal bound, got: {identity}"
         );
     }
 

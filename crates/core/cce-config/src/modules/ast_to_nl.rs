@@ -345,6 +345,26 @@ impl ChunkingConfig {
         limit.saturating_sub(reserve)
     }
 
+    /// The limit a chunk must satisfy before terminology injection, given
+    /// an explicitly measured reserve.
+    ///
+    /// The reserve is the measured expansion cost of the terminology the
+    /// group actually mentions, not the proportional estimate. It is clamped
+    /// to leave at least one unit of body room, matching the proportional
+    /// path.
+    pub fn pre_injection_limit_with_reserve(
+        &self,
+        path: cce_types::ChunkPath,
+        reserve: usize,
+    ) -> usize {
+        let limit = self.limit(path);
+        if limit == 0 {
+            return usize::MAX;
+        }
+        let capped = reserve.min(limit.saturating_sub(1));
+        limit.saturating_sub(capped)
+    }
+
     /// The budget for one path, given the decoration that will be appended
     /// to a chunk after splitting.
     pub fn budget(
@@ -353,11 +373,32 @@ impl ChunkingConfig {
         has_vocabulary: bool,
         decoration_cost: usize,
     ) -> ChunkBudget {
-        let limit = self.limit(path);
         let reserve = if has_vocabulary {
             self.glossary_reserve(path)
         } else {
             0
+        };
+        self.budget_with_reserve(path, reserve, decoration_cost)
+    }
+
+    /// The budget for one path, given a measured terminology reserve and the
+    /// decoration that will be appended to a chunk after splitting.
+    ///
+    /// Callers that know the group text and the vocabulary table pass the
+    /// measured expansion cost here instead of the proportional estimate, so
+    /// groups that mention few terms keep more body room while groups that
+    /// mention many terms keep enough room for their expansions.
+    pub fn budget_with_reserve(
+        &self,
+        path: cce_types::ChunkPath,
+        reserve: usize,
+        decoration_cost: usize,
+    ) -> ChunkBudget {
+        let limit = self.limit(path);
+        let capped = if limit == 0 {
+            0
+        } else {
+            reserve.min(limit.saturating_sub(1))
         };
         if limit == 0 {
             return ChunkBudget {
@@ -371,7 +412,7 @@ impl ChunkingConfig {
                 merge_limit: usize::MAX,
             };
         }
-        let pre_injection_limit = limit.saturating_sub(reserve);
+        let pre_injection_limit = limit.saturating_sub(capped);
         let body_limit = pre_injection_limit.saturating_sub(decoration_cost).max(1);
         let min_limit = match path {
             cce_types::ChunkPath::Bm25 => self.min_chunk_bm25_terms,
@@ -390,7 +431,7 @@ impl ChunkingConfig {
         ChunkBudget {
             unit: self.unit(path),
             hard_limit: limit,
-            reserve,
+            reserve: capped,
             decoration_cost,
             pre_injection_limit,
             body_limit,
@@ -428,6 +469,27 @@ impl ChunkingConfig {
             return 0;
         }
         ((limit as f32) * self.glossary_reserve_ratio).ceil() as usize
+    }
+
+    /// The merge ceiling for one path, given an explicitly measured reserve.
+    ///
+    /// Mirrors `merge_limit` but derives the pre-injection limit from the
+    /// measured reserve so cross-group merging stays within the room the
+    /// groups actually need for terminology injection.
+    pub fn merge_limit_with_reserve(&self, path: cce_types::ChunkPath, reserve: usize) -> usize {
+        let pre = self.pre_injection_limit_with_reserve(path, reserve);
+        match path {
+            cce_types::ChunkPath::Bm25 => pre,
+            cce_types::ChunkPath::Embedding => {
+                if self.cross_group_merge_threshold == 0 {
+                    pre
+                } else if pre == usize::MAX {
+                    self.cross_group_merge_threshold
+                } else {
+                    self.cross_group_merge_threshold.min(pre)
+                }
+            }
+        }
     }
 }
 

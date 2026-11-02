@@ -86,11 +86,29 @@ pub struct HeaderPathParams<'a> {
     pub include_header_in_first_coverage: bool,
 }
 
+/// How many times a split combination text may be re-split when its
+/// assembled chunks exceed the pre-injection limit.
+///
+/// Each repair tightens the body limit by the observed overflow, so body
+/// pieces shrink strictly while the decoration upper bound stays fixed and
+/// the loop converges. The cap guarantees termination; whatever still
+/// overflows after the last pass falls back to hard-limit truncation.
+const MAX_DECORATION_REPAIR_PASSES: usize = 3;
+
 /// Chunk a single text path (BM25 or Embedding) independently
 ///
 /// Unified orchestration for both the plain single-path flow and the
 /// header-path flow (header + members): check limits, split, enforce segment
 /// limits, then build chunks.
+///
+/// The verification point sits after assembly and before terminology
+/// injection: every chunk carries its final anchor, so the actual cost can be
+/// compared against the pre-injection budget. Compliant combinations pass
+/// through; an overflowing combination is repaired as a unit by folding the
+/// overflow back into the body budget and re-splitting the same combination
+/// text with the same strategy and entity boundaries. The unsplit path needs
+/// no repair: its text already fits the body budget and its first-chunk
+/// identity is deterministic, so its verification always passes.
 pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
     let ChunkInput {
         infra,
@@ -145,80 +163,157 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
         ));
     }
 
-    let segments = if let Some(nl) = nl_boundaries {
-        infra
-            .splitter
-            .split_with_nl_boundaries(text, group, strategy, path, nl)?
-    } else {
-        infra.splitter.split(text, group, strategy, path)?
-    };
-
-    let segments = segment_limit::enforce_segment_max_limit(
-        segments,
-        path,
-        infra,
-        group,
-        nl_boundaries.unwrap_or_default(),
-    )?;
-
-    if segments.is_empty() {
-        return Err(ParseError::code_splitting(format!(
-            "over-limit text produced no segments (path={path}, strategy={strategy:?}, group={})",
-            group.group_id
-        )));
-    }
-
-    let blank_count = segments.iter().filter(|s| s.text.trim().is_empty()).count();
-    let segments = if blank_count > 0 {
-        tracing::warn!(
-            path = ?path,
-            group = %group.group_id,
-            blank = blank_count,
-            "Dropping blank segments produced by splitting (splitter/converter bug)"
+    let mut current_emb_budget = infra.emb_budget;
+    let mut current_bm25_budget = infra.bm25_budget;
+    let mut current_body = budget.body_limit;
+    let pre_limit = budget.pre_injection_limit;
+    let mut last_output: Option<ChunkOutput> = None;
+    for attempt in 0..MAX_DECORATION_REPAIR_PASSES {
+        let current_budget = match path {
+            ChunkPath::Bm25 => current_bm25_budget,
+            ChunkPath::Embedding => current_emb_budget,
+        };
+        let current_splitter = TextSplitter::with_budgets(
+            infra.config.clone(),
+            current_emb_budget,
+            current_bm25_budget,
         );
-        segments
-            .into_iter()
-            .filter(|s| !s.text.trim().is_empty())
-            .collect::<Vec<_>>()
-    } else {
-        segments
-    };
-    if segments.is_empty() {
-        return Ok(ChunkOutput {
-            chunks: Vec::new(),
+        let repair_infra = ChunkInfrastructure {
+            config: infra.config,
+            estimator: infra.estimator,
+            splitter: &current_splitter,
+            pre_injection_embedding: current_emb_budget.pre_injection_limit,
+            pre_injection_bm25: current_bm25_budget.pre_injection_limit,
+            emb_budget: current_emb_budget,
+            bm25_budget: current_bm25_budget,
+            has_vocabulary: infra.has_vocabulary,
+        };
+        let segments = if let Some(nl) = nl_boundaries {
+            current_splitter.split_with_nl_boundaries(text, group, strategy, path, nl)?
+        } else {
+            current_splitter.split(text, group, strategy, path)?
+        };
+        let segments = segment_limit::enforce_segment_max_limit(
+            segments,
+            path,
+            &repair_infra,
+            group,
+            nl_boundaries.unwrap_or_default(),
+        )?;
+        if segments.is_empty() {
+            return Err(ParseError::code_splitting(format!(
+                "over-limit text produced no segments (path={path}, strategy={strategy:?}, group={})",
+                group.group_id
+            )));
+        }
+        let blank_count = segments.iter().filter(|s| s.text.trim().is_empty()).count();
+        let segments = if blank_count > 0 {
+            tracing::warn!(
+                path = ?path,
+                group = %group.group_id,
+                blank = blank_count,
+                "Dropping blank segments produced by splitting (splitter/converter bug)"
+            );
+            segments
+                .into_iter()
+                .filter(|s| !s.text.trim().is_empty())
+                .collect::<Vec<_>>()
+        } else {
+            segments
+        };
+        if segments.is_empty() {
+            return Ok(ChunkOutput {
+                chunks: Vec::new(),
+                dropped_blank_segments: blank_count,
+                vocabulary: cce_plugin::vocabulary::VocabularyStats::default(),
+            });
+        }
+        let active: &GroupTracker = header_mode.as_ref().map_or(tracker, |h| h.tracker);
+        let builder = ChunkBuilder::new();
+        let header_ctx = header_mode.as_ref().map(|h| SegmentHeaderContext {
+            header_entity_id: h.header_entity_id,
+            include_header_in_first_coverage: h.include_header_in_first_coverage,
+        });
+        let chunks = builder.from_segments(
+            active,
+            &segments,
+            path,
+            group,
+            file_path,
+            keywords,
+            nl_boundaries.unwrap_or_default(),
+            header_ctx,
+        );
+        let max_cost = chunks
+            .iter()
+            .map(|chunk| current_budget.unit.cost(&chunk.text))
+            .max()
+            .unwrap_or(0);
+        let needs_repair = budget.hard_limit > 0 && pre_limit != usize::MAX && max_cost > pre_limit;
+        if !needs_repair || attempt + 1 >= MAX_DECORATION_REPAIR_PASSES {
+            if needs_repair {
+                tracing::warn!(
+                    file = file_path,
+                    group = group.group_id.as_str(),
+                    path = ?path,
+                    cost = max_cost,
+                    pre = pre_limit,
+                    attempt = attempt,
+                    "combination text still exceeds the pre-injection limit after repair; keeping it for hard-limit truncation"
+                );
+            }
+            return Ok(ChunkOutput {
+                chunks: limits::enforce_pre_injection_limit(
+                    chunks,
+                    current_budget,
+                    file_path,
+                    group.group_id.as_str(),
+                )?,
+                dropped_blank_segments: blank_count,
+                vocabulary: cce_plugin::vocabulary::VocabularyStats::default(),
+            });
+        }
+        let overflow = max_cost.saturating_sub(pre_limit).max(1);
+        let tightened = current_body.saturating_sub(overflow).max(1);
+        tracing::info!(
+            file = file_path,
+            group = group.group_id.as_str(),
+            path = ?path,
+            cost = max_cost,
+            pre = pre_limit,
+            body = current_body,
+            tightened = tightened,
+            attempt = attempt,
+            "decoration overflow folds back into the body budget; re-splitting the combination text"
+        );
+        if tightened >= current_body {
+            return Ok(ChunkOutput {
+                chunks: limits::enforce_pre_injection_limit(
+                    chunks,
+                    current_budget,
+                    file_path,
+                    group.group_id.as_str(),
+                )?,
+                dropped_blank_segments: blank_count,
+                vocabulary: cce_plugin::vocabulary::VocabularyStats::default(),
+            });
+        }
+        current_body = tightened;
+        match path {
+            ChunkPath::Bm25 => current_bm25_budget.body_limit = tightened,
+            ChunkPath::Embedding => current_emb_budget.body_limit = tightened,
+        }
+        last_output = Some(ChunkOutput {
+            chunks,
             dropped_blank_segments: blank_count,
             vocabulary: cce_plugin::vocabulary::VocabularyStats::default(),
         });
     }
-
-    let active: &GroupTracker = header_mode.as_ref().map_or(tracker, |h| h.tracker);
-    let builder = ChunkBuilder::new();
-
-    let header_ctx = header_mode.as_ref().map(|h| SegmentHeaderContext {
-        header_entity_id: h.header_entity_id,
-        include_header_in_first_coverage: h.include_header_in_first_coverage,
-    });
-
-    let chunks = builder.from_segments(
-        active,
-        &segments,
-        path,
-        group,
-        file_path,
-        keywords,
-        nl_boundaries.unwrap_or_default(),
-        header_ctx,
-    );
-    Ok(ChunkOutput {
-        chunks: limits::enforce_pre_injection_limit(
-            chunks,
-            infra.budget(path),
-            file_path,
-            group.group_id.as_str(),
-        )?,
-        dropped_blank_segments: blank_count,
+    Ok(last_output.unwrap_or(ChunkOutput {
+        chunks: Vec::new(),
+        dropped_blank_segments: 0,
         vocabulary: cce_plugin::vocabulary::VocabularyStats::default(),
-    })
+    }))
 }
 
 /// Build an unsplit chunk with header semantics (header + members).

@@ -1396,4 +1396,257 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_repair_folds_parent_overflow_back_into_body() {
+        use crate::ast_to_nl::chunker::single_path::{ChunkInfrastructure, ChunkInput};
+        use crate::ast_to_nl::chunker::strategy::SplitStrategy;
+        let config = ChunkingConfig {
+            max_bm25_terms: 60,
+            min_chunk_bm25_terms: 5,
+            max_tokens: 512,
+            ..Default::default()
+        };
+        let mut parent = create_small_group();
+        parent.group_id = CompactString::from("parent_long");
+        parent.name = CompactString::from("VeryLongParentModuleNameThatKeepsGrowingAndGrowing");
+        parent.kind = EntityKind::Class;
+        let mut child = create_small_group();
+        child.group_id = CompactString::from("child_short");
+        child.name = CompactString::from("s");
+        child.kind = EntityKind::Function;
+        child.parent_group_id = Some(CompactString::from("parent_long"));
+        child.header = Some(GroupedEntity::new(
+            EntityId(11),
+            EntityKind::Function,
+            "s".to_string(),
+            "fn s()".to_string(),
+        ));
+        child.header_id = Some(EntityId(11));
+        let mut tracker = GroupTracker::new();
+        tracker.register_identity(&parent);
+        tracker.register_identity(&child);
+        let decoration = ChunkBuilder::decoration_allowance(&child, ChunkPath::Bm25);
+        let emb_budget = config.budget_with_reserve(ChunkPath::Embedding, 0, 0);
+        let bm25_budget = config.budget_with_reserve(ChunkPath::Bm25, 0, decoration);
+        let splitter = TextSplitter::with_budgets(config.clone(), emb_budget, bm25_budget);
+        let estimator = TokenEstimator::default();
+        let infra = ChunkInfrastructure {
+            config: &config,
+            estimator: &estimator,
+            splitter: &splitter,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: false,
+        };
+        let body = bm25_budget.body_limit;
+        assert!(body > 1 && body < bm25_budget.pre_injection_limit);
+        let words_needed = body + 40;
+        let text = (0..words_needed)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let nl = crate::ast_to_nl::chunker::boundary::compute_nl_entity_boundaries(
+            &text,
+            Some(EntityId(11)),
+            &[],
+            ChunkPath::Bm25,
+        );
+        let input = ChunkInput {
+            infra: &infra,
+            group: &child,
+            text: &text,
+            file_path: "parent_child.rs",
+            keywords: &[],
+            path: ChunkPath::Bm25,
+            strategy: SplitStrategy::ByNlEntityBoundaries,
+            nl_boundaries: Some(nl.as_slice()),
+            tracker: &tracker,
+            header_mode: None,
+        };
+        let output = crate::ast_to_nl::chunker::single_path::chunk_single_path(input)
+            .expect("repair must keep the combination text");
+        assert!(!output.chunks.is_empty(), "repair must not drop the file");
+        for chunk in &output.chunks {
+            assert!(
+                config.cost(&chunk.text, ChunkPath::Bm25) <= bm25_budget.pre_injection_limit,
+                "repaired chunk {} must fit the pre-injection budget",
+                chunk.chunk_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_repair_falls_back_to_truncation_when_body_cannot_shrink_enough() {
+        let config = ChunkingConfig {
+            max_tokens: 40,
+            max_bm25_terms: 40,
+            min_chunk_tokens: 5,
+            min_chunk_bm25_terms: 5,
+            ..Default::default()
+        };
+        let mut parent = create_small_group();
+        parent.group_id = CompactString::from("parent_long");
+        parent.name = CompactString::from("LongParentName Word ".repeat(50));
+        parent.kind = EntityKind::Class;
+        let mut child = create_small_group();
+        child.group_id = CompactString::from("child_tiny");
+        child.group_type = GroupType::ClassWithMethods;
+        child.kind = EntityKind::Class;
+        child.name = CompactString::from("Tiny");
+        child.header = Some(GroupedEntity::new(
+            EntityId(21),
+            EntityKind::Class,
+            "Tiny".to_string(),
+            "class Tiny".to_string(),
+        ));
+        child.header_id = Some(EntityId(21));
+        child.parent_group_id = Some(CompactString::from("parent_long"));
+        let long_text = "w ".repeat(400);
+        let header_conv = ConversionResult {
+            entity_id: EntityId(21),
+            kind: EntityKind::Class,
+            name: "Tiny".to_string(),
+            file_path: "tiny_parent.cs".to_string(),
+            bm25_text: Some(long_text.clone()),
+            embedding_text: Some(long_text.clone()),
+            ..Default::default()
+        };
+        let member_conv = ConversionResult {
+            entity_id: EntityId(22),
+            kind: EntityKind::Method,
+            name: "run".to_string(),
+            file_path: "tiny_parent.cs".to_string(),
+            bm25_text: Some(long_text.clone()),
+            embedding_text: Some(long_text),
+            ..Default::default()
+        };
+        let conversions = vec![
+            GroupConversions {
+                group: parent.clone(),
+                header_conversion: Some(ConversionResult {
+                    entity_id: EntityId(20),
+                    kind: EntityKind::Class,
+                    name: parent.name.to_string(),
+                    file_path: "tiny_parent.cs".to_string(),
+                    bm25_text: Some("parent".to_string()),
+                    embedding_text: Some("parent".to_string()),
+                    ..Default::default()
+                }),
+                member_conversions: vec![],
+            },
+            GroupConversions {
+                group: child.clone(),
+                header_conversion: Some(header_conv),
+                member_conversions: vec![member_conv],
+            },
+        ];
+        let chunker = GroupChunker::new(config.clone());
+        let output = chunker
+            .chunk_groups(&conversions, "tiny_parent.cs")
+            .expect("tiny budget must not drop the file");
+        assert!(!output.chunks.is_empty(), "file must keep its chunks");
+        for chunk in &output.chunks {
+            assert!(
+                config.cost(&chunk.text, chunk.path) <= config.limit(chunk.path),
+                "chunk {} exceeds the hard limit",
+                chunk.chunk_id
+            );
+        }
+        assert!(
+            output.chunks.iter().any(|c| c.truncated),
+            "exhausted repair must fall back to truncation with the flag set"
+        );
+    }
+
+    #[test]
+    fn test_measured_terminology_reserve_below_proportional_without_extra_truncation() {
+        use cce_plugin::vocabulary::InjectionLimits;
+        use cce_plugin::vocabulary::{FileVocabulary, VocabularyTable, inject_chunks};
+        use cce_plugin::{CodePlugin, PluginBundle, PluginError, PluginMetadata, PluginRegistry};
+        use cce_types::plugin::VocabularyEntry;
+        use std::sync::Arc;
+        struct VocabularyMockPlugin {
+            meta: PluginMetadata,
+            entries: Vec<VocabularyEntry>,
+        }
+        impl CodePlugin for VocabularyMockPlugin {
+            fn metadata(&self) -> &PluginMetadata {
+                &self.meta
+            }
+            fn supports_vocabulary(&self) -> bool {
+                true
+            }
+            fn vocabulary(&self) -> Result<Vec<VocabularyEntry>, PluginError> {
+                Ok(self.entries.clone())
+            }
+        }
+        let config = ChunkingConfig::default();
+        let proportional_emb = config.glossary_reserve(ChunkPath::Embedding);
+        let proportional_bm25 = config.glossary_reserve(ChunkPath::Bm25);
+        assert!(proportional_emb > 0 && proportional_bm25 > 0);
+        let plugin = VocabularyMockPlugin {
+            meta: PluginMetadata {
+                id: "vocab".to_string(),
+                name: "vocab".to_string(),
+                version: "0.1.0".to_string(),
+                priority: 0,
+                capabilities: Vec::new(),
+                capability_priorities: std::collections::HashMap::new(),
+                capability_timeouts: std::collections::HashMap::new(),
+                description: None,
+            },
+            entries: vec![VocabularyEntry::new("stts", "box")],
+        };
+        let mut registry = PluginRegistry::new();
+        registry.register_bundle(PluginBundle::new(Arc::new(plugin)));
+        let chunker = GroupChunker::new(config.clone()).with_plugin_registry(Arc::new(registry));
+        let texts = ["parse_stts reads the table"];
+        let measured_emb =
+            chunker.measured_terminology_reserve("a.c", Some("c"), &texts, ChunkPath::Embedding);
+        let measured_bm25 =
+            chunker.measured_terminology_reserve("a.c", Some("c"), &texts, ChunkPath::Bm25);
+        assert!(
+            measured_emb < proportional_emb,
+            "single small hit must reserve less than the proportional estimate"
+        );
+        assert!(
+            measured_bm25 < proportional_bm25,
+            "single small hit must reserve less than the proportional estimate"
+        );
+        let table = VocabularyTable::from_entries(vec![VocabularyEntry::new("stts", "box")]);
+        let view = FileVocabulary::all(Arc::new(table));
+        let mut chunks = vec![{
+            let group = create_small_group();
+            let tracker = GroupTracker::new();
+            let builder = ChunkBuilder::new();
+            builder.from_single_text(
+                &tracker,
+                SingleChunkContext {
+                    group: &group,
+                    file_path: "a.c",
+                    path: ChunkPath::Embedding,
+                    text: "parse_stts reads the table",
+                    keywords: &[],
+                },
+            )
+        }];
+        let stats = inject_chunks(
+            &mut chunks,
+            &view,
+            false,
+            config.glossary_max_entries,
+            InjectionLimits {
+                bm25: config.limit(ChunkPath::Bm25),
+                embedding: config.limit(ChunkPath::Embedding),
+            },
+        );
+        assert_eq!(stats.injected, 1);
+        assert_eq!(
+            stats.truncated, 0,
+            "measured reserve must not grow the truncation count"
+        );
+    }
 }
