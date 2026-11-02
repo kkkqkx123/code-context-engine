@@ -586,3 +586,65 @@ fn python_async_function_modifier() {
         process.modifiers
     );
 }
+
+#[test]
+fn javascript_define_property_descriptor_is_not_a_method() {
+    let parsed = parse_file(
+        "application.js",
+        "var app = {};\n\
+         app.init = function init() {\n\
+         \x20 Object.defineProperty(this, 'router', {\n\
+         \x20\x20 get: function getrouter() {\n\
+         \x20\x20\x20 return this.enabled('x');\n\
+         \x20\x20 },\n\
+         \x20\x20 set: function setrouter(v) {\n\
+         \x20\x20\x20 this.disabled(v);\n\
+         \x20\x20 }\n\
+         \x20 });\n\
+         \x20 Object.defineProperties(this.settings, {\n\
+         \x20\x20 flag: {\n\
+         \x20\x20\x20 get: function () { return true; },\n\
+         \x20\x20\x20 value: 1\n\
+         \x20\x20 }\n\
+         \x20 });\n\
+         };\n\
+         var opts = { get: function getOpt(k) { return k; } };\n\
+         foo({ load: function loadCb() {} });\n",
+    );
+    find(&parsed.entities, EntityKind::Method, "init");
+    // Descriptor accessors declare properties, not callable methods: neither
+    // the named getters/setters nor the anonymous nested one may surface
+    // under the key name or the function name.
+    for banned in ["getrouter", "setrouter"] {
+        assert!(
+            !parsed.entities.iter().any(|e| e.name == banned),
+            "descriptor accessor '{banned}' must not become an entity, got {:?}",
+            parsed
+                .entities
+                .iter()
+                .map(|e| (&e.kind, e.name.as_str()))
+                .collect::<Vec<_>>()
+        );
+    }
+    // Ordinary object literals and non-descriptor call arguments keep their
+    // key-named method entities; the `opts` literal is the only surviving
+    // source of a `get` method, and no `set` method remains at all.
+    find(&parsed.entities, EntityKind::Method, "get");
+    find(&parsed.entities, EntityKind::Method, "load");
+    assert_eq!(
+        parsed
+            .entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Method && e.name == "get")
+            .count(),
+        1,
+        "only the plain object literal may contribute a `get` method"
+    );
+    assert!(
+        !parsed
+            .entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Method && e.name == "set"),
+        "descriptor `set` must not become a method entity"
+    );
+}

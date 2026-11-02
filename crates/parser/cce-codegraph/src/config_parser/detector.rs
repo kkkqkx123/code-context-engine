@@ -609,11 +609,19 @@ impl BuildConfigParser {
             let mut emitted: HashSet<String> = HashSet::new();
             for dep in deps {
                 if emitted.insert(dep.name.clone()) {
+                    // Config-file dependencies are file scope, never calls:
+                    // emitting them as entity-level direct calls lets the
+                    // resolver bind the bare dependency name to an unrelated
+                    // same-name entity (such as a `package.json` dependency
+                    // resolving to an internal method), polluting callers,
+                    // chains and ego graphs with synthetic `0-0` call edges.
+                    // File-level dependency edges stay in the file relation
+                    // index and never pollute entity-scoped call queries.
                     parsed.add_relation(RawRelationData {
                         src: EntityId(0),
-                        level: RelationLevel::Entity,
+                        level: RelationLevel::File,
                         dst_name: dep.name.clone(),
-                        relation_type: RelationType::DirectCall,
+                        relation_type: RelationType::ModuleDependency,
                         span: Span::default(),
                         stdlib_category: None,
                     });

@@ -76,11 +76,15 @@ pub fn entity_query() -> &'static str {
 ; Note: tree-sitter-c-sharp only honors the `returns:` field constraint when
 ; it precedes `name:` in the pattern; placing it after `name:` silently drops
 ; the capture (or raises a Structure error without the `?` quantifier).
+; The body is optional so bodyless declarations (abstract methods,
+; interface members, extern methods) are extracted as entities too: they
+; are the dispatch targets member-call resolution must bind, and their
+; signatures compose from the name/params/return captures alone.
 (method_declaration
   returns: (_)? @entity.method.return_type @entity.method.signature.return_type
   name: (identifier) @entity.method.name @entity.method.signature.name
   parameters: (parameter_list) @entity.method.params @entity.method.signature.params
-  body: (_) @entity.method.body
+  body: (_)? @entity.method.body
 ) @entity.method
 
 ; Constructor definition

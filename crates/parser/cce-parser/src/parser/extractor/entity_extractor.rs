@@ -477,6 +477,30 @@ impl EntityExtractor {
                 return None;
             }
         }
+        // JavaScript: a function-valued `pair` inside an
+        // `Object.defineProperty` / `Object.defineProperties` descriptor
+        // argument (`{ get: function getrouter() {...} }`) declares a
+        // property accessor, not a callable method. Emitting the key
+        // (`get`) as a method entity mis-binds every `this.get(...)` site
+        // to the getter. Descriptor objects are metadata, so no entity is
+        // produced and the accessor body stays attributed to the enclosing
+        // function. Only pair keys are gated: member-assignment names hang
+        // under a member expression, never under a pair.
+        if language == &Language::JavaScript
+            && kind == cce_types::EntityKind::Method
+            && main_capture.name == "entity.method"
+        {
+            let in_descriptor = tree
+                .root_node()
+                .descendant_for_byte_range(name_capture.start_byte, name_capture.end_byte)
+                .and_then(|key| key.parent())
+                .is_some_and(|pair| {
+                    pair.kind() == "pair" && pair_in_property_descriptor(pair, source.as_bytes())
+                });
+            if in_descriptor {
+                return None;
+            }
+        }
         // `entity.macro.attribute.inner` shares the `attribute` subtype with
         // its outer counterpart; distinguish file-level inner attributes
         // (`#![...]`) so they are never buffered as entity modifiers.
@@ -656,6 +680,50 @@ fn python_field_scope_allows(node: tree_sitter::Node, source: &[u8]) -> bool {
         }
     }
     false
+}
+
+/// Whether a JavaScript object-literal `pair` sits inside a property
+/// descriptor argument of `defineProperty` / `defineProperties`.
+///
+/// The walk starts at the pair and crosses `object` / `pair` layers, which
+/// covers the nested descriptor shape of the plural form (`{ name: { get()
+/// {...} } }`). It stops at the first non-container ancestor: an
+/// `arguments` node belongs to a descriptor only when its call names a
+/// property-definition function, anything else (a variable declarator, a
+/// return position, another call's options object) is a real method table.
+fn pair_in_property_descriptor(pair: tree_sitter::Node, source: &[u8]) -> bool {
+    let mut current = pair.parent();
+    while let Some(ancestor) = current {
+        match ancestor.kind() {
+            "object" | "pair" => current = ancestor.parent(),
+            "arguments" => {
+                return ancestor
+                    .parent()
+                    .filter(|parent| parent.kind() == "call_expression")
+                    .is_some_and(|call| call_defines_property(call, source));
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Whether a call expression defines object properties (`defineProperty` /
+/// `defineProperties`, bare or as `X.defineProperty` member access, which
+/// covers `Object` and `Reflect` alike).
+fn call_defines_property(call: tree_sitter::Node, source: &[u8]) -> bool {
+    let Some(function) = call.child_by_field_name("function") else {
+        return false;
+    };
+    let name = match function.kind() {
+        "identifier" => Some(function),
+        "member_expression" => function.child_by_field_name("property"),
+        _ => None,
+    };
+    name.is_some_and(|node| {
+        node.utf8_text(source)
+            .is_ok_and(|text| text == "defineProperty" || text == "defineProperties")
+    })
 }
 
 fn adjust_namespace_spans(entities: &mut [cce_types::Entity], source: &str, language: &Language) {

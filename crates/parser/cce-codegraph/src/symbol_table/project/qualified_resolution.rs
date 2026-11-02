@@ -314,6 +314,25 @@ impl ProjectSymbolTable {
                 }
             }
 
+            // A self-rooted receiver (`this.get`, `self.foo`, or a bare name
+            // whose receiver was recovered from the source text before the
+            // call span) names the caller's own object graph, so a
+            // cross-file same-name candidate without a type/inheritance/
+            // mixin link is a guess, not evidence. The caller-file candidate
+            // above already had its chance; abstain instead of letting an
+            // unrelated same-name symbol hijack the edge.
+            let self_rooted = prefix
+                .split("::")
+                .next()
+                .is_some_and(cce_parser_core::is_self_receiver);
+            let receiver_self = overload_ctx
+                .as_ref()
+                .and_then(|ctx| ctx.receiver_type.as_deref())
+                .is_some_and(cce_parser_core::is_self_receiver);
+            if self_rooted || receiver_self {
+                return None;
+            }
+
             // Then candidates whose file/module path matches the prefix.
             let prefix_lower = prefix.to_ascii_lowercase();
             for entry in &candidates {
@@ -411,6 +430,21 @@ impl ProjectSymbolTable {
                         return Some(symbol);
                     }
                 }
+            }
+
+            // Self-receiver abstention (mirrors the prefix fallback below):
+            // the receiver may be known only through source-text recovery
+            // (`this.get` arrives as bare `get` with `this` recovered from
+            // before the call span) or through type inference. Either way a
+            // self-rooted receiver names the caller's own object graph, so
+            // without a caller-file hit the remaining cross-file candidates
+            // are guesses, not evidence.
+            if overload_ctx
+                .as_ref()
+                .and_then(|ctx| ctx.receiver_type.as_deref())
+                .is_some_and(cce_parser_core::is_self_receiver)
+            {
+                return None;
             }
 
             if candidates.len() > 1 {
@@ -526,9 +560,15 @@ impl ProjectSymbolTable {
                         .global_type_index
                         .read()
                         .ok()
-                        .and_then(|idx| idx.owner_of(eid).map(|k| k.qualified.clone()))
+                        .and_then(|idx| idx.owner_of(eid).cloned())
                     {
-                        if &owner == receiver {
+                        // Declared types carry generics and namespaces the
+                        // index keys may not (`RequestHandlerWrapper<T>` vs
+                        // `...RequestHandlerWrapper`), so compare normalized
+                        // simple names alongside the exact qualified form.
+                        let exact = owner.qualified == *receiver;
+                        let simple = simple_type_name(&owner.simple) == simple_type_name(receiver);
+                        if exact || simple {
                             receiver_matches.push(entry.clone());
                         }
                     }
@@ -937,4 +977,18 @@ impl ProjectSymbolTable {
 
         None
     }
+}
+
+/// Simple type name for owner matching: strip generics and namespace
+/// qualifiers (`MediatR.RequestHandlerWrapper<T>` -> `RequestHandlerWrapper`).
+fn simple_type_name(type_name: &str) -> &str {
+    let stripped = type_name
+        .find('<')
+        .map(|pos| &type_name[..pos])
+        .unwrap_or(type_name);
+    stripped
+        .rsplit(['.', ':'])
+        .next()
+        .unwrap_or(stripped)
+        .trim()
 }

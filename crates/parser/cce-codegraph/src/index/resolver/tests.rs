@@ -1168,7 +1168,10 @@ fn test_scoped_funcref_resolves_end_to_end() {
         .into_iter()
         .next()
         .expect("scoped funcref must produce a relation");
-    assert!(!resolved.is_external, "scoped funcref must resolve internally");
+    assert!(
+        !resolved.is_external,
+        "scoped funcref must resolve internally"
+    );
     assert_eq!(resolved.callee_name, "bar");
 }
 
@@ -1208,4 +1211,73 @@ fn test_scoped_funcref_drops_wrong_scope() {
         None,
         "foreign scope must not resolve"
     );
+}
+
+/// Build a two-file JavaScript project: `app.js` holds a `handle` method
+/// containing a `this.get` call, `response.js` holds a same-name `get`
+/// method. When `with_local_get` is set, `app.js` also owns a `get` method.
+/// Resolves the call end to end.
+fn resolve_this_call_against_foreign_file(with_local_get: bool) -> cce_types::ResolvedRelation {
+    // Mirrors the real extraction shape: `call.method` records
+    // `this.get('env')` as bare `get` with a span covering only the
+    // property name, the receiver surviving solely in the source text.
+    let source = "var x = this.get('env');\n";
+    let mut caller_file = ParsedFile::new(Language::JavaScript, "app.js".to_string(), source);
+    caller_file.add_entity(create_test_entity(100, "handle", EntityKind::Method));
+    if with_local_get {
+        caller_file.add_entity(create_test_entity(101, "get", EntityKind::Method));
+    }
+    caller_file.add_relation(RawRelationData {
+        src: EntityId(100u32.into()),
+        level: cce_types::RelationLevel::Entity,
+        dst_name: "get".to_string(),
+        relation_type: RelationType::InstanceMethodCall,
+        span: Span {
+            start_byte: 13,
+            end_byte: 16,
+            ..Default::default()
+        },
+        stdlib_category: None,
+    });
+    let mut def_file = ParsedFile::new(Language::JavaScript, "response.js".to_string(), "");
+    def_file.add_entity(create_test_entity(200, "get", EntityKind::Method));
+    let files = [&caller_file, &def_file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+    let resolver = RelationResolver::new();
+    resolver
+        .resolve_batch(&caller_file.raw_relations, &caller_file, &symbols, &index)
+        .into_iter()
+        .next()
+        .expect("this.get must produce a relation")
+}
+
+#[test]
+fn test_self_receiver_does_not_hijack_foreign_same_name() {
+    // `this.get(...)` with no local `get` must not bind another file's
+    // `get`: a self-rooted receiver names the caller's own object graph,
+    // and the foreign same-name method is a guess, not evidence.
+    let resolved = resolve_this_call_against_foreign_file(false);
+    assert!(
+        resolved.is_external,
+        "foreign same-name method must not hijack a self-receiver call, got {:?}",
+        resolved.callee_name
+    );
+}
+
+#[test]
+fn test_self_receiver_prefers_caller_file_candidate() {
+    // The guard only removes the cross-file guess: a same-file `get` still
+    // wins for `this.get`.
+    let resolved = resolve_this_call_against_foreign_file(true);
+    assert!(
+        !resolved.is_external,
+        "caller-file candidate must still resolve, got {:?}",
+        resolved.callee_name
+    );
+    assert_eq!(resolved.callee_name, "get");
 }

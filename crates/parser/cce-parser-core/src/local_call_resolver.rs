@@ -170,12 +170,27 @@ impl LocalCallResolver {
             // Find matching callee within the file. The entity map is keyed
             // by simple names; extraction now preserves full paths
             // (`obj.method`, `Foo::new`), so fall back to the last segment
-            // when the full name misses.
+            // when the full name misses. A qualified callee names a method
+            // on the receiver value, not a same-file bare function, so the
+            // last-segment fallback only applies when the receiver is the
+            // enclosing object itself (`this`/`self`/...). Anything else
+            // (`handler`, `this.router`, `a.b`) must resolve through the
+            // receiver's type (or stay unresolved) so a same-name local
+            // cannot hijack the edge (e.g. `_publisher.Publish` binding to
+            // a same-file `Publish`, `this.router.handle` looping back to a
+            // same-name local `handle`).
             let candidates: Option<&Vec<&Entity>> = entity_map.get(callee_name).or_else(|| {
                 let last = callee_name.rsplit(['.', ':']).next().unwrap_or(callee_name);
-                (last != callee_name)
-                    .then(|| entity_map.get(last))
-                    .flatten()
+                if last == callee_name {
+                    return None;
+                }
+                let receiver =
+                    callee_name[..callee_name.len() - last.len()].trim_end_matches(['.', ':']);
+                if is_self_receiver(receiver) {
+                    entity_map.get(last)
+                } else {
+                    None
+                }
             });
 
             if let Some(candidates) = candidates {
@@ -427,6 +442,20 @@ impl LocalCallResolver {
 /// text, so nested parentheses and string literals cannot corrupt the count.
 pub fn count_call_arguments_from_node(node: tree_sitter::Node) -> Option<usize> {
     count_arguments(node)
+}
+
+/// Receivers that denote the enclosing object itself (`this.foo`,
+/// `self.bar`, `base.baz`): method lookup stays file-local for them.
+/// Anything else names a value whose method must resolve through its
+/// type, never through a same-name local.
+/// Whether a call receiver denotes the caller's own object (`this`,
+/// `self`, `super`, ...). Shared with the symbol-table layer so both the
+/// local fast path and the qualified fallback agree on what "self" means.
+pub fn is_self_receiver(receiver: &str) -> bool {
+    matches!(
+        receiver,
+        "this" | "self" | "Self" | "super" | "cls" | "me" | "base"
+    )
 }
 
 /// Legacy source-text argument counting for call sites without an AST node.

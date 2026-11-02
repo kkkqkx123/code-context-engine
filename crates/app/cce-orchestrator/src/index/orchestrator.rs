@@ -589,6 +589,14 @@ impl IndexOrchestrator {
             batch_size,
             file_indexer.file_list_hash()
         );
+        if total_files == 0 {
+            tracing::warn!(
+                root = %options.root_dir.display(),
+                extensions = ?options.extensions,
+                "Scan selected no files; the index will be empty. \
+                 Check that the configured extensions cover the project languages."
+            );
+        }
 
         if start_batch > 0 {
             tracing::info!(

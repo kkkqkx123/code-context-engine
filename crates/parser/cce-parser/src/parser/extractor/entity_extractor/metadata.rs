@@ -1070,7 +1070,7 @@ pub(crate) fn extract_variable_assignment_metadata(
             extract_java_variable_metadata(mat, entity, source, tree);
         }
         Language::CSharp => {
-            extract_csharp_variable_metadata(mat, entity);
+            extract_csharp_variable_metadata(mat, entity, source, tree);
         }
         Language::Kotlin => {
             extract_kotlin_variable_metadata(mat, entity, source, tree);
@@ -1222,7 +1222,15 @@ fn extract_kotlin_variable_metadata(
 /// C# distinguishes between:
 /// - `var x = expr` — type inferred (write `var_type`)
 /// - `Type x = expr` — explicit type (write `explicit_type`)
-fn extract_csharp_variable_metadata(mat: &QueryMatch, entity: &mut Entity) {
+/// - `var x = (T)expr` — cast target type (write `explicit_type`, so the
+///   receiver type flows to member-call resolution exactly like a declared
+///   type; explicit declarations keep priority and are never overwritten)
+fn extract_csharp_variable_metadata(
+    mat: &QueryMatch,
+    entity: &mut Entity,
+    source: &str,
+    tree: &tree_sitter::Tree,
+) {
     // Check the source text for `var` keyword or explicit type
     if let Some(main) = utils::find_capture_by_name(&mat.captures, |name| {
         name.contains("local_declaration_statement")
@@ -1252,6 +1260,73 @@ fn extract_csharp_variable_metadata(mat: &QueryMatch, entity: &mut Entity) {
                 }
             }
         }
+    }
+    extract_csharp_cast_target_type(mat, entity, source, tree);
+}
+
+/// Record the target type of a cast initializer for `var` declarations.
+///
+/// `var handler = (RequestHandlerWrapper<TResponse>)...` binds the cast
+/// target, but the plain `var` reading leaves the variable untyped and
+/// member calls on it degrade to external edges. Only the direct
+/// initializer is considered: a cast nested anywhere else (such as inside
+/// a call argument) must not leak onto the variable. Uses AST node kinds
+/// rather than source-text heuristics, and never overwrites an explicit
+/// declaration type.
+fn extract_csharp_cast_target_type(
+    mat: &QueryMatch,
+    entity: &mut Entity,
+    source: &str,
+    tree: &tree_sitter::Tree,
+) {
+    if entity.metadata.contains_key("explicit_type") {
+        return;
+    }
+    let Some(name_capture) =
+        utils::find_capture_by_name(&mat.captures, |name| name.ends_with(".variable.name"))
+    else {
+        return;
+    };
+    let Some(mut node) = tree
+        .root_node()
+        .descendant_for_byte_range(name_capture.start_byte, name_capture.end_byte)
+    else {
+        return;
+    };
+    loop {
+        if node.kind() == "variable_declarator" {
+            break;
+        }
+        let Some(parent) = node.parent() else {
+            return;
+        };
+        node = parent;
+    }
+    let mut cursor = node.walk();
+    let value_node = node
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find(|child| {
+            child.start_byte() != name_capture.start_byte
+                || child.end_byte() != name_capture.end_byte
+        });
+    let Some(value_node) = value_node else {
+        return;
+    };
+    if value_node.kind() != "cast_expression" {
+        return;
+    }
+    let mut type_cursor = value_node.walk();
+    let type_node = value_node
+        .children(&mut type_cursor)
+        .find(|child| child.is_named());
+    let Some(type_node) = type_node else {
+        return;
+    };
+    let text = cce_utils::text::slice_clamped(source, type_node.start_byte(), type_node.end_byte());
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        entity.set_metadata("explicit_type", trimmed.to_string());
     }
 }
 

@@ -336,12 +336,33 @@ impl RelationResolver {
             .unwrap_or(&raw_data.dst_name);
         let has_overload = symbol_table.has_overload_candidates(simple_name);
         let is_bare = !raw_data.dst_name.contains('.') && !raw_data.dst_name.contains(':');
+        // The inferred declared type outranks the syntactic receiver name:
+        // `handler.Handle` with `handler: RequestHandlerWrapper<T>` must
+        // compare the owner against the type, not the variable name. The raw
+        // receiver name stays as the last resort for receivers inference
+        // knows nothing about (`this`, `console`, untyped locals).
         let receiver_type = self
             .extract_promoted_receiver_type(&raw_data.dst_name, symbol_table)
-            .or_else(|| self.extract_receiver_from_name(&raw_data.dst_name))
             .or_else(|| {
                 if has_overload || !is_bare {
                     self.extract_receiver_type(raw_data, parsed, symbol_table, entity_index)
+                } else {
+                    None
+                }
+            })
+            .or_else(|| self.extract_receiver_from_name(&raw_data.dst_name))
+            .or_else(|| {
+                // `call.method` captures only the property identifier, so a
+                // plain `this.get('env')` reaches resolution as bare `get`
+                // with the receiver lost. Recover it from the source text
+                // before the call span; only a bare name with no inferred
+                // receiver takes this path, so existing evidence is never
+                // overridden.
+                if is_bare {
+                    Self::recover_receiver_before_span(
+                        parsed.source.as_ref(),
+                        raw_data.span.start_byte,
+                    )
                 } else {
                     None
                 }
@@ -352,7 +373,13 @@ impl RelationResolver {
                 .or_else(|| {
                     extract_call_arguments(parsed.source.as_ref(), raw_data.span).map(|v| v.len())
                 });
-        let overload_ctx = if is_bare && !has_overload {
+        // A recovered self-like receiver must survive even the unambiguous
+        // fast path: the single project-wide candidate may still live in
+        // another file, which a self-rooted call can never target.
+        let self_recovered = receiver_type
+            .as_deref()
+            .is_some_and(cce_parser_core::is_self_receiver);
+        let overload_ctx = if is_bare && !has_overload && !self_recovered {
             OverloadContext {
                 receiver_type: None,
                 arg_count: None,
@@ -750,7 +777,40 @@ impl RelationResolver {
                 .next()
                 .unwrap_or(&raw_data.dst_name);
             let is_name_match = caller_name == callee_name && last_segment == caller_name;
-            let is_self_loop = effective == global_src;
+            // Qualified and bare aliases of one function share a span under
+            // different ids (`app.handle` vs `handle`): byte-identical,
+            // available spans in the same file with the same simple name are
+            // the same function, so they self-loop even when the entity ids
+            // differ and the id comparison above misses. Unavailable spans
+            // (synthetic nodes, unit-test fixtures) never qualify, and bare
+            // names alone never imply aliasing.
+            let is_same_span_alias = match (
+                caller_entity_opt,
+                entity_index.get_function_by_entity_id(effective),
+            ) {
+                (Some(caller_entity), Some(callee_entity)) => {
+                    caller_entity.span.is_available()
+                        && callee_entity.span.is_available()
+                        && caller_entity.span.start_byte == callee_entity.span.start_byte
+                        && caller_entity.span.end_byte == callee_entity.span.end_byte
+                        && entity_index.get_file_path_by_entity(effective).is_some_and(
+                            |callee_file| {
+                                cce_types::path::normalized_equals(&callee_file, &parsed.path)
+                            },
+                        )
+                        && caller_name
+                            .rsplit(['.', ':'])
+                            .next()
+                            .is_some_and(|caller_simple| {
+                                callee_name
+                                    .rsplit(['.', ':'])
+                                    .next()
+                                    .is_some_and(|callee_simple| caller_simple == callee_simple)
+                            })
+                }
+                _ => false,
+            };
+            let is_self_loop = effective == global_src || is_same_span_alias;
             let is_structural_self_loop = is_self_loop && relation_type.is_structural();
             let is_call_self_loop =
                 (is_self_loop || (is_name_match && !via_promoted)) && relation_type.is_call();
@@ -838,9 +898,10 @@ impl RelationResolver {
                 symbol_table,
             );
         }
-        let visible = entity_index.get_function_ids_by_name(name).into_iter().filter(|id| {
-            self.is_visible_funcref_candidate(*id, caller_file, entity_index)
-        });
+        let visible = entity_index
+            .get_function_ids_by_name(name)
+            .into_iter()
+            .filter(|id| self.is_visible_funcref_candidate(*id, caller_file, entity_index));
         Self::pick_funcref_winner(visible, caller_file, entity_index)
     }
 
@@ -977,8 +1038,7 @@ impl RelationResolver {
             .get_type_by_simple(scope)
             .iter()
             .filter(|entry| {
-                entry.key.simple == scope
-                    || Self::scope_matches_owner(&entry.key.qualified, scope)
+                entry.key.simple == scope || Self::scope_matches_owner(&entry.key.qualified, scope)
             })
             .filter_map(|entry| entry.members.get(&candidate.name))
             .flatten()
@@ -997,7 +1057,10 @@ impl RelationResolver {
         if owner_qualified == scope {
             return true;
         }
-        let simple = owner_qualified.rsplit("::").next().unwrap_or(owner_qualified);
+        let simple = owner_qualified
+            .rsplit("::")
+            .next()
+            .unwrap_or(owner_qualified);
         if simple == scope {
             return true;
         }
@@ -1105,7 +1168,9 @@ impl RelationResolver {
         let type_index = symbol_table.global_type_index();
         let owns_method = |name: &str| {
             type_index.get_type_by_simple(name).iter().any(|entry| {
-                type_index.get_members(&entry.key.qualified, method).is_some()
+                type_index
+                    .get_members(&entry.key.qualified, method)
+                    .is_some()
             })
         };
         if owns_method(&start) {
@@ -1139,8 +1204,7 @@ impl RelationResolver {
                         continue;
                     }
                     for child_id in &host.children {
-                        let Some(child) = entity_index.get_function_by_entity_id(*child_id)
-                        else {
+                        let Some(child) = entity_index.get_function_by_entity_id(*child_id) else {
                             continue;
                         };
                         if child.kind != cce_types::EntityKind::Field
@@ -1178,7 +1242,12 @@ impl RelationResolver {
         let decorated = raw.trim().trim_start_matches(['*', ' ']).trim();
         let simple = decorated.rsplit('.').next().unwrap_or(decorated);
         let simple = simple.split('[').next().unwrap_or(simple);
-        simple.split('<').next().unwrap_or(simple).trim().to_string()
+        simple
+            .split('<')
+            .next()
+            .unwrap_or(simple)
+            .trim()
+            .to_string()
     }
 
     /// Receiver type for dotted field-access paths (`engine.RouterGroup.Use`).
@@ -1237,6 +1306,47 @@ impl RelationResolver {
         }
 
         None
+    }
+
+    /// Recover a textual call receiver lost at extraction.
+    ///
+    /// `call.method` captures only the property identifier, so a plain
+    /// `this.get('env')` reaches resolution as bare `get` with a span
+    /// covering just the property name. When the source immediately before
+    /// the span reads `identifier.`, that identifier is the receiver. Only
+    /// a standalone identifier directly attached by a dot qualifies:
+    /// longer chains (`a.this.get`) and detached forms are left alone
+    /// rather than guessed.
+    fn recover_receiver_before_span(source: &str, span_start: usize) -> Option<String> {
+        let bytes = source.as_bytes();
+        let mut end = span_start.min(bytes.len());
+        if end == 0 || bytes[end - 1] != b'.' {
+            return None;
+        }
+        end -= 1;
+        while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+            end -= 1;
+        }
+        let mut start = end;
+        while start > 0
+            && (bytes[start - 1].is_ascii_alphanumeric()
+                || bytes[start - 1] == b'_'
+                || bytes[start - 1] == b'$')
+        {
+            start -= 1;
+        }
+        if start == end {
+            return None;
+        }
+        if start > 0
+            && (bytes[start - 1] == b'.'
+                || bytes[start - 1].is_ascii_alphanumeric()
+                || bytes[start - 1] == b'_'
+                || bytes[start - 1] == b'$')
+        {
+            return None;
+        }
+        Some(source[start..end].to_string())
     }
 
     /// Extract owner type from static method call name

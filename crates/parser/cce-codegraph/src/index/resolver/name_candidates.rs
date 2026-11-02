@@ -186,99 +186,141 @@ impl RelationResolver {
             symbol_table.resolve_enhanced(name, resolution_context)
         };
 
-        let resolved_entity_id: Option<EntityId> = symbol_ref
-            .as_ref()
-            .and_then(|symbol_ref| {
-                // A receiver-qualified call (`engine.RouterGroup.Use`)
-                // that the symbol table resolved to another file must not
-                // be captured by a same-name local (here `Engine.Use` in
-                // the caller file): the receiver selects the method, so
-                // the local same-name method is a different function.
-                // Bare names keep local priority.
-                let symbol_remote_target = name.contains('.')
-                    && !cce_types::path::normalized_equals(
-                        symbol_ref.metadata.location.file_path.as_ref(),
-                        &parsed.path,
-                    );
-                Self::local_definition_id(parsed, name)
-                    .map(to_global_id)
-                    .or_else(|| {
-                        // Qualified names (`obj.method`, `Foo::new`) do
-                        // not exist as local-symbol keys; retry with the
-                        // last segment. Skipped for stdlib targets so
-                        // `Vec::new` can never hit a local `new`.
-                        // For Rust, suppress fallback when the receiver is a
-                        // generic local variable (e.g., `value.clone` where
-                        // `value: T: Clone`) to avoid spurious self-loops.
-                        if symbol_remote_target
-                            || self.should_block_last_segment_fallback(name, is_stdlib, ctx)
-                        {
-                            return None;
-                        }
-                        self.last_segment_for_resolution(name, is_stdlib)
-                            .and_then(|last| {
-                                Self::local_definition_id(parsed, last).map(to_global_id)
+        // Mixin/assign forwarding runs before the symbol-dependent chain:
+        // when the receiver was extended by `mixin(recv, src)` the target
+        // lives in the source module's file, which no name-only lookup can
+        // reach. It needs no prior symbol, so it must not sit inside the
+        // symbol-gated chain below.
+        let resolved_entity_id: Option<EntityId> =
+            self.resolve_mixin_member(name, ctx).or_else(|| {
+                symbol_ref
+                    .as_ref()
+                    .and_then(|symbol_ref| {
+                        // A receiver-qualified call (`engine.RouterGroup.Use`)
+                        // that the symbol table resolved to another file must not
+                        // be captured by a same-name local (here `Engine.Use` in
+                        // the caller file): the receiver selects the method, so
+                        // the local same-name method is a different function.
+                        // Bare names keep local priority, except relative-import
+                        // aliases (`var View = require('./view')`), which own no
+                        // callable meaning themselves: the target module's export is
+                        // the reference, so the local alias variable must not win.
+                        let symbol_remote_target = name.contains('.')
+                            && !cce_types::path::normalized_equals(
+                                symbol_ref.metadata.location.file_path.as_ref(),
+                                &parsed.path,
+                            );
+                        (!Self::is_relative_import_alias(parsed, name))
+                            .then(|| Self::local_definition_id(parsed, name))
+                            .flatten()
+                            .map(to_global_id)
+                            .or_else(|| {
+                                // Qualified names (`obj.method`, `Foo::new`) do
+                                // not exist as local-symbol keys; retry with the
+                                // last segment. Skipped for stdlib targets so
+                                // `Vec::new` can never hit a local `new`.
+                                // For Rust, suppress fallback when the receiver is a
+                                // generic local variable (e.g., `value.clone` where
+                                // `value: T: Clone`) to avoid spurious self-loops.
+                                if symbol_remote_target
+                                    || self.should_block_last_segment_fallback(name, is_stdlib, ctx)
+                                {
+                                    return None;
+                                }
+                                self.last_segment_for_resolution(name, is_stdlib)
+                                    .and_then(|last| {
+                                        Self::local_definition_id(parsed, last).map(to_global_id)
+                                    })
+                            })
+                            .or_else(|| {
+                                if RelationIndex::is_synthetic_id(symbol_ref.symbol_id) {
+                                    self.resolve_symbol_to_entity_id(symbol_ref, entity_index)
+                                } else {
+                                    Some(symbol_ref.symbol_id)
+                                }
                             })
                     })
                     .or_else(|| {
-                        if RelationIndex::is_synthetic_id(symbol_ref.symbol_id) {
-                            self.resolve_symbol_to_entity_id(symbol_ref, entity_index)
+                        // Fallback: the enhanced resolver did not produce a symbol
+                        // ref, but the flat project index may still know the target.
+                        // resolve through the real entity index by name; the
+                        // symbol-table ID space must never be mixed into entity IDs.
+                        // query keys use the same normalized path form the
+                        // symbol table registered them under.
+                        // Self-receiver abstention, mirroring the symbol-table
+                        // layers: a bare name with a self-rooted (recovered or
+                        // inferred) receiver names the caller's own object graph.
+                        // The caller-file entity already had its chance
+                        // upstream; only same-file locals may still satisfy
+                        // it, never a cross-file affinity pick.
+                        if ctx
+                            .overload_ctx
+                            .as_ref()
+                            .and_then(|overload| overload.receiver_type.as_deref())
+                            .is_some_and(cce_parser_core::is_self_receiver)
+                        {
+                            return parsed
+                                .local_symbols
+                                .get(name)
+                                .and_then(|ids| ids.first().copied())
+                                .map(to_global_id);
+                        }
+                        let normalized_path = cce_types::normalize_project_path(&parsed.path);
+                        let qualified_name = format!("{}::{}", normalized_path, name);
+                        if symbol_table
+                            .get_by_qualified_name(&qualified_name)
+                            .is_some()
+                        {
+                            self.resolve_entity_by_name(
+                                name,
+                                Some(&parsed.path),
+                                Some(&parsed.path),
+                                entity_index,
+                            )
+                        } else if symbol_table.get_by_simple_name(name).is_some() {
+                            self.resolve_entity_by_name(
+                                name,
+                                None,
+                                Some(&parsed.path),
+                                entity_index,
+                            )
+                        } else if self.should_block_last_segment_fallback(name, is_stdlib, ctx) {
+                            None
+                        } else if let Some(last) = self.last_segment_for_resolution(name, is_stdlib)
+                        {
+                            let qualified_last = format!("{}::{}", normalized_path, last);
+                            if symbol_table
+                                .get_by_qualified_name(&qualified_last)
+                                .is_some()
+                            {
+                                self.resolve_entity_by_name(
+                                    last,
+                                    Some(&parsed.path),
+                                    Some(&parsed.path),
+                                    entity_index,
+                                )
+                            } else if symbol_table.get_by_simple_name(last).is_some() {
+                                self.resolve_entity_by_name(
+                                    last,
+                                    None,
+                                    Some(&parsed.path),
+                                    entity_index,
+                                )
+                            } else {
+                                parsed
+                                    .local_symbols
+                                    .get(last)
+                                    .and_then(|ids| ids.first().copied())
+                                    .map(to_global_id)
+                            }
                         } else {
-                            Some(symbol_ref.symbol_id)
+                            parsed
+                                .local_symbols
+                                .get(name)
+                                .and_then(|ids| ids.first().copied())
+                                .map(to_global_id)
                         }
                     })
-            })
-            .or_else(|| {
-                // Fallback: the enhanced resolver did not produce a symbol
-                // ref, but the flat project index may still know the target.
-                // resolve through the real entity index by name; the
-                // symbol-table ID space must never be mixed into entity IDs.
-                // query keys use the same normalized path form the
-                // symbol table registered them under.
-                let normalized_path = cce_types::normalize_project_path(&parsed.path);
-                let qualified_name = format!("{}::{}", normalized_path, name);
-                if symbol_table
-                    .get_by_qualified_name(&qualified_name)
-                    .is_some()
-                {
-                    self.resolve_entity_by_name(
-                        name,
-                        Some(&parsed.path),
-                        Some(&parsed.path),
-                        entity_index,
-                    )
-                } else if symbol_table.get_by_simple_name(name).is_some() {
-                    self.resolve_entity_by_name(name, None, Some(&parsed.path), entity_index)
-                } else if self.should_block_last_segment_fallback(name, is_stdlib, ctx) {
-                    None
-                } else if let Some(last) = self.last_segment_for_resolution(name, is_stdlib) {
-                    let qualified_last = format!("{}::{}", normalized_path, last);
-                    if symbol_table
-                        .get_by_qualified_name(&qualified_last)
-                        .is_some()
-                    {
-                        self.resolve_entity_by_name(
-                            last,
-                            Some(&parsed.path),
-                            Some(&parsed.path),
-                            entity_index,
-                        )
-                    } else if symbol_table.get_by_simple_name(last).is_some() {
-                        self.resolve_entity_by_name(last, None, Some(&parsed.path), entity_index)
-                    } else {
-                        parsed
-                            .local_symbols
-                            .get(last)
-                            .and_then(|ids| ids.first().copied())
-                            .map(to_global_id)
-                    }
-                } else {
-                    parsed
-                        .local_symbols
-                        .get(name)
-                        .and_then(|ids| ids.first().copied())
-                        .map(to_global_id)
-                }
             });
 
         (symbol_ref, resolved_entity_id)
@@ -337,6 +379,100 @@ impl RelationResolver {
                 is_stdlib,
                 receiver_type_known,
             )
+    }
+
+    /// Resolve `recv.member` through a mixin/assign call in this file.
+    ///
+    /// `mixin(app, proto)` / `Object.assign(app, proto)` attach another
+    /// module's members to a local object; a later `app.handle(...)` then
+    /// names the mixed-in member, not a local definition. When the receiver
+    /// is the mixin target and the source alias is a relative import, the
+    /// member is resolved in the source module's file.
+    pub(crate) fn resolve_mixin_member(
+        &self,
+        name: &str,
+        ctx: &NameCandidateContext<'_>,
+    ) -> Option<EntityId> {
+        let (receiver, member) = name.rsplit_once(['.', ':'])?;
+        if receiver.is_empty()
+            || member.is_empty()
+            || receiver.contains(['.', ':'])
+            || !super::is_bare_identifier(receiver)
+            || !super::is_bare_identifier(member)
+        {
+            return None;
+        }
+        let parsed = ctx.parsed;
+        for raw in &parsed.raw_relations {
+            let is_mixin_attach = raw.dst_name == "mixin" || raw.dst_name.ends_with(".assign");
+            if !is_mixin_attach || !raw.relation_type.is_call() {
+                continue;
+            }
+            // Raw call spans cover the callee name only, so the argument
+            // list sits past `span.end_byte`. Extend the window past the
+            // opening paren (allowing a little whitespace) and let the
+            // balanced splitter find the arguments.
+            let bytes = parsed.source.as_bytes();
+            let mut paren = raw.span.end_byte.min(bytes.len());
+            let mut skipped = 0usize;
+            while paren < bytes.len() && skipped < 16 && bytes[paren] != b'(' {
+                if !bytes[paren].is_ascii_whitespace() {
+                    break;
+                }
+                paren += 1;
+                skipped += 1;
+            }
+            if paren >= bytes.len() || bytes[paren] != b'(' {
+                continue;
+            }
+            let mut probe = raw.span;
+            probe.end_byte = (paren + 2000).min(bytes.len());
+            let Some(args) = super::extract_call_arguments(parsed.source.as_ref(), probe) else {
+                continue;
+            };
+            if args.len() < 2 || args[0].trim() != receiver {
+                continue;
+            }
+            let src_alias = args[1].trim();
+            if !super::is_bare_identifier(src_alias) {
+                continue;
+            }
+            let import = parsed
+                .import_table
+                .as_ref()?
+                .standardized_imports
+                .iter()
+                .find(|import| {
+                    let local = import.alias.as_deref().unwrap_or(&import.target.local_name);
+                    local == src_alias && import.is_relative
+                })?;
+            let package = ctx.symbol_table.get_package_for_file(&parsed.path)?;
+            let target = package.get_module_by_relative_source(&parsed.path, &import.source)?;
+            return self.resolve_entity_by_name(
+                member,
+                Some(&target.file_path),
+                Some(&parsed.path),
+                ctx.entity_index,
+            );
+        }
+        None
+    }
+
+    /// Whether `name` is bound by a relative JavaScript/TypeScript import
+    /// in this file, in which case the import target owns the reference.
+    fn is_relative_import_alias(parsed: &ParsedFile, name: &str) -> bool {
+        if !matches!(
+            parsed.language,
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx
+        ) {
+            return false;
+        }
+        parsed.import_table.as_ref().is_some_and(|table| {
+            table.standardized_imports.iter().any(|import| {
+                let local = import.alias.as_deref().unwrap_or(&import.target.local_name);
+                local == name && import.is_relative
+            })
+        })
     }
 
     fn local_definition_id(parsed: &ParsedFile, name: &str) -> Option<EntityId> {

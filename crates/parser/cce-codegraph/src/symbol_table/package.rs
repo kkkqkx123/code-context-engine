@@ -10,6 +10,23 @@ use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// Join a relative import source onto the caller file's directory and
+/// collapse `.` / `..` segments lexically, without touching the filesystem.
+fn join_relative_posix(caller_file: &str, source: &str) -> String {
+    let mut segments: Vec<&str> = caller_file.split('/').collect();
+    segments.pop();
+    for part in source.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            _ => segments.push(part),
+        }
+    }
+    segments.join("/")
+}
+
 /// Whether `file_path` is a package init file (`__init__.py` / `__init__.pyi`).
 fn is_package_init_file(file_path: &str) -> bool {
     let name = cce_types::path::file_name_str(file_path);
@@ -350,6 +367,40 @@ impl PackageSymbolTable {
     /// Get a module by file path (shares the stored table via `Arc`)
     pub fn get_module(&self, file_path: &str) -> Option<Arc<super::module::ModuleSymbolTable>> {
         self.modules.get(file_path).map(|m| Arc::clone(m.value()))
+    }
+
+    /// Find a module by a relative import source (`./view`, `../util`)
+    /// resolved against the caller file, probing JavaScript/TypeScript
+    /// extensions.
+    ///
+    /// Module-path resolution cannot serve relative sources: caller module
+    /// paths keep the file stem (`lib/application`), so joining `./view`
+    /// onto them overshoots. Resolve lexically against the caller file's
+    /// directory instead (`lib/view` + `.js` probing).
+    pub fn get_module_by_relative_source(
+        &self,
+        caller_file: &str,
+        source: &str,
+    ) -> Option<Arc<super::module::ModuleSymbolTable>> {
+        if !(source.starts_with("./") || source.starts_with("../")) {
+            return None;
+        }
+        let joined = join_relative_posix(caller_file, source);
+        let mut candidates = vec![joined.clone()];
+        if !joined
+            .rsplit('/')
+            .next()
+            .is_some_and(|base| base.contains('.'))
+        {
+            for extension in ["js", "ts", "jsx", "tsx", "mjs", "cjs"] {
+                candidates.push(format!("{joined}.{extension}"));
+            }
+            candidates.push(format!("{joined}/index.js"));
+            candidates.push(format!("{joined}/index.ts"));
+        }
+        candidates
+            .into_iter()
+            .find_map(|candidate| self.get_module(&candidate))
     }
 
     /// Get a module by module path (shares the stored table via `Arc`)

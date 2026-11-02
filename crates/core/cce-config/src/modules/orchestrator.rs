@@ -615,7 +615,21 @@ pub fn default_embed_input_token_limit() -> usize {
 }
 
 fn default_extensions() -> Vec<String> {
-    vec![
+    default_code_extensions()
+}
+
+/// File extensions indexed by default: the historical extension sets of the
+/// long-standing default languages, plus every other AST-parsable code
+/// language from the language registry.
+///
+/// Markup, style and template languages (Html, Css, Scss, Less, Vue, Svelte,
+/// Ejs) stay opt-in so default runs do not sweep view and template assets
+/// into the code index. Previously-default languages keep their exact
+/// historical sets so existing indexes do not churn.
+fn default_code_extensions() -> Vec<String> {
+    use cce_types::language::Language;
+
+    let mut extensions = vec![
         "rs".to_string(),
         "py".to_string(),
         "js".to_string(),
@@ -624,7 +638,27 @@ fn default_extensions() -> Vec<String> {
         "cpp".to_string(),
         "java".to_string(),
         "go".to_string(),
-    ]
+    ];
+    for language in [
+        Language::CSharp,
+        Language::Jsx,
+        Language::Tsx,
+        Language::Kotlin,
+        Language::Scala,
+        Language::Php,
+        Language::Ruby,
+        Language::Dart,
+        Language::Bash,
+        Language::Lua,
+    ] {
+        extensions.extend(
+            language
+                .common_extensions()
+                .iter()
+                .map(|ext| ext.to_string()),
+        );
+    }
+    extensions
 }
 
 fn default_exclude_dirs() -> Vec<String> {
@@ -641,16 +675,7 @@ fn default_exclude_dirs() -> Vec<String> {
 impl Default for IndexerConfig {
     fn default() -> Self {
         Self {
-            extensions: vec![
-                "rs".to_string(),
-                "py".to_string(),
-                "js".to_string(),
-                "ts".to_string(),
-                "c".to_string(),
-                "cpp".to_string(),
-                "java".to_string(),
-                "go".to_string(),
-            ],
+            extensions: default_extensions(),
             exclude_dirs: vec![
                 "node_modules".to_string(),
                 "target".to_string(),

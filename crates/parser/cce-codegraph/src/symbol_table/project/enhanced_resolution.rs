@@ -73,6 +73,20 @@ impl ProjectSymbolTable {
         // file is not indexed (resolution stays permissive).
         let from_scope = self.caller_scope(&context.file_path);
 
+        // Relative-require precedence: a bare name bound by a relative
+        // import (`var View = require('./view')`) names the target module's
+        // export, not the local alias variable. Forward through the import
+        // binding before local scope so the call lands on the real
+        // definition; shadowing a require alias with a same-name local is
+        // pathological and stays unsupported.
+        if !name.contains(':') && !name.contains('.') {
+            if let Some(symbol) =
+                self.resolve_relative_import_binding(name, context, from_scope.as_ref())
+            {
+                return Some(symbol);
+            }
+        }
+
         // Level 0: Local scope chain resolution (inner-to-outer, handles shadowing)
         if !context.scope_chain.is_empty() {
             if let Some(symbol) = self.resolve_via_local_scope(name, context) {
@@ -101,6 +115,15 @@ impl ProjectSymbolTable {
         let qualified = name.contains('.') || name.contains("::");
         if qualified {
             if let Some(symbol) = self.resolve_via_type_member(name, context, from_scope.as_ref()) {
+                return Some(symbol);
+            }
+            // Variable receiver with a known declared type (`handler.Handle`
+            // with `handler: RequestHandlerWrapper<T>`): the head names a
+            // value, not a type, so retry member lookup against the inferred
+            // type instead of degrading to a bare-name search.
+            if let Some(symbol) =
+                self.resolve_via_inferred_receiver_member(name, context, from_scope.as_ref())
+            {
                 return Some(symbol);
             }
         }
@@ -136,6 +159,54 @@ impl ProjectSymbolTable {
         None
     }
 
+    /// Resolve `recv.member` against the receiver variable's inferred
+    /// declared type.
+    ///
+    /// Only single-level receivers qualify; deeper paths already carry
+    /// their own type context through promotion. Returns `None` when the
+    /// head has no recorded type, letting normal resolution proceed.
+    fn resolve_via_inferred_receiver_member(
+        &self,
+        name: &str,
+        context: &ResolutionContext,
+        from_scope: Option<&ScopeContext>,
+    ) -> Option<SymbolRef> {
+        let (head, member) = name.rsplit_once(['.', ':'])?;
+        if head.is_empty()
+            || member.is_empty()
+            || head.contains(['.', ':'])
+            || member.contains(['.', ':'])
+        {
+            return None;
+        }
+        let type_ctx = self.get_type_inference_context(&context.file_path)?;
+        let receiver_type = type_ctx.get_variable_type(head)?.type_name.clone();
+        if receiver_type.is_empty() {
+            return None;
+        }
+        self.resolve_via_type_member(&format!("{receiver_type}.{member}"), context, from_scope)
+    }
+
+    /// Resolve a bare name bound by a relative import through its target
+    /// module's exports.
+    ///
+    /// Returns `None` when the name has no import binding or the source is
+    /// not a relative path, letting normal scope resolution proceed.
+    fn resolve_relative_import_binding(
+        &self,
+        name: &str,
+        context: &ResolutionContext,
+        from_scope: Option<&ScopeContext>,
+    ) -> Option<SymbolRef> {
+        let package = self.get_package_for_file(&context.file_path)?;
+        let module = package.get_module(&context.file_path)?;
+        let binding = module.get_import(name)?;
+        if !(binding.source_path.starts_with("./") || binding.source_path.starts_with("../")) {
+            return None;
+        }
+        self.resolve_import_binding(&module, &package, name, from_scope)
+    }
+
     fn resolve_enhanced_inner_with_overload(
         &self,
         name: &str,
@@ -144,12 +215,32 @@ impl ProjectSymbolTable {
         overload_ctx: Option<&OverloadContext>,
     ) -> Option<SymbolRef> {
         let from_scope = self.caller_scope(&context.file_path);
+        // A self-rooted receiver (`this.get` with `this` recovered from the
+        // source text, or inferred by the caller) names the caller's own
+        // object graph. Module- and package-level guesses (import,
+        // re-export, cross-package exports) would bind a different file's
+        // same-name symbol, so they are skipped: only scope, caller-file,
+        // and typed evidence may satisfy such a call.
+        let cross_file_guess_allowed = !overload_ctx
+            .as_ref()
+            .and_then(|ctx| ctx.receiver_type.as_deref())
+            .is_some_and(cce_parser_core::is_self_receiver);
+        // Relative-require precedence, mirroring `resolve_enhanced_inner`:
+        // a bare name bound by a relative import forwards to the target
+        // module's export before local scope is consulted.
+        if !name.contains(':') && !name.contains('.') {
+            if let Some(symbol) =
+                self.resolve_relative_import_binding(name, context, from_scope.as_ref())
+            {
+                return Some(symbol);
+            }
+        }
         if !context.scope_chain.is_empty() {
             if let Some(symbol) = self.resolve_via_local_scope(name, context) {
                 return Some(symbol);
             }
         }
-        if !name.contains(':') && !name.contains('.') {
+        if cross_file_guess_allowed && !name.contains(':') && !name.contains('.') {
             if let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
             {
                 return Some(symbol);
@@ -158,6 +249,14 @@ impl ProjectSymbolTable {
         let qualified = name.contains('.') || name.contains("::");
         if qualified {
             if let Some(symbol) = self.resolve_via_type_member(name, context, from_scope.as_ref()) {
+                return Some(symbol);
+            }
+            // Variable receiver with a known declared type: retry member
+            // lookup against the inferred type (mirrors
+            // `resolve_enhanced_inner`).
+            if let Some(symbol) =
+                self.resolve_via_inferred_receiver_member(name, context, from_scope.as_ref())
+            {
                 return Some(symbol);
             }
         }
@@ -175,14 +274,19 @@ impl ProjectSymbolTable {
                 return Some(symbol);
             }
         }
-        if let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref()) {
-            return Some(symbol);
-        }
-        if let Some(symbol) = self.resolve_via_module_reexport(name, context, from_scope.as_ref()) {
-            return Some(symbol);
-        }
-        if let Some(symbol) = self.resolve_via_cross_package(name, context) {
-            return Some(symbol);
+        if cross_file_guess_allowed {
+            if let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
+            {
+                return Some(symbol);
+            }
+            if let Some(symbol) =
+                self.resolve_via_module_reexport(name, context, from_scope.as_ref())
+            {
+                return Some(symbol);
+            }
+            if let Some(symbol) = self.resolve_via_cross_package(name, context) {
+                return Some(symbol);
+            }
         }
         None
     }
@@ -381,6 +485,28 @@ impl ProjectSymbolTable {
         from_scope: Option<&ScopeContext>,
     ) -> Option<SymbolRef> {
         let source = module::strip_crate_prefix(&binding.source_path);
+        // Relative requires (`./view`, `../util`) carry no `::` segments,
+        // so the split below cannot name a module or symbol. Resolve the
+        // required file against the caller and look the imported name up in
+        // its exports. `var View = require('./view')` binds the module's
+        // default export, but the common case keeps the exported name
+        // (`module.exports = View`), so the local alias is tried first,
+        // then the default-export markers.
+        if source.starts_with("./") || source.starts_with("../") {
+            let target =
+                package.get_module_by_relative_source(caller_file.unwrap_or_default(), source)?;
+            for candidate in [binding.local_name.as_str(), "default", "module.exports"] {
+                let found = match from_scope {
+                    Some(scope) => target.get_export_visible_from(candidate, scope),
+                    None => target.lookup_local(candidate),
+                };
+                if let Some(metadata) = found {
+                    let metadata = metadata.clone();
+                    return Some(self.stable_symbol_ref(&metadata));
+                }
+            }
+            return None;
+        }
         let (module_path, symbol_name) = if let Some(symbol) = binding.symbol_name.as_deref() {
             match source.rsplit_once("::") {
                 Some((prefix, last)) if last == symbol => (prefix.to_string(), symbol.to_string()),

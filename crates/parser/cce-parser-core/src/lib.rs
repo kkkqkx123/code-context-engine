@@ -19,4 +19,5 @@ pub use default_rules::default_language_rules;
 pub use extraction::{ExtractionConfig, ExtractionContext, determine_module_path};
 pub use local_call_resolver::{
     LocalCall, LocalCallResolver, LocalCallResolverConfig, count_call_arguments_from_node,
+    is_self_receiver,
 };

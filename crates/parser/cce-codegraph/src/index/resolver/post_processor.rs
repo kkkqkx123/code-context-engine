@@ -287,7 +287,18 @@ impl RelationPostProcessor {
             None => return false,
         };
         if parsed.language != Language::Rust {
-            if receiver_type_known || parsed.local_symbols.contains_key(last) {
+            if receiver_type_known {
+                return false;
+            }
+            // A nested receiver (`this.router.handle`, `a.b.method`) names
+            // a method on a property, not on the receiver object itself, so
+            // a same-name entity in the caller file is a different function
+            // and must not unlock the fallback. Single-segment receivers
+            // (`this.get`, `obj.method`) keep the local-priority behavior.
+            let receiver_is_nested = name
+                .rsplit_once(['.', ':'])
+                .is_some_and(|(receiver, _)| receiver.contains('.') || receiver.contains(':'));
+            if !receiver_is_nested && parsed.local_symbols.contains_key(last) {
                 return false;
             }
             let head = name.split(['.', ':']).next().unwrap_or("");
