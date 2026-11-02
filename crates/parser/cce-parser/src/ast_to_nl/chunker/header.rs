@@ -8,6 +8,18 @@ pub struct HeaderHelper<'a> {
     config: &'a ChunkingConfig,
 }
 
+/// One standalone-eligible member plus the budgets that decide whether it
+/// may rejoin the previous member group instead of standing alone.
+struct PrevPack<'a> {
+    member: &'a ConversionResult,
+    member_text: &'a str,
+    first_budget: usize,
+    continuation_budget: usize,
+    separator_cost: usize,
+    min_cost: usize,
+    path: ChunkPath,
+}
+
 impl<'a> HeaderHelper<'a> {
     pub fn new(config: &'a ChunkingConfig) -> Self {
         Self { config }
@@ -182,6 +194,33 @@ impl<'a> HeaderHelper<'a> {
                     groups.push(std::mem::take(&mut current_group));
                     current_text.clear();
                 }
+                // A standalone member still joins the previous member group
+                // when it only continues that group's topic. Overloads share
+                // one declaration name but are distinct entities; splitting
+                // adjacent same-name overloads (e.g. two `Handle` methods in
+                // `RequestHandlerWrapperImpl`) scatters the call body
+                // (`Reverse`/`Aggregate`) a query must match in one unit. A
+                // member below the min threshold is a residue with no
+                // retrieval value of its own (e.g. the one-line `PublishCore`
+                // delegation `=> _publisher.Publish(...)`); leaving it alone
+                // spends a corpus slot on a fragment no query can match.
+                // Either packs backward when the combined text still fits the
+                // budget that governed the previous group.
+                if Self::pack_with_previous(
+                    self,
+                    &mut groups,
+                    PrevPack {
+                        member,
+                        member_text,
+                        first_budget,
+                        continuation_budget,
+                        separator_cost,
+                        min_cost,
+                        path,
+                    },
+                ) {
+                    continue;
+                }
                 groups.push(vec![member.clone()]);
                 continue;
             }
@@ -220,6 +259,63 @@ impl<'a> HeaderHelper<'a> {
             groups.push(current_group);
         }
         groups
+    }
+
+    /// Pack a standalone-eligible member backward into the previous member
+    /// group when it only continues that group's topic.
+    ///
+    /// Returns true when the member was packed (the caller must skip the
+    /// standalone push). Packing applies in two cases: adjacent same-name
+    /// overloads, which share one declaration identity, and tiny residues
+    /// below the min threshold, which have no retrieval value alone. The
+    /// combined text must fit the budget that governed the previous group;
+    /// multi-entity previous groups only absorb a same-name member when
+    /// every member they hold already shares that name, so unrelated
+    /// members never glue together through a shared neighbor.
+    fn pack_with_previous(&self, groups: &mut [Vec<ConversionResult>], pack: PrevPack) -> bool {
+        let PrevPack {
+            member,
+            member_text,
+            first_budget,
+            continuation_budget,
+            separator_cost,
+            min_cost,
+            path,
+        } = pack;
+        if groups.is_empty() {
+            return false;
+        }
+        let is_first = groups.len() == 1;
+        let Some(prev) = groups.last_mut() else {
+            return false;
+        };
+        if member.name.is_empty() || !prev.iter().all(|m| m.name == member.name) {
+            let member_cost = self.unit_count(member_text, path);
+            if member_cost >= min_cost {
+                return false;
+            }
+        }
+        let prev_budget = if is_first {
+            first_budget
+        } else {
+            continuation_budget
+        };
+        let prev_max = prev_budget.saturating_sub(separator_cost).max(1);
+        let mut candidate_cost = self.unit_count(member_text, path);
+        for m in prev.iter() {
+            let text = match path {
+                ChunkPath::Bm25 => m.bm25_text.as_deref().unwrap_or(""),
+                ChunkPath::Embedding => m.embedding_text.as_deref().unwrap_or(""),
+            };
+            candidate_cost = candidate_cost
+                .saturating_add(separator_cost)
+                .saturating_add(self.unit_count(text, path));
+        }
+        if candidate_cost > prev_max {
+            return false;
+        }
+        prev.push(member.clone());
+        true
     }
 }
 
@@ -297,6 +393,18 @@ mod tests {
             .collect()
     }
 
+    /// Members above the min threshold: distinct viable units stay apart.
+    fn large_member_conversions(n: usize) -> Vec<ConversionResult> {
+        (0..n)
+            .map(|i| ConversionResult {
+                entity_id: cce_types::entity::EntityId(i as u64),
+                bm25_text: Some(format!("fn member_{i}() {}", "body ".repeat(60))),
+                embedding_text: Some(format!("member {i} does things {}", "body ".repeat(60))),
+                ..Default::default()
+            })
+            .collect()
+    }
+
     fn default_helper<R>(f: impl FnOnce(&HeaderHelper) -> R) -> R {
         let cfg = ChunkingConfig::default();
         let helper = HeaderHelper::new(&cfg);
@@ -306,7 +414,9 @@ mod tests {
     #[test]
     fn test_bm25_multiline_members_split_per_member() {
         default_helper(|helper| {
-            let members = member_conversions(13);
+            // Viable multiline members (above the min threshold) keep one
+            // chunk each: each is a retrieval unit of its own.
+            let members = large_member_conversions(13);
             let self_contained = vec![false; members.len()];
             let multiline = vec![true; members.len()];
             let groups = helper.group_members_by_header_budget(
@@ -319,6 +429,58 @@ mod tests {
             );
             assert_eq!(groups.len(), 13);
             assert!(groups.iter().all(|g| g.len() == 1));
+        });
+    }
+
+    #[test]
+    fn test_bm25_tiny_multiline_members_pack_together() {
+        default_helper(|helper| {
+            // A residue below the min threshold is no retrieval unit alone
+            // (e.g. a one-line `PublishCore` delegation): tiny multiline
+            // members rejoin their neighbors instead of standing alone.
+            let members = member_conversions(13);
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![true; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Bm25,
+                &self_contained,
+                &multiline,
+            );
+            assert_eq!(groups.len(), 1);
+            assert_eq!(groups[0].len(), 13);
+        });
+    }
+
+    #[test]
+    fn test_bm25_same_name_overloads_pack_together() {
+        default_helper(|helper| {
+            // Adjacent same-name overloads share one declaration identity;
+            // splitting them scatters the call body a query must match in
+            // one unit, so they pack when the combined text fits.
+            let members: Vec<ConversionResult> = (0..2)
+                .map(|i| ConversionResult {
+                    entity_id: cce_types::entity::EntityId(i),
+                    name: "Handle".to_string(),
+                    bm25_text: Some(format!("Task Handle overload {i} {}", "body ".repeat(20))),
+                    embedding_text: Some(format!("Handle overload {i}")),
+                    ..Default::default()
+                })
+                .collect();
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![true; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Bm25,
+                &self_contained,
+                &multiline,
+            );
+            assert_eq!(groups.len(), 1);
+            assert_eq!(groups[0].len(), 2);
         });
     }
 
@@ -344,7 +506,9 @@ mod tests {
     #[test]
     fn test_bm25_self_contained_single_line_member_stands_alone() {
         default_helper(|helper| {
-            let members = member_conversions(3);
+            // A viable self-contained member (above the min threshold)
+            // stands alone so its topic is never diluted by neighbors.
+            let members = large_member_conversions(3);
             let self_contained = vec![false, true, false];
             let multiline = vec![false; members.len()];
             let groups = helper.group_members_by_header_budget(

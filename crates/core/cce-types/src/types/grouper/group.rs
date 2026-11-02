@@ -985,7 +985,6 @@ pub struct ProcessingStats {
     pub output_groups: usize,
     pub class_method_associations: usize,
     pub utility_functions: usize,
-    pub merged_calls: usize,
     pub standalone_entities: usize,
     pub impl_associations: usize,
     /// Groups whose `test_info` is `Test` (filter-critical marker).

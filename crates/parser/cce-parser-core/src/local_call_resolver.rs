@@ -47,7 +47,7 @@ pub struct LocalCall {
     /// Standard library category (if this is a stdlib call)
     ///
     /// Set during Parser phase when the Relation is created.
-    /// This eliminates duplicate stdlib detection in CallMerger.
+    /// This eliminates duplicate stdlib detection downstream.
     pub stdlib_category: Option<cce_types::StdlibCategory>,
 }
 

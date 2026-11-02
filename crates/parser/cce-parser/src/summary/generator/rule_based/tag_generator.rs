@@ -36,11 +36,6 @@ impl super::RuleBasedGenerator {
             tags.push("interface".to_string());
         }
 
-        // Check for merged calls
-        if processing_result.stats.merged_calls > 0 {
-            tags.push("repetitive-patterns".to_string());
-        }
-
         tags.sort();
         tags.dedup();
 

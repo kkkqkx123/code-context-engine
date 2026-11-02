@@ -18,14 +18,8 @@ pub struct NestProcessorConfig {
     /// Small class threshold (in lines)
     pub small_class_threshold: usize,
 
-    /// Simple call merge threshold
-    pub simple_call_merge_threshold: usize,
-
     /// Enable class-method association optimization
     pub enable_class_method_association: bool,
-
-    /// Enable simple call merging
-    pub enable_call_merging: bool,
 
     /// Enable getter/setter merging
     pub enable_getter_setter_merging: bool,
@@ -113,9 +107,7 @@ impl Default for NestProcessorConfig {
     fn default() -> Self {
         Self {
             small_class_threshold: 20,
-            simple_call_merge_threshold: 3,
             enable_class_method_association: true,
-            enable_call_merging: true,
             enable_getter_setter_merging: true,
             getter_setter_complexity_threshold: 3,
             enable_test_entity_grouping: true,
@@ -143,12 +135,6 @@ impl Validate for NestProcessorConfig {
         if self.small_class_threshold == 0 {
             errors.push(ConfigValidationError::invalid_field(
                 "small_class_threshold",
-                "must be greater than 0",
-            ));
-        }
-        if self.simple_call_merge_threshold == 0 {
-            errors.push(ConfigValidationError::invalid_field(
-                "simple_call_merge_threshold",
                 "must be greater than 0",
             ));
         }
@@ -195,7 +181,6 @@ impl NestProcessorConfig {
     pub fn small_codebase() -> Self {
         Self {
             small_class_threshold: 50,
-            simple_call_merge_threshold: 5,
             getter_setter_complexity_threshold: 5,
             max_test_suite_nesting: 5,
             ..Default::default()
@@ -206,7 +191,6 @@ impl NestProcessorConfig {
     pub fn large_codebase() -> Self {
         Self {
             small_class_threshold: 20,
-            simple_call_merge_threshold: 3,
             getter_setter_complexity_threshold: 2,
             max_test_suite_nesting: 2,
             ..Default::default()
@@ -217,7 +201,6 @@ impl NestProcessorConfig {
     pub fn disabled() -> Self {
         Self {
             enable_class_method_association: false,
-            enable_call_merging: false,
             enable_getter_setter_merging: false,
             enable_test_entity_grouping: false,
             ..Default::default()
@@ -228,7 +211,6 @@ impl NestProcessorConfig {
     pub fn basic() -> Self {
         Self {
             enable_class_method_association: true,
-            enable_call_merging: false,
             enable_getter_setter_merging: false,
             enable_test_entity_grouping: true,
             ..Default::default()

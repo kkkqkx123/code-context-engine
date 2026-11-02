@@ -379,9 +379,7 @@ pub struct ProjectCachePatch {
 #[serde(default)]
 pub struct ProjectGrouperPatch {
     pub small_class_threshold: Option<usize>,
-    pub simple_call_merge_threshold: Option<usize>,
     pub enable_class_method_association: Option<bool>,
-    pub enable_call_merging: Option<bool>,
     pub enable_getter_setter_merging: Option<bool>,
     pub getter_setter_complexity_threshold: Option<usize>,
     pub enable_test_entity_grouping: Option<bool>,

@@ -77,7 +77,6 @@ fn test_keep_valid_entity() {
 fn test_pipeline_creation() {
     let pipeline = PreprocessingPipeline::new();
     assert!(pipeline.config.enable_class_method_association);
-    assert!(pipeline.config.enable_call_merging);
 }
 
 #[test]
@@ -715,13 +714,12 @@ fn test_stage9_injects_resolved_calls_for_internal_callee() {
     );
 }
 
-/// Stage 1 (`CallMerger`) and Stage 9 (`RESOLVED_CALLS` injection) share one
-/// `LocalCallResolver` run per file (`parsed_file` is immutable across
-/// stages). A caller with three consecutive calls to an internal helper
-/// exercises both consumers in a single pipeline run: merging must fire
-/// and the resolved name must be injected.
+/// Stage 9 (`RESOLVED_CALLS` injection) runs one `LocalCallResolver` pass
+/// per file (`parsed_file` is immutable across stages). A caller with three
+/// consecutive calls to an internal helper exercises the injection in a
+/// single pipeline run: the resolved name must be recorded.
 #[test]
-fn test_shared_resolution_feeds_merger_and_stage9() {
+fn test_shared_resolution_feeds_stage9() {
     use cce_types::entity::meta_keys;
 
     let source =
@@ -742,10 +740,6 @@ fn test_shared_resolution_feeds_merger_and_stage9() {
 
     let pipeline = PreprocessingPipeline::new();
     let result = pipeline.process(&parsed);
-    assert!(
-        result.stats.merged_calls > 0,
-        "consecutive repeated calls must merge via the shared resolution"
-    );
 
     let mut found_resolved = false;
     for group in &result.groups {

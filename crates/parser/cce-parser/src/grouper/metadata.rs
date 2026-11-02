@@ -34,9 +34,6 @@ pub const IMPLEMENTS: &str = "implements";
 /// Local call references within the entity
 pub const LOCAL_CALLS: &str = "local_calls";
 
-/// Merged calls metadata (set by call merger processor)
-pub const MERGED_CALLS: &str = "merged_calls";
-
 /// Property name that a getter targets
 pub const GETTER_FOR: &str = "getter_for";
 

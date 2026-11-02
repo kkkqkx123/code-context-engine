@@ -5,7 +5,6 @@ use cce_types::entity::{Entity, EntityId, EntityKind, ParsedFile};
 use cce_types::language::Language;
 
 use crate::grouper::context::FileProcessingContext;
-use crate::grouper::processors::CallMerger;
 use crate::grouper::processors::ClassMethodProcessor;
 use crate::grouper::processors::TestSuiteProcessor;
 use crate::grouper::types::{EntityGroup, GroupType};
@@ -338,27 +337,6 @@ fn test_class_method_processor_disabled_association() {
         "Processor still groups regardless of pipeline-level flag"
     );
     assert_eq!(assoc_count, 1);
-}
-
-// ============================================================
-// CallMerger workflow tests
-// ============================================================
-
-#[test]
-fn test_call_merger_creation() {
-    let merger_empty = CallMerger::new();
-    let config = NestProcessorConfig::default();
-    let parsed_file = ParsedFile::new(Language::Rust, "empty.rs".to_string(), "");
-    let ctx = FileProcessingContext::new(&[], &parsed_file, &config);
-    assert!(merger_empty.merge(ctx).0.is_empty());
-
-    let merger = CallMerger::new();
-    let config = NestProcessorConfig::default();
-    let parsed_file = ParsedFile::new(Language::Rust, "empty.rs".to_string(), "");
-    let ctx = FileProcessingContext::new(&[], &parsed_file, &config);
-    let (result, count) = merger.merge(ctx);
-    assert_eq!(count, 0);
-    assert!(result.is_empty());
 }
 
 // ============================================================

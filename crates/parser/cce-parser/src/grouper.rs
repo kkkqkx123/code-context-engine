@@ -68,6 +68,5 @@ pub use types::{
 
 // Re-export processors
 pub use processors::{
-    CallMerger, ClassMethodProcessor, EntityCallMergeExt, GetterSetterDetectionConfig,
-    GetterSetterDetector, MergedCallInfo, MethodType, ParameterPattern, SemanticRole, ValuePattern,
+    ClassMethodProcessor, GetterSetterDetectionConfig, GetterSetterDetector, MethodType,
 };

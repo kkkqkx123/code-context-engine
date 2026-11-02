@@ -293,14 +293,8 @@ impl Mergeable for NestProcessorConfig {
         if let Some(value) = patch.small_class_threshold {
             self.small_class_threshold = value;
         }
-        if let Some(value) = patch.simple_call_merge_threshold {
-            self.simple_call_merge_threshold = value;
-        }
         if let Some(value) = patch.enable_class_method_association {
             self.enable_class_method_association = value;
-        }
-        if let Some(value) = patch.enable_call_merging {
-            self.enable_call_merging = value;
         }
         if let Some(value) = patch.enable_getter_setter_merging {
             self.enable_getter_setter_merging = value;

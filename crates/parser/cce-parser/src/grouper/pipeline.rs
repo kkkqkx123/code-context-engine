@@ -3,9 +3,8 @@
 //! This pipeline handles entity preprocessing between Parser and AstToNl.
 //! It improves natural language conversion quality by:
 //!
-//! 1. Merging simple repeated function calls
-//! 2. Associating classes with their methods based on size
-//! 3. Grouping test suites with their test cases
+//! 1. Associating classes with their methods based on size
+//! 2. Grouping test suites with their test cases
 
 use std::collections::HashMap;
 
@@ -28,8 +27,7 @@ use super::plugin_grouping::{
     try_plugin_group_override,
 };
 use super::processors::{
-    CallMerger, ClassMethodProcessor, FunctionMemberProcessor, SmallFragmentMerger,
-    TestSuiteProcessor,
+    ClassMethodProcessor, FunctionMemberProcessor, SmallFragmentMerger, TestSuiteProcessor,
 };
 use super::recognizers::test_suite::TestSuiteDetector;
 use super::types::{EntityGroup, GroupType, ProcessingResult, ProcessingStats};
@@ -42,10 +40,9 @@ use cce_config::NestProcessorConfig;
 ///
 /// # Pipeline Stages
 ///
-/// 1. **Call Merging** - Merge repeated simple calls
-/// 2. **Test Suite Grouping** - Group test suites with test cases
-/// 3. **Class-Method Association** - Associate small classes with methods
-/// 4. **Source Generation** - Generate combined source for groups
+/// 1. **Test Suite Grouping** - Group test suites with test cases
+/// 2. **Class-Method Association** - Associate small classes with methods
+/// 3. **Source Generation** - Generate combined source for groups
 ///
 /// # Example
 ///
@@ -60,15 +57,25 @@ use cce_config::NestProcessorConfig;
 /// //     println!("Group: {} ({:?})", group.name, group.group_type);
 /// // }
 /// ```
+/// Shared same-file call resolution for `RESOLVED_CALLS` injection.
+///
+/// Single source of truth for the resolver configuration; `parsed_file` is
+/// immutable across stages so one run serves the whole pipeline.
+fn resolve_calls_for_file(parsed_file: &ParsedFile) -> Vec<cce_parser_core::LocalCall> {
+    let config = cce_parser_core::LocalCallResolverConfig {
+        enable_signature_matching: true,
+        ..Default::default()
+    };
+    cce_parser_core::LocalCallResolver::with_config(config)
+        .resolve_from_parsed_file(parsed_file)
+}
+
 pub struct PreprocessingPipeline {
     /// Configuration
     config: NestProcessorConfig,
 
     /// Class-method processor
     class_method_processor: ClassMethodProcessor,
-
-    /// Call merger
-    call_merger: CallMerger,
 
     /// Test suite processor
     test_suite_processor: TestSuiteProcessor,
@@ -99,7 +106,6 @@ impl PreprocessingPipeline {
     pub fn with_config(config: NestProcessorConfig) -> Self {
         Self {
             class_method_processor: ClassMethodProcessor::new(&config.getter_setter),
-            call_merger: CallMerger::new(),
             test_suite_processor: TestSuiteProcessor::new(),
             function_member_processor: FunctionMemberProcessor::new(),
             small_fragment_merger: SmallFragmentMerger::with_config(&config),
@@ -211,7 +217,7 @@ impl PreprocessingPipeline {
     /// | Stage | Input | Output | Side Effects |
     /// |-------|-------|--------|--------------|
     /// | 0. StdlibClassify | `parsed_file.entities` | `entities` with stdlib tags | None |
-    /// | 1. FragmentConsolidate | `entities` | `entities` with merged calls + `groups` with merged fragments | `stats.merged_calls` |
+    /// | 1. FragmentConsolidate | `entities` | `entities` (unchanged) | None |
     /// | 2. TestSuiteGroup | `entities` | `groups` with test suites | None |
     /// | 3. ClassMethodAssociate | `entities` (remaining) | `groups` with class+methods | `stats.class_method_associations` |
     /// | 4. PluginEntityInject | `groups` | `groups` + plugin entities | None |
@@ -231,31 +237,18 @@ impl PreprocessingPipeline {
         // Stage 0: `LangHeuristics` stdlib classification for custom-language
         // files (entities whose stdlib status is unknown to the built-in
         // detectors; plugin answers are in priority order, first wins).
-        let mut entities = apply_stdlib_heuristics(&self.plugin_registry, parsed_file);
+        let entities = apply_stdlib_heuristics(&self.plugin_registry, parsed_file);
 
-        // Shared same-file call resolution for Stage 1 (`CallMerger`) and
-        // Stage 9 (`RESOLVED_CALLS` injection). `parsed_file` is immutable
-        // across stages, so one run serves both; previously each stage ran
-        // the resolver independently. Skipped only when neither stage needs it.
-        let local_calls = (self.config.enable_call_merging
-            || !parsed_file.raw_relations.is_empty())
-        .then(|| CallMerger::resolve_calls_for_file(parsed_file));
-
-        // Stage 1: Consolidate fragments (merge simple repeated calls + merge small fragments)
-        // This stage combines two related optimizations:
-        // - CallMerger: merges consecutive identical calls within function bodies
-        // - SmallFragmentMerger: merges adjacent small standalone groups
-        let mut groups = Vec::new();
-        if self.config.enable_call_merging {
-            let calls = local_calls.as_deref().unwrap_or(&[]);
-            let (merged, merge_count) = self.merge_simple_calls(&entities, parsed_file, calls);
-            stats.merged_calls = merge_count;
-            entities = merged;
-        }
+        // Shared same-file call resolution for Stage 9 (`RESOLVED_CALLS`
+        // injection). `parsed_file` is immutable across stages. Skipped when
+        // the file carries no call relations.
+        let local_calls = (!parsed_file.raw_relations.is_empty())
+            .then(|| resolve_calls_for_file(parsed_file));
 
         // Stage 2: Process test suites and test cases (if enabled)
         // Test suite processing happens before class-method to ensure test entities
         // are properly grouped even if they contain class definitions
+        let mut groups = Vec::new();
         if self.config.enable_test_entity_grouping {
             groups = self.process_test_suites(&entities, parsed_file);
         }
@@ -488,7 +481,7 @@ impl PreprocessingPipeline {
         // created MergedFragments groups are covered.
         //
         // AST-level detection (attribute adjacency + constrained conventions)
-        // runs on the (call-merged) entity list and is merged per group with
+        // runs on the entity list and is merged per group with
         // the file-level path rule. The marker is orthogonal to grouping:
         // groups keep their `group_type` regardless of test status.
         self.annotate_groups_test_info(&mut groups, parsed_file, &entities);
@@ -496,8 +489,7 @@ impl PreprocessingPipeline {
         // Stage 9: Inject call paths from raw_relations into group metadata.
         // `CALL_PATHS` carries every call target (normalized); `RESOLVED_CALLS`
         // carries the subset that resolves to an internal same-file entity via
-        // the shared `LocalCallResolver` run (same config as `CallMerger`, see
-        // above). Pruning keeps resolved names unconditionally, mirroring the
+        // the shared `LocalCallResolver` run above. Pruning keeps resolved names unconditionally, mirroring the
         // relation layer where resolution runs before stdlib filtering.
         if !parsed_file.raw_relations.is_empty() {
             let mut call_paths_map: HashMap<EntityId, Vec<String>> = HashMap::new();
@@ -801,18 +793,6 @@ impl PreprocessingPipeline {
             result.stats.record_test_partition(&result.groups);
         }
         result
-    }
-
-    /// Merge simple repeated calls against the shared per-file resolution.
-    fn merge_simple_calls(
-        &self,
-        entities: &[Entity],
-        parsed_file: &ParsedFile,
-        local_calls: &[cce_parser_core::LocalCall],
-    ) -> (Vec<Entity>, usize) {
-        use crate::grouper::context::FileProcessingContext;
-        let ctx = FileProcessingContext::new(entities, parsed_file, &self.config);
-        self.call_merger.merge_with_calls(ctx, local_calls)
     }
 
     /// Process class methods

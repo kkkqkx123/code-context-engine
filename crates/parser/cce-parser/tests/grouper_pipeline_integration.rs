@@ -258,7 +258,6 @@ fn test_pipeline_with_disabled_test_grouping() {
 #[test]
 fn test_pipeline_with_all_disabled() {
     let config = NestProcessorConfig {
-        enable_call_merging: false,
         enable_test_entity_grouping: false,
         enable_class_method_association: false,
         ..Default::default()
@@ -623,7 +622,6 @@ fn test_pipeline_stats_tracking() {
         result.stats.output_groups >= 3,
         "Output groups should be >= 3 for 3 standalone functions"
     );
-    assert_eq!(result.stats.merged_calls, 0);
     assert_eq!(result.stats.class_method_associations, 0);
     assert!(result.stats.standalone_entities >= 3);
 }
@@ -828,7 +826,6 @@ fn test_pipeline_suite_without_cases() {
 #[test]
 fn test_pipeline_process_with_all_features_enabled() {
     let config = NestProcessorConfig {
-        enable_call_merging: true,
         enable_test_entity_grouping: true,
         enable_class_method_association: true,
         enable_getter_setter_merging: true,
