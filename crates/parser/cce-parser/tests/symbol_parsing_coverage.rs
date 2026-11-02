@@ -612,9 +612,10 @@ fn javascript_define_property_descriptor_is_not_a_method() {
          foo({ load: function loadCb() {} });\n",
     );
     find(&parsed.entities, EntityKind::Method, "init");
-    // Descriptor accessors declare properties, not callable methods: neither
-    // the named getters/setters nor the anonymous nested one may surface
-    // under the key name or the function name.
+    // Descriptor accessors declare properties, not callable methods:
+    // the function names never surface, while the keys downgrade to
+    // accessors instead of disappearing. The anonymous nested getter
+    // has no key to downgrade under, so it leaves no entity at all.
     for banned in ["getrouter", "setrouter"] {
         assert!(
             !parsed.entities.iter().any(|e| e.name == banned),
@@ -629,6 +630,19 @@ fn javascript_define_property_descriptor_is_not_a_method() {
     // Ordinary object literals and non-descriptor call arguments keep their
     // key-named method entities; the `opts` literal is the only surviving
     // source of a `get` method, and no `set` method remains at all.
+    // The descriptor keys downgrade to accessors carrying their roles.
+    for role in ["get", "set"] {
+        let accessor = parsed
+            .entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Accessor && e.name == role)
+            .unwrap_or_else(|| panic!("expected accessor '{role}'"));
+        assert_eq!(
+            accessor.metadata.get("accessor_role").map(String::as_str),
+            Some(role),
+            "accessor '{role}' must record its role"
+        );
+    }
     find(&parsed.entities, EntityKind::Method, "get");
     find(&parsed.entities, EntityKind::Method, "load");
     assert_eq!(
@@ -646,5 +660,23 @@ fn javascript_define_property_descriptor_is_not_a_method() {
             .iter()
             .any(|e| e.kind == EntityKind::Method && e.name == "set"),
         "descriptor `set` must not become a method entity"
+    );
+}
+
+#[test]
+fn javascript_indirect_descriptor_downgrades_to_accessor() {
+    // Indirect descriptors resolve through one hop: the object literal
+    // is bound to a variable first and only the variable reaches
+    // `defineProperty`. The `get` key therefore downgrades to an accessor
+    // instead of staying a callable method.
+    let parsed = parse_file(
+        "indirect.js",
+        "var desc = { get: function getVal() { return 1; } };\n\
+         Object.defineProperty(this, 'val', desc);\n",
+    );
+    find(&parsed.entities, EntityKind::Accessor, "get");
+    assert!(
+        !parsed.entities.iter().any(|e| e.kind == EntityKind::Method),
+        "indirect descriptor must not keep callable methods"
     );
 }

@@ -206,6 +206,7 @@ impl CodeFormConverter {
             EntityKind::Trait => format!("Trait for {}", Self::humanize_name(name)),
             EntityKind::Function => format!("Function {}", name),
             EntityKind::Method => format!("Method {}", name),
+            EntityKind::Accessor => format!("Accessor {}", name),
             EntityKind::Constructor => "Constructor".to_string(),
             EntityKind::Field => format!("Field {}", name),
             EntityKind::Variable => format!("Variable {}", name),

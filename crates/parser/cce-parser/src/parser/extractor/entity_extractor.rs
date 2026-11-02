@@ -333,6 +333,12 @@ impl EntityExtractor {
         // relationships based on span containment, since tree-sitter returns
         // flat matches without nesting information.
 
+        // JavaScript one-hop indirect descriptors: `var desc = { get() {} }`
+        // passed by name into `defineProperty`. The direct gate cannot see
+        // through the variable, so downgrade matching pairs here before
+        // deduplication decides same-span winners.
+        downgrade_indirect_descriptor_accessors(&mut entities, tree, source, language);
+
         // Second pass: deduplicate entities with same span
         // Tree-sitter may return multiple captures for the same code entity.
         // Keep only the most specific entity for each span.
@@ -443,7 +449,7 @@ impl EntityExtractor {
         let main_capture = capture_module::parser::find_main_capture(mat)?;
         let name_capture = capture_module::parser::find_name_capture(mat)?;
 
-        let kind = match capture_module::determine_entity_kind(&main_capture.name) {
+        let mut kind = match capture_module::determine_entity_kind(&main_capture.name) {
             Some(kind) => kind,
             None => {
                 // `LangHeuristics` plugin hook: custom query capture names that
@@ -480,25 +486,31 @@ impl EntityExtractor {
         // JavaScript: a function-valued `pair` inside an
         // `Object.defineProperty` / `Object.defineProperties` descriptor
         // argument (`{ get: function getrouter() {...} }`) declares a
-        // property accessor, not a callable method. Emitting the key
-        // (`get`) as a method entity mis-binds every `this.get(...)` site
-        // to the getter. Descriptor objects are metadata, so no entity is
-        // produced and the accessor body stays attributed to the enclosing
-        // function. Only pair keys are gated: member-assignment names hang
-        // under a member expression, never under a pair.
+        // property accessor, not a callable method. The key is downgraded
+        // to an accessor so call resolution never binds a call site to
+        // it, while the accessor body stays attached for outbound edges.
+        // Only pair keys are gated: member-assignment names hang under a
+        // member expression, never under a pair.
+        let mut descriptor_role: Option<String> = None;
+        let mut descriptor_span: Option<cce_types::Span> = None;
         if language == &Language::JavaScript
             && kind == cce_types::EntityKind::Method
             && main_capture.name == "entity.method"
         {
-            let in_descriptor = tree
+            let pair = tree
                 .root_node()
                 .descendant_for_byte_range(name_capture.start_byte, name_capture.end_byte)
                 .and_then(|key| key.parent())
-                .is_some_and(|pair| {
-                    pair.kind() == "pair" && pair_in_property_descriptor(pair, source.as_bytes())
+                .filter(|pair| {
+                    pair.kind() == "pair" && pair_in_property_descriptor(*pair, source.as_bytes())
                 });
-            if in_descriptor {
-                return None;
+            if let Some(pair) = pair {
+                kind = cce_types::EntityKind::Accessor;
+                descriptor_role = Some(name_capture.text.clone());
+                // Pair-method captures span the whole object literal, so
+                // sibling accessors in one descriptor would share one span
+                // and collapse in same-span dedup. Narrow to the pair.
+                descriptor_span = Some(crate::tree_sitter_query::utils::node_to_span(&pair));
             }
         }
         // `entity.macro.attribute.inner` shares the `attribute` subtype with
@@ -555,6 +567,16 @@ impl EntityExtractor {
             Entity::new(id, kind, name_capture.text.clone(), span)
         };
         entity.subtype = subtype;
+        if let Some(span) = descriptor_span {
+            entity.span = span;
+        }
+        if let Some(role) = descriptor_role {
+            entity.set_metadata(
+                cce_types::entity::meta_keys::DESCRIPTOR_ACCESSOR,
+                "true".to_string(),
+            );
+            entity.set_metadata(cce_types::entity::meta_keys::ACCESSOR_ROLE, role);
+        }
 
         // Strip Ruby symbol prefix (`:name` → `name`) for attr_reader/
         // attr_writer/attr_accessor captures and other symbol-named entities.
@@ -724,6 +746,131 @@ fn call_defines_property(call: tree_sitter::Node, source: &[u8]) -> bool {
         node.utf8_text(source)
             .is_ok_and(|text| text == "defineProperty" || text == "defineProperties")
     })
+}
+
+/// Downgrade one-hop indirect descriptor accessors.
+///
+/// When a descriptor object is bound to a variable first (`var desc =
+/// { get() {} }; defineProperty(this, 'v', desc)`), the direct pair gate
+/// cannot prove the pairs are descriptor metadata. This pass collects
+/// the variable names passed as descriptor arguments, locates their
+/// object-literal initializers, and downgrades the function-valued pairs
+/// inside to accessors. Only direct pair children are considered and
+/// only one hop is followed; deeper forwarding keeps its entities.
+fn downgrade_indirect_descriptor_accessors(
+    entities: &mut [cce_types::Entity],
+    tree: &tree_sitter::Tree,
+    source: &str,
+    language: &Language,
+) {
+    if language != &Language::JavaScript || entities.is_empty() {
+        return;
+    }
+    let bytes = source.as_bytes();
+    let mut descriptor_vars: Vec<String> = Vec::new();
+    let mut declarators: Vec<(String, tree_sitter::Node)> = Vec::new();
+    collect_descriptor_sites(
+        &tree.root_node(),
+        bytes,
+        &mut descriptor_vars,
+        &mut declarators,
+    );
+    if descriptor_vars.is_empty() || declarators.is_empty() {
+        return;
+    }
+    for (name, value) in &declarators {
+        if !descriptor_vars.iter().any(|var| var == name) {
+            continue;
+        }
+        if value.kind() != "object" {
+            continue;
+        }
+        let mut child_cursor = value.walk();
+        for child in value.children(&mut child_cursor) {
+            if child.kind() != "pair" {
+                continue;
+            }
+            let Some(key) = child.child_by_field_name("key") else {
+                continue;
+            };
+            let Ok(key_text) = key.utf8_text(bytes) else {
+                continue;
+            };
+            let Some(nested) = child.child_by_field_name("value") else {
+                continue;
+            };
+            if !matches!(nested.kind(), "function_expression" | "arrow_function") {
+                continue;
+            }
+            for entity in entities.iter_mut() {
+                if entity.kind != cce_types::EntityKind::Method || entity.name != key_text {
+                    continue;
+                }
+                // Pair-method captures span the whole object literal, so
+                // containment runs from the entity toward the pair: the
+                // entity must cover the pair it names.
+                if entity.span.start_byte <= child.start_byte()
+                    && child.end_byte() <= entity.span.end_byte
+                {
+                    entity.kind = cce_types::EntityKind::Accessor;
+                    // Same narrowing as the direct gate: pair-method
+                    // captures span the whole literal, so sibling keys
+                    // would collapse without it.
+                    entity.span = crate::tree_sitter_query::utils::node_to_span(&child);
+                    entity.set_metadata(
+                        cce_types::entity::meta_keys::DESCRIPTOR_ACCESSOR,
+                        "true".to_string(),
+                    );
+                    entity.set_metadata(
+                        cce_types::entity::meta_keys::ACCESSOR_ROLE,
+                        key_text.to_string(),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Walk the syntax tree once, recording descriptor-position variables
+/// and variable declarators with their initializer nodes.
+fn collect_descriptor_sites<'tree>(
+    node: &tree_sitter::Node<'tree>,
+    source: &[u8],
+    descriptor_vars: &mut Vec<String>,
+    declarators: &mut Vec<(String, tree_sitter::Node<'tree>)>,
+) {
+    if node.kind() == "call_expression" && call_defines_property(*node, source) {
+        if let Some(args) = node.child_by_field_name("arguments") {
+            let mut cursor = args.walk();
+            let mut last_name: Option<String> = None;
+            for child in args.children(&mut cursor) {
+                if child.is_named() {
+                    last_name = None;
+                    if child.kind() == "identifier" {
+                        last_name = child.utf8_text(source).ok().map(str::to_string);
+                    }
+                }
+            }
+            if let Some(name) = last_name {
+                if !descriptor_vars.contains(&name) {
+                    descriptor_vars.push(name);
+                }
+            }
+        }
+    }
+    if node.kind() == "variable_declarator" {
+        if let (Some(name_node), Some(value)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        ) && let Ok(name) = name_node.utf8_text(source)
+        {
+            declarators.push((name.to_string(), value));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_descriptor_sites(&child, source, descriptor_vars, declarators);
+    }
 }
 
 fn adjust_namespace_spans(entities: &mut [cce_types::Entity], source: &str, language: &Language) {

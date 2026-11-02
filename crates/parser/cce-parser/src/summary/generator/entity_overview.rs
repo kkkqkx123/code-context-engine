@@ -103,6 +103,7 @@ impl SummarySection {
             EntityKind::TraitImpl | EntityKind::InherentImpl => Some(Self::Implementations),
             EntityKind::Function
             | EntityKind::Method
+            | EntityKind::Accessor
             | EntityKind::Constructor
             | EntityKind::Destructor
             | EntityKind::Operator => Some(Self::Functions),

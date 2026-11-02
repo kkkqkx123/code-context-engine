@@ -433,27 +433,43 @@ impl RelationResolver {
             if args.len() < 2 || args[0].trim() != receiver {
                 continue;
             }
-            let src_alias = args[1].trim();
-            if !super::is_bare_identifier(src_alias) {
-                continue;
+            // `Object.assign` is variadic (`assign(target, ...sources)`):
+            // every source position is tried in order and the first
+            // relative-import source that resolves the member wins.
+            // A single-source `mixin(target, source)` is the two-arg case.
+            for src_alias in args.iter().skip(1).map(|arg| arg.trim()) {
+                if !super::is_bare_identifier(src_alias) {
+                    continue;
+                }
+                let Some(import) = parsed
+                    .import_table
+                    .as_ref()?
+                    .standardized_imports
+                    .iter()
+                    .find(|import| {
+                        let local = import.alias.as_deref().unwrap_or(&import.target.local_name);
+                        local == src_alias && import.is_relative
+                    })
+                else {
+                    continue;
+                };
+                let Some(package) = ctx.symbol_table.get_package_for_file(&parsed.path) else {
+                    continue;
+                };
+                let Some(target) =
+                    package.get_module_by_relative_source(&parsed.path, &import.source)
+                else {
+                    continue;
+                };
+                if let Some(id) = self.resolve_entity_by_name(
+                    member,
+                    Some(&target.file_path),
+                    Some(&parsed.path),
+                    ctx.entity_index,
+                ) {
+                    return Some(id);
+                }
             }
-            let import = parsed
-                .import_table
-                .as_ref()?
-                .standardized_imports
-                .iter()
-                .find(|import| {
-                    let local = import.alias.as_deref().unwrap_or(&import.target.local_name);
-                    local == src_alias && import.is_relative
-                })?;
-            let package = ctx.symbol_table.get_package_for_file(&parsed.path)?;
-            let target = package.get_module_by_relative_source(&parsed.path, &import.source)?;
-            return self.resolve_entity_by_name(
-                member,
-                Some(&target.file_path),
-                Some(&parsed.path),
-                ctx.entity_index,
-            );
         }
         None
     }

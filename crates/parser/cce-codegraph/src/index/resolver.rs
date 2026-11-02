@@ -444,6 +444,24 @@ impl RelationResolver {
             ) {
                 let (candidate_ref, candidate_id) =
                     self.resolve_name_candidate(&name, is_stdlib, &candidate_ctx);
+                // Calls never land on accessors: a descriptor `get` shares
+                // its name with real callables elsewhere, so taking it
+                // would misattribute the call. Skip the candidate and keep
+                // trying later names instead of settling for it.
+                // Constructible types stay valid targets: a bare call to a
+                // struct or class upgrades to a constructor edge below.
+                if candidate_id.is_some_and(|id| {
+                    raw_data.relation_type.is_call()
+                        && entity_index
+                            .get_function_by_entity_id(id)
+                            .is_some_and(|entity| {
+                                !entity.kind.is_callable_target()
+                                    && !entity.kind.is_constructible_type()
+                            })
+                }) {
+                    symbol_ref = symbol_ref.or(candidate_ref);
+                    continue;
+                }
                 if candidate_id.is_some() {
                     via_promoted = promoted_name.as_deref().is_some_and(|p| p == name.as_str())
                         || embedded_name.as_deref().is_some_and(|p| p == name.as_str());
@@ -681,12 +699,13 @@ impl RelationResolver {
             // Function references survive only when tied to a real function:
             // initializer lists also hold macro constants and enum values
             // that are syntactically indistinguishable, and an unresolved or
-            // non-function target carries no review value as an external edge.
+            // non-callable target carries no review value as an external edge.
+            // Accessors are function-shaped but never valid callees.
             if relation_type == cce_types::relation::RelationType::FunctionReference
                 && !effective_callee_id.is_some_and(|id| {
                     entity_index
                         .get_function_by_entity_id(id)
-                        .is_some_and(|callee| callee.kind.is_function_like())
+                        .is_some_and(|callee| callee.kind.is_callable_target())
                 })
             {
                 return None;
@@ -777,13 +796,13 @@ impl RelationResolver {
                 .next()
                 .unwrap_or(&raw_data.dst_name);
             let is_name_match = caller_name == callee_name && last_segment == caller_name;
-            // Qualified and bare aliases of one function share a span under
-            // different ids (`app.handle` vs `handle`): byte-identical,
-            // available spans in the same file with the same simple name are
-            // the same function, so they self-loop even when the entity ids
-            // differ and the id comparison above misses. Unavailable spans
-            // (synthetic nodes, unit-test fixtures) never qualify, and bare
-            // names alone never imply aliasing.
+            // The builder canonicalizes same-span aliases to one global ID,
+            // so distinct IDs with byte-identical spans should be rare
+            // (stale remaps, cross-space lookups). When they occur in one
+            // file with the same simple name they are still one function,
+            // so they self-loop even when the ID comparison above misses.
+            // Unavailable spans never qualify, and bare names alone never
+            // imply aliasing.
             let is_same_span_alias = match (
                 caller_entity_opt,
                 entity_index.get_function_by_entity_id(effective),
@@ -919,7 +938,8 @@ impl RelationResolver {
 
     /// Whether an entity may be the target of a cross-file function value.
     ///
-    /// Function-like kinds only; free `static` functions are confined to
+    /// Callable kinds only; accessors are function-shaped but never valid
+    /// callees. Free `static` functions are confined to
     /// their own file while every other shape keeps external visibility.
     fn is_visible_funcref_candidate(
         &self,
@@ -930,7 +950,7 @@ impl RelationResolver {
         entity_index
             .get_function_by_entity_id(id)
             .is_some_and(|entity| {
-                if !entity.kind.is_function_like() {
+                if !entity.kind.is_callable_target() {
                     return false;
                 }
                 if entity.kind == cce_types::EntityKind::Function
@@ -2167,13 +2187,16 @@ fn infer_literal_type_shape(text: &str, language: Language) -> Option<TypeShape>
     None
 }
 
-/// Whether the text is a bare ASCII identifier (no dots, colons, brackets,
+/// Whether the text is a bare identifier (no dots, colons, brackets,
 /// or quotes). Used by the callback-binding gates so only plain named
 /// references — never literals, chains, or inline closures — are bound.
+/// `$` is accepted alongside `_` because JavaScript identifiers may start
+/// with or contain it (`$app`, `$store`); rejecting it would blind mixin
+/// and receiver checks to common JS naming.
 fn is_bare_identifier(text: &str) -> bool {
     let mut chars = text.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
 fn extract_call_arguments(source: &str, span: cce_types::Span) -> Option<Vec<String>> {

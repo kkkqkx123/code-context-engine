@@ -23,6 +23,7 @@ pub fn entity_kind_from_plugin_kind(kind: &str) -> EntityKind {
     match kind {
         "function" | "route" | "handler" => EntityKind::Function,
         "method" => EntityKind::Method,
+        "accessor" => EntityKind::Accessor,
         "class" => EntityKind::Class,
         "struct" => EntityKind::Struct,
         "enum" => EntityKind::Enum,

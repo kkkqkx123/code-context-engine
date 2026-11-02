@@ -134,6 +134,7 @@ impl PresentationConverter {
         match kind {
             EntityKind::Function => "Function",
             EntityKind::Method => "Method",
+            EntityKind::Accessor => "Accessor",
             EntityKind::Constructor => "Constructor",
             EntityKind::Destructor => "Destructor",
             EntityKind::Operator => "Operator",

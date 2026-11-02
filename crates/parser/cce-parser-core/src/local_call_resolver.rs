@@ -141,10 +141,13 @@ impl LocalCallResolver {
             .filter(|r| r.relation_type.is_call())
             .collect();
 
-        // Build entity lookup map for faster access
+        // Build entity lookup map for faster access. Only callable
+        // targets participate: accessors are function-shaped (so they stay
+        // visible as callers via `by_id`) but binding a call to one
+        // misattributes the edge.
         let entity_map: HashMap<&str, Vec<&Entity>> = entities
             .iter()
-            .filter(|e| e.kind.is_function_like())
+            .filter(|e| e.kind.is_callable_target())
             .fold(HashMap::new(), |mut map, entity| {
                 map.entry(&entity.name)
                     .or_insert_with(Vec::new)

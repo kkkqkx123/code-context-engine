@@ -951,6 +951,7 @@ pub(crate) fn kind_label_lowercase(kind: EntityKind) -> &'static str {
     match kind {
         EntityKind::Function => "function",
         EntityKind::Method => "method",
+        EntityKind::Accessor => "accessor",
         EntityKind::Class => "class",
         EntityKind::Struct => "struct",
         EntityKind::Enum => "enum",

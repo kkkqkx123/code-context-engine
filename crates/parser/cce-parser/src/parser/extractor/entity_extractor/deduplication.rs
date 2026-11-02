@@ -182,7 +182,7 @@ fn select_best_entity(group: &[Entity]) -> usize {
         match kind {
             EntityKind::TestCase | EntityKind::TestSuite => 12,
             EntityKind::Method => 11,
-            EntityKind::Function => 10,
+            EntityKind::Function | EntityKind::Accessor => 10,
             EntityKind::Class
             | EntityKind::Struct
             | EntityKind::Enum

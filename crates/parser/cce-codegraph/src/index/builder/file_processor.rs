@@ -185,36 +185,162 @@ impl<'a> FileProcessor<'a> {
         // ParsedFile-local EntityIds are remapped to process-unique IDs
         // to prevent collisions when multiple files share overlapping local IDs
         // (e.g. during concurrent hot-update reparsing).
+        // Same-span alias canonicalization: one file may carry two local
+        // entities for one function (`app.handle` vs `handle` share
+        // byte-identical spans and the same simple name). They are one
+        // addressable node, so they share one global ID; the alias keeps
+        // only its remap entry. Unavailable spans never merge. Within a
+        // group the canonical entity prefers function-like kinds with the
+        // same priority the extractor dedup uses, so a surviving Variable
+        // can never shadow the Method it aliases.
         let mut remap: HashMap<EntityId, EntityId> = HashMap::with_capacity(file.entities.len());
-        for entity in &file.entities {
-            let new_id = self.index.allocate_entity_id();
-            remap.insert(entity.id, new_id);
+        let mut canonical_ids: Vec<EntityId> = Vec::with_capacity(file.entities.len());
+        let mut merged_children: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
+        let mut merged_parent: HashMap<EntityId, Option<EntityId>> = HashMap::new();
+        {
+            let priority = |kind: &cce_types::EntityKind| -> u8 {
+                use cce_types::EntityKind as Kind;
+                match kind {
+                    Kind::Method => 11,
+                    Kind::Function => 10,
+                    Kind::Class | Kind::Struct | Kind::Enum | Kind::Trait | Kind::Interface => 9,
+                    _ if kind.is_function_like() => 10,
+                    _ => 0,
+                }
+            };
+            let local_to_entity: HashMap<EntityId, &cce_types::Entity> =
+                file.entities.iter().map(|e| (e.id, e)).collect();
+            let mut groups: HashMap<(usize, usize, String), Vec<EntityId>> = HashMap::new();
+            for entity in &file.entities {
+                if !entity.span.is_available() {
+                    canonical_ids.push(entity.id);
+                    continue;
+                }
+                let simple = entity
+                    .name
+                    .rsplit(['.', ':'])
+                    .next()
+                    .unwrap_or(entity.name.as_str())
+                    .to_string();
+                groups
+                    .entry((entity.span.start_byte, entity.span.end_byte, simple))
+                    .or_default()
+                    .push(entity.id);
+            }
+            let mut ordered_keys: Vec<(usize, usize, String)> = groups.keys().cloned().collect();
+            ordered_keys.sort();
+            let mut canonical_set: HashMap<EntityId, bool> = HashMap::new();
+            let mut alias_to_canonical: HashMap<EntityId, EntityId> = HashMap::new();
+            for key in ordered_keys {
+                let ids = groups.remove(&key).unwrap_or_default();
+                if ids.len() <= 1 {
+                    if let Some(id) = ids.first() {
+                        canonical_set.insert(*id, true);
+                    }
+                    continue;
+                }
+                let mut best = ids[0];
+                let mut best_score = 0u8;
+                let mut first = true;
+                for id in &ids {
+                    let score = local_to_entity
+                        .get(id)
+                        .map(|e| priority(&e.kind))
+                        .unwrap_or(0);
+                    if first || score > best_score {
+                        best_score = score;
+                        best = *id;
+                        first = false;
+                    }
+                }
+                canonical_set.insert(best, true);
+                let mut children_union: Vec<EntityId> = Vec::new();
+                let mut parent_choice: Option<EntityId> = None;
+                for id in &ids {
+                    if *id == best {
+                        continue;
+                    }
+                    alias_to_canonical.insert(*id, best);
+                }
+                for id in &ids {
+                    if let Some(entity) = local_to_entity.get(id) {
+                        if parent_choice.is_none() {
+                            parent_choice = entity.parent;
+                        }
+                        for child in &entity.children {
+                            if !children_union.contains(child) {
+                                children_union.push(*child);
+                            }
+                        }
+                    }
+                }
+                if !children_union.is_empty() {
+                    merged_children.insert(best, children_union);
+                }
+                merged_parent.insert(best, parent_choice);
+            }
+            for entity in &file.entities {
+                if entity.span.is_available() {
+                    if canonical_set.contains_key(&entity.id) {
+                        canonical_ids.push(entity.id);
+                    }
+                }
+            }
+            for local_id in &canonical_ids {
+                let new_id = self.index.allocate_entity_id();
+                remap.insert(*local_id, new_id);
+            }
+            for (alias_local, canonical_local) in alias_to_canonical {
+                if let Some(canonical_global) = remap.get(&canonical_local).copied() {
+                    remap.insert(alias_local, canonical_global);
+                }
+            }
         }
-        let remapped_entities: Vec<(EntityId, cce_types::Entity, String)> = file
-            .entities
+        let local_to_entity: HashMap<EntityId, &cce_types::Entity> =
+            file.entities.iter().map(|e| (e.id, e)).collect();
+        let remapped_entities: Vec<(EntityId, cce_types::Entity, String)> = canonical_ids
             .iter()
+            .filter_map(|local_id| local_to_entity.get(local_id))
             .map(|e| {
                 let new_id = remap
                     .get(&e.id)
                     .copied()
                     .expect("remap must contain entity id");
-                let mut entity = e.clone();
+                let mut entity = (*e).clone();
                 entity.id = new_id;
-                if let Some(pid) = entity.parent {
+                if let Some(merged) = merged_parent.get(&e.id) {
+                    entity.parent = merged.as_ref().and_then(|pid| remap.get(pid).copied());
+                } else if let Some(pid) = entity.parent {
                     entity.parent = remap.get(&pid).copied();
                 }
-                entity.children = entity
+                let mut children = entity
                     .children
                     .iter()
                     .filter_map(|cid| remap.get(cid).copied())
-                    .collect();
+                    .collect::<Vec<_>>();
+                if let Some(extra) = merged_children.get(&e.id) {
+                    for child_local in extra {
+                        if let Some(child_global) = remap.get(child_local).copied() {
+                            if !children.contains(&child_global) {
+                                children.push(child_global);
+                            }
+                        }
+                    }
+                }
+                entity.children = children;
                 (new_id, entity, normalized_path.clone())
             })
             .collect();
         self.index.add_functions_with_paths(remapped_entities);
 
         let scoped_names = file.resolve_all_scoped_names();
-        for entity in &file.entities {
+        let canonical_lookup: std::collections::HashSet<EntityId> =
+            canonical_ids.iter().copied().collect();
+        for entity in file
+            .entities
+            .iter()
+            .filter(|e| canonical_lookup.contains(&e.id))
+        {
             // Every entity is registered, including import directives: they
             // appear as inheritance/reference edge endpoints in the graph, so
             // leaving them unregistered would force clients onto a second,

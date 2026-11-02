@@ -45,4 +45,15 @@ pub const BASE_CLASSES: &str = "base_classes";
 
 pub const PARAM_DEFAULTS: &str = "param_defaults";
 
+/// Marks an entity downgraded from a property-descriptor function key.
+/// Present only on accessors proven (directly or via a one-hop variable)
+/// to sit inside a `defineProperty`/`defineProperties` descriptor argument.
+/// Call resolution consults the entity kind, not this flag; the flag keeps
+/// the provenance auditable for review tooling.
+pub const DESCRIPTOR_ACCESSOR: &str = "descriptor_accessor";
+
+/// Accessor role within its descriptor (`get`, `set`, or the literal key
+/// for value-style fields). Recorded alongside [`DESCRIPTOR_ACCESSOR`].
+pub const ACCESSOR_ROLE: &str = "accessor_role";
+
 pub const IMPL_SOURCE_INHERENT: &str = "inherent";

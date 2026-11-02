@@ -77,6 +77,11 @@ pub enum EntityKind {
     /// Constructor
     #[serde(rename = "constructor")]
     Constructor,
+    /// Property accessor (JavaScript `get`/`set` in a property descriptor).
+    /// Function-shaped: carries parameters and a body and may issue calls,
+    /// but never serves as a call target.
+    #[serde(rename = "accessor")]
+    Accessor,
     /// Destructor
     #[serde(rename = "destructor")]
     Destructor,
@@ -221,6 +226,7 @@ impl std::fmt::Display for EntityKind {
             EntityKind::Function => write!(f, "function"),
             EntityKind::Method => write!(f, "method"),
             EntityKind::Constructor => write!(f, "constructor"),
+            EntityKind::Accessor => write!(f, "accessor"),
             EntityKind::Destructor => write!(f, "destructor"),
             EntityKind::Operator => write!(f, "operator"),
             EntityKind::Field => write!(f, "field"),
@@ -325,8 +331,31 @@ impl EntityKind {
         matches!(self, EntityKind::Annotation)
     }
 
-    /// Check if this is a function/method
+    /// Check if this is a function/method.
+    ///
+    /// Accessors share the function shape (parameters, body, callers), so
+    /// shape-driven passes (parenting, callers, grouping) keep working.
+    /// Call-target validation must use `is_callable_target` instead: an
+    /// accessor is never a valid callee.
     pub fn is_function_like(&self) -> bool {
+        matches!(
+            self,
+            EntityKind::Function
+                | EntityKind::Method
+                | EntityKind::Accessor
+                | EntityKind::Constructor
+                | EntityKind::Destructor
+                | EntityKind::Operator
+        )
+    }
+
+    /// Whether this kind may be the target of a call edge.
+    ///
+    /// Accessors and properties are excluded: a `get`/`set` key in a
+    /// property descriptor declares access behavior, so binding a call
+    /// site to it misattributes the call. Non-call references (property
+    /// reads, symbol queries) are unaffected.
+    pub fn is_callable_target(&self) -> bool {
         matches!(
             self,
             EntityKind::Function
@@ -496,6 +525,7 @@ impl EntityKind {
             EntityKind::Function => "function",
             EntityKind::Method => "method",
             EntityKind::Constructor => "constructor",
+            EntityKind::Accessor => "accessor",
             EntityKind::Destructor => "destructor",
             EntityKind::Operator => "operator",
             EntityKind::Field => "field",
@@ -659,5 +689,17 @@ mod tests {
                 "{kind:?} must NOT be treated as import-like"
             );
         }
+    }
+
+    #[test]
+    fn test_accessor_is_function_shaped_but_not_callable() {
+        // Accessors keep the function shape so parenting and caller-side
+        // passes treat them like functions, but no call edge may land on
+        // them and they carry no keyword value.
+        assert!(EntityKind::Accessor.is_function_like());
+        assert!(!EntityKind::Accessor.is_callable_target());
+        assert!(EntityKind::Accessor.can_be_caller());
+        assert!(!EntityKind::Accessor.is_named_semantic_entity());
+        assert!(!EntityKind::Accessor.is_variable_like());
     }
 }

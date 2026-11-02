@@ -245,6 +245,7 @@ impl FileFolder {
                         // Include functions
                         | EntityKind::Function
                         | EntityKind::Method
+                        | EntityKind::Accessor
                         | EntityKind::Constructor
                         // Include modules
                         | EntityKind::Module

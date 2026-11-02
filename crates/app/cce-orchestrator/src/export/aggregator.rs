@@ -152,7 +152,9 @@ enum EntityCategory {
     ModuleLike,
     /// Data members (field, property, constant)
     DataMember,
-    /// Callable entities (function, method, constructor, destructor, operator)
+    /// Callable entities (function, method, constructor, destructor, operator).
+    /// Accessors share the function shape for export priority but are never
+    /// call targets; see `is_callable_target`.
     Callable,
     /// Type definitions (class, struct, enum, interface, trait, type alias, union)
     TypeDef,
@@ -175,7 +177,8 @@ impl EntityCategory {
             | EntityKind::Method
             | EntityKind::Constructor
             | EntityKind::Destructor
-            | EntityKind::Operator => Self::Callable,
+            | EntityKind::Operator
+            | EntityKind::Accessor => Self::Callable,
 
             EntityKind::Field | EntityKind::Property | EntityKind::Constant => Self::DataMember,
 
@@ -283,6 +286,7 @@ impl FileAggregator {
                 | EntityKind::Union
                 | EntityKind::Function
                 | EntityKind::Method
+                | EntityKind::Accessor
                 | EntityKind::Constructor
                 | EntityKind::Destructor
                 | EntityKind::Operator

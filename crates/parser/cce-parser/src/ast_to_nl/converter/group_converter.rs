@@ -688,6 +688,7 @@ impl super::AstToNlConverter {
             EntityKind::TypeAlias => "type alias",
             EntityKind::Function => "function",
             EntityKind::Method => "method",
+            EntityKind::Accessor => "accessor",
             EntityKind::Constructor => "constructor",
             EntityKind::Destructor => "destructor",
             EntityKind::Operator => "operator",

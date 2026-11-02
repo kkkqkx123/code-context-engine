@@ -444,6 +444,7 @@ fn parse_entity_kind(s: &str) -> EntityKind {
         "Macro" => EntityKind::Macro,
         "Function" => EntityKind::Function,
         "Method" => EntityKind::Method,
+        "Accessor" => EntityKind::Accessor,
         "Constructor" => EntityKind::Constructor,
         "Destructor" => EntityKind::Destructor,
         "Operator" => EntityKind::Operator,
