@@ -8,11 +8,20 @@ pub struct HeaderHelper<'a> {
     config: &'a ChunkingConfig,
 }
 
+/// Source lines from which an undocumented member keeps its own chunk.
+///
+/// A ten-line `Publish` implementation carries an independent behavior even
+/// when its description is only a kind line plus a signature; a one-line
+/// `PublishCore` delegation does not. The threshold sits between the two so
+/// the former stands alone while the latter still rejoins its neighbor.
+pub(crate) const VIABLE_SOURCE_LINES: usize = 5;
+
 /// One standalone-eligible member plus the budgets that decide whether it
 /// may rejoin the previous member group instead of standing alone.
 struct PrevPack<'a> {
     member: &'a ConversionResult,
     member_text: &'a str,
+    member_source_lines: usize,
     first_budget: usize,
     continuation_budget: usize,
     separator_cost: usize,
@@ -133,8 +142,11 @@ impl<'a> HeaderHelper<'a> {
     /// as a chunk.
     ///
     /// On the Embedding path that means the member is flagged `self_contained`
-    /// (it carries its own docstring/behavior description), so its topic is
-    /// never diluted by adjacent members.
+    /// (it carries its own docstring/behavior description) or it owns a
+    /// multi-statement implementation (`member_source_lines` at or above
+    /// `VIABLE_SOURCE_LINES`), so its topic is never diluted by adjacent
+    /// members. An undocumented ten-line method keeps its identity; a
+    /// one-line delegation still rejoins its neighbor.
     ///
     /// On the BM25 path the member qualifies when it is `self_contained` or
     /// when its own source spans more than one line. A single declaration
@@ -151,6 +163,7 @@ impl<'a> HeaderHelper<'a> {
         path: ChunkPath,
         member_self_contained: &[bool],
         member_multiline: &[bool],
+        member_source_lines: &[usize],
     ) -> Vec<Vec<ConversionResult>> {
         if first_budget == usize::MAX {
             return vec![members.to_vec()];
@@ -182,8 +195,12 @@ impl<'a> HeaderHelper<'a> {
                 ChunkPath::Embedding => member.embedding_text.as_deref().unwrap_or(""),
             };
 
+            let member_source_lines = member_source_lines.get(idx).copied().unwrap_or(0);
             let may_stand_alone = match path {
-                ChunkPath::Embedding => member_self_contained.get(idx).copied().unwrap_or(false),
+                ChunkPath::Embedding => {
+                    member_self_contained.get(idx).copied().unwrap_or(false)
+                        || member_source_lines >= VIABLE_SOURCE_LINES
+                }
                 ChunkPath::Bm25 => {
                     member_self_contained.get(idx).copied().unwrap_or(false)
                         || member_multiline.get(idx).copied().unwrap_or(false)
@@ -212,6 +229,7 @@ impl<'a> HeaderHelper<'a> {
                     PrevPack {
                         member,
                         member_text,
+                        member_source_lines,
                         first_budget,
                         continuation_budget,
                         separator_cost,
@@ -267,15 +285,20 @@ impl<'a> HeaderHelper<'a> {
     /// Returns true when the member was packed (the caller must skip the
     /// standalone push). Packing applies in two cases: adjacent same-name
     /// overloads, which share one declaration identity, and tiny residues
-    /// below the min threshold, which have no retrieval value alone. The
-    /// combined text must fit the budget that governed the previous group;
-    /// multi-entity previous groups only absorb a same-name member when
-    /// every member they hold already shares that name, so unrelated
-    /// members never glue together through a shared neighbor.
+    /// below the min threshold, which have no retrieval value alone. A residue
+    /// is short on both axes: its natural-language cost is below the min
+    /// threshold and its source spans fewer than `VIABLE_SOURCE_LINES` lines.
+    /// A multi-statement implementation keeps its own chunk even when its
+    /// undocumented description is short; only a one-line delegation rejoins
+    /// its neighbor. The combined text must fit the budget that governed the
+    /// previous group; multi-entity previous groups only absorb a same-name
+    /// member when every member they hold already shares that name, so
+    /// unrelated members never glue together through a shared neighbor.
     fn pack_with_previous(&self, groups: &mut [Vec<ConversionResult>], pack: PrevPack) -> bool {
         let PrevPack {
             member,
             member_text,
+            member_source_lines,
             first_budget,
             continuation_budget,
             separator_cost,
@@ -291,7 +314,7 @@ impl<'a> HeaderHelper<'a> {
         };
         if member.name.is_empty() || !prev.iter().all(|m| m.name == member.name) {
             let member_cost = self.unit_count(member_text, path);
-            if member_cost >= min_cost {
+            if member_cost >= min_cost || member_source_lines >= VIABLE_SOURCE_LINES {
                 return false;
             }
         }
@@ -419,6 +442,7 @@ mod tests {
             let members = large_member_conversions(13);
             let self_contained = vec![false; members.len()];
             let multiline = vec![true; members.len()];
+            let source_lines = vec![0; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -426,6 +450,7 @@ mod tests {
                 ChunkPath::Bm25,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 13);
             assert!(groups.iter().all(|g| g.len() == 1));
@@ -441,6 +466,7 @@ mod tests {
             let members = member_conversions(13);
             let self_contained = vec![false; members.len()];
             let multiline = vec![true; members.len()];
+            let source_lines = vec![2; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -448,6 +474,7 @@ mod tests {
                 ChunkPath::Bm25,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].len(), 13);
@@ -471,6 +498,7 @@ mod tests {
                 .collect();
             let self_contained = vec![false; members.len()];
             let multiline = vec![true; members.len()];
+            let source_lines = vec![10; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -478,6 +506,7 @@ mod tests {
                 ChunkPath::Bm25,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].len(), 2);
@@ -490,6 +519,7 @@ mod tests {
             let members = member_conversions(13);
             let self_contained = vec![false; members.len()];
             let multiline = vec![false; members.len()];
+            let source_lines = vec![1; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -497,6 +527,7 @@ mod tests {
                 ChunkPath::Bm25,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].len(), 13);
@@ -511,6 +542,7 @@ mod tests {
             let members = large_member_conversions(3);
             let self_contained = vec![false, true, false];
             let multiline = vec![false; members.len()];
+            let source_lines = vec![1; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -518,6 +550,7 @@ mod tests {
                 ChunkPath::Bm25,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 3);
             assert!(groups.iter().all(|g| g.len() == 1));
@@ -530,6 +563,7 @@ mod tests {
             let members = member_conversions(3);
             let self_contained = vec![false; members.len()];
             let multiline = vec![false; members.len()];
+            let source_lines = vec![1; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -537,6 +571,7 @@ mod tests {
                 ChunkPath::Bm25,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 1);
         });
@@ -548,6 +583,7 @@ mod tests {
             let members = member_conversions(13);
             let self_contained = vec![false; members.len()];
             let multiline = vec![true; members.len()];
+            let source_lines = vec![2; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
@@ -555,8 +591,34 @@ mod tests {
                 ChunkPath::Embedding,
                 &self_contained,
                 &multiline,
+                &source_lines,
             );
             assert_eq!(groups.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_embedding_viable_source_lines_stand_alone() {
+        default_helper(|helper| {
+            // An undocumented ten-line implementation keeps its own chunk
+            // even when its description is short; tiny residues stay in
+            // the greedy tail instead of diluting the viable member.
+            let members = member_conversions(3);
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![true; members.len()];
+            let source_lines = vec![10, 10, 1];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Embedding,
+                &self_contained,
+                &multiline,
+                &source_lines,
+            );
+            assert_eq!(groups.len(), 3);
+            assert_eq!(groups[0].len(), 1);
+            assert_eq!(groups[1].len(), 1);
         });
     }
 }

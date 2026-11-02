@@ -58,6 +58,25 @@ pub(crate) fn entity_has_own_descriptor(group: &EntityGroup, entity_id: EntityId
         .is_some_and(|doc| !doc.trim().is_empty())
 }
 
+/// Source line count of one entity (`end.row - start.row + 1`).
+///
+/// Zero when the group holds no span for the entity. A multi-statement
+/// implementation keeps its retrieval identity even when its undocumented
+/// natural-language description falls below the chunk min threshold; a
+/// one-line delegation does not.
+pub(crate) fn entity_source_line_count(group: &EntityGroup, entity_id: EntityId) -> usize {
+    group
+        .entity_spans
+        .get(&entity_id)
+        .map(|span| {
+            span.end_position
+                .row
+                .saturating_sub(span.start_position.row)
+                .saturating_add(1)
+        })
+        .unwrap_or(0)
+}
+
 /// First contributing entity id of a chunk, excluding the group header
 /// (which is context on the header path, not content).
 fn first_content_entity_id<'a>(

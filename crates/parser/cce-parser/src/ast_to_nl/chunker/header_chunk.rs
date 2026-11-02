@@ -267,6 +267,10 @@ fn process_path(
                 .is_some_and(|span| span.end_position.row > span.start_position.row)
         })
         .collect();
+    let member_source_lines: Vec<usize> = member_convs
+        .iter()
+        .map(|m| super::chunk_builder::entity_source_line_count(ctx.group, m.entity_id))
+        .collect();
     let member_groups = input.helper.group_members_by_header_budget(
         member_convs,
         first_budget,
@@ -274,6 +278,7 @@ fn process_path(
         input.path,
         &member_self_contained,
         &member_multiline,
+        &member_source_lines,
     );
     let total = member_groups.len();
 
@@ -295,38 +300,42 @@ fn process_path(
                     continuation_for_block =
                         format!("{} {}.", first.kind.kind_label(), names.join(", "));
                 } else {
-                    let owner =
-                        if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str() {
-                            String::new()
-                        } else {
-                            format!("{}.{}", ctx.group.name, first.name)
-                        };
-                    let display = if owner.is_empty() {
-                        first.name.clone()
-                    } else {
-                        owner
-                    };
-                    // Continuation blocks name the members they hold. When
-                    // the member carries its own descriptor (docstring), it
-                    // is retrievable on its own: repeating the group topic
-                    // ahead of it only adds a shared common component that
-                    // pulls every block of the group toward the same
-                    // direction and dilutes the member's own signal.
-                    // Tiny members without a descriptor keep the group
-                    // topic so they still carry file-level intent.
+                    let qualified: Vec<String> = members
+                        .iter()
+                        .map(|m| {
+                            if ctx.group.name.is_empty() || ctx.group.name == m.name.as_str() {
+                                m.name.clone()
+                            } else {
+                                format!("{}.{}", ctx.group.name, m.name)
+                            }
+                        })
+                        .collect();
+                    let joined = qualified.join(", ");
+                    // Continuation blocks name every member they hold. Naming
+                    // only the first member leaves the rest as anonymous body
+                    // text, so a trailing member systematically loses retrieval
+                    // signal. The head is capped below, so long member lists
+                    // still degrade to the leading names only.
+                    // When the block carries its own descriptor it is
+                    // retrievable on its own: repeating the group topic ahead
+                    // of it only adds a shared common component that pulls
+                    // every block of the group toward the same direction and
+                    // dilutes the member's own signal. Tiny members without a
+                    // descriptor keep the group topic so they still carry
+                    // file-level intent.
                     if super::chunk_builder::entity_has_own_descriptor(ctx.group, first.entity_id) {
                         continuation_for_block =
-                            format!("{} {}.", first.kind.kind_label(), display);
+                            format!("{} {}.", first.kind.kind_label(), joined);
                     } else {
                         // Continuation blocks keep the group topic sentence ahead of
-                        // the member identity so split halves and tiny merged members
+                        // the member identities so split halves and tiny merged members
                         // still carry file-level intent in vector space.
                         continuation_for_block = format!(
                             "{} {}. {} {}.",
                             ctx.group.kind.kind_label(),
                             ctx.group.name,
                             first.kind.kind_label(),
-                            display
+                            joined
                         );
                     }
                 }

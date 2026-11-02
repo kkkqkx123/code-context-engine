@@ -66,8 +66,7 @@ fn resolve_calls_for_file(parsed_file: &ParsedFile) -> Vec<cce_parser_core::Loca
         enable_signature_matching: true,
         ..Default::default()
     };
-    cce_parser_core::LocalCallResolver::with_config(config)
-        .resolve_from_parsed_file(parsed_file)
+    cce_parser_core::LocalCallResolver::with_config(config).resolve_from_parsed_file(parsed_file)
 }
 
 pub struct PreprocessingPipeline {
@@ -242,8 +241,8 @@ impl PreprocessingPipeline {
         // Shared same-file call resolution for Stage 9 (`RESOLVED_CALLS`
         // injection). `parsed_file` is immutable across stages. Skipped when
         // the file carries no call relations.
-        let local_calls = (!parsed_file.raw_relations.is_empty())
-            .then(|| resolve_calls_for_file(parsed_file));
+        let local_calls =
+            (!parsed_file.raw_relations.is_empty()).then(|| resolve_calls_for_file(parsed_file));
 
         // Stage 2: Process test suites and test cases (if enabled)
         // Test suite processing happens before class-method to ensure test entities

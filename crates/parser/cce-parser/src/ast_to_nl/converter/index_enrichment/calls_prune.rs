@@ -186,10 +186,10 @@ pub(crate) fn normalize_callee(name: &str) -> &str {
     name.trim().trim_end_matches(['.', '!']).trim()
 }
 
-/// Split a comma-joined call list without breaking generic arguments.
+/// Split a comma-joined call list without breaking nested arguments.
 ///
-/// `HashMap<String, i32>::new` keeps its inner comma: only top-level
-/// commas (outside `<...>` nesting) separate entries. Each entry is
+/// `HashMap<String, i32>::new` keeps its inner comma, as does
+/// `Invoke(a, b)`: only top-level commas separate entries. Each entry is
 /// normalized and empty entries are dropped.
 pub(crate) fn split_call_list(raw: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -197,11 +197,11 @@ pub(crate) fn split_call_list(raw: &str) -> Vec<String> {
     let mut depth: usize = 0;
     for ch in raw.chars() {
         match ch {
-            '<' => {
+            '<' | '(' | '[' | '{' => {
                 depth = depth.saturating_add(1);
                 current.push(ch);
             }
-            '>' => {
+            '>' | ')' | ']' | '}' => {
                 depth = depth.saturating_sub(1);
                 current.push(ch);
             }
@@ -1122,6 +1122,15 @@ mod tests {
             "function demo.\ncalls: Candidate::new.\nReturns true.\nlet x = Candidate::\nnew(path);",
         );
         assert!(!out.contains("calls:"), "split qualifier prunes: {out:?}");
+    }
+
+    #[test]
+    fn split_call_list_keeps_paren_comma() {
+        let parts = split_call_list("Invoke(a, b), build_index.");
+        assert_eq!(
+            parts,
+            vec!["Invoke(a, b)".to_string(), "build_index".to_string()]
+        );
     }
 
     #[test]

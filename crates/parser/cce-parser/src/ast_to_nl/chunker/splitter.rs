@@ -446,14 +446,14 @@ impl TextSplitter {
     }
 
     /// Merge adjacent small segments whose combined cost fits within the
-    /// ceiling for `path`.
+    /// ceiling for `path` (pre-injection for same-entity fragments).
     ///
     /// Both merge layers (this intra-splitter pass and the cross-group
     /// pass in `merge::merge_small_chunks_cross_group`) share the same
     /// limits from `boundary::merge_limits`: a cross-entity merge happens
     /// when either side is still below the path's min threshold and the
     /// combined cost stays within the path's merge ceiling. Fragments of
-    /// one entity are instead packed up to the ceiling, so a long method
+    /// one entity are instead packed up to the pre-injection limit, so a long method
     /// does not stay fragmented at the min threshold. A single
     /// left-to-right greedy pass fully determines the result.
     ///
@@ -471,12 +471,13 @@ impl TextSplitter {
         path: ChunkPath,
     ) -> Vec<ChunkSegment> {
         let (min_threshold, ceiling) = self.merge_ceiling(path);
+        let same_unit_ceiling = self.budget(path).pre_injection_limit.max(ceiling);
         let mut merged: Vec<ChunkSegment> = Vec::with_capacity(segments.len());
         for segment in segments {
             if let Some(last) = merged.last_mut() {
                 // Fragments of one entity are packed back together up to the
-                // ceiling; pieces from different entities only merge when one
-                // of them is still undersized.
+                // pre-injection limit; pieces from different entities only merge
+                // when one of them is still undersized.
                 let same_unit = !last.boundary.entity_ids.is_empty()
                     && last.boundary.entity_ids == segment.boundary.entity_ids;
                 let last_test = ChunkBuilder::fragment_test_info(group, &last.boundary.entity_ids);
@@ -486,12 +487,13 @@ impl TextSplitter {
                     merged.push(segment);
                     continue;
                 }
+                let effective_ceiling = if same_unit { same_unit_ceiling } else { ceiling };
                 let mergeable = can_merge_with_ceiling(
                     &last.text,
                     &segment.text,
                     path,
                     min_threshold,
-                    ceiling,
+                    effective_ceiling,
                     same_unit,
                 );
                 if mergeable {
