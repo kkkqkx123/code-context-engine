@@ -32,7 +32,7 @@ use cce_types::ast_to_nl::ConversionResult;
 use cce_types::language::Language;
 use cce_types::{BehaviorFactKind, EntityId};
 use source_extract::{
-    extract_body_without_signature, extract_clean_source, find_entity_doc_comment,
+    code_body_start, extract_body_without_signature, extract_clean_source, find_entity_doc_comment,
     find_entity_signature, find_entity_span, is_docstring_statement, is_meaningful_code,
     strip_trailing_closers,
 };
@@ -240,6 +240,14 @@ impl<'a> IndexTextEnricher<'a> {
         let cf_facts = processing_result.control_flow.get(entity_id);
         let bf_facts = processing_result.behavior.get(entity_id);
 
+        // Facts fully inside the signature/docstring region describe no
+        // behavior; the template already owns that text. Straddling facts
+        // are clamped to the code body so re-extraction cannot pull raw
+        // documentation back into the sidecar.
+        let entity_span = find_entity_span(processing_result, entity_id);
+        let body_start =
+            entity_span.map(|(span_start, span_end)| code_body_start(source, span_start, span_end));
+
         let mut all_fragments: Vec<(usize, usize, String)> = Vec::new();
 
         if let Some(cf) = cf_facts {
@@ -247,9 +255,15 @@ impl<'a> IndexTextEnricher<'a> {
                 if fact.content_line_count == 0 {
                     continue;
                 }
-                let text = extract_clean_source(source, fact.start_byte, fact.end_byte);
+                if let Some(body) = body_start {
+                    if fact.end_byte <= body {
+                        continue;
+                    }
+                }
+                let start = body_start.map_or(fact.start_byte, |body| fact.start_byte.max(body));
+                let text = extract_clean_source(source, start, fact.end_byte);
                 if !text.trim().is_empty() {
-                    all_fragments.push((fact.start_byte, fact.end_byte, text));
+                    all_fragments.push((start, fact.end_byte, text));
                 }
             }
         }
@@ -274,9 +288,15 @@ impl<'a> IndexTextEnricher<'a> {
                 if is_docstring_statement(&fact.text) {
                     continue;
                 }
+                if let Some(body) = body_start {
+                    if fact.end_byte <= body {
+                        continue;
+                    }
+                }
+                let start = body_start.map_or(fact.start_byte, |body| fact.start_byte.max(body));
                 let is_inside_cf = cf_ranges
                     .iter()
-                    .any(|(s, e)| fact.start_byte >= *s && fact.end_byte <= *e);
+                    .any(|(s, e)| start >= *s && fact.end_byte <= *e);
                 if is_inside_cf {
                     continue;
                 }
@@ -288,15 +308,13 @@ impl<'a> IndexTextEnricher<'a> {
                 let text = if matches!(fact.kind, BehaviorFactKind::MacroBody) {
                     fact.text.clone()
                 } else {
-                    extract_clean_source(source, fact.start_byte, fact.end_byte)
+                    extract_clean_source(source, start, fact.end_byte)
                 };
                 if !text.trim().is_empty() {
-                    all_fragments.push((fact.start_byte, fact.end_byte, text));
+                    all_fragments.push((start, fact.end_byte, text));
                 }
             }
         }
-
-        let entity_span = find_entity_span(processing_result, entity_id);
 
         if all_fragments.is_empty() {
             if let Some((span_start, span_end)) = entity_span {
@@ -477,6 +495,61 @@ mod tests {
             "raw RST directives must be skipped"
         );
         assert!(result.contains("return 1"));
+    }
+
+    #[test]
+    fn test_build_extra_text_drops_pre_body_facts() {
+        use crate::grouper::types::{EntityGroup, GroupType};
+        use cce_types::Span;
+
+        let source = "@setupmethod\ndef register_blueprint(self, blueprint):\n    \"\"\"Register rhe blueprint.\"\"\"\n    blueprint.register(self)\n";
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group
+            .entity_spans
+            .insert(EntityId(1), Span::new(0, source.len(), 0, 0, 0, 0));
+        let mut bf_store = BehaviorStore::default();
+        let rogue_start = source.find("blueprint):").expect("signature tail");
+        let rogue_end = source.find("\"\"\"\n    blueprint").expect("docstring end") + 3;
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            "signature remnant",
+            rogue_start,
+            rogue_end,
+        ));
+        let call_text = "blueprint.register(self)";
+        let call_start = source.find(call_text).expect("call");
+        let call_end = call_start + call_text.len();
+        let straddle_start = source.find("rhe blueprint").expect("docstring body");
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            "straddling",
+            straddle_start,
+            call_end,
+        ));
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            call_text,
+            call_start,
+            call_end,
+        ));
+        let processing_result = ProcessingResult {
+            groups: vec![group],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let result = enricher
+            .build_extra_text(EntityId(1), &processing_result, source)
+            .expect("call fact should still produce text");
+        assert!(!result.contains("\"\"\""), "raw docstring must go");
+        assert!(
+            !result.contains("rhe blueprint"),
+            "signature-region facts must go"
+        );
+        assert!(!result.contains("setupmethod"), "decorators must go");
+        assert!(result.contains(call_text), "code body must stay");
     }
 
     #[test]

@@ -736,12 +736,16 @@ impl GroupChunker {
             .collect();
         let dropped_blank_segments = all_chunks.dropped_blank_segments;
 
-        // Cross-group merging and word overlap stay on the embedding path only.
-        // Merging BM25 chunks across groups would mix independent entities
-        // into one block, and overlap would repeat content across blocks.
-        // The type system guarantees Bm25Chunk cannot enter this path.
+        // Cross-group merging rescues undersized neighbours on both paths.
+        // BM25 tiny residues (single-line splinters, bare fields) are as poor
+        // retrieval units as their embedding counterparts, so they rejoin a
+        // same-kind neighbour within the merge ceiling. The shared kind and
+        // test guards still forbid mixing unrelated entities, and overlap
+        // stays embedding-only so BM25 documents never repeat content.
         let emb_chunks_inner: Vec<ChunkedResult> =
             emb_chunks.into_iter().map(|c| c.into_inner()).collect();
+        let bm25_inner: Vec<ChunkedResult> =
+            bm25_chunks.into_iter().map(|c| c.into_inner()).collect();
         let (emb_merge_reserve, bm25_merge_reserve) =
             self.batch_measured_reserves(group_conversions, file_path, language.as_deref());
         let mut merge_config = self.config.clone();
@@ -760,10 +764,11 @@ impl GroupChunker {
             &group_spans,
             &merge_config,
         );
+        let merged_bm25_chunks =
+            super::merge::merge_small_chunks_cross_group(bm25_inner, &group_spans, &merge_config);
 
         let mut emb_results: Vec<ChunkedResult> = merged_emb_chunks;
-        let mut bm25_results: Vec<ChunkedResult> =
-            bm25_chunks.into_iter().map(|c| c.into_inner()).collect();
+        let mut bm25_results: Vec<ChunkedResult> = merged_bm25_chunks;
 
         // The expansions are placed before the overlap, so the overlap a
         // chunk carries points into the text the retriever sees.

@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cross_group_no_merge_bm25_chunks_stay_independent() {
+    fn test_cross_group_bm25_tiny_rescue_merges() {
         let config = ChunkingConfig {
             min_chunk_bm25_terms: 80,
             max_bm25_terms: 150,
@@ -464,14 +464,10 @@ mod tests {
 
         assert_eq!(
             bm25_chunks.len(),
-            2,
-            "BM25 chunks must not be merged across groups"
+            1,
+            "tiny same-kind BM25 neighbours merge within the ceiling"
         );
         assert_eq!(bm25_chunks[0].path, ChunkPath::Bm25);
-        assert_ne!(
-            bm25_chunks[0].source_group_id, bm25_chunks[1].source_group_id,
-            "each BM25 chunk keeps its own group"
-        );
     }
 
     #[test]
@@ -642,13 +638,13 @@ mod tests {
             );
         }
 
-        // BM25 chunks are never merged across groups: each group yields
-        // independent chunks carrying per-group indices.
+        // Both paths merge tiny same-kind neighbours: each path yields one
+        // chunk carrying normalized per-path indices.
         let bm25_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
             .collect();
-        assert_eq!(bm25_chunks.len(), 2);
+        assert_eq!(bm25_chunks.len(), 1);
         for chunk in &bm25_chunks {
             assert_eq!(chunk.chunk_index, 0);
             assert_eq!(chunk.total_chunks, 1);

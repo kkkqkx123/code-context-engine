@@ -487,7 +487,11 @@ impl TextSplitter {
                     merged.push(segment);
                     continue;
                 }
-                let effective_ceiling = if same_unit { same_unit_ceiling } else { ceiling };
+                let effective_ceiling = if same_unit {
+                    same_unit_ceiling
+                } else {
+                    ceiling
+                };
                 let mergeable = can_merge_with_ceiling(
                     &last.text,
                     &segment.text,

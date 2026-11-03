@@ -169,6 +169,8 @@ pub(super) fn extract_body_without_signature(
         return String::new();
     }
     let rest: Vec<&str> = lines.collect();
+    let rest = skip_leading_signature_block(rest);
+    let rest = skip_leading_docstring_block(rest);
     if rest.is_empty() {
         return String::new();
     }
@@ -179,6 +181,195 @@ pub(super) fn extract_body_without_signature(
     } else {
         String::new()
     }
+}
+
+fn skip_leading_signature_block(lines: Vec<&str>) -> Vec<&str> {
+    let mut index = 0usize;
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+    while index < lines.len() && lines[index].trim_start().starts_with('@') {
+        index += 1;
+        while index < lines.len() && lines[index].trim().is_empty() {
+            index += 1;
+        }
+    }
+    if index >= lines.len() {
+        return Vec::new();
+    }
+    let trimmed = lines[index].trim_start();
+    let is_definition = trimmed.starts_with("def ")
+        || trimmed.starts_with("async def ")
+        || trimmed.starts_with("class ");
+    if is_definition {
+        while index < lines.len() && !lines[index].contains(':') {
+            index += 1;
+        }
+        if index < lines.len() {
+            index += 1;
+        }
+        while index < lines.len() && lines[index].trim().is_empty() {
+            index += 1;
+        }
+    }
+    lines[index..].to_vec()
+}
+
+fn skip_leading_docstring_block(lines: Vec<&str>) -> Vec<&str> {
+    let mut index = 0usize;
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+    if index >= lines.len() {
+        return Vec::new();
+    }
+    let delimiter = docstring_delimiter(lines[index]);
+    let Some(delimiter) = delimiter else {
+        return lines[index..].to_vec();
+    };
+    let opener = lines[index].trim_start();
+    if single_line_docstring(opener, delimiter) {
+        let mut rest = lines[index + 1..].to_vec();
+        while !rest.is_empty() && rest[0].trim().is_empty() {
+            rest.remove(0);
+        }
+        return rest;
+    }
+    let mut end = index + 1;
+    while end < lines.len() && !lines[end].contains(delimiter) {
+        end += 1;
+    }
+    if end < lines.len() {
+        end += 1;
+    }
+    let mut rest = lines[end..].to_vec();
+    while !rest.is_empty() && rest[0].trim().is_empty() {
+        rest.remove(0);
+    }
+    rest
+}
+
+/// First byte of executable code inside an entity span.
+///
+/// Skips decorators, the definition header (including multi-line
+/// signatures), and a leading docstring block. Any shape mismatch falls
+/// back to the span start, so filtering based on this offset stays a
+/// no-op for languages and layouts the scan does not understand.
+pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) -> usize {
+    let Some(window) = source.get(span_start..span_end) else {
+        return span_start;
+    };
+    let mut offsets: Vec<usize> = Vec::new();
+    let mut lines: Vec<&str> = Vec::new();
+    let mut cursor = span_start;
+    for piece in window.split_inclusive('\n') {
+        offsets.push(cursor);
+        lines.push(piece);
+        cursor += piece.len();
+    }
+    if lines.is_empty() {
+        return span_start;
+    }
+    let mut index = 0usize;
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+    loop {
+        while index < lines.len() && lines[index].trim().is_empty() {
+            index += 1;
+        }
+        if index < lines.len() && lines[index].trim_start().starts_with('@') {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    if index >= lines.len() {
+        return span_start;
+    }
+    let head = lines[index].trim_start();
+    let is_definition = head.starts_with("def ")
+        || head.starts_with("def\t")
+        || head.starts_with("async def ")
+        || head.starts_with("async def\t")
+        || head.starts_with("class ")
+        || head.starts_with("class\t");
+    if !is_definition {
+        return span_start;
+    }
+    let mut sig_end = index;
+    loop {
+        let line = lines[sig_end];
+        let code_part = line.split('#').next().unwrap_or(line);
+        if code_part.trim_end().ends_with(':') || code_part.contains("):") {
+            break;
+        }
+        sig_end += 1;
+        if sig_end >= lines.len() {
+            return span_start;
+        }
+    }
+    let end_code = lines[sig_end].split('#').next().unwrap_or(lines[sig_end]);
+    if !end_code.trim_end().ends_with(':') {
+        return span_start;
+    }
+    let mut body = sig_end + 1;
+    while body < lines.len() && lines[body].trim().is_empty() {
+        body += 1;
+    }
+    if body >= lines.len() {
+        return span_end;
+    }
+    let opener = lines[body].trim_start();
+    let stripped = opener.trim_start_matches(['r', 'R', 'u', 'U', 'b', 'B', 'f', 'F']);
+    let delimiter = if stripped.starts_with("\"\"\"") {
+        Some("\"\"\"")
+    } else if stripped.starts_with("'''") {
+        Some("'''")
+    } else {
+        None
+    };
+    let Some(delimiter) = delimiter else {
+        return offsets[body];
+    };
+    let after_open = &stripped[delimiter.len()..];
+    if after_open.contains(delimiter) {
+        return if body + 1 < lines.len() {
+            offsets[body + 1]
+        } else {
+            span_end
+        };
+    }
+    let mut close = body + 1;
+    while close < lines.len() && !lines[close].contains(delimiter) {
+        close += 1;
+    }
+    if close >= lines.len() {
+        return span_start;
+    }
+    if close + 1 < lines.len() {
+        offsets[close + 1]
+    } else {
+        span_end
+    }
+}
+
+fn docstring_delimiter(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("\"\"\"") {
+        Some("\"\"\"")
+    } else if trimmed.starts_with("'''") {
+        Some("'''")
+    } else {
+        None
+    }
+}
+
+fn single_line_docstring(trimmed_start: &str, delimiter: &str) -> bool {
+    let Some(after_open) = trimmed_start.strip_prefix(delimiter) else {
+        return false;
+    };
+    after_open.contains(delimiter)
 }
 
 pub(super) fn is_meaningful_code(text: &str) -> bool {
@@ -260,5 +451,29 @@ mod tests {
         assert_eq!(lines[1], "    let mut buffer = Vec::new();");
         assert_eq!(lines[2], "} else {");
         assert_eq!(lines[3], "    return;");
+    }
+
+    #[test]
+    fn code_body_start_skips_decorator_signature_and_docstring() {
+        let source = "@setupmethod\ndef register_blueprint(self, blueprint):\n    \"\"\"Register the blueprint.\n\n    Details here.\n    \"\"\"\n    blueprint.register(self)\n";
+        let body = code_body_start(source, 0, source.len());
+        assert_eq!(&source[body..], "    blueprint.register(self)\n");
+    }
+
+    #[test]
+    fn code_body_start_handles_multiline_signature() {
+        let source = "def f(\n    a,\n    b=1,\n):\n    \"\"\"Doc.\"\"\"\n    return a\n";
+        let body = code_body_start(source, 0, source.len());
+        assert_eq!(&source[body..], "    return a\n");
+    }
+
+    #[test]
+    fn code_body_start_falls_back_for_unknown_shapes() {
+        let rust = "fn demo() {\n    let x = 1;\n}";
+        assert_eq!(code_body_start(rust, 0, rust.len()), 0);
+        let one_liner = "def f(): return 1\n";
+        assert_eq!(code_body_start(one_liner, 0, one_liner.len()), 0);
+        let unterminated = "def f():\n    \"\"\"never closed\n    return 1\n";
+        assert_eq!(code_body_start(unterminated, 0, unterminated.len()), 0);
     }
 }

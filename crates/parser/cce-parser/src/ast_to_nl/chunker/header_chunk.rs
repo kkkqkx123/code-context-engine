@@ -324,8 +324,7 @@ fn process_path(
                     // descriptor keep the group topic so they still carry
                     // file-level intent.
                     if super::chunk_builder::entity_has_own_descriptor(ctx.group, first.entity_id) {
-                        continuation_for_block =
-                            format!("{} {}.", first.kind.kind_label(), joined);
+                        continuation_for_block = format!("{} {}.", first.kind.kind_label(), joined);
                     } else {
                         // Continuation blocks keep the group topic sentence ahead of
                         // the member identities so split halves and tiny merged members

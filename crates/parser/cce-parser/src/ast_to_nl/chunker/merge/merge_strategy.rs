@@ -80,7 +80,7 @@ pub(crate) fn should_merge(
     ) {
         return false;
     }
-    // Tiny-rescue (Embedding-only): a residue far below the min threshold
+    // Tiny-rescue: a residue far below the min threshold
     // (sentence splinters, bare fields, header-only tails) is a poor
     // retrieval unit on its own. Within one group such fragments only
     // rejoin the unit they were split from, so fold a tiny side back into
@@ -92,7 +92,7 @@ pub(crate) fn should_merge(
     // would mislabel the merged chunk, so the kind gate below still
     // applies there. Documented topics are protected by the veto above
     // and never reach this branch; the test boundary is never crossed.
-    if path == ChunkPath::Embedding {
+    {
         let (min_threshold, _) = merge_limits(path, &budget);
         let tiny = min_threshold / 3;
         let prev_cost = cost(&prev.text, path);
