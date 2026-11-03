@@ -787,6 +787,11 @@ impl GroupChunker {
         let mut result = Vec::with_capacity(total_chunks);
         result.extend(emb_chunks.into_iter().map(|c| c.into_inner()));
         result.extend(bm25_results);
+        // Overview cards give split members a single-hit unit: the head of
+        // the first fragment over the union of the fragments' spans.
+        // Plugin outputs bypass the built-in chunker, so they own their
+        // whole text and never receive cards.
+        super::overview::synthesize_overviews(&mut result);
         Ok(ChunkOutput {
             chunks: result,
             dropped_blank_segments,

@@ -100,6 +100,7 @@ pub mod header;
 pub mod header_chunk;
 pub mod limits;
 pub mod overlap;
+mod overview;
 pub mod result;
 pub mod single_path;
 pub mod source_coverage;

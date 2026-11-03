@@ -24,6 +24,8 @@ pub enum SplitReason {
     /// Not split (single chunk)
     #[default]
     NotSplit,
+    /// Overview card for a member split across fragments
+    Overview,
 }
 
 impl std::fmt::Display for SplitReason {
@@ -36,6 +38,7 @@ impl std::fmt::Display for SplitReason {
             SplitReason::TokenLimit => write!(f, "token_limit"),
             SplitReason::HardLimit => write!(f, "hard_limit"),
             SplitReason::NotSplit => write!(f, "not_split"),
+            SplitReason::Overview => write!(f, "overview"),
         }
     }
 }
