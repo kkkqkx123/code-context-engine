@@ -126,6 +126,9 @@ pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
     let mut ordered: Vec<((ChunkPath, EntityId), Vec<usize>)> = by_entity.into_iter().collect();
     ordered.sort_by_key(|(_, indices)| indices[0]);
     for ((path, _), mut indices) in ordered {
+        if path != ChunkPath::Embedding {
+            continue;
+        }
         if !split_chain(&indices, chunks) {
             continue;
         }
@@ -357,7 +360,7 @@ mod tests {
         let mut chunks = vec![
             chunk(
                 "g",
-                ChunkPath::Bm25,
+                ChunkPath::Embedding,
                 0,
                 2,
                 Some(EntityId(7)),
@@ -367,7 +370,7 @@ mod tests {
             ),
             chunk(
                 "g",
-                ChunkPath::Bm25,
+                ChunkPath::Embedding,
                 1,
                 2,
                 Some(EntityId(7)),
@@ -417,5 +420,33 @@ mod tests {
         let mut chunks = vec![head, body];
         synthesize_overviews(&mut chunks);
         assert_eq!(chunks.len(), 2, "far-apart chunks never chain");
+    }
+
+    #[test]
+    fn word_path_split_gains_no_card() {
+        let mut chunks = vec![
+            chunk(
+                "g",
+                ChunkPath::Bm25,
+                0,
+                2,
+                Some(EntityId(7)),
+                0,
+                50,
+                "is match returns true",
+            ),
+            chunk(
+                "g",
+                ChunkPath::Bm25,
+                1,
+                2,
+                Some(EntityId(7)),
+                50,
+                90,
+                "candidate amortizes",
+            ),
+        ];
+        synthesize_overviews(&mut chunks);
+        assert_eq!(chunks.len(), 2, "word path keeps fragments without a card");
     }
 }
