@@ -2,10 +2,13 @@
 //!
 //! A member whose converted text exceeds the path budget is split into
 //! fragments, so a single retrieval hit cannot cover the labelled range.
-//! For every member whose coverage spreads over a chain of adjacent
-//! chunks, this pass appends one overview card: the head of the earliest
-//! pure fragment over the union of the chain's source spans. The card is
-//! an ordinary indexed chunk, so one hit recovers the whole member.
+//! For every embedding member whose coverage spreads over a chain of
+//! adjacent chunks, this pass appends one overview card: the head of the
+//! earliest pure fragment over the union of the chain's source spans.
+//! The card is an ordinary indexed chunk, so one hit recovers the whole
+//! member. Only the embedding path receives cards; the term path relies
+//! on segment merging for group recovery and skips cards to avoid
+//! near-duplicate competition.
 //!
 //! A pure single-entity fragment anchors the chain; adjacency tells a
 //! real split with spillover apart from a far-away chunk that merely
@@ -161,6 +164,9 @@ fn union_heads(
 pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
     let mut by_entity: HashMap<(ChunkPath, EntityId), Vec<usize>> = HashMap::new();
     for (index, chunk) in chunks.iter().enumerate() {
+        if chunk.path != ChunkPath::Embedding {
+            continue;
+        }
         let covers = chunk
             .metadata
             .as_code()
@@ -185,6 +191,9 @@ pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
     let mut ordered: Vec<((ChunkPath, EntityId), Vec<usize>)> = by_entity.into_iter().collect();
     ordered.sort_by_key(|(_, indices)| indices[0]);
     for ((path, _), mut indices) in ordered {
+        if path != ChunkPath::Embedding {
+            continue;
+        }
         if !split_chain(&indices, chunks) {
             continue;
         }
@@ -226,8 +235,8 @@ pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
         }
         let union_span =
             cce_types::Span::new(start_byte, end_byte, start_row, start_col, end_row, end_col);
-        // The card text is built after the union span is known so the BM25
-        // union fill can admit only fragments inside the promised span.
+        // Embedding cards keep the single-head text: the similarity model
+        // degrades on stitched text. The term path no longer reaches here.
         let overview = if path == ChunkPath::Bm25 {
             union_heads(chunks, first, path, start_byte, end_byte)
         } else {
@@ -421,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_spillover_produces_card() {
+    fn adjacent_spillover_produces_no_card_on_term_path() {
         let mut chunks = vec![
             chunk(
                 "g",
@@ -452,6 +461,41 @@ mod tests {
             .content_entity_ids
             .push(EntityId(8));
         synthesize_overviews(&mut chunks);
+        assert_eq!(chunks.len(), 2, "term path skips overview cards");
+    }
+
+    #[test]
+    fn embedding_spillover_produces_card() {
+        let mut chunks = vec![
+            chunk(
+                "g",
+                ChunkPath::Embedding,
+                0,
+                2,
+                Some(EntityId(7)),
+                0,
+                50,
+                "is match returns true",
+            ),
+            chunk(
+                "g",
+                ChunkPath::Embedding,
+                1,
+                2,
+                Some(EntityId(7)),
+                50,
+                90,
+                "candidate amortizes",
+            ),
+        ];
+        chunks[1]
+            .metadata
+            .code_metadata
+            .as_mut()
+            .expect("code metadata present")
+            .content_entity_ids
+            .push(EntityId(8));
+        synthesize_overviews(&mut chunks);
         assert_eq!(chunks.len(), 3, "spillover tail still chains");
         let card = chunks.last().expect("card present");
         assert_eq!(card.start_byte, 0, "union covers the head");
@@ -459,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn bm25_card_fills_union_vocabulary_from_sibling_fragments() {
+    fn term_path_skips_union_vocabulary_fill() {
         let mut chunks = vec![
             chunk(
                 "g",
@@ -483,22 +527,11 @@ mod tests {
             ),
         ];
         synthesize_overviews(&mut chunks);
-        assert_eq!(chunks.len(), 3, "one card appended");
-        let card = chunks.last().expect("card present");
-        assert!(
-            card.text.contains("is match returns true"),
-            "head leads: {}",
-            card.text
-        );
-        assert!(
-            card.text.contains("candidate amortizes"),
-            "sibling vocabulary fills the union card: {}",
-            card.text
-        );
+        assert_eq!(chunks.len(), 2, "term path skips overview cards");
     }
 
     #[test]
-    fn bm25_card_skips_sibling_head_already_contained() {
+    fn term_path_skips_duplicate_guard() {
         let mut chunks = vec![
             chunk(
                 "g",
@@ -522,14 +555,7 @@ mod tests {
             ),
         ];
         synthesize_overviews(&mut chunks);
-        assert_eq!(chunks.len(), 3, "one card appended");
-        let card = chunks.last().expect("card present");
-        assert_eq!(
-            card.text.matches("beta gamma").count(),
-            1,
-            "contained sibling head adds no second copy: {}",
-            card.text
-        );
+        assert_eq!(chunks.len(), 2, "term path skips overview cards");
     }
 
     #[test]
