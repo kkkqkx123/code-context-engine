@@ -8,6 +8,13 @@ pub struct HeaderHelper<'a> {
     config: &'a ChunkingConfig,
 }
 
+/// Per-member signals consumed by `HeaderHelper::group_members_by_header_budget`.
+pub struct MemberSignals<'a> {
+    pub self_contained: &'a [bool],
+    pub multiline: &'a [bool],
+    pub source_lines: &'a [usize],
+}
+
 /// Source lines from which an undocumented member keeps its own chunk.
 ///
 /// A ten-line `Publish` implementation carries an independent behavior even
@@ -161,9 +168,7 @@ impl<'a> HeaderHelper<'a> {
         first_budget: usize,
         continuation_budget: usize,
         path: ChunkPath,
-        member_self_contained: &[bool],
-        member_multiline: &[bool],
-        member_source_lines: &[usize],
+        signals: MemberSignals<'_>,
     ) -> Vec<Vec<ConversionResult>> {
         if first_budget == usize::MAX {
             return vec![members.to_vec()];
@@ -195,15 +200,15 @@ impl<'a> HeaderHelper<'a> {
                 ChunkPath::Embedding => member.embedding_text.as_deref().unwrap_or(""),
             };
 
-            let member_source_lines = member_source_lines.get(idx).copied().unwrap_or(0);
+            let member_source_lines = signals.source_lines.get(idx).copied().unwrap_or(0);
             let may_stand_alone = match path {
                 ChunkPath::Embedding => {
-                    member_self_contained.get(idx).copied().unwrap_or(false)
+                    signals.self_contained.get(idx).copied().unwrap_or(false)
                         || member_source_lines >= VIABLE_SOURCE_LINES
                 }
                 ChunkPath::Bm25 => {
-                    member_self_contained.get(idx).copied().unwrap_or(false)
-                        || member_multiline.get(idx).copied().unwrap_or(false)
+                    signals.self_contained.get(idx).copied().unwrap_or(false)
+                        || signals.multiline.get(idx).copied().unwrap_or(false)
                 }
             };
             if may_stand_alone {
@@ -448,9 +453,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 13);
             assert!(groups.iter().all(|g| g.len() == 1));
@@ -472,9 +479,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].len(), 13);
@@ -504,9 +513,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].len(), 2);
@@ -525,9 +536,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].len(), 13);
@@ -548,9 +561,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 3);
             assert!(groups.iter().all(|g| g.len() == 1));
@@ -569,9 +584,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 1);
         });
@@ -589,9 +606,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Embedding,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 1);
         });
@@ -612,9 +631,11 @@ mod tests {
                 1000,
                 1000,
                 ChunkPath::Embedding,
-                &self_contained,
-                &multiline,
-                &source_lines,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
             );
             assert_eq!(groups.len(), 3);
             assert_eq!(groups[0].len(), 1);

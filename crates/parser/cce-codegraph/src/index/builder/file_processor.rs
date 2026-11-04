@@ -280,10 +280,8 @@ impl<'a> FileProcessor<'a> {
                 merged_parent.insert(best, parent_choice);
             }
             for entity in &file.entities {
-                if entity.span.is_available() {
-                    if canonical_set.contains_key(&entity.id) {
-                        canonical_ids.push(entity.id);
-                    }
+                if entity.span.is_available() && canonical_set.contains_key(&entity.id) {
+                    canonical_ids.push(entity.id);
                 }
             }
             for local_id in &canonical_ids {

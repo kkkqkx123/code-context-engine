@@ -276,9 +276,11 @@ fn process_path(
         first_budget,
         continuation_budget,
         input.path,
-        &member_self_contained,
-        &member_multiline,
-        &member_source_lines,
+        super::header::MemberSignals {
+            self_contained: &member_self_contained,
+            multiline: &member_multiline,
+            source_lines: &member_source_lines,
+        },
     );
     let total = member_groups.len();
 

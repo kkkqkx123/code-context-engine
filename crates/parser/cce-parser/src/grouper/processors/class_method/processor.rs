@@ -150,6 +150,15 @@ impl ClassMethodProcessor {
                 matches!(pattern_result.pattern_info, PatternInfo::GetterSetter(_));
             let should_merge = if pattern_result.methods.len() > MAX_MEMBERS_PER_CLASS {
                 false
+            } else if pattern_result.methods.is_empty() && !fields.is_empty() {
+                // A type with state but no behavior keeps its state: the
+                // fields join the type group instead of becoming one group
+                // per field. A head chunk covering the type can then name
+                // the fields it spans, and the declaration the fields
+                // describe is no longer separated from them. The size guard
+                // still applies, so an enormous field list keeps the
+                // existing separate layout.
+                line_count < LARGE_CLASS_THRESHOLD
             } else {
                 line_count < LARGE_CLASS_THRESHOLD
                     && (!pattern_result.methods.is_empty() || has_getter_setter)
@@ -194,7 +203,8 @@ impl ClassMethodProcessor {
                 }
                 association_count += 1;
             } else {
-                // Large class or no methods: keep separate
+                // Large class, or a methodless type without fields:
+                // keep separate groups.
                 let owner_language = ctx.language_for(&entity);
                 let mut group = EntityGroup::from_entity(entity.clone(), owner_language);
 

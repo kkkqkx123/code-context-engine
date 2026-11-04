@@ -858,14 +858,14 @@ fn collect_descriptor_sites<'tree>(
             }
         }
     }
-    if node.kind() == "variable_declarator" {
-        if let (Some(name_node), Some(value)) = (
+    if node.kind() == "variable_declarator"
+        && let (Some(name_node), Some(value)) = (
             node.child_by_field_name("name"),
             node.child_by_field_name("value"),
-        ) && let Ok(name) = name_node.utf8_text(source)
-        {
-            declarators.push((name.to_string(), value));
-        }
+        )
+        && let Ok(name) = name_node.utf8_text(source)
+    {
+        declarators.push((name.to_string(), value));
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {

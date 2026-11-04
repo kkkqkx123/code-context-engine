@@ -70,7 +70,11 @@ fn max_cost(path: ChunkPath) -> usize {
 
 /// Head-truncate text to the overview budget, preferring a sentence end.
 fn head_text(text: &str, path: ChunkPath) -> String {
-    let budget = max_cost(path);
+    head_text_with_budget(text, path, max_cost(path))
+}
+
+/// Head-truncate text to an explicit budget, preferring a sentence end.
+fn head_text_with_budget(text: &str, path: ChunkPath, budget: usize) -> String {
     if cost(text, path) <= budget {
         return text.to_string();
     }
@@ -94,6 +98,61 @@ fn head_text(text: &str, path: ChunkPath) -> String {
         return text.split_whitespace().next().unwrap_or("").to_string();
     }
     text[..end].trim_end().to_string()
+}
+
+/// Fill a BM25 overview card with the union's vocabulary.
+///
+/// The card promises the union span but carries only the head fragment's
+/// text; terms living in later fragments (fields after the struct head,
+/// methods after the first) can never match it, so split truths covered
+/// only by the card stay unrecoverable. Appending the head of every
+/// same-group fragment inside the union span gives the card the union's
+/// vocabulary within the same cost budget. Embedding cards keep the
+/// single-head text: the similarity model degrades on stitched text.
+fn union_heads(
+    chunks: &[ChunkedResult],
+    first: &ChunkedResult,
+    path: ChunkPath,
+    union_start: usize,
+    union_end: usize,
+) -> String {
+    let budget = max_cost(path);
+    let mut overview = head_text(&first.text, path);
+    if cost(&overview, path) >= budget {
+        return overview;
+    }
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(overview.clone());
+    let mut siblings: Vec<&ChunkedResult> = chunks
+        .iter()
+        .filter(|chunk| {
+            chunk.path == path
+                && chunk.source_group_id == first.source_group_id
+                && !std::ptr::eq(*chunk, first)
+                && chunk.metadata.source_span.start_byte >= union_start
+                && chunk.metadata.source_span.end_byte <= union_end
+        })
+        .collect();
+    siblings.sort_by_key(|chunk| chunk.start_byte);
+    for sibling in siblings {
+        let remaining = budget.saturating_sub(cost(&overview, path));
+        if remaining == 0 {
+            break;
+        }
+        let head = head_text_with_budget(&sibling.text, path, remaining);
+        if head.trim().is_empty() || !seen.insert(head.clone()) {
+            continue;
+        }
+        // Skip a sibling head already contained in the card: repeating a
+        // sentence already present only inflates term frequency and spends
+        // budget without adding vocabulary.
+        if overview.contains(&head) {
+            continue;
+        }
+        overview.push('\n');
+        overview.push_str(&head);
+    }
+    overview
 }
 
 /// Append one overview card per member that owns two or more single-entity
@@ -126,9 +185,6 @@ pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
     let mut ordered: Vec<((ChunkPath, EntityId), Vec<usize>)> = by_entity.into_iter().collect();
     ordered.sort_by_key(|(_, indices)| indices[0]);
     for ((path, _), mut indices) in ordered {
-        if path != ChunkPath::Embedding {
-            continue;
-        }
         if !split_chain(&indices, chunks) {
             continue;
         }
@@ -146,10 +202,6 @@ pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
             })
             .and_then(|index| chunks.get(*index))
             .unwrap_or(&chunks[indices[0]]);
-        let overview = head_text(&first.text, path);
-        if overview.trim().is_empty() {
-            continue;
-        }
         let mut start_byte = usize::MAX;
         let mut end_byte = 0usize;
         let mut start_row = usize::MAX;
@@ -174,6 +226,16 @@ pub fn synthesize_overviews(chunks: &mut Vec<ChunkedResult>) {
         }
         let union_span =
             cce_types::Span::new(start_byte, end_byte, start_row, start_col, end_row, end_col);
+        // The card text is built after the union span is known so the BM25
+        // union fill can admit only fragments inside the promised span.
+        let overview = if path == ChunkPath::Bm25 {
+            union_heads(chunks, first, path, start_byte, end_byte)
+        } else {
+            head_text(&first.text, path)
+        };
+        if overview.trim().is_empty() {
+            continue;
+        }
 
         let key = (first.source_group_id.clone(), path);
         let counter = counts.entry(key).or_insert(0);
@@ -229,6 +291,7 @@ mod tests {
     use super::super::{ChunkMetadata, CodeSpecificMetadata};
     use cce_types::GroupType;
 
+    #[allow(clippy::too_many_arguments)]
     fn chunk(
         group: &str,
         path: ChunkPath,
@@ -248,9 +311,11 @@ mod tests {
             original_entity_id: Some(id),
             ..Default::default()
         });
-        let mut metadata = ChunkMetadata::default();
-        metadata.source_span = cce_types::Span::new(start, end, 1, 0, 2, 0);
-        metadata.code_metadata = code_metadata;
+        let metadata = ChunkMetadata {
+            source_span: cce_types::Span::new(start, end, 1, 0, 2, 0),
+            code_metadata,
+            ..Default::default()
+        };
         ChunkedResult {
             chunk_id: format!("{group}_{path}_{index}"),
             source_group_id: group.to_string(),
@@ -360,7 +425,7 @@ mod tests {
         let mut chunks = vec![
             chunk(
                 "g",
-                ChunkPath::Embedding,
+                ChunkPath::Bm25,
                 0,
                 2,
                 Some(EntityId(7)),
@@ -370,7 +435,7 @@ mod tests {
             ),
             chunk(
                 "g",
-                ChunkPath::Embedding,
+                ChunkPath::Bm25,
                 1,
                 2,
                 Some(EntityId(7)),
@@ -391,6 +456,114 @@ mod tests {
         let card = chunks.last().expect("card present");
         assert_eq!(card.start_byte, 0, "union covers the head");
         assert_eq!(card.end_byte, 90, "union covers the spillover");
+    }
+
+    #[test]
+    fn bm25_card_fills_union_vocabulary_from_sibling_fragments() {
+        let mut chunks = vec![
+            chunk(
+                "g",
+                ChunkPath::Bm25,
+                0,
+                2,
+                Some(EntityId(7)),
+                0,
+                50,
+                "is match returns true",
+            ),
+            chunk(
+                "g",
+                ChunkPath::Bm25,
+                1,
+                2,
+                Some(EntityId(7)),
+                50,
+                90,
+                "candidate amortizes",
+            ),
+        ];
+        synthesize_overviews(&mut chunks);
+        assert_eq!(chunks.len(), 3, "one card appended");
+        let card = chunks.last().expect("card present");
+        assert!(
+            card.text.contains("is match returns true"),
+            "head leads: {}",
+            card.text
+        );
+        assert!(
+            card.text.contains("candidate amortizes"),
+            "sibling vocabulary fills the union card: {}",
+            card.text
+        );
+    }
+
+    #[test]
+    fn bm25_card_skips_sibling_head_already_contained() {
+        let mut chunks = vec![
+            chunk(
+                "g",
+                ChunkPath::Bm25,
+                0,
+                2,
+                Some(EntityId(7)),
+                0,
+                50,
+                "alpha beta gamma",
+            ),
+            chunk(
+                "g",
+                ChunkPath::Bm25,
+                1,
+                2,
+                Some(EntityId(7)),
+                50,
+                90,
+                "beta gamma",
+            ),
+        ];
+        synthesize_overviews(&mut chunks);
+        assert_eq!(chunks.len(), 3, "one card appended");
+        let card = chunks.last().expect("card present");
+        assert_eq!(
+            card.text.matches("beta gamma").count(),
+            1,
+            "contained sibling head adds no second copy: {}",
+            card.text
+        );
+    }
+
+    #[test]
+    fn embedding_card_keeps_single_head_text() {
+        let mut chunks = vec![
+            chunk(
+                "g",
+                ChunkPath::Embedding,
+                0,
+                2,
+                Some(EntityId(7)),
+                0,
+                50,
+                "is match returns true",
+            ),
+            chunk(
+                "g",
+                ChunkPath::Embedding,
+                1,
+                2,
+                Some(EntityId(7)),
+                50,
+                90,
+                "candidate amortizes",
+            ),
+        ];
+        synthesize_overviews(&mut chunks);
+        assert_eq!(chunks.len(), 3, "one card appended");
+        let card = chunks.last().expect("card present");
+        assert!(
+            !card.text.contains("candidate amortizes"),
+            "embedding cards keep the single-head text: {}",
+            card.text
+        );
     }
 
     #[test]
@@ -420,33 +593,5 @@ mod tests {
         let mut chunks = vec![head, body];
         synthesize_overviews(&mut chunks);
         assert_eq!(chunks.len(), 2, "far-apart chunks never chain");
-    }
-
-    #[test]
-    fn word_path_split_gains_no_card() {
-        let mut chunks = vec![
-            chunk(
-                "g",
-                ChunkPath::Bm25,
-                0,
-                2,
-                Some(EntityId(7)),
-                0,
-                50,
-                "is match returns true",
-            ),
-            chunk(
-                "g",
-                ChunkPath::Bm25,
-                1,
-                2,
-                Some(EntityId(7)),
-                50,
-                90,
-                "candidate amortizes",
-            ),
-        ];
-        synthesize_overviews(&mut chunks);
-        assert_eq!(chunks.len(), 2, "word path keeps fragments without a card");
     }
 }

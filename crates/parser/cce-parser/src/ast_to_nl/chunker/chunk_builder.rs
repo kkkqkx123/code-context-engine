@@ -491,6 +491,32 @@ impl ChunkBuilder {
         Some(group.name.as_str())
     }
 
+    /// Self type of a trait implementation group, when recorded.
+    ///
+    /// The group itself is named after the trait (e.g. `Matcher`), while the
+    /// concrete type (e.g. `RegexMatcher`) lives in the entity metadata.
+    /// Keywords carry the concrete type additively so the whole-term signal
+    /// survives; titles are never renamed (see `bm25_keywords_for_ids`).
+    fn trait_impl_for_type(group: &EntityGroup) -> Option<&str> {
+        if group.kind != EntityKind::TraitImpl {
+            return None;
+        }
+        if let Some(header) = &group.header {
+            if let Some(for_type) = header.metadata.get("impl_for_type") {
+                if !for_type.is_empty() {
+                    return Some(for_type);
+                }
+            }
+        }
+        group.members.iter().find_map(|member| {
+            member
+                .metadata
+                .get("impl_for_type")
+                .filter(|t| !t.is_empty())
+                .map(String::as_str)
+        })
+    }
+
     /// File module stem used to qualify module-level free functions.
     fn module_stem(file_path: &str) -> Option<String> {
         let stem = Path::new(file_path).file_stem()?.to_string_lossy();
@@ -573,11 +599,51 @@ impl ChunkBuilder {
         Self::qualify_bm25_title(group.name.to_string(), group, parent, file_path)
     }
 
+    /// Names of group entities overlapped by a chunk span.
+    ///
+    /// A chunk covers a byte span, not an entity list: a head chunk spans
+    /// its members, a card spans the union. Keywords distilled only from
+    /// the chunk's own entity ids leave the overlapped entities unnamed,
+    /// so a query matching those names can only hit the content field.
+    /// Naming every overlapped entity keeps the keyword field aligned with
+    /// what the chunk actually covers. Deduplication rides on `seen`, so
+    /// already-named entities are never repeated.
+    pub(crate) fn push_overlapping_entity_names(
+        group: &EntityGroup,
+        chunk_start: usize,
+        chunk_end: usize,
+        result: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        if chunk_end <= chunk_start {
+            return;
+        }
+        let mut ids: Vec<EntityId> = Vec::new();
+        if let Some(id) = group.header_id {
+            ids.push(id);
+        }
+        ids.extend(group.member_ids.iter().copied());
+        ids.sort();
+        for id in ids {
+            let overlaps = group
+                .entity_spans
+                .get(&id)
+                .is_some_and(|span| span.start_byte < chunk_end && span.end_byte > chunk_start);
+            if !overlaps {
+                continue;
+            }
+            if let Some(name) = Self::entity_name_by_id(group, id) {
+                Self::push_keyword_part(result, seen, &name);
+            }
+        }
+    }
+
     fn bm25_keywords_for_ids(
         group: &EntityGroup,
         content_ids: &[EntityId],
         parent: Option<&str>,
         file_path: &str,
+        chunk_span: Option<(usize, usize)>,
     ) -> Vec<String> {
         let sorted = Self::sorted_content_ids(group, content_ids);
         let mut seen = std::collections::HashSet::new();
@@ -590,6 +656,13 @@ impl ChunkBuilder {
         let has_member = sorted.iter().any(|id| Some(*id) != group.header_id);
         if has_member && group.group_type.is_container() && !group.name.is_empty() {
             Self::push_keyword_part(&mut result, &mut seen, &group.name);
+            // Name the concrete self type of a trait implementation as an
+            // additional keyword. Titles stay untouched (byte-identical to
+            // baseline), so only the keyword field gains the whole-term
+            // signal; the generic trait keyword is kept, nothing is renamed.
+            if let Some(for_type) = Self::trait_impl_for_type(group) {
+                Self::push_keyword_part(&mut result, &mut seen, for_type);
+            }
         }
         if let Some(parent_name) = parent.filter(|p| !p.is_empty()) {
             Self::push_keyword_part(&mut result, &mut seen, parent_name);
@@ -597,6 +670,20 @@ impl ChunkBuilder {
             && let Some(stem) = Self::module_stem(file_path)
         {
             Self::push_keyword_part(&mut result, &mut seen, &stem);
+        }
+        // Name every entity the chunk span overlaps, not just the entities
+        // it holds: a head chunk spanning its members must carry the
+        // member names, otherwise the answer vocabulary lives in a
+        // neighbouring chunk that does not cover the truth (see
+        // `push_overlapping_entity_names`).
+        if let Some((chunk_start, chunk_end)) = chunk_span {
+            Self::push_overlapping_entity_names(
+                group,
+                chunk_start,
+                chunk_end,
+                &mut result,
+                &mut seen,
+            );
         }
         result
     }
@@ -688,6 +775,7 @@ impl ChunkBuilder {
                     &content_entity_ids,
                     parent.as_deref(),
                     ctx.file_path,
+                    Some((source_span.start_byte, source_span.end_byte)),
                 ),
             )
         } else {
@@ -993,6 +1081,7 @@ impl ChunkBuilder {
                             &effective_ids,
                             parent.as_deref(),
                             file_path,
+                            Some((source_span.start_byte, source_span.end_byte)),
                         ),
                     )
                 } else {
@@ -1123,6 +1212,7 @@ impl ChunkBuilder {
                     &effective_ids,
                     ctx.parent_qualifier.as_deref(),
                     ctx.file_path,
+                    Some((source_span.start_byte, source_span.end_byte)),
                 ),
             )
         } else {
@@ -1650,6 +1740,84 @@ mod tests {
         assert!(!ChunkBuilder::states_own_topic(
             "function handler.\nint depth = 0;\nreturn depth;"
         ));
+    }
+
+    #[test]
+    fn trait_impl_keywords_carry_self_type_without_renaming_title() {
+        let mut header = GroupedEntity::new(
+            EntityId(1),
+            EntityKind::TraitImpl,
+            "Matcher".to_string(),
+            "impl Matcher for RegexMatcher".to_string(),
+        );
+        header
+            .metadata
+            .insert("impl_for_type".to_string(), "RegexMatcher".to_string());
+        let mut group = header_with_member_group();
+        group.kind = EntityKind::TraitImpl;
+        group.group_type = GroupType::ClassWithMethods;
+        group.name = CompactString::from("Matcher");
+        group.header = Some(header);
+        group.header_id = Some(EntityId(1));
+        let title = ChunkBuilder::bm25_title_for_ids(
+            &group,
+            &[EntityId(1)],
+            None,
+            "crates/regex/src/matcher.rs",
+        );
+        assert_eq!(title, "Matcher", "titles stay byte-identical to baseline");
+        let member_title = ChunkBuilder::bm25_title_for_ids(
+            &group,
+            &[EntityId(2)],
+            None,
+            "crates/regex/src/matcher.rs",
+        );
+        assert_eq!(
+            member_title, "Matcher.write_fn",
+            "member titles keep the distinctive method name untouched"
+        );
+        let keywords = ChunkBuilder::bm25_keywords_for_ids(
+            &group,
+            &[EntityId(1), EntityId(2)],
+            None,
+            "crates/regex/src/matcher.rs",
+            Some((0, 500)),
+        );
+        assert_eq!(
+            keywords,
+            vec!["matcher", "write_fn", "regexmatcher"],
+            "keywords gain the self type additively, nothing renamed: {keywords:?}"
+        );
+    }
+
+    #[test]
+    fn keywords_name_every_entity_the_chunk_span_overlaps() {
+        // Header-only chunk whose span covers the member: the member name
+        // must join the keywords so the answer vocabulary travels with
+        // the covering chunk instead of living in a neighbour.
+        let group = header_with_member_group();
+        let keywords =
+            ChunkBuilder::bm25_keywords_for_ids(&group, &[EntityId(1)], None, "x", Some((0, 500)));
+        assert_eq!(
+            keywords,
+            vec!["read_fn", "write_fn"],
+            "overlapped member joins the keywords: {keywords:?}"
+        );
+        // Same chunk, narrow span: no overlap, no addition.
+        let keywords =
+            ChunkBuilder::bm25_keywords_for_ids(&group, &[EntityId(1)], None, "x", Some((0, 399)));
+        assert_eq!(
+            keywords,
+            vec!["read_fn"],
+            "disjoint member stays out: {keywords:?}"
+        );
+        // No span information: legacy behavior preserved.
+        let keywords = ChunkBuilder::bm25_keywords_for_ids(&group, &[EntityId(1)], None, "x", None);
+        assert_eq!(
+            keywords,
+            vec!["read_fn"],
+            "missing span adds nothing: {keywords:?}"
+        );
     }
 }
 
