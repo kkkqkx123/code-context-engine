@@ -266,8 +266,20 @@ impl RegularGroupTemplate {
 
         // Inline the group qualifier so embedding text carries ownership in
         // the entity line itself (`Flask.make_response`), not only in a
-        // separate anchor that header truncation can drop.
-        let display_name = if group.group_type != GroupType::MergedFragments
+        // separate anchor that header truncation can drop. Only type-like
+        // owners qualify members: function clusters named after their first
+        // sibling must not fabricate a parent relation (`JSON.AsciiJSON`).
+        let is_owner_kind = matches!(
+            group.kind,
+            EntityKind::Class
+                | EntityKind::Struct
+                | EntityKind::Trait
+                | EntityKind::Interface
+                | EntityKind::Enum
+                | EntityKind::Union
+        );
+        let display_name = if is_owner_kind
+            && group.group_type != GroupType::MergedFragments
             && !group.name.is_empty()
             && group.name != member.name
         {

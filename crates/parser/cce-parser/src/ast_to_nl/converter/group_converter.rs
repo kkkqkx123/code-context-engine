@@ -949,8 +949,18 @@ impl super::AstToNlConverter {
                 // MergedFragments groups are named after their first fragment,
                 // which is not the owner of the remaining siblings — qualifying
                 // with it would fabricate a false relation (`getId.setName`),
-                // so those members keep their standalone names.
-                if group.group_type != cce_types::GroupType::MergedFragments {
+                // so those members keep their standalone names. The same holds
+                // for function clusters: only type-like owners qualify members.
+                let is_owner_kind = matches!(
+                    group.kind,
+                    EntityKind::Class
+                        | EntityKind::Struct
+                        | EntityKind::Trait
+                        | EntityKind::Interface
+                        | EntityKind::Enum
+                        | EntityKind::Union
+                );
+                if is_owner_kind && group.group_type != cce_types::GroupType::MergedFragments {
                     if let Some(ref mut bm25) = member_result.bm25_text {
                         *bm25 = super::entity_converter::qualify_member_head(
                             &group.name,

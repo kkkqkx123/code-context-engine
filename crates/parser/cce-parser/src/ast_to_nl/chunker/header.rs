@@ -17,11 +17,12 @@ pub struct MemberSignals<'a> {
 
 /// Source lines from which an undocumented member keeps its own chunk.
 ///
-/// A ten-line `Publish` implementation carries an independent behavior even
-/// when its description is only a kind line plus a signature; a one-line
-/// `PublishCore` delegation does not. The threshold sits between the two so
-/// the former stands alone while the latter still rejoins its neighbor.
-pub(crate) const VIABLE_SOURCE_LINES: usize = 5;
+/// A three-line method with a doc comment and a call body (e.g. a Gin
+/// `String`/`Render` helper) carries an independent behavior even when its
+/// description is short; a one-line delegation does not. The threshold sits
+/// above one-line residues so viable short methods stand alone while pure
+/// forwarders still rejoin their neighbor.
+pub(crate) const VIABLE_SOURCE_LINES: usize = 3;
 
 /// One standalone-eligible member plus the budgets that decide whether it
 /// may rejoin the previous member group instead of standing alone.

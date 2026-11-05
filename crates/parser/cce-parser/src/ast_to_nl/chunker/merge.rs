@@ -238,6 +238,27 @@ pub(crate) fn merge_two_chunks(
     bm25_keywords.extend_from_slice(&b.bm25_keywords);
     bm25_keywords.dedup();
 
+    // A merged chunk covers both inputs, so its title must name both.
+    // Keeping only the left title misattributes the right content
+    // (e.g. a Render body titled as Cookie), which kills qualified
+    // queries against the absorbed entity. Combine distinct titles;
+    // shared owner prefixes collapse (`Context.Cookie` + `Context.Render`
+    // becomes `Context.Cookie + Render`) to stay within title budgets.
+    let merged_title = match (&a.bm25_title, &b.bm25_title) {
+        (Some(a_title), Some(b_title)) if a_title != b_title => {
+            let (a_owner, a_name) = a_title.rsplit_once('.').unwrap_or(("", a_title.as_str()));
+            let (b_owner, b_name) = b_title.rsplit_once('.').unwrap_or(("", b_title.as_str()));
+            if !a_owner.is_empty() && a_owner == b_owner {
+                Some(format!("{a_owner}.{a_name} + {b_name}"))
+            } else {
+                Some(format!("{a_title} + {b_title}"))
+            }
+        }
+        (Some(_), _) => a.bm25_title.clone(),
+        (None, Some(_)) => b.bm25_title.clone(),
+        (None, None) => None,
+    };
+
     let bm25_word_count = cost(&merged_text, ChunkPath::Bm25);
 
     let code_metadata = CodeSpecificMetadata {
@@ -265,7 +286,7 @@ pub(crate) fn merge_two_chunks(
         chunk_index: a.chunk_index,
         total_chunks: a.total_chunks,
         text: merged_text,
-        bm25_title: a.bm25_title.clone(),
+        bm25_title: merged_title,
         bm25_keywords,
         token_count: combined_cost,
         start_byte: a.start_byte,

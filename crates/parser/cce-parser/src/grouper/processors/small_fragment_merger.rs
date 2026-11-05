@@ -314,6 +314,17 @@ impl SmallFragmentMerger {
                 }
             }
 
+            // Bound merged batch size: even within the span budget, packing
+            // many independent methods into one retrieval unit dilutes each
+            // target (e.g. eight JSON helpers in one chunk leave the target
+            // at one eighth of the text). Flush after three fragments so a
+            // merged unit stays searchable while still rescuing tiny shards.
+            if current_batch.len() >= 3 {
+                if let Some(merged) = self.flush_batch(&mut current_batch) {
+                    merged_groups.push(merged);
+                }
+            }
+
             current_batch.push(group);
             prev_end_byte = Some(group.span.end_byte);
         }
@@ -344,7 +355,22 @@ impl SmallFragmentMerger {
     /// that declares a local variable on its own, without the file-level
     /// context its neighbours share.
     fn is_merge_candidate(group: &EntityGroup) -> bool {
-        group.group_type.is_standalone()
+        if !group.group_type.is_standalone() {
+            return false;
+        }
+        // A documented entity carries independent retrieval value: its doc
+        // comment states its own contract (e.g. `String writes ...`,
+        // `Render writes ...`). Merging it with siblings dilutes the target
+        // to a fraction of the chunk text and lets neighbours outrank it.
+        // Only undocumented fragments are eligible for rescue merging.
+        if let Some(header) = group.header.as_ref() {
+            if let Some(doc) = header.doc_comment.as_deref() {
+                if doc.trim().len() >= 20 {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Check if a group is import-like (header kind is import/require/include/export).
