@@ -950,7 +950,9 @@ impl super::AstToNlConverter {
                 // which is not the owner of the remaining siblings — qualifying
                 // with it would fabricate a false relation (`getId.setName`),
                 // so those members keep their standalone names. The same holds
-                // for function clusters: only type-like owners qualify members.
+                // for function clusters: only type-like owners and their impl
+                // blocks qualify members. Impl blocks are named after their
+                // self type, so their methods carry the same ownership.
                 let is_owner_kind = matches!(
                     group.kind,
                     EntityKind::Class
@@ -959,6 +961,8 @@ impl super::AstToNlConverter {
                         | EntityKind::Interface
                         | EntityKind::Enum
                         | EntityKind::Union
+                        | EntityKind::InherentImpl
+                        | EntityKind::TraitImpl
                 );
                 if is_owner_kind && group.group_type != cce_types::GroupType::MergedFragments {
                     if let Some(ref mut bm25) = member_result.bm25_text {
@@ -969,11 +973,41 @@ impl super::AstToNlConverter {
                         );
                     }
                     if let Some(ref mut emb) = member_result.embedding_text {
+                        // Impl associated functions are classified as Function
+                        // and standalone conversion qualifies them with the file
+                        // stem (`lib.new`); replace that prefix with the owner
+                        // before attaching, otherwise every `lib.rs` collides.
+                        if member.kind == EntityKind::Function {
+                            if let Some(stem) = super::entity_converter::module_stem(file_path) {
+                                let wrong = format!("{}.{}", stem, member.name);
+                                if emb.contains(&wrong) {
+                                    let right = format!("{}.{}", group.name, member.name);
+                                    *emb = emb.replace(&wrong, &right);
+                                }
+                            }
+                        }
                         *emb = super::entity_converter::qualify_member_head(
                             &group.name,
                             &member.name,
                             emb,
                         );
+                        // A `new` function owned by a type is a constructor.
+                        // Relabel the head so constructor queries meet
+                        // `constructor Owner.new` instead of a generic
+                        // `function` shared with every free `new`. Only the
+                        // head line is touched and only when it already
+                        // carries the owner qualifier.
+                        if member.kind == EntityKind::Function && member.name == "new" {
+                            let head_end = emb.find('\n').unwrap_or(emb.len());
+                            let marker = format!("{}.{}", group.name, member.name);
+                            if emb[..head_end].contains(&marker)
+                                && emb[..head_end].contains("function ")
+                            {
+                                let relabeled =
+                                    emb[..head_end].replacen("function ", "constructor ", 1);
+                                emb.replace_range(..head_end, &relabeled);
+                            }
+                        }
                     }
                 }
                 results.push(member_result);

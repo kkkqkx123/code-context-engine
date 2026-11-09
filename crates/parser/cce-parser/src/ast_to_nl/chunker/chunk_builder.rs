@@ -656,6 +656,18 @@ impl ChunkBuilder {
         let has_member = sorted.iter().any(|id| Some(*id) != group.header_id);
         if has_member && group.group_type.is_container() && !group.name.is_empty() {
             Self::push_keyword_part(&mut result, &mut seen, &group.name);
+            for id in &sorted {
+                if Some(*id) == group.header_id {
+                    continue;
+                }
+                if let Some(name) = Self::entity_name_by_id(group, *id) {
+                    if name.is_empty() || name.contains('.') {
+                        continue;
+                    }
+                    let qualified = format!("{}.{}", group.name, name);
+                    Self::push_keyword_part(&mut result, &mut seen, &qualified);
+                }
+            }
             // Name the concrete self type of a trait implementation as an
             // additional keyword. Titles stay untouched (byte-identical to
             // baseline), so only the keyword field gains the whole-term
@@ -1785,8 +1797,8 @@ mod tests {
         );
         assert_eq!(
             keywords,
-            vec!["matcher", "write_fn", "regexmatcher"],
-            "keywords gain the self type additively, nothing renamed: {keywords:?}"
+            vec!["matcher", "write_fn", "matcher.write_fn", "regexmatcher"],
+            "keywords gain the self type and the qualified form additively, nothing renamed: {keywords:?}"
         );
     }
 

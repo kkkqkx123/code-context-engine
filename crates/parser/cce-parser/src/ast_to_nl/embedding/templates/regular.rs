@@ -189,6 +189,8 @@ impl RegularGroupTemplate {
                 | EntityKind::Interface
                 | EntityKind::Enum
                 | EntityKind::Union
+                | EntityKind::InherentImpl
+                | EntityKind::TraitImpl
         ) {
             return None;
         }
@@ -266,9 +268,11 @@ impl RegularGroupTemplate {
 
         // Inline the group qualifier so embedding text carries ownership in
         // the entity line itself (`Flask.make_response`), not only in a
-        // separate anchor that header truncation can drop. Only type-like
-        // owners qualify members: function clusters named after their first
-        // sibling must not fabricate a parent relation (`JSON.AsciiJSON`).
+        // separate anchor that header truncation can drop. Type-like owners
+        // and their impl blocks qualify members: function clusters named
+        // after their first sibling must not fabricate a parent relation
+        // (`JSON.AsciiJSON`). Impl blocks are named after their self type,
+        // so their methods carry the same ownership as type-body methods.
         let is_owner_kind = matches!(
             group.kind,
             EntityKind::Class
@@ -277,6 +281,8 @@ impl RegularGroupTemplate {
                 | EntityKind::Interface
                 | EntityKind::Enum
                 | EntityKind::Union
+                | EntityKind::InherentImpl
+                | EntityKind::TraitImpl
         );
         let display_name = if is_owner_kind
             && group.group_type != GroupType::MergedFragments
@@ -287,8 +293,21 @@ impl RegularGroupTemplate {
         } else {
             member.name.clone()
         };
+        // A `new` function owned by a type is a constructor, not a free
+        // function: label it as such so constructor queries meet
+        // `constructor Owner.new` instead of a generic `function` shared
+        // with every free `new` in the workspace. Only applies when the
+        // member already carries the owner qualifier.
+        let effective_kind = if member.kind == EntityKind::Function
+            && member.name == "new"
+            && display_name != member.name
+        {
+            EntityKind::Constructor
+        } else {
+            member.kind.clone()
+        };
         let mut member_desc =
-            Self::semantic_entity_description(&display_name, member.kind, Some(member));
+            Self::semantic_entity_description(&display_name, effective_kind, Some(member));
 
         if let Some(doc) = Self::clean_doc_comment(member.doc_comment.as_deref(), profile) {
             if !Self::is_text_duplicate(&member_desc, &doc) {
@@ -1189,5 +1208,28 @@ mod tests {
             "returns a. returns b.",
             &dummy_member(),
         ));
+    }
+
+    #[test]
+    fn test_impl_block_member_carries_owner_qualifier() {
+        let group = EntityGroup {
+            name: "Searcher".into(),
+            kind: EntityKind::InherentImpl,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(2),
+                name: "search_path".to_string(),
+                kind: EntityKind::Method,
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        assert!(
+            results.iter().any(|r| r.contains("Searcher.search_path")),
+            "impl methods keep their self type qualifier: {results:?}"
+        );
     }
 }

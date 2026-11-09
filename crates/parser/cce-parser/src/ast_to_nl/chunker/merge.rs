@@ -236,7 +236,12 @@ pub(crate) fn merge_two_chunks(
 
     let mut bm25_keywords = a.bm25_keywords.clone();
     bm25_keywords.extend_from_slice(&b.bm25_keywords);
-    bm25_keywords.dedup();
+    // Chunks merged from the same group repeat the owner and member names
+    // on both sides; consecutive-only dedup leaves non-adjacent repeats
+    // behind and inflates term frequency for the merged chunk. Drop every
+    // repeat while keeping first-seen order.
+    let mut seen_keywords = std::collections::HashSet::new();
+    bm25_keywords.retain(|keyword| seen_keywords.insert(keyword.clone()));
 
     // A merged chunk covers both inputs, so its title must name both.
     // Keeping only the left title misattributes the right content
