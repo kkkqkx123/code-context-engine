@@ -217,10 +217,17 @@ cce-mcp = { path = "crates/app/cce-mcp" }
 
 [patch.crates-io]
 # Vendored tantivy fork: patch the renamed root package so local development
-# always builds from the submodule. The fork's sub-crates are renamed to
-# `kkkqkx-tantivy-*` too and resolve through the submodule's own workspace
-# path dependencies, so no further patch entries are needed.
+# always builds from the submodule. The root manifest does not use path
+# dependencies for its sub-crates, so each sub-crate must be patched
+# explicitly to keep the fork consistent with crates.io versions.
 kkkqkx-tantivy = { path = "crates/tantivy" }
+tantivy-columnar = { path = "crates/tantivy/columnar" }
+tantivy-common = { path = "crates/tantivy/common" }
+tantivy-sstable = { path = "crates/tantivy/sstable" }
+tantivy-stacker = { path = "crates/tantivy/stacker" }
+tantivy-bitpacker = { path = "crates/tantivy/bitpacker" }
+tantivy-query-grammar = { path = "crates/tantivy/query-grammar" }
+tantivy-tokenizer-api = { path = "crates/tantivy/tokenizer-api" }
 
 [profile.release]
 opt-level = 3
