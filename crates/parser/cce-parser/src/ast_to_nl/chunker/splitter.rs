@@ -82,20 +82,21 @@ impl BoundaryLevel {
     }
 }
 
-/// How many times the body budget a single-entity BM25 piece may exceed
-/// while staying whole.
+/// How many times the hard and pre-injection budgets a single-entity BM25
+/// whole may exceed while staying whole and silent.
 ///
 /// The keyword index has no neural ceiling, and splitting a function would
-/// multiply index entries without shrinking the reported source span. The
-/// bound covers the observed long test functions while still capping
-/// pathological inputs; beyond it the piece subdivides and the hard limit
-/// truncates to the same bound.
+/// multiply index entries without shrinking the reported source span. A
+/// fragment can also land on a blank-only line with no source coverage, so
+/// the splitter keeps such a piece whole and the hard limit truncates an
+/// over-bound whole to this extended budget instead. The bound covers the
+/// observed long test functions while still capping pathological inputs.
 pub(crate) const SINGLE_ENTITY_BM25_TOLERANCE_FACTOR: usize = 3;
 
 /// Whether an entity is a module container.
 ///
 /// Module sections stay independent prose and always subdivide at the body
-/// budget, even within the single-entity tolerance above.
+/// budget.
 fn is_module_entity(group: &EntityGroup, id: EntityId) -> bool {
     group
         .header
@@ -328,22 +329,19 @@ impl TextSplitter {
                 .config
                 .cost(&text[boundary.start_byte..boundary.end_byte], path);
             // Over-body pieces subdivide, except a single-entity BM25 piece
-            // within tolerance stays whole: splitting it would multiply index
-            // entries while the reported source span stays whole, and the
-            // repair loop cannot recover an atomic piece by tightening.
+            // stays whole: splitting it would multiply index entries while
+            // the reported source span stays whole, and a fragment can land
+            // on a blank-only line with no source coverage. The hard limit
+            // truncates such a whole to a bounded extended budget instead.
             if budget.body_limit == 0 || piece_cost <= budget.body_limit {
                 return Ok(vec![boundary]);
             }
-            let tolerated = path == ChunkPath::Bm25
+            let atomic = path == ChunkPath::Bm25
                 && piece_ids.len() == 1
                 && piece_ids
                     .first()
-                    .is_some_and(|id| !is_module_entity(group, *id))
-                && piece_cost
-                    <= budget
-                        .body_limit
-                        .saturating_mul(SINGLE_ENTITY_BM25_TOLERANCE_FACTOR);
-            if tolerated {
+                    .is_some_and(|id| !is_module_entity(group, *id));
+            if atomic {
                 return Ok(vec![boundary]);
             }
             return self.split_range_at(
@@ -366,16 +364,12 @@ impl TextSplitter {
             }
             let piece_ids = b.entity_ids.clone();
             let piece_cost = self.config.cost(&text[b.start_byte..b.end_byte], path);
-            let tolerated = path == ChunkPath::Bm25
+            let atomic = path == ChunkPath::Bm25
                 && piece_ids.len() == 1
                 && piece_ids
                     .first()
-                    .is_some_and(|id| !is_module_entity(group, *id))
-                && piece_cost
-                    <= budget
-                        .body_limit
-                        .saturating_mul(SINGLE_ENTITY_BM25_TOLERANCE_FACTOR);
-            if budget.body_limit > 0 && piece_cost > budget.body_limit && !tolerated {
+                    .is_some_and(|id| !is_module_entity(group, *id));
+            if budget.body_limit > 0 && piece_cost > budget.body_limit && !atomic {
                 result.extend(self.split_range_at(
                     text,
                     group,
@@ -948,9 +942,10 @@ mod tests {
     }
 
     #[test]
-    fn test_bm25_single_entity_piece_subdivides_beyond_tolerance() {
-        // Single-entity BM25 stays whole up to three times the body budget;
-        // beyond that it subdivides so pathological inputs stay bounded.
+    fn test_bm25_single_entity_piece_stays_whole_even_beyond_tolerance() {
+        // Single-entity BM25 stays whole even beyond tolerance: splitting it
+        // could land a fragment on a blank-only line with no source coverage.
+        // The hard limit truncates an over-bound whole to the extended bound.
         let config = ChunkingConfig {
             max_bm25_terms: 3,
             ..Default::default()
@@ -970,9 +965,10 @@ mod tests {
             Some(&nlb),
             0..text.len(),
         );
-        assert!(
-            boundaries.len() > 1,
-            "single-entity BM25 piece must subdivide beyond tolerance: {boundaries:?}"
+        assert_eq!(
+            boundaries.len(),
+            1,
+            "single-entity BM25 piece stays whole to avoid blank-only fragments: {boundaries:?}"
         );
         assert_partition(text, &boundaries);
     }

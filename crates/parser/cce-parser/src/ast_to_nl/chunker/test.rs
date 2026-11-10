@@ -1480,9 +1480,10 @@ mod tests {
     }
 
     #[test]
-    fn test_single_entity_chunks_subdivide_and_fit_hard_limit() {
-        // Beyond three times the hard limit the splitter subdivides, so every
-        // stored chunk fits; within tolerance the whole stays by design.
+    fn test_single_entity_bm25_truncates_to_extended_bound() {
+        // Single-entity BM25 stays whole in the splitter to avoid blank-only
+        // fragments; beyond three times the hard limit it truncates to the
+        // extended bound. Embedding still subdivides to the base hard limit.
         let config = ChunkingConfig {
             max_tokens: 40,
             max_bm25_terms: 40,
@@ -1551,14 +1552,21 @@ mod tests {
             .chunk_groups(&conversions, "tiny_parent.cs")
             .expect("tiny budget must not drop the file");
         assert!(!output.chunks.is_empty(), "file must keep its chunks");
-        // Subdivision keeps every fragment within budget; truncation only
-        // fires for residual over-hard assembly.
+        // BM25 wholes truncate to three times hard; embedding subdivides to hard.
         for chunk in &output.chunks {
-            assert!(
-                config.cost(&chunk.text, chunk.path) <= config.limit(chunk.path),
-                "chunk {} must fit the hard limit",
-                chunk.chunk_id
-            );
+            if chunk.path == ChunkPath::Bm25 {
+                assert!(
+                    config.cost(&chunk.text, chunk.path) <= 120,
+                    "BM25 chunk {} must fit the extended bound",
+                    chunk.chunk_id
+                );
+            } else {
+                assert!(
+                    config.cost(&chunk.text, chunk.path) <= config.limit(chunk.path),
+                    "embedding chunk {} must fit the hard limit",
+                    chunk.chunk_id
+                );
+            }
         }
     }
 
