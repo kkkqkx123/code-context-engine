@@ -57,6 +57,103 @@ pub fn shared_jieba() -> &'static Jieba {
     SHARED_JIEBA.get_or_init(Jieba::new)
 }
 
+/// Minimal English depluralization for one lowercased word.
+///
+/// Returns the singular form when the word is an unambiguous plural, and
+/// `None` otherwise. This is intentionally NOT a general stemmer: it only
+/// strips plural suffixes (`-s`, `-es`, `-ies`), leaving verb inflections
+/// (`formatted`/`format`) and irregular forms untouched. Code identifiers
+/// are overwhelmingly nominal, and every observed singular/plural miss in
+/// retrieval (`patterns`/`pattern`, `matches`/`match`, `errors`/`error`,
+/// `strings`/`string`, `queries`/`query`, `classes`/`class`) is a plain
+/// plural. A full Snowball stemmer would conflate far more aggressively
+/// (`running`/`run`, `related`/`relate`) with unpredictable document
+/// frequency effects on code vocabulary; the minimal rule keeps the
+/// conflation set small and auditable.
+///
+/// Guards: words shorter than four characters never vary (avoids
+/// `as`→`a`, `is`→`i`); `-ss`/`-us`/`-is`/`-as` endings are singular nouns
+/// that merely end in `s` (`class`, `status`, `bias`, `alias`). Known
+/// accepted edges: `news`→`new` and `lens`→`len` (harmless — `new`/`len`
+/// document frequencies are already saturated, so the added postings move
+/// their inverse document frequencies negligibly) and junk variants such
+/// as `does`→`doe` (match nothing, indexed but never queried).
+///
+/// Callers pass already-lowercased token text; non-ASCII and
+/// digit-containing words yield `None`.
+pub fn english_plural_variant(word: &str) -> Option<String> {
+    if word.len() < 4 || !word.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return None;
+    }
+    if let Some(stem) = word.strip_suffix("ies") {
+        if stem.len() >= 2 {
+            return Some(format!("{stem}y"));
+        }
+        return None;
+    }
+    // -sses/-shes/-ches/-xes/-zes drop the plural -es (classes -> class,
+    // matches -> match). Only the -es comes off; the sibilant stays.
+    for ending in ["sses", "shes", "ches", "xes", "zes"] {
+        if word.ends_with(ending) {
+            if let Some(stem) = word.strip_suffix("es") {
+                if !stem.is_empty() {
+                    return Some(stem.to_string());
+                }
+            }
+            return None;
+        }
+    }
+    for ending in ["ss", "us", "is", "as"] {
+        if word.ends_with(ending) {
+            return None;
+        }
+    }
+    word.strip_suffix('s').map(|stem| stem.to_string())
+}
+
+/// Append minimal plural variants to a token stream without moving positions.
+///
+/// Each variant shares its source word's position with `position_length = 0`,
+/// exactly like identifier splits, so scorers treat it as an auxiliary form
+/// of the same word. A variant already present at the same position (the
+/// word itself or an identical split) is skipped, keeping term frequencies
+/// identical to a stream that had spelled the variant out.
+///
+/// Query-side use only. This is the single implementation behind both the
+/// production retrieval query path and the benchmark query expansion, so
+/// the two cannot diverge. The index stores attested word forms only: index
+/// tokenization (engine adapter, benchmark term index) and chunk word
+/// counting never go through here, so index statistics and chunk
+/// boundaries are unaffected by the added variants.
+pub fn expand_with_plural_variants(tokens: Vec<MixedToken>) -> Vec<MixedToken> {
+    let mut out: Vec<MixedToken> = Vec::with_capacity(tokens.len());
+    let mut pos_texts: Vec<String> = Vec::new();
+    let mut pos: Option<u32> = None;
+    for token in tokens {
+        if pos != Some(token.position) {
+            pos = Some(token.position);
+            pos_texts.clear();
+        }
+        let variant = english_plural_variant(&token.text);
+        pos_texts.push(token.text.clone());
+        let source = token;
+        out.push(source.clone());
+        if let Some(text) = variant {
+            if !pos_texts.contains(&text) {
+                pos_texts.push(text.clone());
+                out.push(MixedToken {
+                    text,
+                    offset_from: source.offset_from,
+                    offset_to: source.offset_to,
+                    position: source.position,
+                    position_length: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// A single token produced by [`segment_text`].
 ///
 /// Exposes the full token metadata (text, byte offsets, position) so that
@@ -292,6 +389,75 @@ mod tests {
             .find(|t| t.text == "get_or_init")
             .expect("original");
         assert_eq!(original.position_length, 1);
+    }
+
+    #[test]
+    fn plural_variant_strips_plain_suffix() {
+        assert_eq!(
+            english_plural_variant("patterns"),
+            Some("pattern".to_string())
+        );
+        assert_eq!(english_plural_variant("errors"), Some("error".to_string()));
+        assert_eq!(
+            english_plural_variant("strings"),
+            Some("string".to_string())
+        );
+        assert_eq!(
+            english_plural_variant("numbers"),
+            Some("number".to_string())
+        );
+        assert_eq!(
+            english_plural_variant("results"),
+            Some("result".to_string())
+        );
+        assert_eq!(english_plural_variant("tabs"), Some("tab".to_string()));
+    }
+
+    #[test]
+    fn plural_variant_handles_es_and_ies() {
+        assert_eq!(english_plural_variant("matches"), Some("match".to_string()));
+        assert_eq!(english_plural_variant("classes"), Some("class".to_string()));
+        assert_eq!(english_plural_variant("wishes"), Some("wish".to_string()));
+        assert_eq!(english_plural_variant("boxes"), Some("box".to_string()));
+        assert_eq!(english_plural_variant("queries"), Some("query".to_string()));
+        assert_eq!(english_plural_variant("stories"), Some("story".to_string()));
+        // Silent-e roots (cache, niche) are out of scope: their -ches
+        // plural sheds to a junk form that simply never matches a query.
+    }
+
+    #[test]
+    fn plural_variant_keeps_singular_lookalikes() {
+        assert_eq!(english_plural_variant("class"), None);
+        assert_eq!(english_plural_variant("status"), None);
+        assert_eq!(english_plural_variant("bias"), None);
+        assert_eq!(english_plural_variant("alias"), None);
+        assert_eq!(english_plural_variant("this"), None);
+        assert_eq!(english_plural_variant("pattern"), None);
+        assert_eq!(english_plural_variant("as"), None);
+        assert_eq!(english_plural_variant("v2"), None);
+        assert_eq!(english_plural_variant("match"), None);
+    }
+
+    #[test]
+    fn plural_expansion_shares_positions_and_skips_duplicates() {
+        let tokens = segment_text("patterns", shared_jieba());
+        assert_eq!(texts(&tokens), vec!["patterns"]);
+        let expanded = expand_with_plural_variants(tokens);
+        assert_eq!(texts(&expanded), vec!["patterns", "pattern"]);
+        assert!(expanded.iter().all(|t| t.position == 0));
+        assert_eq!(expanded[1].position_length, 0);
+        // A word whose split already names the variant gains no repeat.
+        let tokens = segment_text("user_stories", shared_jieba());
+        let expanded = expand_with_plural_variants(tokens);
+        let story_count = expanded.iter().filter(|t| t.text == "story").count();
+        assert_eq!(story_count, 1);
+        // Singular words pass through untouched.
+        let tokens = segment_text("status match", shared_jieba());
+        let expanded = expand_with_plural_variants(tokens);
+        assert_eq!(
+            texts(&expanded),
+            texts(&segment_text("status match", shared_jieba()))
+        );
     }
 
     #[test]

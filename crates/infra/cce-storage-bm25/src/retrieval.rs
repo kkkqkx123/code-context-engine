@@ -347,6 +347,12 @@ impl Bm25Retrieval {
         }
 
         let tokens = collect_tokens(&mut tokenizer, &remaining);
+        // Query-side plural variants (shared implementation with the
+        // benchmark): a plural query term also tries its singular form, so
+        // `files` reaches docs that only spell `file`. Phrase segments keep
+        // exact forms; the index stores attested forms only, so index
+        // statistics stay untouched and no reindexing is needed.
+        let tokens = cce_text::expand_with_plural_variants(tokens);
         for (token, scale) in
             expand_query_tokens(&tokens, |text| field_doc_freq(searcher, schema, text))
         {

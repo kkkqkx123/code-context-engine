@@ -64,6 +64,10 @@ mod engine {
 
     impl<'a> MixedTokenStream<'a> {
         fn from_tokens(tokens: Vec<MixedToken>) -> Self {
+            // No variant expansion here: the index stores attested word
+            // forms only. Depluralization applies on the query side, where
+            // the shared expansion keeps production and benchmark aligned
+            // without touching index statistics.
             Self {
                 tokens,
                 pos: 0,

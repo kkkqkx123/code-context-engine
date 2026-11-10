@@ -304,7 +304,7 @@ impl RegularGroupTemplate {
         {
             EntityKind::Constructor
         } else {
-            member.kind.clone()
+            member.kind
         };
         let mut member_desc =
             Self::semantic_entity_description(&display_name, effective_kind, Some(member));

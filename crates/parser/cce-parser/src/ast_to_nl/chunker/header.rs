@@ -53,13 +53,23 @@ impl<'a> HeaderHelper<'a> {
         cost(text, path)
     }
 
-    /// Limit a repeated header to one third of the hard chunk limit.
+    /// Limit a repeated header to half of the hard chunk limit.
+    ///
+    /// The header carries the group identity plus the full documentation
+    /// of its own entity; its member tables only repeat names that the
+    /// keyword field already holds, so under pressure the tables yield
+    /// first. Group text lays identity and documentation before the
+    /// tables, and truncation below keeps whole sentences, which is
+    /// exactly the priority a recall header needs: a dropped doc
+    /// sentence (for example a struct paragraph holding the only
+    /// occurrence of a query word) can never be recovered downstream,
+    /// while a dropped table row still matches through keywords.
     pub fn compact_header(&self, full: &str, brief: &str, path: ChunkPath) -> String {
         let limit = self.path_limit(path);
         if limit == 0 {
             return full.to_string();
         }
-        let header_limit = (limit / 3).max(1);
+        let header_limit = (limit / 2).max(1);
         let preferred = if self.unit_count(full, path) <= header_limit {
             full
         } else if !brief.is_empty() {
@@ -389,7 +399,7 @@ mod tests {
         with_helper(12, |helper| {
             let long = "one two three four five six seven eight nine ten";
             let result = helper.compact_header(long, "", ChunkPath::Bm25);
-            assert_eq!(result, "one two three four");
+            assert_eq!(result, "one two three four five six");
         });
     }
 
@@ -407,7 +417,7 @@ mod tests {
         with_helper(9, |helper| {
             let long = "foo.bar baz qux quux corge grault garply";
             let result = helper.compact_header(long, "", ChunkPath::Bm25);
-            assert_eq!(result, "foo.bar baz qux");
+            assert_eq!(result, "foo.bar baz qux quux");
         });
     }
 

@@ -8,7 +8,8 @@ pub mod tokenizer;
 pub use budget::{ChunkUnit, split_to_fit, suffix_start_for_cost, truncate_to_cost};
 pub use cce_utils::text::{ceil_char_boundary, find_case_insensitive, floor_char_boundary};
 pub use segment::{
-    MAX_TOKENIZE_CHARS, MixedToken, segment_text, shared_jieba, truncated_input_count,
+    MAX_TOKENIZE_CHARS, MixedToken, english_plural_variant, expand_with_plural_variants,
+    segment_text, shared_jieba, truncated_input_count,
 };
 pub use text_cleaner::{Bm25TextCleaner, Bm25TextCleanerConfig};
 #[cfg(feature = "tantivy")]

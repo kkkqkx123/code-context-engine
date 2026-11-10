@@ -64,17 +64,44 @@ pub(crate) fn enforce_hard_limit(
         let limit = config.limit(chunk.path);
         let actual = config.cost(&chunk.text, chunk.path);
         if limit > 0 && actual > limit {
-            tracing::warn!(
-                file = file_path,
-                group = chunk.source_group_id.as_str(),
-                chunk = %chunk.chunk_id,
-                cost = actual,
-                hard = limit,
-                "chunk exceeds the hard limit; truncating tail to keep the file"
-            );
-            let truncated = cce_text::truncate_to_cost(&chunk.text, config.unit(chunk.path), limit);
-            chunk.text = truncated.to_string();
-            chunk.truncated = true;
+            // Single-entity BM25 chunks stay whole by design (method
+            // atomicity): their documentation, signature and code must
+            // share one chunk so exact-match queries find the whole
+            // vocabulary together. Truncating the tail would strand
+            // precisely the code identifiers the chunk was kept whole to
+            // carry, so the chunk is kept and warned instead of cut. The
+            // splitter only produces such chunks for single non-module
+            // entities (multi-entity pieces still subdivide to fit the
+            // body budget), so ordinary oversized assembly still truncates.
+            let atomic = chunk.path == ChunkPath::Bm25
+                && chunk
+                    .metadata
+                    .code_metadata
+                    .as_ref()
+                    .is_some_and(|code| code.content_entity_ids.len() == 1);
+            if atomic {
+                tracing::warn!(
+                    file = file_path,
+                    group = chunk.source_group_id.as_str(),
+                    chunk = %chunk.chunk_id,
+                    cost = actual,
+                    hard = limit,
+                    "atomic single-entity BM25 chunk exceeds the hard limit; keeping it whole"
+                );
+            } else {
+                tracing::warn!(
+                    file = file_path,
+                    group = chunk.source_group_id.as_str(),
+                    chunk = %chunk.chunk_id,
+                    cost = actual,
+                    hard = limit,
+                    "chunk exceeds the hard limit; truncating tail to keep the file"
+                );
+                let truncated =
+                    cce_text::truncate_to_cost(&chunk.text, config.unit(chunk.path), limit);
+                chunk.text = truncated.to_string();
+                chunk.truncated = true;
+            }
         }
         let fitted = config.cost(&chunk.text, chunk.path);
         chunk.token_count = fitted;
@@ -95,6 +122,85 @@ mod tests {
             .map(|i| format!("w{i}"))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    #[test]
+    fn test_hard_limit_keeps_atomic_single_entity_bm25_chunk() {
+        // Single-entity BM25 chunks stay whole by design (method
+        // atomicity): truncating the tail would strand precisely the code
+        // identifiers the chunk was kept whole to carry.
+        use cce_types::entity::{EntityId, EntityKind};
+
+        let config = ChunkingConfig {
+            max_bm25_terms: 10,
+            ..Default::default()
+        };
+        let text = words(30);
+        assert!(
+            config.cost(&text, ChunkPath::Bm25) > 10,
+            "fixture must exceed the hard limit"
+        );
+        let mut chunk = ChunkedResult::new(
+            "group_1_bm25_0".to_string(),
+            "group_1".to_string(),
+            ChunkPath::Bm25,
+            0,
+            1,
+        );
+        chunk.text = text;
+        chunk.metadata.code_metadata = Some(cce_types::ast_to_nl::CodeSpecificMetadata {
+            content_entity_ids: vec![EntityId(1)],
+            content_entity_kinds: vec![EntityKind::Function.to_string()],
+            ..Default::default()
+        });
+        let mut chunks = vec![chunk];
+        super::enforce_hard_limit(&mut chunks, &config, "atomic.rs")
+            .expect("hard limit must not drop the file");
+        assert_eq!(chunks.len(), 1);
+        assert!(
+            config.cost(&chunks[0].text, ChunkPath::Bm25) > 10,
+            "atomic chunk stays over the hard limit"
+        );
+        assert!(
+            !chunks[0].truncated,
+            "keeping the chunk whole must not set the truncated flag"
+        );
+    }
+
+    #[test]
+    fn test_hard_limit_still_truncates_multi_entity_chunks() {
+        // Multi-entity pieces still subdivide, so an over-hard
+        // multi-entity chunk is ordinary oversized assembly and truncates.
+        use cce_types::entity::EntityId;
+
+        let config = ChunkingConfig {
+            max_bm25_terms: 10,
+            ..Default::default()
+        };
+        let text = words(30);
+        let mut chunk = ChunkedResult::new(
+            "group_2_bm25_0".to_string(),
+            "group_2".to_string(),
+            ChunkPath::Bm25,
+            0,
+            1,
+        );
+        chunk.text = text;
+        chunk.metadata.code_metadata = Some(cce_types::ast_to_nl::CodeSpecificMetadata {
+            content_entity_ids: vec![EntityId(1), EntityId(2)],
+            ..Default::default()
+        });
+        let mut chunks = vec![chunk];
+        super::enforce_hard_limit(&mut chunks, &config, "multi.rs")
+            .expect("hard limit must not drop the file");
+        assert!(
+            config.cost(&chunks[0].text, ChunkPath::Bm25) <= 10,
+            "multi-entity chunk must fit the hard limit"
+        );
+        assert!(
+            chunks[0].truncated,
+            "truncation must set the truncated flag"
+        );
     }
 
     #[test]

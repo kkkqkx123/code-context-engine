@@ -3,7 +3,7 @@ use std::ops::Range;
 use cce_config::modules::ChunkBudget;
 use cce_config::modules::ChunkingConfig;
 use cce_types::ParseError;
-use cce_types::entity::EntityId;
+use cce_types::entity::{EntityId, EntityKind};
 use cce_utils::token_estimation::TokenEstimator;
 
 use crate::grouper::EntityGroup;
@@ -80,6 +80,22 @@ impl BoundaryLevel {
             SplitStrategy::ByParagraphs => Self::Paragraphs,
         }
     }
+}
+
+/// Whether an entity is a module container.
+///
+/// Module entities keep their document-section splitting even on the BM25
+/// path: their sections are independent prose units, not one callable
+/// whose documentation and code must stay together.
+fn is_module_entity(group: &EntityGroup, id: EntityId) -> bool {
+    group
+        .header
+        .as_ref()
+        .is_some_and(|header| header.id == id && header.kind == EntityKind::Module)
+        || group
+            .members
+            .iter()
+            .any(|member| member.id == id && member.kind == EntityKind::Module)
 }
 
 /// Text splitter
@@ -311,6 +327,22 @@ impl TextSplitter {
             if budget.body_limit == 0 || piece_cost <= budget.body_limit {
                 return Ok(vec![boundary]);
             }
+            // Exact-match retrieval needs one entity's documentation,
+            // signature and code in a single chunk: subdividing them divides
+            // the query vocabulary across chunks no single chunk satisfies
+            // (documentation terms land in one half, code identifiers in
+            // the other). The BM25 path has no neural ceiling, so a
+            // single-entity piece stays whole even over budget. Multi-entity
+            // pieces still subdivide between entities, and module entities
+            // keep their document-section splitting.
+            if path == ChunkPath::Bm25
+                && piece_ids.len() == 1
+                && piece_ids
+                    .first()
+                    .is_some_and(|id| !is_module_entity(group, *id))
+            {
+                return Ok(vec![boundary]);
+            }
             return self.split_range_at(
                 text,
                 group,
@@ -331,8 +363,16 @@ impl TextSplitter {
             }
             let piece_ids = b.entity_ids.clone();
 
+            // Single-entity BM25 pieces stay whole (see above): only
+            // multi-entity pieces subdivide between entities.
+            let atomic = path == ChunkPath::Bm25
+                && piece_ids.len() == 1
+                && piece_ids
+                    .first()
+                    .is_some_and(|id| !is_module_entity(group, *id));
             if budget.body_limit > 0
                 && self.config.cost(&text[b.start_byte..b.end_byte], path) > budget.body_limit
+                && !atomic
             {
                 result.extend(self.split_range_at(
                     text,
@@ -906,6 +946,113 @@ mod tests {
     }
 
     #[test]
+    fn test_bm25_single_entity_piece_stays_whole_over_budget() {
+        // One entity's documentation, signature and code belong in one
+        // BM25 chunk: subdividing them divides the query vocabulary
+        // across chunks. The BM25 path has no neural ceiling, so the
+        // over-budget single-entity piece stays whole.
+        let config = ChunkingConfig {
+            max_bm25_terms: 3,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        let text = "word1 word2 word3 word4 word5 word6 word7 word8";
+        let nlb = vec![NlEntityBoundary {
+            entity_id: EntityId(1),
+            start_byte: 0,
+            end_byte: text.len(),
+        }];
+        let boundaries = splitter.split_range(
+            text,
+            &EntityGroup::default(),
+            SplitStrategy::ByNlEntityBoundaries,
+            ChunkPath::Bm25,
+            Some(&nlb),
+            0..text.len(),
+        );
+        assert_eq!(
+            boundaries.len(),
+            1,
+            "single-entity BM25 piece must stay atomic: {boundaries:?}"
+        );
+        assert_partition(text, &boundaries);
+    }
+
+    #[test]
+    fn test_embedding_single_entity_piece_still_subdivides() {
+        // The embedding path keeps hard model limits: the same
+        // over-budget single-entity piece subdivides there.
+        let config = ChunkingConfig {
+            max_tokens: 3,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        let text = "word1 word2 word3 word4 word5 word6 word7 word8";
+        let nlb = vec![NlEntityBoundary {
+            entity_id: EntityId(1),
+            start_byte: 0,
+            end_byte: text.len(),
+        }];
+        let boundaries = splitter.split_range(
+            text,
+            &EntityGroup::default(),
+            SplitStrategy::ByNlEntityBoundaries,
+            ChunkPath::Embedding,
+            Some(&nlb),
+            0..text.len(),
+        );
+        assert!(
+            boundaries.len() > 1,
+            "embedding path must still subdivide: {boundaries:?}"
+        );
+        assert_partition(text, &boundaries);
+    }
+
+    #[test]
+    fn test_bm25_module_entity_still_subdivides() {
+        // Module entities keep their document-section splitting: their
+        // sections are independent prose, not one callable whose parts
+        // must stay together.
+        use cce_types::entity::{EntityKind, GroupedEntity};
+
+        let config = ChunkingConfig {
+            max_bm25_terms: 3,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        let header = GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Module,
+            "m".to_string(),
+            "m".to_string(),
+        );
+        let group = EntityGroup {
+            header: Some(header),
+            header_id: Some(EntityId(1)),
+            ..Default::default()
+        };
+        let text = "word1 word2 word3 word4 word5 word6 word7 word8";
+        let nlb = vec![NlEntityBoundary {
+            entity_id: EntityId(1),
+            start_byte: 0,
+            end_byte: text.len(),
+        }];
+        let boundaries = splitter.split_range(
+            text,
+            &group,
+            SplitStrategy::ByNlEntityBoundaries,
+            ChunkPath::Bm25,
+            Some(&nlb),
+            0..text.len(),
+        );
+        assert!(
+            boundaries.len() > 1,
+            "module entities must still subdivide: {boundaries:?}"
+        );
+        assert_partition(text, &boundaries);
+    }
+
+    #[test]
     fn test_split_range_unicode_text_no_zero_length() {
         let config = ChunkingConfig {
             max_tokens: 2,
@@ -1115,13 +1262,28 @@ mod tests {
     }
 
     #[test]
-    fn test_entity_subdivision_routes_bm25_to_paragraphs_embedding_to_sentences() {
-        let text = "alpha beta gamma. delta epsilon zeta.\n\neta theta iota kappa.";
-        let nlb = vec![NlEntityBoundary {
-            entity_id: EntityId(1),
-            start_byte: 0,
-            end_byte: text.len(),
-        }];
+    fn test_entity_subdivision_routes_bm25_to_entities_embedding_to_sentences() {
+        // Two entities: BM25 stops at the entity level and never descends
+        // to sentences (single-entity BM25 pieces stay atomic by design and
+        // are covered by dedicated tests). Paragraph-level BM25 splitting
+        // without entity data is covered by the oversized-paragraph test.
+        // Each half stays over the embedding budget so the embedding path
+        // still descends to sentences.
+        let text = "alpha beta gamma. delta epsilon zeta.\n\neta theta iota kappa. ".repeat(3);
+        let text = text.as_str();
+        let mid = text.len() / 2;
+        let nlb = vec![
+            NlEntityBoundary {
+                entity_id: EntityId(1),
+                start_byte: 0,
+                end_byte: mid,
+            },
+            NlEntityBoundary {
+                entity_id: EntityId(2),
+                start_byte: mid,
+                end_byte: text.len(),
+            },
+        ];
 
         let bm25_config = ChunkingConfig {
             max_bm25_terms: 5,
