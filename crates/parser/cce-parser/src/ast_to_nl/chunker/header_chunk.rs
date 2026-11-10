@@ -232,6 +232,25 @@ fn smart_chunk_with_header(
     Ok(all_chunks)
 }
 
+/// Whether a continuation block head is a repeated bare group anchor.
+///
+/// Adjacent blocks of one group restate the same topic line when the head
+/// names no block members of its own. The first statement carries the
+/// group identity; every repeat only adds a shared common component that
+/// pulls all of the group's chunk embeddings toward the same direction.
+/// Heads that name block members differ per block and are never dropped.
+fn drops_repeated_bare_anchor(
+    block_index: usize,
+    head: &str,
+    continuation: &str,
+    prev_block_head: &str,
+) -> bool {
+    block_index > 0
+        && !continuation.is_empty()
+        && head == continuation
+        && prev_block_head == continuation
+}
+
 fn process_path(
     ctx: &GroupChunkContext,
     tracker: &mut GroupTracker,
@@ -285,6 +304,8 @@ fn process_path(
     let total = member_groups.len();
 
     let mut output = ChunkOutput::default();
+    let mut prev_block_head = String::new();
+    let mut prev_group_anchor = String::new();
     for (idx, members) in member_groups.into_iter().enumerate() {
         let continuation_for_block: String;
         let header_text = if idx == 0 {
@@ -301,6 +322,7 @@ fn process_path(
                     let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
                     continuation_for_block =
                         format!("{} {}.", first.kind.kind_label(), names.join(", "));
+                    prev_group_anchor.clear();
                 } else {
                     let qualified: Vec<String> = members
                         .iter()
@@ -327,17 +349,25 @@ fn process_path(
                     // file-level intent.
                     if super::chunk_builder::entity_has_own_descriptor(ctx.group, first.entity_id) {
                         continuation_for_block = format!("{} {}.", first.kind.kind_label(), joined);
+                        prev_group_anchor.clear();
                     } else {
                         // Continuation blocks keep the group topic sentence ahead of
                         // the member identities so split halves and tiny merged members
-                        // still carry file-level intent in vector space.
-                        continuation_for_block = format!(
-                            "{} {}. {} {}.",
-                            ctx.group.kind.kind_label(),
-                            ctx.group.name,
-                            first.kind.kind_label(),
-                            joined
-                        );
+                        // still carry file-level intent in vector space. Adjacent blocks
+                        // of one group restate the identical topic sentence; every
+                        // repeat drags all of the group's chunk embeddings toward one
+                        // shared direction while member heads already carry the owner
+                        // qualifier, so only the first statement is kept and the rest
+                        // name just their members.
+                        let group_anchor =
+                            format!("{} {}.", ctx.group.kind.kind_label(), ctx.group.name);
+                        let member_head = format!("{} {}.", first.kind.kind_label(), joined);
+                        if prev_group_anchor == group_anchor {
+                            continuation_for_block = member_head;
+                        } else {
+                            continuation_for_block = format!("{} {}", group_anchor, member_head);
+                            prev_group_anchor = group_anchor;
+                        }
                     }
                 }
                 &continuation_for_block
@@ -347,6 +377,20 @@ fn process_path(
         } else {
             &input.texts.continuation
         };
+        // Adjacent blocks of one group restate the same bare group anchor
+        // when neither names its own members; every repeat drags all of
+        // the group's chunk embeddings toward one shared direction while
+        // adding no new signal, since member texts already carry qualified
+        // names. Drop the repeat: the previous block just stated it.
+        // Heads that name block members differ per block and are kept.
+        let drop_head = drops_repeated_bare_anchor(
+            idx,
+            header_text,
+            &input.texts.continuation,
+            &prev_block_head,
+        );
+        prev_block_head = header_text.to_string();
+        let header_text = if drop_head { "" } else { header_text };
         // A synthetic head names the members of a continuation block. It is
         // decoration, not body: cap it in the path's unit so a group with
         // many members cannot push the block over the budget.
@@ -1263,6 +1307,27 @@ mod tests {
             joined.contains("writebody99"),
             "merged member body must survive, got {:?}",
             joined
+        );
+    }
+
+    #[test]
+    fn test_drops_repeated_bare_anchor() {
+        let anchor = "trait implementation Matcher.";
+        assert!(
+            !super::drops_repeated_bare_anchor(0, anchor, anchor, anchor),
+            "first block keeps the group anchor"
+        );
+        assert!(
+            super::drops_repeated_bare_anchor(1, anchor, anchor, anchor),
+            "adjacent repeat of the bare anchor is dropped"
+        );
+        assert!(
+            !super::drops_repeated_bare_anchor(1, "function Matcher.find_at.", anchor, anchor),
+            "heads naming block members are kept"
+        );
+        assert!(
+            !super::drops_repeated_bare_anchor(1, anchor, "", anchor),
+            "empty continuation never triggers"
         );
     }
 }

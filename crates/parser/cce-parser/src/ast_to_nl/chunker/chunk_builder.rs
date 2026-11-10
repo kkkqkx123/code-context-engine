@@ -44,6 +44,18 @@ const IDENTITY_COST_CAP: usize = 80;
 /// Maximum cost of a synthetic block head.
 pub(crate) const SYNTHETIC_HEAD_COST_CAP: usize = 32;
 
+/// Maximum sibling member names added to a chunk's BM25 keywords.
+///
+/// Entity-aligned splitting isolates a method from the siblings it was
+/// written with, breaking the term co-occurrence a query may need (e.g. a
+/// `context` method chunk loses the sibling `matched` name a neighbouring
+/// raw window still carries). Naming the nearest siblings restores that
+/// co-occurrence in the keyword field. The cap bounds keyword-field
+/// dilution and document-frequency inflation on common method names;
+/// members cluster by functionality in source order, so the first few in
+/// group order are the most topical neighbours.
+const SIBLING_KEYWORD_CAP: usize = 4;
+
 /// Whether an entity carries its own docstring, making it semantically
 /// self-contained. Members with an independent description must stay in
 /// their own chunk (Embedding path) so their topic is not diluted by
@@ -696,6 +708,38 @@ impl ChunkBuilder {
                 &mut result,
                 &mut seen,
             );
+        }
+        // Name the sibling members the chunk does not hold. A method chunk
+        // is split away from the siblings it was written with, so a query
+        // needing names from both sides (e.g. `matched` + `context` of one
+        // trait) can only hit the chunk holding one of them. Sibling names
+        // are topically related by construction (same owner), and the
+        // qualified form keeps the owner attached the same way member
+        // keywords do. Merged groups are skipped: their fragments are
+        // siblings, not owned members, and qualifying them with the group
+        // name would assert an ownership that does not exist.
+        if group.group_type != GroupType::MergedFragments {
+            let mut siblings = 0;
+            for id in group.member_ids.iter().copied() {
+                if siblings >= SIBLING_KEYWORD_CAP {
+                    break;
+                }
+                if content_ids.contains(&id) {
+                    continue;
+                }
+                let Some(name) = Self::entity_name_by_id(group, id) else {
+                    continue;
+                };
+                if name.is_empty() || name.contains('.') || name == group.name.as_str() {
+                    continue;
+                }
+                let qualified = format!("{}.{}", group.name, name);
+                let before = result.len();
+                Self::push_keyword_part(&mut result, &mut seen, &qualified);
+                if result.len() > before {
+                    siblings += 1;
+                }
+            }
         }
         result
     }
@@ -1829,6 +1873,72 @@ mod tests {
             keywords,
             vec!["read_fn"],
             "missing span adds nothing: {keywords:?}"
+        );
+    }
+
+    #[test]
+    fn keywords_name_sibling_members_the_chunk_does_not_hold() {
+        // A method chunk split away from its siblings loses the term
+        // co-occurrence a query may need (`matched` + `context` of one
+        // trait). Sibling names join the keywords in qualified form so
+        // the owner stays attached, capped to bound dilution.
+        let mut group = header_with_member_group();
+        group.group_type = GroupType::ClassWithMethods;
+        group.kind = EntityKind::Trait;
+        group.name = CompactString::from("Sink");
+        group.header = Some(GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Trait,
+            "Sink".to_string(),
+            "pub trait Sink".to_string(),
+        ));
+        group.header_id = Some(EntityId(1));
+        group.members = smallvec::smallvec![
+            GroupedEntity::new(
+                EntityId(2),
+                EntityKind::Method,
+                "matched".to_string(),
+                "fn matched".to_string(),
+            ),
+            GroupedEntity::new(
+                EntityId(3),
+                EntityKind::Method,
+                "context".to_string(),
+                "fn context".to_string(),
+            ),
+            GroupedEntity::new(
+                EntityId(4),
+                EntityKind::Method,
+                "finish".to_string(),
+                "fn finish".to_string(),
+            ),
+        ];
+        group.member_ids = smallvec::smallvec![EntityId(2), EntityId(3), EntityId(4)];
+        let keywords = ChunkBuilder::bm25_keywords_for_ids(&group, &[EntityId(3)], None, "x", None);
+        assert_eq!(
+            keywords,
+            vec![
+                "context",
+                "sink",
+                "sink.context",
+                "sink.matched",
+                "sink.finish"
+            ],
+            "siblings join qualified, content member is not repeated: {keywords:?}"
+        );
+    }
+
+    #[test]
+    fn keywords_skip_sibling_names_for_merged_fragments() {
+        // Merged fragments are siblings, not owned members: qualifying
+        // them with the group name would assert a false ownership.
+        let group = header_with_member_group();
+        assert_eq!(group.group_type, GroupType::MergedFragments);
+        let keywords = ChunkBuilder::bm25_keywords_for_ids(&group, &[EntityId(1)], None, "x", None);
+        assert_eq!(
+            keywords,
+            vec!["read_fn"],
+            "merged groups gain no sibling names: {keywords:?}"
         );
     }
 }

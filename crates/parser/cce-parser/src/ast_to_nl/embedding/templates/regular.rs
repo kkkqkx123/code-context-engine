@@ -654,7 +654,12 @@ impl RegularGroupTemplate {
     fn kind_label_with_subtype(kind: EntityKind, subtype: Option<&str>) -> String {
         let base = kind.to_string();
         match subtype {
-            Some(s) if !s.is_empty() => format!("{} {}", s, base),
+            // A subtype that merely restates the kind (e.g. `trait` on a
+            // trait implementation) adds noise instead of signal, so the
+            // kind display stands alone.
+            Some(s) if !s.is_empty() && s != base && !base.contains(s) && !s.contains(&base) => {
+                format!("{} {}", s, base)
+            }
             _ => base.to_string(),
         }
     }
@@ -872,6 +877,25 @@ mod tests {
             desc.contains("Option<u32>"),
             "field description should include type, got: {}",
             desc
+        );
+    }
+
+    #[test]
+    fn test_kind_label_drops_redundant_subtype() {
+        assert_eq!(
+            RegularGroupTemplate::kind_label_with_subtype(EntityKind::TraitImpl, Some("trait")),
+            "trait_impl",
+            "a subtype restating the kind adds no signal"
+        );
+        assert_eq!(
+            RegularGroupTemplate::kind_label_with_subtype(EntityKind::Method, Some("async")),
+            "async method",
+            "a distinctive subtype is kept"
+        );
+        assert_eq!(
+            RegularGroupTemplate::kind_label_with_subtype(EntityKind::Method, None),
+            "method",
+            "no subtype keeps the kind display"
         );
     }
 
