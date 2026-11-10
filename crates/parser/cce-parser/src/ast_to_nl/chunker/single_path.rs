@@ -19,7 +19,7 @@ use super::config::ChunkingConfig;
 use super::limits;
 use super::result::{ChunkPath, ChunkedResult};
 use super::segment_limit;
-use super::splitter::TextSplitter;
+use super::splitter::{SINGLE_ENTITY_BM25_TOLERANCE_FACTOR, TextSplitter};
 use super::strategy::SplitStrategy;
 use super::tracker::GroupTracker;
 
@@ -249,7 +249,15 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
             .map(|chunk| current_budget.unit.cost(&chunk.text))
             .max()
             .unwrap_or(0);
-        let needs_repair = budget.hard_limit > 0 && pre_limit != usize::MAX && max_cost > pre_limit;
+        // Bounded BM25 wholes stay silent: splitting them would multiply index
+        // entries while the reported span stays whole, so the repair threshold
+        // uses three times the pre-injection limit on that path only.
+        let repair_limit = match path {
+            ChunkPath::Bm25 => pre_limit.saturating_mul(SINGLE_ENTITY_BM25_TOLERANCE_FACTOR),
+            ChunkPath::Embedding => pre_limit,
+        };
+        let needs_repair =
+            budget.hard_limit > 0 && pre_limit != usize::MAX && max_cost > repair_limit;
         if !needs_repair || attempt + 1 >= MAX_DECORATION_REPAIR_PASSES {
             if needs_repair {
                 tracing::warn!(

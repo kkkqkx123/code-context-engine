@@ -82,11 +82,20 @@ impl BoundaryLevel {
     }
 }
 
+/// How many times the body budget a single-entity BM25 piece may exceed
+/// while staying whole.
+///
+/// The keyword index has no neural ceiling, and splitting a function would
+/// multiply index entries without shrinking the reported source span. The
+/// bound covers the observed long test functions while still capping
+/// pathological inputs; beyond it the piece subdivides and the hard limit
+/// truncates to the same bound.
+pub(crate) const SINGLE_ENTITY_BM25_TOLERANCE_FACTOR: usize = 3;
+
 /// Whether an entity is a module container.
 ///
-/// Module entities keep their document-section splitting even on the BM25
-/// path: their sections are independent prose units, not one callable
-/// whose documentation and code must stay together.
+/// Module sections stay independent prose and always subdivide at the body
+/// budget, even within the single-entity tolerance above.
 fn is_module_entity(group: &EntityGroup, id: EntityId) -> bool {
     group
         .header
@@ -318,29 +327,23 @@ impl TextSplitter {
             let piece_cost = self
                 .config
                 .cost(&text[boundary.start_byte..boundary.end_byte], path);
-            // A single piece is kept whole only when it fits the body limit:
-            // the assembly still appends decoration on top, so keeping a
-            // body-overflowing piece would push the final chunk over the
-            // pre-injection and hard limits whenever the reserve is smaller
-            // than the decoration. Splitting here may strand a tail, but it
-            // keeps the hard limit reachable.
+            // Over-body pieces subdivide, except a single-entity BM25 piece
+            // within tolerance stays whole: splitting it would multiply index
+            // entries while the reported source span stays whole, and the
+            // repair loop cannot recover an atomic piece by tightening.
             if budget.body_limit == 0 || piece_cost <= budget.body_limit {
                 return Ok(vec![boundary]);
             }
-            // Exact-match retrieval needs one entity's documentation,
-            // signature and code in a single chunk: subdividing them divides
-            // the query vocabulary across chunks no single chunk satisfies
-            // (documentation terms land in one half, code identifiers in
-            // the other). The BM25 path has no neural ceiling, so a
-            // single-entity piece stays whole even over budget. Multi-entity
-            // pieces still subdivide between entities, and module entities
-            // keep their document-section splitting.
-            if path == ChunkPath::Bm25
+            let tolerated = path == ChunkPath::Bm25
                 && piece_ids.len() == 1
                 && piece_ids
                     .first()
                     .is_some_and(|id| !is_module_entity(group, *id))
-            {
+                && piece_cost
+                    <= budget
+                        .body_limit
+                        .saturating_mul(SINGLE_ENTITY_BM25_TOLERANCE_FACTOR);
+            if tolerated {
                 return Ok(vec![boundary]);
             }
             return self.split_range_at(
@@ -362,18 +365,17 @@ impl TextSplitter {
                 b.entity_ids = inherit_entity_ids.to_vec();
             }
             let piece_ids = b.entity_ids.clone();
-
-            // Single-entity BM25 pieces stay whole (see above): only
-            // multi-entity pieces subdivide between entities.
-            let atomic = path == ChunkPath::Bm25
+            let piece_cost = self.config.cost(&text[b.start_byte..b.end_byte], path);
+            let tolerated = path == ChunkPath::Bm25
                 && piece_ids.len() == 1
                 && piece_ids
                     .first()
-                    .is_some_and(|id| !is_module_entity(group, *id));
-            if budget.body_limit > 0
-                && self.config.cost(&text[b.start_byte..b.end_byte], path) > budget.body_limit
-                && !atomic
-            {
+                    .is_some_and(|id| !is_module_entity(group, *id))
+                && piece_cost
+                    <= budget
+                        .body_limit
+                        .saturating_mul(SINGLE_ENTITY_BM25_TOLERANCE_FACTOR);
+            if budget.body_limit > 0 && piece_cost > budget.body_limit && !tolerated {
                 result.extend(self.split_range_at(
                     text,
                     group,
@@ -946,11 +948,39 @@ mod tests {
     }
 
     #[test]
-    fn test_bm25_single_entity_piece_stays_whole_over_budget() {
-        // One entity's documentation, signature and code belong in one
-        // BM25 chunk: subdividing them divides the query vocabulary
-        // across chunks. The BM25 path has no neural ceiling, so the
-        // over-budget single-entity piece stays whole.
+    fn test_bm25_single_entity_piece_subdivides_beyond_tolerance() {
+        // Single-entity BM25 stays whole up to three times the body budget;
+        // beyond that it subdivides so pathological inputs stay bounded.
+        let config = ChunkingConfig {
+            max_bm25_terms: 3,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        let text = "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12";
+        let nlb = vec![NlEntityBoundary {
+            entity_id: EntityId(1),
+            start_byte: 0,
+            end_byte: text.len(),
+        }];
+        let boundaries = splitter.split_range(
+            text,
+            &EntityGroup::default(),
+            SplitStrategy::ByNlEntityBoundaries,
+            ChunkPath::Bm25,
+            Some(&nlb),
+            0..text.len(),
+        );
+        assert!(
+            boundaries.len() > 1,
+            "single-entity BM25 piece must subdivide beyond tolerance: {boundaries:?}"
+        );
+        assert_partition(text, &boundaries);
+    }
+
+    #[test]
+    fn test_bm25_single_entity_piece_stays_whole_within_tolerance() {
+        // Within three times the body budget the piece stays whole so one
+        // function keeps one index entry and the reported span stays whole.
         let config = ChunkingConfig {
             max_bm25_terms: 3,
             ..Default::default()
@@ -973,7 +1003,7 @@ mod tests {
         assert_eq!(
             boundaries.len(),
             1,
-            "single-entity BM25 piece must stay atomic: {boundaries:?}"
+            "single-entity BM25 piece stays whole within tolerance: {boundaries:?}"
         );
         assert_partition(text, &boundaries);
     }
@@ -1263,10 +1293,9 @@ mod tests {
 
     #[test]
     fn test_entity_subdivision_routes_bm25_to_entities_embedding_to_sentences() {
-        // Two entities: BM25 stops at the entity level and never descends
-        // to sentences (single-entity BM25 pieces stay atomic by design and
-        // are covered by dedicated tests). Paragraph-level BM25 splitting
-        // without entity data is covered by the oversized-paragraph test.
+        // Two entities: BM25 stops at the entity level before descending
+        // to paragraphs, while over-body single-entity pieces subdivide
+        // further. Paragraph-level BM25 splitting without entity data is covered by the oversized-paragraph test.
         // Each half stays over the embedding budget so the embedding path
         // still descends to sentences.
         let text = "alpha beta gamma. delta epsilon zeta.\n\neta theta iota kappa. ".repeat(3);

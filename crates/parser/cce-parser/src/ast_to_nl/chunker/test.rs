@@ -809,11 +809,10 @@ mod tests {
     fn test_single_function_chunk_claims_the_range_of_the_code_it_carries() {
         // A C function group holds its local variables as members, but those
         // members contribute no text of their own: the group text is the
-        // function's own text, local declarations included. Single-entity
-        // BM25 text stays atomic by design, so the group yields one chunk
-        // carrying the function's code; it must claim the function's range,
-        // not the narrow range of a local variable whose name happens to
-        // appear inside the text.
+        // function's own text, local declarations included. Within tolerance
+        // the text stays one whole carrying the function's code; it must claim
+        // the function's range, not the narrow range of a local variable whose
+        // name happens to appear inside the text.
         let base = ChunkingConfig {
             max_bm25_terms: 150,
             ..Default::default()
@@ -898,7 +897,7 @@ mod tests {
         assert_eq!(
             bm25.len(),
             1,
-            "single-function BM25 text stays atomic instead of splitting"
+            "within-tolerance single-function BM25 text stays one whole"
         );
         // Every fragment carries function code, so every fragment stays
         // inside the function range; a local variable mentioned in the text
@@ -930,7 +929,7 @@ mod tests {
         assert_eq!(
             claimed,
             vec![(198, 240)],
-            "the atomic chunk claims the whole function range: {claimed:?}"
+            "the tolerated whole claims the whole function range: {claimed:?}"
         );
     }
 
@@ -1461,28 +1460,29 @@ mod tests {
         let output = crate::ast_to_nl::chunker::single_path::chunk_single_path(input)
             .expect("repair must keep the combination text");
         assert!(!output.chunks.is_empty(), "repair must not drop the file");
-        // The child is a single function entity: its BM25 text stays atomic
-        // by design and is kept whole even over the pre-injection budget
-        // (warned, not dropped). Multi-entity overflow still folds back and
-        // must fit.
+        // Within tolerance the single-entity BM25 text stays one whole without
+        // folding the body budget; the whole exceeds pre-injection but stays
+        // within three times of it, so no repair subdivides it.
         assert_eq!(
             output.chunks.len(),
             1,
-            "atomic single-entity BM25 text stays one chunk"
+            "within-tolerance single-entity BM25 text stays one whole"
         );
         assert!(
             config.cost(&output.chunks[0].text, ChunkPath::Bm25) > bm25_budget.pre_injection_limit,
-            "test setup must exceed pre-injection to exercise the keep path"
+            "tolerated whole exceeds pre-injection by design"
+        );
+        assert!(
+            config.cost(&output.chunks[0].text, ChunkPath::Bm25)
+                <= bm25_budget.pre_injection_limit.saturating_mul(3),
+            "tolerated whole stays within three times pre-injection"
         );
     }
 
     #[test]
-    fn test_atomic_single_entity_chunks_skip_truncation_fallback() {
-        // Single-entity BM25 pieces stay whole by design (method
-        // atomicity), so the truncation fallback never fires for them:
-        // the over-hard chunks are kept whole and warned instead of cut.
-        // Multi-entity over-hard chunks still truncate (covered by the
-        // hard-limit unit tests).
+    fn test_single_entity_chunks_subdivide_and_fit_hard_limit() {
+        // Beyond three times the hard limit the splitter subdivides, so every
+        // stored chunk fits; within tolerance the whole stays by design.
         let config = ChunkingConfig {
             max_tokens: 40,
             max_bm25_terms: 40,
@@ -1551,16 +1551,14 @@ mod tests {
             .chunk_groups(&conversions, "tiny_parent.cs")
             .expect("tiny budget must not drop the file");
         assert!(!output.chunks.is_empty(), "file must keep its chunks");
-        // Both child pieces are single-entity BM25 text, so atomicity keeps
-        // them whole even over the hard limit; truncation must not fire.
+        // Subdivision keeps every fragment within budget; truncation only
+        // fires for residual over-hard assembly.
         for chunk in &output.chunks {
-            if chunk.path == ChunkPath::Bm25 {
-                assert!(
-                    !chunk.truncated,
-                    "atomic single-entity chunk {} must not be truncated",
-                    chunk.chunk_id
-                );
-            }
+            assert!(
+                config.cost(&chunk.text, chunk.path) <= config.limit(chunk.path),
+                "chunk {} must fit the hard limit",
+                chunk.chunk_id
+            );
         }
     }
 
