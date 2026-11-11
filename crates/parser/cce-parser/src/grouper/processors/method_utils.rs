@@ -200,7 +200,7 @@ impl GetterSetterDetector {
 
         let param_count = method.parameters.len();
         let is_valid_param_count = match language {
-            Language::Java | Language::Kotlin => param_count == 0,
+            Language::Java | Language::Kotlin | Language::Groovy => param_count == 0,
             Language::Cpp | Language::C => param_count == 0 || param_count == 1,
             Language::Python | Language::Ruby => param_count == 1,
             Language::Php => param_count == 1,
@@ -258,7 +258,7 @@ impl GetterSetterDetector {
 
         let param_count = method.parameters.len();
         let is_valid_param_count = match language {
-            Language::Java | Language::Kotlin => param_count == 1,
+            Language::Java | Language::Kotlin | Language::Groovy => param_count == 1,
             Language::Cpp | Language::C => param_count == 1 || param_count == 2,
             Language::Python | Language::Ruby => param_count == 2,
             Language::Php => param_count == 2,

@@ -1,8 +1,9 @@
 //! Groovy language query schemes
 //!
 //! Targets the vendored `murtaza64` grammar (`crates/tree-sitter/tree-sitter-groovy`):
-//! classes own their body closure, methods are function definitions nested in
-//! that closure, fields and locals share the `declaration` node with
+//! classes own their body closure, enums own an `enum_body` holding constants
+//! plus members after the separator, methods are function definitions nested in
+//! either body, fields and locals share the `declaration` node with
 //! name/type/value fields, and calls split into parenthesized `function_call`
 //! plus juxtaposed `juxt_function_call` command calls. Block and line comments
 //! share the `comment` node, so both feed line spans.
@@ -10,17 +11,32 @@
 /// Get entity query for Groovy
 ///
 /// Returns Tree-sitter query patterns for identifying Groovy code entities:
-/// - Class definitions (name, superclass, body closure)
-/// - Method definitions nested in the class body closure
+/// - Class, interface and annotation-type definitions (told apart by keyword)
+/// - Enum definitions (told apart by keyword) and enum constants
+/// - Method definitions nested in the class body closure or the enum body
 /// - Top-level function definitions
-/// - Field declarations (class body closure) and local declarations
+/// - Field declarations (class body closure or enum body) and local declarations
+/// - Annotation usages (buffered for test detection)
 /// - Package declarations
 pub fn entity_query() -> &'static str {
     r#"
 (class_definition
+  "class"
   name: (identifier) @entity.class.name @entity.class.signature.name
   superclass: [(identifier) (qualified_name) (dotted_identifier)]? @entity.class.signature.base
   body: (closure) @entity.class.body) @entity.class
+
+; Interface definition (shares the class node, told apart by keyword)
+(class_definition
+  "interface"
+  name: (identifier) @entity.interface.name @entity.interface.signature.name
+  body: (closure) @entity.interface.body) @entity.interface
+
+; Annotation type definition (shares the class node, told apart by keyword)
+(class_definition
+  "@interface"
+  name: (identifier) @entity.annotation.name @entity.annotation.signature.name
+  body: (closure) @entity.annotation.body) @entity.annotation
 
 ; Methods with bodies
 (class_definition
@@ -36,6 +52,46 @@ pub fn entity_query() -> &'static str {
     (function_declaration
       function: (identifier) @entity.method.name @entity.method.signature.name
       parameters: (parameter_list) @entity.method.params @entity.method.signature.params) @entity.method))
+
+; Enum definition, told apart by keyword rather than body shape: the
+; current grammar still parses the enum body as a closure (constants
+; recovered inside an error node), while a disambiguated grammar yields
+; an enum body, so both shapes are accepted here.
+(class_definition
+  "enum"
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
+  body: [(closure) (enum_body)] @entity.enum.body) @entity.enum
+
+; Enum constants, with or without construction arguments
+(enum_constant
+  name: (identifier) @entity.enum_constant.name @entity.enum_constant.signature.name
+  args: (argument_list)? @entity.enum_constant.signature.arguments) @entity.enum_constant
+
+; Methods with bodies nested in the enum body
+(class_definition
+  body: (enum_body
+    (function_definition
+      function: (identifier) @entity.method.name @entity.method.signature.name
+      parameters: (parameter_list) @entity.method.params @entity.method.signature.params
+      body: (closure)? @entity.method.body) @entity.method))
+
+; Body-less declarations nested in the enum body
+(class_definition
+  body: (enum_body
+    (function_declaration
+      function: (identifier) @entity.method.name @entity.method.signature.name
+      parameters: (parameter_list) @entity.method.params @entity.method.signature.params) @entity.method))
+
+; Fields declared in the enum body
+(class_definition
+  body: (enum_body
+    (declaration
+      name: (identifier) @entity.field.name @entity.field.signature.name) @entity.field))
+
+; Annotation usage, buffered as pending annotations so `@Test`
+; methods are promoted to `TestCase` like in Java and Kotlin
+(annotation
+  (identifier) @entity.annotation.name) @entity.annotation
 
 (source_file
   (function_definition
@@ -90,6 +146,7 @@ pub fn call_query() -> &'static str {
 ///
 /// Returns Tree-sitter query patterns for identifying Groovy dependencies:
 /// - Import declarations (qualified and wildcard)
+/// - Superclass references (extends inheritance)
 pub fn dependency_query() -> &'static str {
     r#"
 (groovy_import
@@ -97,6 +154,10 @@ pub fn dependency_query() -> &'static str {
 
 (groovy_import
   (wildcard_import) @dependency.import.wildcard) @dependency.import.wildcard
+
+; Superclass clause (extends inheritance)
+(class_definition
+  superclass: [(identifier) (qualified_name) (dotted_identifier)] @dependency.extend.name) @dependency.extend
 "#
 }
 

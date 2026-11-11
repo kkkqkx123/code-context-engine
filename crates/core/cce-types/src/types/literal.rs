@@ -61,7 +61,11 @@ pub fn literal_type_name(language: &Language, kind: LiteralKind) -> &'static str
             match language {
                 Language::Rust => "f64",
                 Language::Go => "float64",
-                Language::Java | Language::CSharp | Language::C | Language::Cpp => "double",
+                Language::Java
+                | Language::Groovy
+                | Language::CSharp
+                | Language::C
+                | Language::Cpp => "double",
                 Language::Kotlin | Language::Scala => "Double",
                 Language::Ruby => "Float",
                 Language::Dart => "double",
@@ -76,6 +80,7 @@ pub fn literal_type_name(language: &Language, kind: LiteralKind) -> &'static str
             | Language::CSharp
             | Language::Kotlin
             | Language::Scala
+            | Language::Groovy
             | Language::Dart
             | Language::Ruby => "String",
             _ => "string",
@@ -97,7 +102,7 @@ pub fn literal_type_name(language: &Language, kind: LiteralKind) -> &'static str
                 return "boolean";
             }
             match language {
-                Language::Java => "boolean",
+                Language::Java | Language::Groovy => "boolean",
                 Language::Kotlin | Language::Scala => "Boolean",
                 Language::Ruby | Language::Lua => "boolean",
                 // Bare `true`/`false` in shell are builtin commands whose

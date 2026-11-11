@@ -7,7 +7,7 @@
 //! | Rust     | `#[test]`, `#[cfg(test)]` | — (deliberately no naming) | `*_test.rs`, `tests/` |
 //! | Python   | `@pytest.mark.*`, `@pytest.fixture` | `test_*` in test files | `test_*.py`, `conftest.py`, `tests/` |
 //! | Go       | — | `TestXxx`/`BenchmarkXxx` in `*_test.go` | `*_test.go` |
-//! | Java/Kotlin | `@Test`, `@ParameterizedTest` | `*Test`/`*Tests` classes | `*Test.java`/`*Tests.java`, `src/test/` |
+//! | Java/Kotlin/Groovy | `@Test`, `@ParameterizedTest` | `*Test`/`*Tests` classes (`*Spec` for Kotlin/Groovy) | `*Test.java`/`*Tests.java`, `src/test/` |
 //! | JS/TS/JSX/TSX | — | `describe`/`it`/`test` in test files | `.spec.*`/`.test.*`, `__tests__/` |
 //! | C#       | `[Test]`, `[TestCase]`, `[Fact]`, `[Theory]` | `*Test`/`*Tests` classes | `*Test.cs`/`*Tests.cs`, `tests/` |
 //! | Scala    | `@Test` | `*Test`/`*Tests`/`*Spec` classes | `src/test/`, `tests/` |

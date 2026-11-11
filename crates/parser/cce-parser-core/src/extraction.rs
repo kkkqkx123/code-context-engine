@@ -58,7 +58,7 @@ impl ExtractionContext {
 
     /// Resolve relative import to absolute path.
     ///
-    /// Java, Kotlin, Scala and C# have no relative import syntax: every
+    /// Java, Kotlin, Scala, Groovy and C# have no relative import syntax: every
     /// import is an absolute package or namespace path, so they
     /// deliberately return none. Dart, C, C++, PHP, Ruby, Lua and Bash
     /// use file-relative paths (`./`, `../`, quoted headers, `require_relative`,
@@ -81,9 +81,13 @@ impl ExtractionContext {
             Language::Php | Language::Ruby | Language::Lua | Language::Bash => {
                 self.resolve_file_relative(relative_path)
             }
-            // Java, Kotlin, Scala and C# imports are always absolute
+            // Java, Kotlin, Scala, Groovy and C# imports are always absolute
             // package or namespace paths; there is no relative syntax to resolve.
-            Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => None,
+            Language::Java
+            | Language::Kotlin
+            | Language::Scala
+            | Language::Groovy
+            | Language::CSharp => None,
             _ => None,
         }
     }
@@ -109,7 +113,11 @@ impl ExtractionContext {
         }
         if let Some(ref package) = self.package_declaration {
             match language {
-                Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => {
+                Language::Java
+                | Language::Kotlin
+                | Language::Scala
+                | Language::Groovy
+                | Language::CSharp => {
                     if import_path.starts_with(package) {
                         let remaining = import_path.strip_prefix(package).unwrap_or("");
                         if remaining.is_empty() || remaining.starts_with('.') {
@@ -142,7 +150,11 @@ impl ExtractionContext {
 
         for project_pkg in &self.config.project_packages {
             match language {
-                Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => {
+                Language::Java
+                | Language::Kotlin
+                | Language::Scala
+                | Language::Groovy
+                | Language::CSharp => {
                     if import_path.starts_with(project_pkg) {
                         return true;
                     }
@@ -246,7 +258,7 @@ impl ExtractionContext {
                     || import_path == "."
                     || import_path == ".."
             }
-            // Java, Kotlin, Scala and C# use absolute package paths only.
+            // Java, Kotlin, Scala, Groovy and C# use absolute package paths only.
             _ => false,
         }
     }
@@ -420,7 +432,7 @@ pub fn determine_module_path(
             let module = path_str.trim_end_matches(".go").trim_end_matches("/");
             Some(module.to_string())
         }
-        Language::Kotlin | Language::Scala | Language::CSharp => {
+        Language::Kotlin | Language::Scala | Language::Groovy | Language::CSharp => {
             let path_str = relative.as_str();
             let module = strip_file_extension(path_str).replace(['/', '\\'], ".");
             Some(module)

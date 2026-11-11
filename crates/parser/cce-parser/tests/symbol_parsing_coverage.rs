@@ -283,6 +283,41 @@ fn groovy_class_method_function_and_import() {
 }
 
 #[test]
+fn groovy_enum_with_constants_and_members() {
+    let parsed = parse_file(
+        "Color.groovy",
+        "package demo\nenum Color {\n  RED, GREEN(\"g\")\n  String label\n  String getLabel() { return label }\n}\n",
+    );
+    find(&parsed.entities, EntityKind::Enum, "Color");
+    find(&parsed.entities, EntityKind::EnumVariant, "RED");
+    find(&parsed.entities, EntityKind::EnumVariant, "GREEN");
+    find(&parsed.entities, EntityKind::Field, "label");
+    find(&parsed.entities, EntityKind::Method, "getLabel");
+}
+
+#[test]
+fn groovy_class_extends_records_inheritance() {
+    let parsed = parse_file(
+        "Store.groovy",
+        "package demo\nclass Store extends Base {\n}\n",
+    );
+    find(&parsed.entities, EntityKind::Class, "Store");
+    assert!(
+        parsed
+            .raw_relations
+            .iter()
+            .any(|r| matches!(r.relation_type, RelationType::Inheritance)
+                && r.dst_name.contains("Base")),
+        "Groovy extends should be recorded, got {:?}",
+        parsed
+            .raw_relations
+            .iter()
+            .map(|r| (&r.relation_type, r.dst_name.as_str()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn kotlin_class_and_function() {
     let parsed = parse_file(
         "Main.kt",

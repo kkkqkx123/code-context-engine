@@ -125,11 +125,10 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
         Language::Go => go::default_visibility(&entity.name),
         Language::Python => python::default_visibility(&entity.name),
         Language::Dart => dart::default_visibility(&entity.name),
-        Language::Java
-        | Language::Kotlin
-        | Language::Scala
-        | Language::Groovy
-        | Language::CSharp => jvm::default_visibility(),
+        // Kotlin and Groovy default to public, matching the authoritative
+        // policy; Java and Scala stay package-private.
+        Language::Kotlin | Language::Groovy => Visibility::Public,
+        Language::Java | Language::Scala | Language::CSharp => jvm::default_visibility(),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::default_visibility()
         }
