@@ -349,6 +349,18 @@ pub fn call_query() -> &'static str {
   arguments: (argument_list)? @call.method.arguments
 ) @call.method
 
+; Null-conditional call (`o?.M()`). The function arrives wrapped in a
+; conditional access expression, so the member-access pattern above never
+; fires. Same bare-name convention as the anonymous-receiver pattern.
+(invocation_expression
+  function: (conditional_access_expression
+    (member_binding_expression
+      name: (identifier) @call.method.function
+    )
+  )
+  arguments: (argument_list)? @call.method.arguments
+) @call.method
+
 ; ============================================
 ; 7. Generic Method Calls
 ; ============================================

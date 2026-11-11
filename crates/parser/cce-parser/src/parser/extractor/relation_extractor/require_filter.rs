@@ -72,6 +72,46 @@ pub(crate) fn is_shadowed_require(
         .any(|e| e.name == "require" && e.span.start_byte < call_byte)
 }
 
+/// Whether a Ruby call match is really a class-body mixin declaration.
+///
+/// `include M`, `extend M` and `prepend M` parse as ordinary calls, so the
+/// call query fires alongside the mixin dependency patterns. A mixin call
+/// takes a single constant (uppercase) argument; genuine same-named calls
+/// with other argument shapes are preserved.
+pub(crate) fn is_ruby_mixin_call(mat: &QueryMatch, language: &Language) -> bool {
+    if !matches!(language, Language::Ruby) {
+        return false;
+    }
+    let Some(callee) = mat.captures.iter().find_map(|c| {
+        (c.name.ends_with(".function.name") || c.name.ends_with(".method.name"))
+            .then_some(c.text.as_str())
+    }) else {
+        return false;
+    };
+    if !matches!(callee, "include" | "extend" | "prepend") {
+        return false;
+    }
+    let Some(args) = mat
+        .captures
+        .iter()
+        .find(|c| c.name.ends_with(".arguments"))
+        .map(|c| c.text.trim())
+    else {
+        return false;
+    };
+    let inner = args
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(args)
+        .trim();
+    !inner.is_empty()
+        && !inner.contains(|c: char| c.is_whitespace() || c == ',')
+        && inner
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_uppercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

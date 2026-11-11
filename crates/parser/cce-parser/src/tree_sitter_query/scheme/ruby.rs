@@ -50,11 +50,14 @@ pub fn entity_query() -> &'static str {
 ; Class Definitions
 ; ============================================
 
-; Class definition
+; Class definition. The body is optional so body-less declarations still
+; register; the superclass arrives wrapped in a superclass node.
 (class
   name: (constant) @entity.class.name @entity.class.signature.name
-  superclass: (constant)? @entity.class.superclass @entity.class.signature.base
-  body: (body_statement) @entity.class.body
+  superclass: (superclass
+    (constant)? @entity.class.superclass @entity.class.signature.base
+  )?
+  body: (body_statement)? @entity.class.body
 ) @entity.class
 
 ; Singleton class
@@ -298,32 +301,33 @@ pub fn dependency_query() -> &'static str {
 ; Module Inclusion
 ; ============================================
 
-; include
+; include. A class-body mixin, not a file inclusion: captured under the
+; mixin category so it does not masquerade as a file dependency.
 (call
-  method: (identifier) @dependency.include.keyword
-  (#eq? @dependency.include.keyword "include")
+  method: (identifier) @dependency.mixin.keyword
+  (#eq? @dependency.mixin.keyword "include")
   arguments: (argument_list
-    (constant) @dependency.include.module
+    (constant) @dependency.mixin.module
   )
-) @dependency.include
+) @dependency.mixin
 
 ; extend
 (call
-  method: (identifier) @dependency.extend.keyword
-  (#eq? @dependency.extend.keyword "extend")
+  method: (identifier) @dependency.mixin.keyword
+  (#eq? @dependency.mixin.keyword "extend")
   arguments: (argument_list
-    (constant) @dependency.extend.module
+    (constant) @dependency.mixin.module
   )
-) @dependency.extend
+) @dependency.mixin
 
 ; prepend
 (call
-  method: (identifier) @dependency.prepend.keyword
-  (#eq? @dependency.prepend.keyword "prepend")
+  method: (identifier) @dependency.mixin.keyword
+  (#eq? @dependency.mixin.keyword "prepend")
   arguments: (argument_list
-    (constant) @dependency.prepend.module
+    (constant) @dependency.mixin.module
   )
-) @dependency.prepend
+) @dependency.mixin
 
 ; ============================================
 ; Autoload
@@ -345,9 +349,12 @@ pub fn dependency_query() -> &'static str {
 ; Inheritance
 ; ============================================
 
-; Class inheritance
+; Class inheritance, scoped to the superclass node so the class name
+; itself and unrelated constants no longer match.
 (class
-  (constant) @dependency.inheritance.super
+  superclass: (superclass
+    (constant) @dependency.inheritance.super
+  )
 ) @dependency.inheritance
 
 ; ============================================

@@ -772,6 +772,15 @@ pub fn dependency_shared() -> &'static str {
   (#eq? @dependency.import.dynamic.function "import")
 ) @dependency.import.dynamic
 
+; Dynamic import where `import` parses as an anonymous token rather than
+; an identifier (tree-sitter-javascript `await import("m")` shape).
+(call_expression
+  function: (import)
+  arguments: (arguments
+    (string) @dependency.import.dynamic.path
+  )
+) @dependency.import.dynamic
+
 ; ============================================
 ; 4. Export Dependencies
 ; ============================================

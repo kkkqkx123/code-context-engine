@@ -84,11 +84,16 @@ pub(crate) fn compose_rust_use_list_target(mat: &QueryMatch) -> Option<Capture> 
     let (item_text, item_capture) = named("dependency.use.list.item")
         .map(|c| (c.text.clone(), c))
         .or_else(|| named("dependency.use.list.item.path").map(|c| (c.text.clone(), c)))?;
-    let target = if item_text == "self" {
+    let mut target = if item_text == "self" {
         prefix.text.clone()
     } else {
         format!("{}::{}", prefix.text, item_text)
     };
+    // Nested two-level lists carry the outer prefix in a separate capture;
+    // compose outward so `use outer::{inner::{item}}` yields the full path.
+    if let Some(outer) = named("dependency.use.list2.outer") {
+        target = format!("{}::{}", outer.text, target);
+    }
     Some(Capture {
         name: "dependency.use.list.item".to_string(),
         text: target,
@@ -97,6 +102,75 @@ pub(crate) fn compose_rust_use_list_target(mat: &QueryMatch) -> Option<Capture> 
         start_point: item_capture.start_point,
         end_point: item_capture.end_point,
     })
+}
+
+/// Remove dependency edges strictly contained in another dependency edge
+/// of the same category.
+///
+/// Qualified-name fragment patterns fire inside their enclosing using
+/// directive (e.g. `Math` inside `using static System.Math;`), producing a
+/// short-name edge alongside the full-path edge. The inner edge adds no
+/// information: its span sits strictly inside the outer edge span, so it
+/// is dropped. Only same-category edges participate; call edges and
+/// unrelated same-span edges are untouched.
+pub(crate) fn deduplicate_nested_using_relations(relations: &mut Vec<Relation>) {
+    use cce_types::RelationType;
+    if relations.len() <= 1 {
+        return;
+    }
+    let mut remove = HashSet::new();
+    for (i, inner) in relations.iter().enumerate() {
+        if inner.relation_type != RelationType::Using {
+            continue;
+        }
+        let (inner_start, inner_end) = (inner.span.start_byte, inner.span.end_byte);
+        for (j, outer) in relations.iter().enumerate() {
+            if i == j || outer.relation_type != RelationType::Using {
+                continue;
+            }
+            let (outer_start, outer_end) = (outer.span.start_byte, outer.span.end_byte);
+            if outer_start <= inner_start
+                && inner_end <= outer_end
+                && (outer_start, outer_end) != (inner_start, inner_end)
+            {
+                remove.insert(i);
+                break;
+            }
+        }
+    }
+    if !remove.is_empty() {
+        let mut kept = Vec::with_capacity(relations.len() - remove.len());
+        for (idx, rel) in relations.drain(..).enumerate() {
+            if !remove.contains(&idx) {
+                kept.push(rel);
+            }
+        }
+        *relations = kept;
+    }
+}
+
+/// Remove exact duplicate non-import edges.
+///
+/// Overlapping patterns (e.g. single- and multi-interface implementation
+/// shapes) can report the same edge twice from one statement. Import-class
+/// duplicates have their own specificity-aware pass above; this pass only
+/// collapses bitwise-identical (span, type, target) non-import edges.
+pub(crate) fn deduplicate_identical_relations(relations: &mut Vec<Relation>) {
+    if relations.len() <= 1 {
+        return;
+    }
+    let mut seen = HashSet::new();
+    relations.retain(|rel| {
+        if rel.relation_type.is_import() {
+            return true;
+        }
+        seen.insert((
+            rel.span.start_byte,
+            rel.span.end_byte,
+            rel.relation_type,
+            rel.dst_name().to_string(),
+        ))
+    });
 }
 
 /// Remove generic import relations shadowed by specific ones.

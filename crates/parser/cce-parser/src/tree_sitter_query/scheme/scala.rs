@@ -215,9 +215,11 @@ pub fn call_query() -> &'static str {
 ; 4. Constructor Calls
 ; ============================================
 
-; Constructor invocation (e.g., new ClassName())
+; Constructor invocation (e.g., new ClassName()). The type identifier is
+; captured under the plain constructor name so the generic callee rule
+; picks it up (a `.type.name` suffix is excluded there by design).
 (instance_expression
-  (type_identifier) @call.constructor.type.name
+  (type_identifier) @call.constructor.name
   arguments: (arguments)? @call.constructor.arguments
 ) @call.constructor
 

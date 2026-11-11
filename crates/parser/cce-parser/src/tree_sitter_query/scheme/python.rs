@@ -640,20 +640,17 @@ pub fn dependency_query() -> &'static str {
 ; Import Statements
 ; ============================================
 
-; Simple import statement
+; Simple import statement. The whole dotted path is one target; capturing
+; inner identifiers would fan multi-segment paths out into one edge each.
 (import_statement
-  name: (dotted_name
-    (identifier) @dependency.import.module.name
-  )
-) @dependency.import.module
+  name: (dotted_name) @dependency.import.module.path
+) @dependency.import.module.twin
 
-; Import with alias
+; Import with alias. Only the module path becomes a dependency edge; the
+; local alias lives in the import table (shared with C#/PHP alias handling).
 (import_statement
   name: (aliased_import
-    name: (dotted_name
-      (identifier) @dependency.import.alias.module
-    )
-    alias: (identifier) @dependency.import.alias.name
+    name: (dotted_name) @dependency.import.alias.path
   )
 ) @dependency.import.alias
 
@@ -661,41 +658,58 @@ pub fn dependency_query() -> &'static str {
 ; From Import Statements
 ; ============================================
 
-; From import statement
+; From import statement, module twin. Captures the module path only; the
+; imported names ride a twin pattern below because one match yields one edge.
+; The name anchor excludes star imports, which ride the wildcard twin.
 (import_from_statement
-  module_name: (dotted_name
-    (identifier) @dependency.import.from.module
-  )
+  module_name: (dotted_name) @dependency.import.from.module
+  name: (_)
+) @dependency.import.from
+
+; From import statement, name twin. One match per imported name, so
+; parenthesized multi-imports fan out into one edge each. Anchored on a
+; plain dotted module so relative forms stay with the relative twins.
+(import_from_statement
+  module_name: (dotted_name)
   name: (dotted_name
     (identifier) @dependency.import.from.name
   )
-) @dependency.import.from
+) @dependency.import.from.twin
 
-; From import with alias
+; From import with alias, original-name twin. The plain module twin above
+; already covers the module path (module_name is a dotted_name in both
+; forms); only the original name needs its own match. The local alias never
+; becomes a dependency target.
 (import_from_statement
-  module_name: (dotted_name
-    (identifier) @dependency.import.from.alias.module
-  )
+  module_name: (dotted_name)
   name: (aliased_import
     name: (dotted_name
-      (identifier) @dependency.import.from.alias.original
+      (identifier) @dependency.import.from.name
     )
-    alias: (identifier) @dependency.import.from.alias.name
   )
-) @dependency.import.from.alias
+) @dependency.import.from.twin
 
 ; ============================================
 ; Relative Import
 ; ============================================
 
-; Relative import (from . import)
+; Relative import (from .mod import x). Whole dotted path is one target.
 (import_from_statement
   module_name: (relative_import
-    (dotted_name
-      (identifier) @dependency.import.relative.module
-    )
+    (dotted_name) @dependency.import.relative.module
   )
 ) @dependency.import.relative
+
+; Relative import with module, name twin. The module twin above keeps the
+; module path; this match adds the imported name.
+(import_from_statement
+  module_name: (relative_import
+    (dotted_name)
+  )
+  name: (dotted_name
+    (identifier) @dependency.import.relative.name
+  )
+) @dependency.import.relative.twin
 
 ; Bare relative import (from . import sibling, from .. import name).
 ; The trailing anchor requires the import prefix to be the last child,
@@ -713,8 +727,13 @@ pub fn dependency_query() -> &'static str {
 ; Wildcard Import
 ; ============================================
 
-; Wildcard import (from module import *)
-(wildcard_import) @dependency.import.wildcard
+; Wildcard import (from module import *). Anchored on the module path;
+; the bare wildcard node carries no module context, so it cannot yield
+; an edge on its own.
+(import_from_statement
+  module_name: (dotted_name) @dependency.import.wildcard.module
+  (wildcard_import)
+) @dependency.import.wildcard
 
 ; ============================================
 ; Future Import
@@ -853,9 +872,31 @@ mod tests {
     }
 
     #[test]
-    fn test_dotted_relative_import_keeps_single_module_match() {
+    fn test_dotted_relative_import_fires_module_and_name_twins() {
         let matches = run_matches(dependency_query(), "from .mod import x\n");
-        assert_eq!(matches.len(), 1, "only the dotted-relative form fires");
+        assert_eq!(
+            matches.len(),
+            2,
+            "module twin and name twin fire once each, got {matches:?}"
+        );
+        let modules: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.import.relative.module").then(|| text.clone())
+                })
+            })
+            .collect();
+        assert_eq!(modules, vec!["mod"]);
+        let names: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.import.relative.name").then(|| text.clone())
+                })
+            })
+            .collect();
+        assert_eq!(names, vec!["x"]);
     }
 
     /// Validate query syntax and return detailed error information

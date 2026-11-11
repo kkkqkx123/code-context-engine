@@ -218,6 +218,18 @@ impl LanguageRules for DefaultLanguageRules {
                     find_capture_by_suffix(captures, ".module.path").map(|c| c.text.clone())
                 },
             },
+            // Module sources (JS/TS re-export `export ... from "m"` keeps
+            // the path in a `.source` capture with no `.path` sibling).
+            // Placed after `.path` on purpose: the bare `dependency.source`
+            // roots of shell inclusion patterns also end in `.source`, and
+            // the more specific `.path` value must win there.
+            CaptureRule {
+                required: &[".source"],
+                optional: &[],
+                extract: |captures| {
+                    find_capture_by_suffix(captures, ".source").map(|c| c.text.clone())
+                },
+            },
             // Generic name
             CaptureRule {
                 required: &[".name"],

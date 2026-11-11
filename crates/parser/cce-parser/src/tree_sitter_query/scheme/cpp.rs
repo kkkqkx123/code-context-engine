@@ -249,11 +249,22 @@ pub fn call_query() -> String {
 ; Template Function Calls (C++ specific)
 ; ============================================
 
-; Template function call with explicit template arguments
+; Template function call with explicit template arguments. The function
+; arrives wrapped in a template_function node, so a bare identifier
+; constraint never fires.
 (call_expression
-  function: (identifier) @call.template.function.name
+  function: (template_function
+    name: (identifier) @call.template.function.name
+  )
   arguments: (argument_list) @call.template.function.arguments
 ) @call.template.function
+
+; New expression (new Foo()). The type identifier is captured under the
+; plain constructor name so the generic callee rule picks it up.
+(new_expression
+  type: (type_identifier) @call.constructor.name
+  arguments: (argument_list)? @call.constructor.arguments
+) @call.constructor
 
 ; Template method call
 (call_expression
@@ -316,11 +327,16 @@ pub fn dependency_query() -> String {
 ; Using Dependencies (C++ specific)
 ; ============================================
 
-; using namespace directive
-(using_declaration) @dependency.using.namespace
+; using-namespace directive (using namespace std;). Capture the namespace
+; name, not the whole statement.
+(using_declaration
+  (identifier) @dependency.using.namespace.name
+) @dependency.using.namespace
 
-; using type directive
-(using_declaration) @dependency.using.type
+; using declaration (using std::string;). Capture the qualified name.
+(using_declaration
+  (qualified_identifier) @dependency.using.type.path
+) @dependency.using.type
 
 ; ============================================
 ; Namespace Dependencies (C++ specific)

@@ -250,8 +250,11 @@ pub fn call_query() -> &'static str {
 ; 4. Constructor Calls
 ; ============================================
 
-; Object creation expression (constructor call)
-(object_creation_expression) @call.constructor
+; Object creation expression (constructor call). The bare root carries no
+; name, so the type is captured for the generic callee rule.
+(object_creation_expression
+  type: (_) @call.constructor.name
+) @call.constructor
 
 ; ============================================
 ; 5. Super Constructor Calls

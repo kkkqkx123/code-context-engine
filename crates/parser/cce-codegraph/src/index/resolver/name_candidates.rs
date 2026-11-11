@@ -186,7 +186,6 @@ impl RelationResolver {
             symbol_table.resolve_enhanced(name, resolution_context)
         };
 
-
         // Mixin/assign forwarding runs before the symbol-dependent chain:
         // when the receiver was extended by `mixin(recv, src)` the target
         // lives in the source module's file, which no name-only lookup can

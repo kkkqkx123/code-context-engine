@@ -380,9 +380,13 @@ pub fn dependency_query() -> &'static str {
   argument: (identifier) @dependency.use.path
 ) @dependency.use
 
-; Use declaration with wildcard (use path::*;)
+; Use declaration with wildcard (use path::*;). The prefix identifier has
+; no field, so it is captured positionally; the target is the prefix itself,
+; mirroring how other languages record wildcard imports by their path.
 (use_declaration
-  argument: (use_wildcard) @dependency.use.wildcard
+  argument: (use_wildcard
+    (identifier) @dependency.use.wildcard.name
+  )
 ) @dependency.use.wildcard
 
 ; Use declaration with alias (use path::module as alias;).
@@ -424,6 +428,56 @@ pub fn dependency_query() -> &'static str {
       (use_as_clause
         path: (_) @dependency.use.list.item.path
         alias: (identifier) @dependency.use.list.item.alias
+      )
+    )
+  )
+) @dependency.use.list.alias
+
+; Nested scoped use list items (use outer::{inner::{item}};). Two levels
+; are modeled; the extractor composes outer::inner::item. Deeper nesting
+; stays uncovered by design (diminishing real-world frequency).
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @dependency.use.list2.outer
+    list: (use_list
+      (scoped_use_list
+        path: (_) @dependency.use.list.path
+        list: (use_list
+          (identifier) @dependency.use.list.item
+        )
+      )
+    )
+  )
+) @dependency.use.list
+
+; Nested scoped use list self item (use outer::{inner::{self}};)
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @dependency.use.list2.outer
+    list: (use_list
+      (scoped_use_list
+        path: (_) @dependency.use.list.path
+        list: (use_list
+          (self) @dependency.use.list.item
+        )
+      )
+    )
+  )
+) @dependency.use.list
+
+; Nested scoped use list alias items (use outer::{inner::{item as alias}};)
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @dependency.use.list2.outer
+    list: (use_list
+      (scoped_use_list
+        path: (_) @dependency.use.list.path
+        list: (use_list
+          (use_as_clause
+            path: (_) @dependency.use.list.item.path
+            alias: (identifier) @dependency.use.list.item.alias
+          )
+        )
       )
     )
   )

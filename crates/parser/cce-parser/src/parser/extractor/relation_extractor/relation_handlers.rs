@@ -338,11 +338,14 @@ pub(crate) fn find_callee_capture(mat: &QueryMatch) -> Option<&Capture> {
         if all_required_present {
             // Apply the extraction function
             if let Some(_extracted_name) = (rule.extract)(&captured_items) {
-                // Find the original Capture that matches the first required suffix
-                // This maintains backward compatibility with the existing API
+                // Find the original Capture that matches the first required suffix.
+                // Entity sub-captures never carry the edge target, so they
+                // lose the selection to reference captures (see
+                // `find_reference_capture_by_suffix`). This maintains
+                // backward compatibility with the existing API.
                 for required in rule.required {
                     if let Some(capture) =
-                        utils::find_capture_by_name(&mat.captures, |name| name.ends_with(required))
+                        utils::find_reference_capture_by_suffix(&mat.captures, required)
                     {
                         return Some(capture);
                     }
@@ -385,11 +388,14 @@ pub(crate) fn find_dependency_capture(mat: &QueryMatch) -> Option<&Capture> {
         if all_required_present {
             // Apply the extraction function
             if let Some(_extracted_name) = (rule.extract)(&captured_items) {
-                // Find the original Capture that matches the first required suffix
-                // This maintains backward compatibility with the existing API
+                // Find the original Capture that matches the first required suffix.
+                // Entity sub-captures never carry the edge target, so they
+                // lose the selection to reference captures (see
+                // `find_reference_capture_by_suffix`). This maintains
+                // backward compatibility with the existing API.
                 for required in rule.required {
                     if let Some(capture) =
-                        utils::find_capture_by_name(&mat.captures, |name| name.ends_with(required))
+                        utils::find_reference_capture_by_suffix(&mat.captures, required)
                     {
                         return Some(capture);
                     }

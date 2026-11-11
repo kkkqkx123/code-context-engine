@@ -167,6 +167,25 @@ where
     captures.iter().find(|c| predicate(&c.name))
 }
 
+/// Find a capture by suffix, preferring non-entity captures.
+///
+/// Dependency and call patterns sometimes embed entity sub-captures
+/// (e.g. `entity.class.name` inside a heritage pattern) alongside the
+/// captures that actually carry the edge target. The entity name is the
+/// definition being declared, never the reference, so it must not win
+/// the selection; otherwise the edge target is polluted by the entity
+/// name (TypeScript heritage reported the class itself as a dependency).
+/// Falls back to any suffix match when only entity captures qualify.
+pub fn find_reference_capture_by_suffix<'a>(
+    captures: &'a [Capture],
+    suffix: &str,
+) -> Option<&'a Capture> {
+    find_capture_by_name(captures, |name| {
+        name.ends_with(suffix) && !name.starts_with("entity.")
+    })
+    .or_else(|| find_capture_by_name(captures, |name| name.ends_with(suffix)))
+}
+
 /// Check if a capture name ends with a specific suffix
 ///
 /// Helper function to check capture name patterns like ".name", ".type", etc.

@@ -321,9 +321,11 @@ pub fn dependency_query() -> &'static str {
 ; Namespace Use Declarations
 ; ============================================
 
-; Simple use statement
+; Simple use statement. The `!alias` guard excludes the alias form,
+; whose local name is a bare `name` node like a plain use path segment.
 (namespace_use_declaration
   (namespace_use_clause
+    !alias
     (name) @dependency.use.name
   ) @dependency.use
 )

@@ -28,10 +28,7 @@ impl LanguageTypeInferer for CppTypeInferer {
                 // ordinary functions; class/struct templates have none and
                 // `extract_function_types` skips return-less entities.
                 EntityKind::Template
-                    if matches!(
-                        entity.subtype.as_deref(),
-                        Some("function") | Some("method")
-                    ) =>
+                    if matches!(entity.subtype.as_deref(), Some("function") | Some("method")) =>
                 {
                     extract_function_types(entity, ctx);
                 }

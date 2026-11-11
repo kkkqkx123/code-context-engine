@@ -33,11 +33,12 @@ use tree_sitter::Tree;
 
 use call_extractor::{deduplicate_call_relations, extract_macro_inner_calls, process_call_match};
 use dependency_extractor::{
-    compose_rust_use_list_target, deduplicate_generic_import_relations, process_dependency_match,
+    compose_rust_use_list_target, deduplicate_generic_import_relations,
+    deduplicate_identical_relations, deduplicate_nested_using_relations, process_dependency_match,
 };
 use entity_index::EntityIndex;
 use relation_handlers::{extract_impl_block_relations, find_dependency_capture};
-use require_filter::is_shadowed_require;
+use require_filter::{is_ruby_mixin_call, is_shadowed_require};
 
 /// Relation extractor
 ///
@@ -142,6 +143,12 @@ impl RelationExtractor {
         let mut relations = Vec::new();
 
         for mat in &matches {
+            // Ruby mixin declarations parse as calls; the mixin dependency
+            // patterns already cover them, so the call-shaped duplicate is
+            // dropped (mirrors the shadowed-require filter below).
+            if is_ruby_mixin_call(mat, language) {
+                continue;
+            }
             if let Some(relation) = process_call_match(
                 mat,
                 &entity_index,
@@ -231,6 +238,8 @@ impl RelationExtractor {
         relations.extend(extract_impl_block_relations(entities));
 
         deduplicate_generic_import_relations(&mut relations);
+        deduplicate_nested_using_relations(&mut relations);
+        deduplicate_identical_relations(&mut relations);
 
         Ok(relations)
     }
