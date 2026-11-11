@@ -24,6 +24,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
     "php",
     "swift",
     "kt",
+    "groovy",
     "scala",
     "r",
     "m",

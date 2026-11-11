@@ -1,6 +1,6 @@
 use crate::symbol::{ScopeContext, Visibility};
 
-/// Map JVM signals for Java/Kotlin.
+/// Map JVM signals for Java/Kotlin/Groovy.
 pub fn visibility_from_signal(signal: &str) -> Option<Visibility> {
     let trimmed = signal.to_lowercase();
     let trimmed = trimmed.trim();
@@ -18,12 +18,13 @@ pub fn visibility_from_signal(signal: &str) -> Option<Visibility> {
     }
 }
 
-/// No naming-based visibility for Java/Kotlin.
+/// No naming-based visibility for Java/Kotlin/Groovy.
 pub fn visibility_from_name(_name: &str) -> Option<Visibility> {
     None
 }
 
-/// Default for Java/Kotlin is package-private.
+/// Default for the Java/Scala-style delegation is package-private.
+/// (Kotlin/Groovy override this at the policy layer: their default is public.)
 pub fn default_visibility() -> Visibility {
     Visibility::Package
 }

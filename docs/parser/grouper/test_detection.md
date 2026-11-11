@@ -34,7 +34,7 @@ grouper/recognizers/test_suite/
     ├── rust.rs        # #[test]、#[cfg(test)]
     ├── python.rs      # @pytest.mark.* 源码块重建；test_*（文件约束）
     ├── go.rs          # TestXxx/BenchmarkXxx（*_test.go 约束）
-    ├── java.rs        # Java+Kotlin：@Test/@ParameterizedTest；*Test/*Tests 类；Kotlin 另含 *Spec
+    ├── java.rs        # Java+Kotlin+Groovy：@Test/@ParameterizedTest；*Test/*Tests 类；Kotlin/Groovy 另含 *Spec
     ├── javascript.rs  # describe/it/test（测试文件约束），JS/TS/JSX/TSX 共用
     ├── csharp.rs      # [Test]/[TestCase]/[Fact]/[Theory]；*Test/*Tests 类
     ├── scala.rs       # @Test；*Test/*Tests/*Spec 类
@@ -54,6 +54,7 @@ grouper/recognizers/test_suite/
 | Go | — | `TestXxx`/`BenchmarkXxx`（`*_test.go`） | `*_test.go` |
 | Java | `@Test`/`@ParameterizedTest` | `*Test`/`*Tests` 类 | `*Test.java`/`*Tests.java`、`src/test/` |
 | Kotlin | `@Test`/`@ParameterizedTest` | `*Test`/`*Tests`/`*Spec` 类 | `*Test.kt`/`*Tests.kt`/`*Spec.kt`、`src/test/` |
+| Groovy | `@Test`/`@ParameterizedTest` | `*Test`/`*Tests`/`*Spec` 类 | `*Test.groovy`/`*Tests.groovy`/`*Spec.groovy`、`src/test/` |
 | JS/TS/JSX/TSX | — | `describe`/`it`/`test`（测试文件约束） | `.spec.*`/`.test.*`（8 种扩展名）、`__tests__/` |
 | C# | `[Test]`/`[TestCase]`/`[Fact]`/`[Theory]` | `*Test`/`*Tests` 类 | `*Test.cs`/`*Tests.cs`、`tests/` |
 | Scala | `@Test` | `*Test`/`*Tests`/`*Spec` 类 | `src/test/`、`tests/` |

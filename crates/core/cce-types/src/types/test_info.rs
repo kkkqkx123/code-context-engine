@@ -356,6 +356,7 @@ impl TestInfo {
     /// | JS/TS/JSX/TSX | generic test dirs, `*.spec.*`/`*.test.*` (`js`, `ts`, `mjs`, `cjs`, `mts`, `cts`, `jsx`, `tsx`) |
     /// | Java     | generic test dirs, `*Test.java`, `*Tests.java` |
     /// | Kotlin   | generic test dirs, `*Test.kt`, `*Tests.kt`, `*Spec.kt` |
+    /// | Groovy   | generic test dirs, `*Test.groovy`, `*Tests.groovy`, `*Spec.groovy` |
     /// | C#       | generic test dirs, `*Test.cs`, `*Tests.cs` |
     /// | Dart     | generic test dirs, `test_*.dart` |
     /// | Scala    | generic test dirs |
@@ -430,6 +431,12 @@ impl TestInfo {
                 (file_name.ends_with("Test.kt")
                     || file_name.ends_with("Tests.kt")
                     || file_name.ends_with("Spec.kt"))
+                    || matches_generic_test_dir()
+            }
+            Some(Language::Groovy) => {
+                (file_name.ends_with("Test.groovy")
+                    || file_name.ends_with("Tests.groovy")
+                    || file_name.ends_with("Spec.groovy"))
                     || matches_generic_test_dir()
             }
             Some(Language::CSharp) => {
@@ -632,6 +639,27 @@ mod tests {
         assert!(TestInfo::from_path(Some(&Language::Bash), "tests/math.sh").is_test());
         assert!(TestInfo::from_path(Some(&Language::Bash), "src/math.sh").is_unknown());
         assert!(TestInfo::from_path(Some(&Language::Bash), "src/contest.sh").is_unknown());
+    }
+
+    #[test]
+    fn test_path_rules_groovy() {
+        assert!(TestInfo::from_path(Some(&Language::Groovy), "UserServiceTest.groovy").is_test());
+        assert!(TestInfo::from_path(Some(&Language::Groovy), "UserServiceTests.groovy").is_test());
+        assert!(TestInfo::from_path(Some(&Language::Groovy), "UserServiceSpec.groovy").is_test());
+        assert!(
+            TestInfo::from_path(
+                Some(&Language::Groovy),
+                "src/test/groovy/UserService.groovy"
+            )
+            .is_test()
+        );
+        assert!(
+            TestInfo::from_path(
+                Some(&Language::Groovy),
+                "src/main/groovy/UserService.groovy"
+            )
+            .is_unknown()
+        );
     }
 
     #[test]

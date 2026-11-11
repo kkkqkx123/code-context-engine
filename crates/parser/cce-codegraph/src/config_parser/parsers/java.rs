@@ -46,37 +46,40 @@ impl LanguageParser for JavaParser {
         let settings_gradle = dir.join("settings.gradle");
         let settings_gradle_kts = dir.join("settings.gradle.kts");
 
-        let is_gradle_project = build_gradle.exists()
-            || build_gradle_kts.exists()
-            || settings_gradle.exists()
-            || settings_gradle_kts.exists();
+        // Both dialects can coexist (e.g. a Groovy root script with Kotlin
+        // subproject scripts); their dependencies union. Settings scripts
+        // only act as a fallback when no build script declares anything.
+        let build_scripts: Vec<_> = [&build_gradle_kts, &build_gradle]
+            .into_iter()
+            .filter(|p| p.exists())
+            .collect();
+        let fallback_scripts: Vec<_> = [&settings_gradle_kts, &settings_gradle]
+            .into_iter()
+            .filter(|p| p.exists())
+            .collect();
 
-        if is_gradle_project {
-            let config_path = if build_gradle_kts.exists() {
-                build_gradle_kts
-            } else if build_gradle.exists() {
-                build_gradle
-            } else if settings_gradle_kts.exists() {
-                settings_gradle_kts
+        if !build_scripts.is_empty() || !fallback_scripts.is_empty() {
+            let catalog = gradle::load_version_catalog(project_root);
+            let scripts = if build_scripts.is_empty() {
+                fallback_scripts
             } else {
-                settings_gradle
+                build_scripts
             };
-
-            match gradle::parse_gradle_file(&config_path) {
-                Ok(deps) => {
-                    if !deps.is_empty() {
-                        let rel = cce_types::path::relativize(project_root, &config_path);
-                        return Ok(Some(ParseOutcome {
-                            dependencies: deps,
-                            config_file: rel,
-                        }));
-                    } else {
-                        return Ok(None);
-                    }
+            let mut union = std::collections::HashSet::new();
+            for script in &scripts {
+                match gradle::parse_gradle_file(script, &catalog) {
+                    Ok(deps) => union.extend(deps),
+                    Err(e) => errors.push(e),
                 }
-                Err(e) => {
-                    errors.push(e);
-                }
+            }
+            if !union.is_empty() {
+                let rel = cce_types::path::relativize(project_root, scripts[0]);
+                return Ok(Some(ParseOutcome {
+                    dependencies: union,
+                    config_file: rel,
+                }));
+            } else if errors.is_empty() {
+                return Ok(None);
             }
         }
 

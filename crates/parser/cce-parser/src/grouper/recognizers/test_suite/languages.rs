@@ -55,7 +55,9 @@ pub fn detect_from_annotations(
 ) -> Option<TestInfo> {
     match language {
         Language::Rust => rust::detect_from_annotations(entity, adjacent_annotations),
-        Language::Java | Language::Kotlin => java::detect_from_annotations(adjacent_annotations),
+        Language::Java | Language::Kotlin | Language::Groovy => {
+            java::detect_from_annotations(adjacent_annotations)
+        }
         Language::CSharp => csharp::detect_from_annotations(adjacent_annotations),
         Language::Scala => scala::detect_from_annotations(adjacent_annotations),
         // PHPUnit 10 `#[Test]` attributes are captured as annotation entities;
@@ -81,7 +83,9 @@ pub fn detect_conventional(
     source: &str,
 ) -> Option<TestInfo> {
     match language {
-        Language::Java | Language::Kotlin => java::detect_conventional(entity, language),
+        Language::Java | Language::Kotlin | Language::Groovy => {
+            java::detect_conventional(entity, language)
+        }
         Language::CSharp => csharp::detect_conventional(entity),
         Language::Scala => scala::detect_conventional(entity),
         Language::Php => php::detect_conventional(entity),

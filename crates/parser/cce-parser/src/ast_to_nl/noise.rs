@@ -141,6 +141,9 @@ impl NoiseProfile {
                 strip_scala_markers: true,
                 ..Self::none()
             },
+            // Groovy carries no project-specific whole-line markers:
+            // the generic empty-marker filtering already applies.
+            Language::Groovy => Self::none(),
             Language::Dart => Self {
                 strip_dart_markers: true,
                 ..Self::none()

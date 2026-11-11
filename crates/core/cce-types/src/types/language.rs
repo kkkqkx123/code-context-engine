@@ -83,6 +83,8 @@ pub enum Language {
     Kotlin,
     /// Scala language
     Scala,
+    /// Groovy language (incl. Gradle build scripts)
+    Groovy,
 
     // Scripting languages
     /// Python language
@@ -145,6 +147,7 @@ impl std::fmt::Display for Language {
             Language::Java => write!(f, "Java"),
             Language::Kotlin => write!(f, "Kotlin"),
             Language::Scala => write!(f, "Scala"),
+            Language::Groovy => write!(f, "Groovy"),
             Language::Python => write!(f, "Python"),
             Language::Ruby => write!(f, "Ruby"),
             Language::Php => write!(f, "PHP"),
@@ -194,6 +197,7 @@ impl Language {
             Language::Java,
             Language::Kotlin,
             Language::Scala,
+            Language::Groovy,
             Language::Python,
             Language::Php,
             Language::Ruby,
@@ -244,6 +248,7 @@ impl Language {
             Language::Java => &["java"],
             Language::Kotlin => &["kt", "kts"],
             Language::Scala => &["scala", "sc"],
+            Language::Groovy => &["groovy", "gradle"],
             Language::Python => &["py", "pyi"],
             Language::Ruby => &["rb"],
             Language::Php => &["php"],
@@ -293,6 +298,7 @@ impl Language {
             "java" => Language::Java,
             "kotlin" | "kt" => Language::Kotlin,
             "scala" => Language::Scala,
+            "groovy" => Language::Groovy,
             "python" | "py" => Language::Python,
             "ruby" | "rb" => Language::Ruby,
             "php" => Language::Php,
@@ -670,6 +676,7 @@ pub fn builtin_language_for_extension(ext: &str) -> Option<(Language, FileType)>
         "java" => Some((Language::Java, FileType::Source)),
         "kt" | "kts" => Some((Language::Kotlin, FileType::Source)),
         "scala" => Some((Language::Scala, FileType::Source)),
+        "groovy" | "gradle" => Some((Language::Groovy, FileType::Source)),
         "sc" => Some((Language::Scala, FileType::Source)),
 
         // Scripting languages
@@ -1177,6 +1184,22 @@ mod tests {
         let info = LanguageInfo::detect_from_path("component.svelte");
         assert_eq!(info.language, Language::Svelte);
         assert_eq!(info.file_type, FileType::Source);
+    }
+
+    #[test]
+    fn test_groovy_file_type_is_source() {
+        let info = LanguageInfo::detect_from_path("Script.groovy");
+        assert_eq!(info.language, Language::Groovy);
+        assert_eq!(info.file_type, FileType::Source);
+        // Non-manifest `.gradle` scripts parse as Groovy source.
+        let info = LanguageInfo::detect_from_path("ci/publish.gradle");
+        assert_eq!(info.language, Language::Groovy);
+        assert_eq!(info.file_type, FileType::Source);
+        // Well-known Gradle manifests stay on the config (document) pipeline.
+        let info = LanguageInfo::detect_from_path("build.gradle");
+        assert_eq!(info.file_type, FileType::Config);
+        let info = LanguageInfo::detect_from_path("settings.gradle.kts");
+        assert_eq!(info.file_type, FileType::Config);
     }
 
     #[test]

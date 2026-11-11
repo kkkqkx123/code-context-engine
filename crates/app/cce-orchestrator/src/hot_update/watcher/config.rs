@@ -141,6 +141,8 @@ impl Default for WatchConfig {
                 "php".to_string(),
                 "kt".to_string(),
                 "kts".to_string(),
+                "groovy".to_string(),
+                "gradle".to_string(),
                 "swift".to_string(),
                 "vue".to_string(),
                 "svelte".to_string(),

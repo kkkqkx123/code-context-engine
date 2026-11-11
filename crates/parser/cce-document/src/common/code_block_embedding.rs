@@ -39,6 +39,7 @@ fn map_language_tag(tag: &str) -> Option<Language> {
         "ruby" | "rb" => Some(Language::Ruby),
         "php" => Some(Language::Php),
         "kotlin" | "kt" => Some(Language::Kotlin),
+        "groovy" => Some(Language::Groovy),
         "scala" => Some(Language::Scala),
         "dart" => Some(Language::Dart),
         "bash" | "sh" | "shell" | "zsh" => Some(Language::Bash),

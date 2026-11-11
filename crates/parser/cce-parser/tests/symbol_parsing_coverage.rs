@@ -262,6 +262,27 @@ fn java_class_implements_and_import() {
 }
 
 #[test]
+fn groovy_class_method_function_and_import() {
+    let parsed = parse_file(
+        "Store.groovy",
+        "package demo\nimport java.util.List\nclass Store {\n  String load(String name) { return name }\n}\ndef identity(x) { return x }\n",
+    );
+    find(&parsed.entities, EntityKind::Class, "Store");
+    find(&parsed.entities, EntityKind::Method, "load");
+    find(&parsed.entities, EntityKind::Function, "identity");
+    assert!(
+        has_relation(&parsed, RelationType::ImportNamed, "List")
+            || has_relation(&parsed, RelationType::ImportStandard, "List"),
+        "Groovy import should be recorded, got {:?}",
+        parsed
+            .raw_relations
+            .iter()
+            .map(|r| (&r.relation_type, r.dst_name.as_str()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn kotlin_class_and_function() {
     let parsed = parse_file(
         "Main.kt",

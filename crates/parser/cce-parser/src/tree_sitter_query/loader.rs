@@ -414,6 +414,24 @@ impl QueryLoader {
                 Some(scheme::kotlin::comment_query().to_string())
             }
 
+            // Groovy language queries
+            (Language::Groovy, QueryType::Entity) => {
+                Some(scheme::groovy::entity_query().to_string())
+            }
+            (Language::Groovy, QueryType::Call) => Some(scheme::groovy::call_query().to_string()),
+            (Language::Groovy, QueryType::Dependency) => {
+                Some(scheme::groovy::dependency_query().to_string())
+            }
+            (Language::Groovy, QueryType::Behavior) => {
+                Some(scheme::groovy::behavior_query().to_string())
+            }
+            (Language::Groovy, QueryType::ControlFlow) => {
+                Some(scheme::groovy::control_flow_query().to_string())
+            }
+            (Language::Groovy, QueryType::Comment) => {
+                Some(scheme::groovy::comment_query().to_string())
+            }
+
             // Scala language queries
             (Language::Scala, QueryType::Entity) => Some(scheme::scala::entity_query().to_string()),
             (Language::Scala, QueryType::Call) => Some(scheme::scala::call_query().to_string()),
@@ -705,6 +723,7 @@ mod tests {
             Language::Php,
             Language::Ruby,
             Language::Kotlin,
+            Language::Groovy,
             Language::Scala,
             Language::Dart,
             Language::Bash,

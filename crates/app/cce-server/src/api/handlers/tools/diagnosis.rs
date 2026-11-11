@@ -68,6 +68,7 @@ fn parse_language(s: &str) -> Result<Language, ()> {
         "go" => Ok(Language::Go),
         "java" => Ok(Language::Java),
         "kotlin" | "kt" => Ok(Language::Kotlin),
+        "groovy" => Ok(Language::Groovy),
         "ruby" | "rb" => Ok(Language::Ruby),
         "php" => Ok(Language::Php),
         "json" => Ok(Language::Json),

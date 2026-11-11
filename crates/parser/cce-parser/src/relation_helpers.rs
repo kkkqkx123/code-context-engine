@@ -38,9 +38,11 @@ fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visibilit
         Language::Go => go::visibility_from_signal(signal),
         Language::Python => python::visibility_from_signal(signal),
         Language::Dart => dart::visibility_from_signal(signal),
-        Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => {
-            jvm::visibility_from_signal(signal)
-        }
+        Language::Java
+        | Language::Kotlin
+        | Language::Scala
+        | Language::Groovy
+        | Language::CSharp => jvm::visibility_from_signal(signal),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::visibility_from_signal(signal)
         }
@@ -123,9 +125,11 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
         Language::Go => go::default_visibility(&entity.name),
         Language::Python => python::default_visibility(&entity.name),
         Language::Dart => dart::default_visibility(&entity.name),
-        Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => {
-            jvm::default_visibility()
-        }
+        Language::Java
+        | Language::Kotlin
+        | Language::Scala
+        | Language::Groovy
+        | Language::CSharp => jvm::default_visibility(),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::default_visibility()
         }

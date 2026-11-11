@@ -206,6 +206,10 @@ impl TypeInferenceEngine {
             Language::CSharp => Some(Inferer::CSharp(csharp::CSharpTypeInferer)),
             Language::Cpp => Some(Inferer::Cpp(cpp::CppTypeInferer)),
             Language::Kotlin => Some(Inferer::Kotlin(kotlin::KotlinTypeInferer)),
+            // Groovy reuses the Java inferer: both read the shared
+            // entity metadata and Groovy syntax overlaps Java more
+            // closely than any other inferer.
+            Language::Groovy => Some(Inferer::Java(java::JavaTypeInferer)),
             Language::Scala => Some(Inferer::Scala(scala::ScalaTypeInferer)),
             Language::Ruby => Some(Inferer::Ruby(ruby::RubyTypeInferer)),
             Language::Php => Some(Inferer::Php(php::PhpTypeInferer)),

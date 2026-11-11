@@ -35,7 +35,7 @@ pub fn build_type_index_for_file(
         Language::Go => {
             go::build_type_index(entities, module_path, file_path, package, language, index)
         }
-        Language::Java | Language::Kotlin | Language::Scala => {
+        Language::Java | Language::Kotlin | Language::Scala | Language::Groovy => {
             java::build_type_index(entities, module_path, file_path, package, language, index)
         }
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {

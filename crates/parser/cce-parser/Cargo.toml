@@ -51,6 +51,7 @@ tree-sitter-dart = { workspace = true }
 tree-sitter-lua = { workspace = true }
 tree-sitter-bash = { workspace = true }
 tree-sitter-embedded-template = { workspace = true }
+tree-sitter-groovy = { workspace = true }
 
 # Document parsers (used by document module)
 toml = { workspace = true }

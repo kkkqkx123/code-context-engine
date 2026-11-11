@@ -93,6 +93,13 @@ const JAVA_BARE_METHODS: &[&str] = &[
 /// therefore stay out (see the overlap audit lock below).
 const KOTLIN_BARE_METHODS: &[&str] = &["println", "print"];
 
+/// Groovy GDK methods used without qualifier.
+///
+/// Empty: the detector answers every candidate (`println`/`print`/`printf`,
+/// `each`/`collect`/`findAll` and the rest), so no blind spot remains. Kept
+/// as an explicit empty table so the sync guard records the conscious decision.
+const GROOVY_BARE_METHODS: &[&str] = &[];
+
 /// Scala collection combinators used without qualifier.
 ///
 /// Empty: the detector answers every former entry (`map`/`flatMap`/
@@ -166,6 +173,7 @@ pub(crate) fn bare_boilerplate_methods(language: Language) -> &'static [&'static
         Language::Go => GO_BARE_METHODS,
         Language::Java => JAVA_BARE_METHODS,
         Language::Kotlin => KOTLIN_BARE_METHODS,
+        Language::Groovy => GROOVY_BARE_METHODS,
         Language::Scala => SCALA_BARE_METHODS,
         Language::Cpp => CPP_BARE_METHODS,
         Language::CSharp => CSHARP_BARE_METHODS,
@@ -905,6 +913,7 @@ mod tests {
         let expects_empty: &[Language] = &[
             Language::C,
             Language::Dart,
+            Language::Groovy,
             Language::Scala,
             Language::Ruby,
             Language::Php,

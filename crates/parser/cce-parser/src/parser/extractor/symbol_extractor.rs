@@ -21,6 +21,7 @@
 //!   - `dart`: Dart language
 //!   - `java`: Java language
 //!   - `kotlin`: Kotlin language
+//!   - `groovy`: Groovy language
 //!   - `scala`: Scala language
 //!   - `bash`: Bash language
 //!   - `lua`: Lua language
@@ -36,6 +37,7 @@ pub mod cpp;
 pub mod csharp;
 pub mod dart;
 pub mod go;
+pub mod groovy;
 pub mod java;
 pub mod javascript;
 pub mod kotlin;

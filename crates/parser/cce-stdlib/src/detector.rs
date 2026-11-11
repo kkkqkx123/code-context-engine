@@ -9,9 +9,10 @@ use cce_types::stdlib_category::StdlibCategory;
 use super::{
     bash::BashStdlibDetector, c::CStdlibDetector, cpp::CppStdlibDetector,
     csharp::CSharpStdlibDetector, dart::DartStdlibDetector, go::GoStdlibDetector,
-    java::JavaStdlibDetector, javascript::JavaScriptStdlibDetector, kotlin::KotlinStdlibDetector,
-    lua::LuaStdlibDetector, php::PhpStdlibDetector, python::PythonStdlibDetector,
-    ruby::RubyStdlibDetector, rust::RustStdlibDetector, scala::ScalaStdlibDetector,
+    groovy::GroovyStdlibDetector, java::JavaStdlibDetector, javascript::JavaScriptStdlibDetector,
+    kotlin::KotlinStdlibDetector, lua::LuaStdlibDetector, php::PhpStdlibDetector,
+    python::PythonStdlibDetector, ruby::RubyStdlibDetector, rust::RustStdlibDetector,
+    scala::ScalaStdlibDetector,
 };
 
 /// Unified interface for standard library call detection across languages
@@ -48,6 +49,7 @@ impl StdlibDetector {
                 JavaScriptStdlibDetector::is_stdlib_by_type(call_name, relation_type)
             }
             Language::Kotlin => KotlinStdlibDetector::is_stdlib_by_type(call_name, relation_type),
+            Language::Groovy => GroovyStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Lua => LuaStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Php => PhpStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Python => PythonStdlibDetector::is_stdlib_by_type(call_name, relation_type),
@@ -84,6 +86,7 @@ impl StdlibDetector {
             | Language::Svelte
             | Language::Ejs => JavaScriptStdlibDetector::is_stdlib_call(call_name),
             Language::Kotlin => KotlinStdlibDetector::is_stdlib_call(call_name),
+            Language::Groovy => GroovyStdlibDetector::is_stdlib_call(call_name),
             Language::Lua => LuaStdlibDetector::is_stdlib_call(call_name),
             Language::Php => PhpStdlibDetector::is_stdlib_call(call_name),
             Language::Python => PythonStdlibDetector::is_stdlib_call(call_name),
@@ -120,6 +123,7 @@ impl StdlibDetector {
             | Language::Svelte
             | Language::Ejs => JavaScriptStdlibDetector::get_category(name),
             Language::Kotlin => KotlinStdlibDetector::get_category(name),
+            Language::Groovy => GroovyStdlibDetector::get_category(name),
             Language::Lua => LuaStdlibDetector::get_category(name),
             Language::Php => PhpStdlibDetector::get_category(name),
             Language::Python => PythonStdlibDetector::get_category(name),
@@ -180,6 +184,10 @@ impl StdlibDetector {
             // Kotlin/Scala files import JDK packages as well as their own.
             Language::Kotlin => {
                 KotlinStdlibDetector::is_kotlin_path(path) || JavaStdlibDetector::is_jdk_path(path)
+            }
+            // Groovy files import GDK plus the JDK default imports.
+            Language::Groovy => {
+                GroovyStdlibDetector::is_groovy_path(path) || JavaStdlibDetector::is_jdk_path(path)
             }
             // `SCALA_PACKAGES` mixes third-party frameworks (cats/zio/akka),
             // so the import entry sticks to the `scala` root plus JDK imports.
@@ -1105,6 +1113,7 @@ mod tests {
                     JavaScriptStdlibDetector::get_category("console.log"),
                 ),
                 Language::Kotlin => ("listOf", KotlinStdlibDetector::get_category("listOf")),
+                Language::Groovy => ("println", GroovyStdlibDetector::get_category("println")),
                 Language::Lua => (
                     "string.format",
                     LuaStdlibDetector::get_category("string.format"),
@@ -1153,6 +1162,7 @@ mod tests {
             (Language::Svelte, "console.log"),
             (Language::Ejs, "console.log"),
             (Language::Kotlin, "listOf"),
+            (Language::Groovy, "println"),
             (Language::Lua, "string.format"),
             (Language::Php, "strlen"),
             (Language::Python, "print"),
@@ -1204,6 +1214,7 @@ mod tests {
             (Language::Svelte, "console.log"),
             (Language::Ejs, "console.log"),
             (Language::Kotlin, "listOf"),
+            (Language::Groovy, "println"),
             (Language::Lua, "string.format"),
             (Language::Php, "strlen"),
             (Language::Python, "print"),
@@ -1300,6 +1311,7 @@ mod tests {
             (Language::Java, "System.out.println"),
             (Language::JavaScript, "console.log"),
             (Language::Kotlin, "listOf"),
+            (Language::Groovy, "println"),
             (Language::Lua, "string.format"),
             (Language::Php, "strlen"),
             (Language::Python, "print"),

@@ -43,9 +43,11 @@ impl ImportResolutionStrategy {
         match language {
             Language::Rust => Self::SymbolLevel,
             Language::Python => Self::ModuleLevel,
-            Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => {
-                Self::PackageLevel
-            }
+            Language::Java
+            | Language::Kotlin
+            | Language::Scala
+            | Language::Groovy
+            | Language::CSharp => Self::PackageLevel,
             Language::Cpp | Language::C => Self::HeaderLevel,
             Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
                 Self::ESModuleLevel

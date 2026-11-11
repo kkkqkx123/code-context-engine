@@ -16,7 +16,14 @@ pub fn extract_modifiers(mat: &QueryMatch, entity: &mut Entity, language: &Langu
                 mat, entity,
             )
         }
-        Language::Java | Language::Kotlin | Language::Scala | Language::CSharp => {
+        // Groovy shares Java-style declaration modifiers
+        // (`public`/`private`/`protected`); the extractor scans the
+        // declaration header text, so no Groovy-specific handling is needed.
+        Language::Java
+        | Language::Kotlin
+        | Language::Scala
+        | Language::Groovy
+        | Language::CSharp => {
             crate::parser::extractor::post_processing::modifier::jvm::extract_jvm_modifiers(
                 mat, entity,
             )
@@ -98,6 +105,7 @@ mod tests {
             Language::Java,
             Language::Kotlin,
             Language::Scala,
+            Language::Groovy,
             Language::CSharp,
             Language::TypeScript,
             Language::Tsx,

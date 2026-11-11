@@ -50,6 +50,7 @@ members = [
     "crates/tree-sitter/tree-sitter-vue",
     "crates/tree-sitter/tree-sitter-c",
     "crates/tree-sitter/tree-sitter-cpp",
+    "crates/tree-sitter/tree-sitter-groovy",
 ]
 resolver = "2"
 
@@ -124,6 +125,7 @@ tree-sitter-dart = "0.1"
 tree-sitter-lua = "0.5"
 tree-sitter-bash = "0.25"
 tree-sitter-embedded-template = "0.25"
+tree-sitter-groovy = { version = "0.0.1", path = "crates/tree-sitter/tree-sitter-groovy" }
 streaming-iterator = "0.1"
 
 # File system

@@ -52,7 +52,9 @@ pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visib
         Language::Go => go::visibility_from_signal(signal),
         Language::Python => python::visibility_from_signal(signal),
         Language::Dart => dart::visibility_from_signal(signal),
-        Language::Java | Language::Kotlin | Language::Scala => java::visibility_from_signal(signal),
+        Language::Java | Language::Kotlin | Language::Scala | Language::Groovy => {
+            java::visibility_from_signal(signal)
+        }
         Language::CSharp => csharp::visibility_from_signal(signal),
         Language::C => c::visibility_from_signal(signal),
         Language::Cpp => cpp::visibility_from_signal(signal),
@@ -135,7 +137,9 @@ pub fn visibility_from_name(name: &str, language: &Language) -> Option<Visibilit
             javascript::visibility_from_name(name)
         }
         Language::Rust => rust::visibility_from_name(name),
-        Language::Java | Language::Kotlin | Language::Scala => java::visibility_from_name(name),
+        Language::Java | Language::Kotlin | Language::Scala | Language::Groovy => {
+            java::visibility_from_name(name)
+        }
         Language::CSharp => csharp::visibility_from_name(name),
         Language::C => c::visibility_from_name(name),
         Language::Cpp => cpp::visibility_from_name(name),
@@ -194,8 +198,8 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
         Language::Go => go::default_visibility(&entity.name),
         Language::Python => python::default_visibility(&entity.name),
         Language::Dart => dart::default_visibility(&entity.name),
-        // Kotlin defaults to public; Java/Scala stay package-private.
-        Language::Kotlin => Visibility::Public,
+        // Kotlin/Groovy default to public; Java/Scala stay package-private.
+        Language::Kotlin | Language::Groovy => Visibility::Public,
         Language::Java | Language::Scala => java::default_visibility(),
         Language::CSharp => csharp::default_visibility(),
         Language::C => c::default_visibility(),
@@ -227,7 +231,7 @@ pub fn is_visible(
 ) -> bool {
     match language {
         Language::Rust => rust::is_visible(visibility, from_scope, defined_in),
-        Language::Java | Language::Kotlin | Language::Scala => {
+        Language::Java | Language::Kotlin | Language::Scala | Language::Groovy => {
             java::is_visible(visibility, from_scope, defined_in)
         }
         Language::Go => go::is_visible(visibility, from_scope, defined_in),
@@ -301,6 +305,13 @@ mod tests {
     // Kotlin delegates to the Java (JVM) policy.
     #[test]
     fn kotlin_delegates_to_jvm_signal() {
+        // Groovy shares the same delegation; spot-checked here to lock the
+        // JVM group membership.
+        assert_eq!(
+            visibility_from_signal("public", &Language::Groovy),
+            Some(Visibility::Public)
+        );
+        assert_eq!(visibility_from_name("anything", &Language::Groovy), None);
         assert_eq!(
             visibility_from_signal("public", &Language::Kotlin),
             Some(Visibility::Public)

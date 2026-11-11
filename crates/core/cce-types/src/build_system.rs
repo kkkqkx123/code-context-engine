@@ -126,8 +126,8 @@ pub fn get_supported_build_systems() -> Vec<BuildSystemMetadata> {
                 "settings.gradle".to_string(),
                 "settings.gradle.kts".to_string(),
             ],
-            languages: vec![Java, Kotlin],
-            file_extensions: [Java.extensions(), Kotlin.extensions()]
+            languages: vec![Java, Kotlin, Groovy],
+            file_extensions: [Java.extensions(), Kotlin.extensions(), Groovy.extensions()]
                 .concat()
                 .iter()
                 .map(|s| s.to_string())

@@ -1147,6 +1147,9 @@ mod tests {
             Language::Vue,
             Language::Svelte,
             Language::Ejs,
+            // Groovy carries no project-specific whole-line markers:
+            // the generic empty-marker filtering already applies.
+            Language::Groovy,
         ];
         for language in Language::ast_parsable_languages() {
             let profile = NoiseProfile::for_language(*language);

@@ -123,7 +123,8 @@ pub fn is_varargs_param(name: &str, type_text: Option<&str>, language: Language)
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             name.starts_with("...")
         }
-        Language::Java => name.starts_with("...") || ty.ends_with("..."),
+        // Groovy declares varargs Java-style (`String... args`).
+        Language::Java | Language::Groovy => name.starts_with("...") || ty.ends_with("..."),
         Language::Kotlin => {
             name.strip_prefix("vararg ").is_some() || ty.strip_prefix("vararg ").is_some()
         }
@@ -964,6 +965,7 @@ mod tests {
             (Language::Tsx, "...args", None),
             (Language::Java, "args", Some("String...")),
             (Language::Java, "...args", None),
+            (Language::Groovy, "args", Some("String...")),
             (Language::Kotlin, "vararg args", Some("Int")),
             (Language::Scala, "args", Some("String*")),
             (Language::CSharp, "args", Some("params int[]")),

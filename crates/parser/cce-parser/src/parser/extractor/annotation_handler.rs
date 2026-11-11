@@ -16,6 +16,7 @@ pub fn language_has_annotation_semantics(language: &Language) -> bool {
         Language::Rust
             | Language::Java
             | Language::Kotlin
+            | Language::Groovy
             | Language::CSharp
             | Language::Scala
             | Language::Php

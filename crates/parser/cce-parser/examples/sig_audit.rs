@@ -32,6 +32,7 @@ fn language_for(path: &Path) -> Option<Language> {
         "rb" => Some(Language::Ruby),
         "php" => Some(Language::Php),
         "kt" | "kts" => Some(Language::Kotlin),
+        "groovy" | "gradle" => Some(Language::Groovy),
         "dart" => Some(Language::Dart),
         "scala" => Some(Language::Scala),
         "lua" => Some(Language::Lua),

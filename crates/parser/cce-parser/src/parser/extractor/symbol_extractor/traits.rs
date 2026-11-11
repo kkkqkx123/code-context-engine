@@ -126,6 +126,7 @@ pub fn create_extractor(language: Language) -> Option<Box<dyn SymbolExtractor>> 
         // JVM languages
         Language::Java => Some(Box::new(java::JavaExtractor::new())),
         Language::Kotlin => Some(Box::new(kotlin::KotlinExtractor::new())),
+        Language::Groovy => Some(Box::new(groovy::GroovyExtractor::new())),
         Language::Scala => Some(Box::new(scala::ScalaExtractor::new())),
 
         // Frontend languages

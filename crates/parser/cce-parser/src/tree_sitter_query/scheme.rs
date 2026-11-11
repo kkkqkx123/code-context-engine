@@ -12,6 +12,7 @@ pub mod css;
 pub mod dart;
 pub mod ejs;
 pub mod go;
+pub mod groovy;
 pub mod html;
 pub mod java;
 pub mod javascript;
@@ -705,11 +706,28 @@ mod tests {
             ("dependency", kotlin::dependency_query()),
         ];
 
+        // Validate Groovy language queries
+        let groovy_queries = vec![
+            ("entity", groovy::entity_query()),
+            ("call", groovy::call_query()),
+            ("dependency", groovy::dependency_query()),
+        ];
+
         for (name, query) in &kotlin_queries {
             let result = extract_and_validate_captures(query, "Kotlin");
             assert!(
                 result.is_ok(),
                 "Kotlin {} query has invalid captures: {:?}",
+                name,
+                result.err()
+            );
+        }
+
+        for (name, query) in &groovy_queries {
+            let result = extract_and_validate_captures(query, "Groovy");
+            assert!(
+                result.is_ok(),
+                "Groovy {} query has invalid captures: {:?}",
                 name,
                 result.err()
             );

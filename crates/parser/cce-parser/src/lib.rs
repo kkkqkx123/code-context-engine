@@ -2,6 +2,7 @@
 
 pub mod ast_to_nl;
 pub mod document;
+pub mod gradle;
 pub mod grouper;
 pub mod parser;
 pub mod plugin;

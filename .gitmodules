@@ -25,3 +25,6 @@
 [submodule "crates/encoding-guess"]
 	path = crates/encoding-guess
 	url = https://github.com/kkkqkx123/encoding-guess
+[submodule "crates/tree-sitter/tree-sitter-groovy"]
+	path = crates/tree-sitter/tree-sitter-groovy
+	url = https://github.com/kkkqkx123/tree-sitter-groovy.git
