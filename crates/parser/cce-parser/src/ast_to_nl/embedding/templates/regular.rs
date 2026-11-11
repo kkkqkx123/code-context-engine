@@ -132,6 +132,16 @@ impl RegularGroupTemplate {
             group.header.as_ref(),
         );
 
+        // Trait implementation groups are named after the trait while the
+        // concrete type lives in metadata. Name it next to the identity
+        // line so the query-side whole-term signal survives in text that
+        // has no keyword field to carry it, mirroring the BM25 treatment.
+        if group.kind == EntityKind::TraitImpl
+            && let Some(self_type) = Self::trait_impl_self_type(group, group.header.as_ref())
+        {
+            desc.push_str(&format!(" For {}.", self_type));
+        }
+
         // The group header is the group's primary entity, so its call
         // targets belong to the group description. They sit right behind the
         // identity line, where a retriever reads them before the body
@@ -254,6 +264,33 @@ impl RegularGroupTemplate {
         Some(format!("Inherits from: {}.", bases))
     }
 
+    /// Concrete self type of a trait implementation group, when recorded.
+    ///
+    /// The group is named after the trait while the implementing type lives
+    /// in entity metadata (`impl Matcher for RegexMatcher`). Prefer member
+    /// metadata, fall back to the group header. Empty values and names that
+    /// add no signal (trait name itself, member name itself) are refused so
+    /// callers never fabricate a qualifier.
+    pub(crate) fn trait_impl_self_type<'a>(
+        group: &'a EntityGroup,
+        member: Option<&'a cce_types::entity::GroupedEntity>,
+    ) -> Option<&'a str> {
+        if group.kind != EntityKind::TraitImpl {
+            return None;
+        }
+        let member_name = member.map(|m| m.name.as_str()).unwrap_or("");
+        member
+            .and_then(|m| m.metadata.get("impl_for_type"))
+            .or_else(|| {
+                group
+                    .header
+                    .as_ref()
+                    .and_then(|h| h.metadata.get("impl_for_type"))
+            })
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty() && *s != group.name.as_str() && *s != member_name)
+    }
+
     /// Generate member description
     fn generate_member_description(
         &self,
@@ -284,12 +321,23 @@ impl RegularGroupTemplate {
                 | EntityKind::InherentImpl
                 | EntityKind::TraitImpl
         );
+        // A trait implementation group is named after the trait, so the
+        // default qualifier would misattribute members to the trait itself
+        // (`Matcher.find_at`). Qualify with the concrete self type instead
+        // (`RegexMatcher.find_at`); the trait name stays in the group
+        // description, nothing is renamed away from the text as a whole.
+        let owner_override = Self::trait_impl_self_type(group, Some(member));
         let display_name = if is_owner_kind
             && group.group_type != GroupType::MergedFragments
             && !group.name.is_empty()
             && group.name != member.name
         {
-            format!("{}.{}", group.name, member.name)
+            match owner_override {
+                Some(self_type) if self_type != member.name => {
+                    format!("{}.{}", self_type, member.name)
+                }
+                _ => format!("{}.{}", group.name, member.name),
+            }
         } else {
             member.name.clone()
         };
@@ -1232,6 +1280,72 @@ mod tests {
             "returns a. returns b.",
             &dummy_member(),
         ));
+    }
+
+    #[test]
+    fn test_trait_impl_member_qualified_with_self_type() {
+        // `impl Matcher for RegexMatcher`: members carry the concrete type,
+        // the trait name stays in the group description.
+        let mut header = cce_types::entity::GroupedEntity {
+            id: cce_types::entity::EntityId(1),
+            name: "Matcher".to_string(),
+            kind: EntityKind::TraitImpl,
+            ..Default::default()
+        };
+        header
+            .metadata
+            .insert("impl_for_type".to_string(), "RegexMatcher".to_string());
+        let group = EntityGroup {
+            name: "Matcher".into(),
+            kind: EntityKind::TraitImpl,
+            header: Some(header),
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(2),
+                name: "find_at".to_string(),
+                kind: EntityKind::Method,
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        assert!(
+            results[0].contains("For RegexMatcher."),
+            "group description names the self type: {results:?}"
+        );
+        assert!(
+            results.iter().any(|r| r.contains("RegexMatcher.find_at")),
+            "trait impl members keep their self type qualifier: {results:?}"
+        );
+        assert!(
+            !results.iter().any(|r| r.contains("method Matcher.find_at")),
+            "trait name must not pose as the member owner: {results:?}"
+        );
+    }
+
+    #[test]
+    fn test_trait_impl_without_self_type_falls_back_to_trait_name() {
+        let group = EntityGroup {
+            name: "Matcher".into(),
+            kind: EntityKind::TraitImpl,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(2),
+                name: "find_at".to_string(),
+                kind: EntityKind::Method,
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        assert!(
+            results.iter().any(|r| r.contains("Matcher.find_at")),
+            "without recorded self type the trait name still qualifies: {results:?}"
+        );
     }
 
     #[test]

@@ -509,7 +509,7 @@ impl ChunkBuilder {
     /// concrete type (e.g. `RegexMatcher`) lives in the entity metadata.
     /// Keywords carry the concrete type additively so the whole-term signal
     /// survives; titles are never renamed (see `bm25_keywords_for_ids`).
-    fn trait_impl_for_type(group: &EntityGroup) -> Option<&str> {
+    pub(crate) fn trait_impl_for_type(group: &EntityGroup) -> Option<&str> {
         if group.kind != EntityKind::TraitImpl {
             return None;
         }

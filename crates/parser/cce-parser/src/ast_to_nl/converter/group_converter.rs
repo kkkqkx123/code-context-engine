@@ -32,6 +32,7 @@
 //! ```
 
 use crate::ast_to_nl::ConversionRequest;
+use crate::ast_to_nl::embedding::templates::regular::RegularGroupTemplate;
 use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
 use crate::grouper::ProcessingResult;
 use crate::grouper::{EntityGroup, PatternInfo};
@@ -491,17 +492,24 @@ impl super::AstToNlConverter {
             if !gc.group.group_type.is_container() {
                 continue;
             }
-            let parent_name = gc.group.name.to_string();
             let parent_kind = gc.group.kind;
             for member in &mut gc.member_conversions {
                 if let Some(ref mut emb_text) = member.embedding_text {
                     if !emb_text.is_empty() {
+                        // Trait implementation members already carry the concrete
+                        // self type (`RegexMatcher.find_at`); the group name is
+                        // the trait and must not be prepended as a second owner.
+                        let member_entity =
+                            gc.group.members.iter().find(|m| m.id == member.entity_id);
+                        let parent_name: &str =
+                            RegularGroupTemplate::trait_impl_self_type(&gc.group, member_entity)
+                                .unwrap_or(gc.group.name.as_str());
                         let prefix = if matches!(
                             member.kind,
                             EntityKind::Function | EntityKind::Method | EntityKind::Constructor
                         ) && Self::carries_owner_qualification(
                             emb_text,
-                            &parent_name,
+                            parent_name,
                             &member.name,
                         ) {
                             // Already owner-qualified via group qualification;
@@ -515,7 +523,7 @@ impl super::AstToNlConverter {
                         } else if matches!(member.kind, EntityKind::Field | EntityKind::Property)
                             && Self::carries_owner_qualification(
                                 emb_text,
-                                &parent_name,
+                                parent_name,
                                 &member.name,
                             )
                         {
@@ -965,6 +973,13 @@ impl super::AstToNlConverter {
                         | EntityKind::TraitImpl
                 );
                 if is_owner_kind && group.group_type != cce_types::GroupType::MergedFragments {
+                    // A trait implementation group is named after the trait;
+                    // the embedding text carries the concrete self type
+                    // (`RegexMatcher.find_at`) while the BM25 path keeps the
+                    // group name (its chunker adds the self type by keyword).
+                    let emb_owner: &str =
+                        RegularGroupTemplate::trait_impl_self_type(group, Some(member))
+                            .unwrap_or(group.name.as_str());
                     if let Some(ref mut bm25) = member_result.bm25_text {
                         *bm25 = super::entity_converter::qualify_member_head(
                             &group.name,
@@ -981,13 +996,13 @@ impl super::AstToNlConverter {
                             if let Some(stem) = super::entity_converter::module_stem(file_path) {
                                 let wrong = format!("{}.{}", stem, member.name);
                                 if emb.contains(&wrong) {
-                                    let right = format!("{}.{}", group.name, member.name);
+                                    let right = format!("{}.{}", emb_owner, member.name);
                                     *emb = emb.replace(&wrong, &right);
                                 }
                             }
                         }
                         *emb = super::entity_converter::qualify_member_head(
-                            &group.name,
+                            emb_owner,
                             &member.name,
                             emb,
                         );
@@ -999,7 +1014,7 @@ impl super::AstToNlConverter {
                         // carries the owner qualifier.
                         if member.kind == EntityKind::Function && member.name == "new" {
                             let head_end = emb.find('\n').unwrap_or(emb.len());
-                            let marker = format!("{}.{}", group.name, member.name);
+                            let marker = format!("{}.{}", emb_owner, member.name);
                             if emb[..head_end].contains(&marker)
                                 && emb[..head_end].contains("function ")
                             {

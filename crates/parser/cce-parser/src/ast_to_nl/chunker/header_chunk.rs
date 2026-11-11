@@ -324,13 +324,21 @@ fn process_path(
                         format!("{} {}.", first.kind.kind_label(), names.join(", "));
                     prev_group_anchor.clear();
                 } else {
+                    // A trait implementation group is named after the trait;
+                    // continuation heads must carry the concrete self type
+                    // (`RegexMatcher.find_at`), the same owner the template
+                    // and converter use, or every block re-asserts the trait
+                    // as owner.
+                    let self_type =
+                        super::chunk_builder::ChunkBuilder::trait_impl_for_type(ctx.group);
+                    let owner: &str = self_type.unwrap_or(ctx.group.name.as_str());
                     let qualified: Vec<String> = members
                         .iter()
                         .map(|m| {
-                            if ctx.group.name.is_empty() || ctx.group.name == m.name.as_str() {
+                            if owner.is_empty() || owner == m.name.as_str() {
                                 m.name.clone()
                             } else {
-                                format!("{}.{}", ctx.group.name, m.name)
+                                format!("{}.{}", owner, m.name)
                             }
                         })
                         .collect();
@@ -359,8 +367,19 @@ fn process_path(
                         // shared direction while member heads already carry the owner
                         // qualifier, so only the first statement is kept and the rest
                         // name just their members.
-                        let group_anchor =
-                            format!("{} {}.", ctx.group.kind.kind_label(), ctx.group.name);
+                        // Name the concrete self type next to the trait so the
+                        // anchor carries the same whole-term signal as the
+                        // group description; the comparison below still folds
+                        // repeats because the string is stable per group.
+                        let group_anchor = match self_type {
+                            Some(self_type) => format!(
+                                "{} {} for {}.",
+                                ctx.group.kind.kind_label(),
+                                ctx.group.name,
+                                self_type
+                            ),
+                            None => format!("{} {}.", ctx.group.kind.kind_label(), ctx.group.name),
+                        };
                         let member_head = format!("{} {}.", first.kind.kind_label(), joined);
                         if prev_group_anchor == group_anchor {
                             continuation_for_block = member_head;

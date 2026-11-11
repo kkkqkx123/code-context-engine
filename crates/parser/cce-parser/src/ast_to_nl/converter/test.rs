@@ -347,6 +347,67 @@ mod tests {
     }
 
     #[test]
+    fn test_trait_impl_member_prefix_uses_self_type() {
+        // `impl Clone for OnceCell`: the member already carries `OnceCell`,
+        // so the hierarchy prefix must not prepend the trait name.
+        let config = AstToNlConfig::both();
+        let converter = AstToNlConverter::with_config(&config);
+        let mut header = create_test_header(1, "Clone", EntityKind::TraitImpl, None);
+        header
+            .metadata
+            .insert("impl_for_type".to_string(), "OnceCell".to_string());
+        let member = create_test_member(2, "clone", EntityKind::Method, None);
+
+        let group = EntityGroup {
+            group_id: CompactString::from("group_1"),
+            group_type: GroupType::ClassWithMethods,
+            header: Some(header),
+            header_id: Some(EntityId(1)),
+            members: smallvec::smallvec![member],
+            member_ids: smallvec::smallvec![EntityId(2)],
+            entity_spans: Default::default(),
+            combined_source: None,
+            combined_source_lazy: Default::default(),
+            span: Default::default(),
+            kind: EntityKind::TraitImpl,
+            name: CompactString::from("Clone"),
+            language: Language::Rust,
+            pattern_info: Default::default(),
+            member_roles: Default::default(),
+            nested_groups: Box::new([]),
+            parent_group_id: None,
+            has_significant_nested: false,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+            nesting_level: 0,
+        };
+
+        let groups = vec![group];
+        let results = converter
+            .convert_entity_groups(&groups, "src/lib.rs", None, None, None)
+            .groups;
+
+        assert_eq!(results.len(), 1);
+        let group_conv = &results[0];
+        assert_eq!(group_conv.member_conversions.len(), 1);
+
+        let member_text = group_conv.member_conversions[0]
+            .embedding_text
+            .as_deref()
+            .expect("trait impl member should produce embedding text");
+        assert!(
+            member_text.contains("OnceCell.clone"),
+            "member keeps its self type qualifier, got {:?}",
+            member_text
+        );
+        assert!(
+            !member_text.contains("Clone.clone"),
+            "trait name must not pose as a second owner, got {:?}",
+            member_text
+        );
+    }
+
+    #[test]
     fn test_convert_multiple_groups() {
         let converter = AstToNlConverter::new();
         let header1 =

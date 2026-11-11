@@ -286,13 +286,27 @@ fn groovy_class_method_function_and_import() {
 fn groovy_enum_with_constants_and_members() {
     let parsed = parse_file(
         "Color.groovy",
-        "package demo\nenum Color {\n  RED, GREEN(\"g\")\n  String label\n  String getLabel() { return label }\n}\n",
+        "package demo\nenum Color {\n  RED, GREEN(\"g\");\n  String label\n  String getLabel() { return label }\n}\n",
     );
     find(&parsed.entities, EntityKind::Enum, "Color");
     find(&parsed.entities, EntityKind::EnumVariant, "RED");
     find(&parsed.entities, EntityKind::EnumVariant, "GREEN");
     find(&parsed.entities, EntityKind::Field, "label");
     find(&parsed.entities, EntityKind::Method, "getLabel");
+}
+
+#[test]
+fn groovy_enum_missing_separator_still_recovers() {
+    // Invalid Groovy (members must follow a `;` separator): the grammar
+    // falls back to a closure body with error recovery, but the keyword
+    // anchored rule still reports the enum and its constants.
+    let parsed = parse_file(
+        "Color.groovy",
+        "package demo\nenum Color {\n  RED, GREEN(\"g\")\n  String label\n}\n",
+    );
+    find(&parsed.entities, EntityKind::Enum, "Color");
+    find(&parsed.entities, EntityKind::EnumVariant, "RED");
+    find(&parsed.entities, EntityKind::EnumVariant, "GREEN");
 }
 
 #[test]
