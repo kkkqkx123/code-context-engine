@@ -8,7 +8,7 @@ use super::entity_index::EntityIndex;
 use super::relation_handlers::{determine_dependency_relation_type, normalize_callee_name};
 use crate::parser::extractor::utils;
 use crate::parser::stdlib::StdlibDetector;
-use crate::tree_sitter_query::executor::Capture;
+use crate::tree_sitter_query::executor::{Capture, QueryMatch};
 use cce_types::language::Language;
 use cce_types::{Relation, RelationTarget};
 use std::collections::{HashMap, HashSet};
@@ -62,6 +62,41 @@ pub(crate) fn process_dependency_match(
             .with_stdlib_category(StdlibDetector::ref_category(&dst_name, language)),
         )
     }
+}
+
+/// Compose the full path for Rust scoped-use list items.
+///
+/// A `use prefix::{item}` match carries the list prefix and the item as
+/// separate captures because no single AST node spans `prefix::item`, so
+/// generic single-capture selection cannot produce the item target. When a
+/// match holds list-item captures, compose the target here and synthesize
+/// a capture carrying it; `self` items resolve to the prefix itself since
+/// `use prefix::{self}` re-imports the prefix module. The synthesized
+/// capture keeps the `use` category so relation typing is unchanged, and
+/// its span is the item span so per-site grouping stays precise.
+/// Returns `None` for matches without list-item captures.
+pub(crate) fn compose_rust_use_list_target(mat: &QueryMatch) -> Option<Capture> {
+    let prefix = mat
+        .captures
+        .iter()
+        .find(|c| c.name == "dependency.use.list.path")?;
+    let named = |name: &str| mat.captures.iter().find(|c| c.name == name);
+    let (item_text, item_capture) = named("dependency.use.list.item")
+        .map(|c| (c.text.clone(), c))
+        .or_else(|| named("dependency.use.list.item.path").map(|c| (c.text.clone(), c)))?;
+    let target = if item_text == "self" {
+        prefix.text.clone()
+    } else {
+        format!("{}::{}", prefix.text, item_text)
+    };
+    Some(Capture {
+        name: "dependency.use.list.item".to_string(),
+        text: target,
+        start_byte: item_capture.start_byte,
+        end_byte: item_capture.end_byte,
+        start_point: item_capture.start_point,
+        end_point: item_capture.end_point,
+    })
 }
 
 /// Remove generic import relations shadowed by specific ones.

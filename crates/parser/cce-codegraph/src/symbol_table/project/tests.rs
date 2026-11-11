@@ -140,6 +140,7 @@ fn context_for(file_path: &str) -> ResolutionContext {
         file_path: file_path.to_string(),
         module_path: Vec::new(),
         scope_chain: Vec::new(),
+        entity_remap: None,
     }
 }
 

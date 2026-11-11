@@ -296,21 +296,38 @@ impl ProjectSymbolTable {
     /// Uses the scope chain from the resolution context to resolve
     /// symbols from inner-to-outer scope, correctly handling name shadowing.
     /// Falls through to higher levels if no local table is available.
+    ///
+    /// Module-local tables keep ParsedFile-local entity IDs, so a scope hit
+    /// is translated through the caller file's local-to-global remap before
+    /// leaving symbol-table space. Without this, the local ID is mistaken
+    /// for a global entity ID whenever the two numberings diverge (e.g.
+    /// entity dedup leaves gaps in the local numbering).
     fn resolve_via_local_scope(
         &self,
         name: &str,
         context: &ResolutionContext,
     ) -> Option<SymbolRef> {
+        let translate = |symbol: SymbolRef| -> SymbolRef {
+            let global = context
+                .entity_remap
+                .as_ref()
+                .and_then(|remap| remap.get(&symbol.symbol_id))
+                .copied()
+                .unwrap_or(symbol.symbol_id);
+            SymbolRef::new(global, symbol.metadata)
+        };
         if let Some(package) = self.get_package_for_file(&context.file_path) {
             if let Some(module) = package.get_module(&context.file_path) {
-                return module.resolve_local_scope(name, &context.scope_chain);
+                return module
+                    .resolve_local_scope(name, &context.scope_chain)
+                    .map(translate);
             }
         }
         // Fallback to deterministic scan when file->package mapping is stale.
         for package in self.sorted_packages() {
             if let Some(module) = package.get_module(&context.file_path) {
                 if let Some(symbol) = module.resolve_local_scope(name, &context.scope_chain) {
-                    return Some(symbol);
+                    return Some(translate(symbol));
                 }
             }
         }

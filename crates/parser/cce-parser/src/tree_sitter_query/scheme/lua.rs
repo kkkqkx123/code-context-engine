@@ -19,11 +19,11 @@ pub fn entity_query() -> &'static str {
 
 ; require('module_name')
 (function_call
-  name: (identifier) @entity.require
+  name: (identifier) @entity.require.keyword
   arguments: (arguments
     .
     (string) @entity.require.name)
-  (#eq? @entity.require "require")
+  (#eq? @entity.require.keyword "require")
 ) @entity.require
 
 ; ============================================

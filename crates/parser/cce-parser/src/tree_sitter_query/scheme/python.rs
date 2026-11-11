@@ -697,6 +697,18 @@ pub fn dependency_query() -> &'static str {
   )
 ) @dependency.import.relative
 
+; Bare relative import (from . import sibling, from .. import name).
+; The trailing anchor requires the import prefix to be the last child,
+; which excludes the dotted `from .mod import x` form above.
+(import_from_statement
+  module_name: (relative_import
+    (import_prefix) .
+  )
+  name: (dotted_name
+    (identifier) @dependency.import.relative.name
+  )
+) @dependency.import.relative
+
 ; ============================================
 ; Wildcard Import
 ; ============================================
@@ -795,7 +807,56 @@ pub fn control_flow_query() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tree_sitter::Query;
+    use streaming_iterator::StreamingIterator;
+    use tree_sitter::{Parser, Query, QueryCursor};
+
+    /// Run a query over a snippet, returning matches as capture texts.
+    fn run_matches(query_str: &str, code: &str) -> Vec<Vec<(String, String)>> {
+        let lang = tree_sitter_python::LANGUAGE;
+        let query = Query::new(&lang.into(), query_str).expect("query should compile");
+        let mut parser = Parser::new();
+        parser.set_language(&lang.into()).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        let names = query.capture_names().to_vec();
+        let mut cursor = QueryCursor::new();
+        let mut out = Vec::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        while let Some(mat) = matches.next() {
+            out.push(
+                mat.captures
+                    .iter()
+                    .map(|c| {
+                        (
+                            names[c.index as usize].to_string(),
+                            code[c.node.start_byte()..c.node.end_byte()].to_string(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn test_bare_relative_import_hits_without_module() {
+        let matches = run_matches(dependency_query(), "from . import sibling\n");
+        assert_eq!(matches.len(), 1);
+        let name: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.import.relative.name").then(|| text.clone())
+                })
+            })
+            .collect();
+        assert_eq!(name, vec!["sibling"]);
+    }
+
+    #[test]
+    fn test_dotted_relative_import_keeps_single_module_match() {
+        let matches = run_matches(dependency_query(), "from .mod import x\n");
+        assert_eq!(matches.len(), 1, "only the dotted-relative form fires");
+    }
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {

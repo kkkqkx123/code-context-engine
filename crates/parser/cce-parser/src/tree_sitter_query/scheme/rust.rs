@@ -375,28 +375,59 @@ pub fn dependency_query() -> &'static str {
   argument: (scoped_identifier) @dependency.use.path
 ) @dependency.use
 
+; Single-identifier use declaration (use plain;)
+(use_declaration
+  argument: (identifier) @dependency.use.path
+) @dependency.use
+
 ; Use declaration with wildcard (use path::*;)
 (use_declaration
   argument: (use_wildcard) @dependency.use.wildcard
 ) @dependency.use.wildcard
 
-; Use declaration with list (use path::{item1, item2};)
-(use_declaration
-  argument: (use_list) @dependency.use.list
-) @dependency.use.list
-
-; Use declaration with alias (use path::module as alias;)
+; Use declaration with alias (use path::module as alias;).
+; The path accepts any named node: scoped paths as well as plain
+; identifiers (use foo as bar;) and self paths.
 (use_declaration
   argument: (use_as_clause
-    path: (scoped_identifier) @dependency.use.alias.path
+    path: (_) @dependency.use.alias.path
     alias: (identifier) @dependency.use.alias.name
   )
 ) @dependency.use.alias
 
-; Scoped use list (use path::module::{item1, item2};)
+; Scoped use list items (use path::{item};). Each item carries the list
+; prefix alongside so the extractor can compose the full item path.
 (use_declaration
-  argument: (scoped_use_list) @dependency.use.scoped_list
-) @dependency.use.scoped_list
+  argument: (scoped_use_list
+    path: (_) @dependency.use.list.path
+    list: (use_list
+      (identifier) @dependency.use.list.item
+    )
+  )
+) @dependency.use.list
+
+; Scoped use list self item (use path::{self};)
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @dependency.use.list.path
+    list: (use_list
+      (self) @dependency.use.list.item
+    )
+  )
+) @dependency.use.list
+
+; Scoped use list alias items (use path::{item as alias};)
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @dependency.use.list.path
+    list: (use_list
+      (use_as_clause
+        path: (_) @dependency.use.list.item.path
+        alias: (identifier) @dependency.use.list.item.alias
+      )
+    )
+  )
+) @dependency.use.list.alias
 
 ; ============================================
 ; 2. Trait Bounds
@@ -593,8 +624,79 @@ mod tests {
         behavior_query, call_query, comment_query, control_flow_query, dependency_query,
         entity_query,
     };
+    use streaming_iterator::StreamingIterator;
     use tree_sitter::Query;
     use tree_sitter::{Parser, QueryCursor};
+
+    /// Run a query over a snippet, returning matches as capture texts.
+    fn run_matches(query_str: &str, code: &str) -> Vec<Vec<(String, String)>> {
+        let lang = tree_sitter_rust::LANGUAGE;
+        let query = Query::new(&lang.into(), query_str).expect("query should compile");
+        let mut parser = Parser::new();
+        parser.set_language(&lang.into()).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        let names = query.capture_names().to_vec();
+        let mut cursor = QueryCursor::new();
+        let mut out = Vec::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        while let Some(mat) = matches.next() {
+            out.push(
+                mat.captures
+                    .iter()
+                    .map(|c| {
+                        (
+                            names[c.index as usize].to_string(),
+                            code[c.node.start_byte()..c.node.end_byte()].to_string(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn test_short_path_uses_hit() {
+        let matches = run_matches(dependency_query(), "use foo as bar;\nuse plain;\n");
+        let mut targets: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.use.alias.path" || name == "dependency.use.path")
+                        .then(|| text.clone())
+                })
+            })
+            .collect();
+        targets.sort();
+        assert_eq!(targets, vec!["foo", "plain"]);
+    }
+
+    #[test]
+    fn test_scoped_list_items_are_captured_per_item() {
+        let matches = run_matches(dependency_query(), "use a::{b, c as d};\n");
+        let items: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.use.list.item" || name == "dependency.use.list.item.path")
+                        .then(|| text.clone())
+                })
+            })
+            .collect();
+        assert_eq!(items.len(), 2, "one match per list item");
+        let prefixes: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.use.list.path").then(|| text.clone())
+                })
+            })
+            .collect();
+        assert!(
+            prefixes.iter().all(|p| p == "a"),
+            "prefix rides along, got {prefixes:?}"
+        );
+    }
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {

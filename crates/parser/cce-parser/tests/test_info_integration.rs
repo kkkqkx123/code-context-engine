@@ -1144,10 +1144,12 @@ impl Fixture {
     let parsed = parse_entities(code, Language::Rust, "src/lib.rs");
     let pipeline = PreprocessingPipeline::new();
     let result = pipeline.process(&parsed);
+    // The struct and its inherent impl form separate same-named groups;
+    // select the impl group by its method member, not merely by name.
     let group = result
         .groups
         .iter()
-        .find(|g| g.name == "Fixture" && !g.members.is_empty())
+        .find(|g| g.name == "Fixture" && g.members.iter().any(|m| m.name == "setup"))
         .expect("impl group should exist");
     assert!(
         group.test_info.is_test(),

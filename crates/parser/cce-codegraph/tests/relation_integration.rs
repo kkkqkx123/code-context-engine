@@ -454,6 +454,7 @@ fn test_rust_struct_impl_cross_file_type_member_resolution() {
         file_path: "src/other.rs".to_string(),
         module_path: vec![],
         scope_chain: vec![],
+        entity_remap: None,
     };
     let resolved = project.resolve_enhanced("a::Foo::bar", &ctx);
     assert!(resolved.is_some(), "resolve_enhanced should find Foo::bar");
@@ -504,6 +505,7 @@ fn test_python_class_static_method_resolution() {
         file_path: "other.py".to_string(),
         module_path: vec![],
         scope_chain: vec![],
+        entity_remap: None,
     };
     let r = project.resolve_enhanced("myapp.mod.Foo.m", &ctx);
     assert!(r.is_some(), "Python static method should resolve");
@@ -557,6 +559,7 @@ fn test_go_receiver_type_member_resolution() {
         file_path: "pkg/b.go".to_string(),
         module_path: vec![],
         scope_chain: vec![],
+        entity_remap: None,
     };
     let r = project.resolve_enhanced("pkg.S.M", &ctx);
     assert!(r.is_some(), "Go receiver method M should resolve");
@@ -606,6 +609,7 @@ fn test_typescript_class_member_resolution() {
         file_path: "src/b.ts".to_string(),
         module_path: vec![],
         scope_chain: vec![],
+        entity_remap: None,
     };
     let r = project.resolve_enhanced("src/a.C.m", &ctx);
     assert!(r.is_some(), "TS class method should resolve");

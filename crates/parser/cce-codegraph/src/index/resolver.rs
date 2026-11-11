@@ -311,10 +311,18 @@ impl RelationResolver {
             entity_map,
             symbol_table.max_scope_chain_depth(),
         );
+        // The per-file local→global ID remap is fetched once here so every
+        // candidate resolution emits callee IDs in the index-global space
+        // (see `resolve_name_candidate`). It also rides the resolution
+        // context so file-local scope hits translate before leaving
+        // symbol-table space.
+        let file_remap =
+            entity_index.entity_id_remap_for(&cce_types::normalize_project_path(&parsed.path));
         let resolution_context = ResolutionContext {
             file_path: parsed.path.clone(),
             module_path: Vec::new(),
             scope_chain,
+            entity_remap: file_remap.clone(),
         };
 
         // Import-alias redirect: a callee written under a local alias
@@ -324,11 +332,6 @@ impl RelationResolver {
         // under the import's original symbol name so the call resolves to an
         // internal edge instead of a spurious Unknown edge.
         //
-        // The per-file local→global ID remap is fetched once here so every
-        // candidate resolution emits callee IDs in the index-global space
-        // (see `resolve_name_candidate`).
-        let file_remap =
-            entity_index.entity_id_remap_for(&cce_types::normalize_project_path(&parsed.path));
         let simple_name = raw_data
             .dst_name
             .rsplit(['.', ':'])
@@ -1706,13 +1709,14 @@ impl RelationResolver {
             entity_map,
             symbol_table.max_scope_chain_depth(),
         );
+        let file_remap =
+            entity_index.entity_id_remap_for(&cce_types::normalize_project_path(&parsed.path));
         let resolution_context = ResolutionContext {
             file_path: parsed.path.clone(),
             module_path: Vec::new(),
             scope_chain,
+            entity_remap: file_remap.clone(),
         };
-        let file_remap =
-            entity_index.entity_id_remap_for(&cce_types::normalize_project_path(&parsed.path));
         let candidate_ctx = NameCandidateContext {
             parsed,
             symbol_table,

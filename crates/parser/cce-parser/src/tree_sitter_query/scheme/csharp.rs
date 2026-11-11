@@ -17,14 +17,25 @@ pub fn entity_query() -> &'static str {
 ; 0. Imports
 ; ============================================
 
-; Using directive (namespace import)
+; Using directive (namespace import). The `!name` guard excludes the alias
+; form below, which carries its alias in the `name` field.
 (using_directive
-  name: (identifier) @entity.import.name
+  !name
+  (identifier) @entity.import.name
 ) @entity.import
 
 ; Using directive with qualified name
 (using_directive
-  name: (_) @entity.import.name
+  !name
+  (qualified_name) @entity.import.name
+) @entity.import
+
+; Using directive with alias (using Alias = Namespace.Path;).
+; The alias is inert metadata; the entity name is the real path.
+(using_directive
+  name: (identifier) @entity.import.alias
+  "="
+  (_) @entity.import.name
 ) @entity.import
 
 ; ============================================
@@ -40,17 +51,20 @@ pub fn entity_query() -> &'static str {
   (base_list
     (_) @entity.class.base @entity.class.signature.base
   )?
+  body: (declaration_list)? @entity.class.body
 ) @entity.class
 
 ; Interface definition
 (interface_declaration
   name: (identifier) @entity.interface.name @entity.interface.signature.name
+  body: (declaration_list)? @entity.interface.body
 ) @entity.interface
 
 ; Struct definition
 (struct_declaration
   name: (identifier) @entity.struct.name @entity.struct.signature.name
   (type_parameter_list)? @entity.struct.signature.type_params
+  body: (declaration_list)? @entity.struct.body
 ) @entity.struct
 
 ; Enum definition
@@ -66,6 +80,7 @@ pub fn entity_query() -> &'static str {
 ; Record definition
 (record_declaration
   name: (identifier) @entity.record.name @entity.record.signature.name
+  body: (declaration_list)? @entity.record.body
 ) @entity.record
 
 ; ============================================
@@ -318,7 +333,24 @@ pub fn call_query() -> &'static str {
 ) @call.delegate
 
 ; ============================================
-; 6. Generic Method Calls
+; 6. Member Call With Anonymous Receiver
+; ============================================
+
+; Member call whose receiver is an anonymous token (`this.H()`,
+; `base.M()`). The object patterns above require a named receiver
+; expression, so this form would otherwise go missing. No receiver is
+; captured: the bare function name resolves against same-file methods.
+; Appended last so overlapping ordinary calls keep their earlier winners
+; in downstream per-site deduplication.
+(invocation_expression
+  function: (member_access_expression
+    name: (identifier) @call.method.function
+  )
+  arguments: (argument_list)? @call.method.arguments
+) @call.method
+
+; ============================================
+; 7. Generic Method Calls
 ; ============================================
 
 ; Generic method call
@@ -348,15 +380,27 @@ pub fn dependency_query() -> &'static str {
 ; 1. Using Directives
 ; ============================================
 
-; using directive (namespace import)
+; using directive (namespace import). The `!name` guard excludes the alias
+; form below, which carries its alias in the `name` field.
 (using_directive
-  name: (identifier) @dependency.using.namespace.name
+  !name
+  (identifier) @dependency.using.namespace.name
 ) @dependency.using
 
-; using directive with qualified name
+; using directive with qualified name (also covers `using static`)
 (using_directive
-  name: (_) @dependency.using.qualified.name
+  !name
+  (qualified_name) @dependency.using.qualified.name
 ) @dependency.using.qualified
+
+; using directive with alias (using Alias = Namespace.Path;).
+; The alias capture is inert metadata; the `.path` rule selects the real
+; path as the relation target so the alias never becomes a dependency edge.
+(using_directive
+  name: (identifier) @dependency.using.alias.name
+  "="
+  (_) @dependency.using.alias.path
+) @dependency.using.alias
 
 ; ============================================
 ; 2. Namespace References
@@ -445,7 +489,110 @@ pub fn control_flow_query() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tree_sitter::Query;
+    use streaming_iterator::StreamingIterator;
+    use tree_sitter::{Parser, Query, QueryCursor};
+
+    /// Run a query over a snippet, returning matches as capture texts.
+    fn run_matches(query_str: &str, code: &str) -> Vec<Vec<(String, String)>> {
+        let lang = tree_sitter_c_sharp::LANGUAGE;
+        let query = Query::new(&lang.into(), query_str).expect("query should compile");
+        let mut parser = Parser::new();
+        parser.set_language(&lang.into()).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        let names = query.capture_names().to_vec();
+        let mut cursor = QueryCursor::new();
+        let mut out = Vec::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        while let Some(mat) = matches.next() {
+            out.push(
+                mat.captures
+                    .iter()
+                    .map(|c| {
+                        (
+                            names[c.index as usize].to_string(),
+                            code[c.node.start_byte()..c.node.end_byte()].to_string(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    fn texts_of(matches: &[Vec<(String, String)>], capture: &str) -> Vec<String> {
+        matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter()
+                    .find(|(name, _)| name == capture)
+                    .map(|(_, text)| text.clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_using_plain_and_qualified_hit_without_name_field() {
+        let matches = run_matches(dependency_query(), "using System;\nusing System.IO;\n");
+        assert_eq!(
+            matches.len(),
+            3,
+            "plain, qualified and qualified-name matches"
+        );
+        let targets = texts_of(&matches, "dependency.using.namespace.name");
+        assert_eq!(targets, vec!["System"]);
+        let qualified = texts_of(&matches, "dependency.using.qualified.name");
+        assert_eq!(qualified, vec!["System.IO"]);
+    }
+
+    #[test]
+    fn test_using_alias_resolves_to_path_not_alias() {
+        let matches = run_matches(dependency_query(), "using Foo = Bar.Baz;\n");
+        assert_eq!(
+            matches.len(),
+            2,
+            "alias using plus qualified-name reference"
+        );
+        let paths = texts_of(&matches, "dependency.using.alias.path");
+        assert_eq!(paths, vec!["Bar.Baz"]);
+        assert!(
+            !matches
+                .iter()
+                .flatten()
+                .any(|(name, text)| (name == "dependency.using.namespace.name"
+                    || name == "dependency.using.qualified.name")
+                    && text == "Foo"),
+            "alias must not surface as a plain using name"
+        );
+    }
+
+    #[test]
+    fn test_using_static_and_global_hit() {
+        let matches = run_matches(
+            dependency_query(),
+            "using static System.Math;\nglobal using System;\n",
+        );
+        let qualified = texts_of(&matches, "dependency.using.qualified.name");
+        assert_eq!(qualified, vec!["System.Math"]);
+        let plain = texts_of(&matches, "dependency.using.namespace.name");
+        assert_eq!(plain, vec!["System"]);
+    }
+
+    #[test]
+    fn test_this_and_base_calls_hit_with_bare_name() {
+        let matches = run_matches(
+            call_query(),
+            "class C : B {\n void H() { }\n void G() { this.H(); }\n void F() { base.M(); }\n}\nclass B { public void M() { } }\n",
+        );
+        let names = texts_of(&matches, "call.method.function");
+        assert!(
+            names.contains(&"H".to_string()),
+            "this.H() hits, got {names:?}"
+        );
+        assert!(
+            names.contains(&"M".to_string()),
+            "base.M() hits, got {names:?}"
+        );
+    }
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {

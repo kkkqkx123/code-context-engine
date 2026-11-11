@@ -1250,6 +1250,7 @@ mod tests {
                     file_path: "/project/src/lib.rs".to_string(),
                     module_path: Vec::new(),
                     scope_chain: Vec::new(),
+                    entity_remap: None,
                 },
             )
             .expect("re-export alias resolves to the original symbol");

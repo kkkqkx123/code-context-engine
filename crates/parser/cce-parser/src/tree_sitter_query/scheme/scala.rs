@@ -279,6 +279,18 @@ pub fn dependency_query() -> &'static str {
   )
 ) @dependency.import.selectors
 
+; Renamed selector (import pkg.{c => d}). The plain selector pattern only
+; matches direct identifier children, so the rename node needs its own
+; pattern; the alias capture is inert and the original name wins as target.
+(import_declaration
+  (namespace_selectors
+    (arrow_renamed_identifier
+      name: (identifier) @dependency.import.selector.name
+      alias: (identifier) @dependency.import.selector.alias
+    )
+  )
+) @dependency.import.selectors
+
 ; ============================================
 ; 2. Type References (Inheritance and Mixins)
 ; ============================================

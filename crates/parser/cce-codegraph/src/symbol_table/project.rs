@@ -1052,6 +1052,13 @@ pub struct ResolutionContext {
 
     /// Scope chain (innermost to outermost) for local scope resolution
     pub scope_chain: Vec<EntityId>,
+
+    /// Parsed-file-local to index-global entity ID remap for the caller
+    /// file. Module-local symbol tables keep the local ID space, while
+    /// the resolution scope chain is built from the same local IDs; a
+    /// scope hit must be translated before leaving symbol-table space,
+    /// otherwise the local ID is mistaken for a global entity ID.
+    pub entity_remap: Option<HashMap<EntityId, EntityId>>,
 }
 
 /// Project statistics

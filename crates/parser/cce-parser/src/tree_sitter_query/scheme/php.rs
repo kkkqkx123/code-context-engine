@@ -328,24 +328,43 @@ pub fn dependency_query() -> &'static str {
   ) @dependency.use
 )
 
-; Use statement with alias
+; Single qualified use (use Foo\Bar;). The `!alias` guard excludes the
+; alias form below, which carries its local name in the `alias` field.
 (namespace_use_declaration
   (namespace_use_clause
-    (qualified_name
-      (name) @dependency.use.qualified.name
-    )
-    (name) @dependency.use.alias
+    !alias
+    (qualified_name) @dependency.use.name
+  ) @dependency.use
+)
+
+; Use statement with alias (use Foo\Bar as B;). The alias capture is
+; inert metadata; the `.path` rule selects the full path as the target.
+(namespace_use_declaration
+  (namespace_use_clause
+    (qualified_name) @dependency.use.alias.path
+    alias: (name) @dependency.use.alias.name
   ) @dependency.use.alias
 )
 
-; Group use statement
+; Group use items without alias (use Foo\{Bar, Baz};)
 (namespace_use_declaration
   (namespace_use_group
     (namespace_use_clause
+      !alias
       (name) @dependency.use.group.name
     )
   ) @dependency.use.group
 )
+
+; Group use items with alias (use Foo\{Baz as B};)
+(namespace_use_declaration
+  (namespace_use_group
+    (namespace_use_clause
+      (name) @dependency.use.group.item.path
+      alias: (name) @dependency.use.group.item.alias
+    )
+  )
+) @dependency.use.group.alias
 
 ; ============================================
 ; Include/Require
@@ -451,7 +470,50 @@ pub fn control_flow_query() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tree_sitter::Query;
+    use streaming_iterator::StreamingIterator;
+    use tree_sitter::{Parser, Query, QueryCursor};
+
+    /// Run a query over a snippet, returning matches as capture texts.
+    fn run_matches(query_str: &str, code: &str) -> Vec<Vec<(String, String)>> {
+        let lang = tree_sitter_php::LANGUAGE_PHP;
+        let query = Query::new(&lang.into(), query_str).expect("query should compile");
+        let mut parser = Parser::new();
+        parser.set_language(&lang.into()).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        let names = query.capture_names().to_vec();
+        let mut cursor = QueryCursor::new();
+        let mut out = Vec::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        while let Some(mat) = matches.next() {
+            out.push(
+                mat.captures
+                    .iter()
+                    .map(|c| {
+                        (
+                            names[c.index as usize].to_string(),
+                            code[c.node.start_byte()..c.node.end_byte()].to_string(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn test_single_qualified_use_hits_full_path() {
+        let matches = run_matches(dependency_query(), "<?php\nuse Foo\\Bar;\n");
+        assert_eq!(matches.len(), 1);
+        let name: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter()
+                    .find(|(name, _)| name == "dependency.use.name")
+                    .map(|(_, text)| text.clone())
+            })
+            .collect();
+        assert_eq!(name, vec!["Foo\\Bar"]);
+    }
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {

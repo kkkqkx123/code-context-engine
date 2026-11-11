@@ -25,6 +25,15 @@ pub fn entity_query() -> &'static str {
   )
 ) @entity.import
 
+; Import spec inside a grouped import list
+(import_declaration
+  (import_spec_list
+    (import_spec
+      path: (interpreted_string_literal) @entity.import.name
+    )
+  )
+) @entity.import
+
 ; ============================================
 ; 1. Types
 ; ============================================
@@ -368,6 +377,15 @@ pub fn dependency_query() -> &'static str {
   ) @dependency.import.standard
 )
 
+; Standard import inside a grouped import list
+(import_declaration
+  (import_spec_list
+    (import_spec
+      path: (interpreted_string_literal) @dependency.import.path
+    )
+  )
+) @dependency.import.standard
+
 ; Import with alias
 (import_declaration
   (import_spec
@@ -375,6 +393,16 @@ pub fn dependency_query() -> &'static str {
     path: (interpreted_string_literal) @dependency.import.alias.path
   ) @dependency.import.alias
 )
+
+; Import with alias inside a grouped import list
+(import_declaration
+  (import_spec_list
+    (import_spec
+      name: (_) @dependency.import.alias.alias
+      path: (interpreted_string_literal) @dependency.import.alias.path
+    )
+  )
+) @dependency.import.alias
 
 ; Import with dot (.)
 (import_declaration
@@ -384,6 +412,16 @@ pub fn dependency_query() -> &'static str {
   ) @dependency.import.dot
 )
 
+; Dot import inside a grouped import list
+(import_declaration
+  (import_spec_list
+    (import_spec
+      name: (dot) @dependency.import.dot.dot
+      path: (interpreted_string_literal) @dependency.import.dot.path
+    )
+  )
+) @dependency.import.dot
+
 ; Import with blank identifier (_)
 (import_declaration
   (import_spec
@@ -391,6 +429,16 @@ pub fn dependency_query() -> &'static str {
     path: (interpreted_string_literal) @dependency.import.blank.path
   ) @dependency.import.blank
 )
+
+; Blank import inside a grouped import list
+(import_declaration
+  (import_spec_list
+    (import_spec
+      name: (blank_identifier) @dependency.import.blank.blank
+      path: (interpreted_string_literal) @dependency.import.blank.path
+    )
+  )
+) @dependency.import.blank
 
 ; ============================================
 ; Struct Embedding (Go-specific)
@@ -489,7 +537,55 @@ pub fn control_flow_query() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tree_sitter::Query;
+    use streaming_iterator::StreamingIterator;
+    use tree_sitter::{Parser, Query, QueryCursor};
+
+    /// Run a query over a snippet, returning matches as capture texts.
+    fn run_matches(query_str: &str, code: &str) -> Vec<Vec<(String, String)>> {
+        let lang = tree_sitter_go::LANGUAGE;
+        let query = Query::new(&lang.into(), query_str).expect("query should compile");
+        let mut parser = Parser::new();
+        parser.set_language(&lang.into()).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        let names = query.capture_names().to_vec();
+        let mut cursor = QueryCursor::new();
+        let mut out = Vec::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        while let Some(mat) = matches.next() {
+            out.push(
+                mat.captures
+                    .iter()
+                    .map(|c| {
+                        (
+                            names[c.index as usize].to_string(),
+                            code[c.node.start_byte()..c.node.end_byte()].to_string(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn test_grouped_imports_hit_every_spec() {
+        let code = "package p\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\talias \"example.com/foo\"\n)\n";
+        let matches = run_matches(dependency_query(), code);
+        let mut paths: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.import.path" || name == "dependency.import.alias.path")
+                        .then(|| text.clone())
+                })
+            })
+            .collect();
+        // The alias spec matches both the generic and the alias-specific
+        // pattern; the generic edge is dropped downstream by import dedup.
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths, vec!["\"example.com/foo\"", "\"fmt\"", "\"os\""]);
+    }
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {

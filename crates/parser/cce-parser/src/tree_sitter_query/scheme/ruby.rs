@@ -17,8 +17,8 @@ pub fn entity_query() -> &'static str {
 
 ; require
 (call
-  method: (identifier) @entity.require
-  (#eq? @entity.require "require")
+  method: (identifier) @entity.require.keyword
+  (#eq? @entity.require.keyword "require")
   arguments: (argument_list
     (string
       (string_content) @entity.require.name
@@ -28,8 +28,8 @@ pub fn entity_query() -> &'static str {
 
 ; require_relative
 (call
-  method: (identifier) @entity.require
-  (#eq? @entity.require "require_relative")
+  method: (identifier) @entity.require.keyword
+  (#eq? @entity.require.keyword "require_relative")
   arguments: (argument_list
     (string
       (string_content) @entity.require.name
@@ -39,8 +39,8 @@ pub fn entity_query() -> &'static str {
 
 ; include
 (call
-  method: (identifier) @entity.include
-  (#eq? @entity.include "include")
+  method: (identifier) @entity.include.keyword
+  (#eq? @entity.include.keyword "include")
   arguments: (argument_list
     (constant) @entity.include.name
   )
@@ -259,8 +259,8 @@ pub fn dependency_query() -> &'static str {
 
 ; require
 (call
-  method: (identifier) @dependency.require
-  (#eq? @dependency.require "require")
+  method: (identifier) @dependency.require.keyword
+  (#eq? @dependency.require.keyword "require")
   arguments: (argument_list
     (string
       (string_content) @dependency.require.path
@@ -270,8 +270,8 @@ pub fn dependency_query() -> &'static str {
 
 ; require_relative
 (call
-  method: (identifier) @dependency.require_relative
-  (#eq? @dependency.require_relative "require_relative")
+  method: (identifier) @dependency.require_relative.keyword
+  (#eq? @dependency.require_relative.keyword "require_relative")
   arguments: (argument_list
     (string
       (string_content) @dependency.require_relative.path
@@ -285,8 +285,8 @@ pub fn dependency_query() -> &'static str {
 
 ; load
 (call
-  method: (identifier) @dependency.load
-  (#eq? @dependency.load "load")
+  method: (identifier) @dependency.load.keyword
+  (#eq? @dependency.load.keyword "load")
   arguments: (argument_list
     (string
       (string_content) @dependency.load.path
@@ -300,8 +300,8 @@ pub fn dependency_query() -> &'static str {
 
 ; include
 (call
-  method: (identifier) @dependency.include
-  (#eq? @dependency.include "include")
+  method: (identifier) @dependency.include.keyword
+  (#eq? @dependency.include.keyword "include")
   arguments: (argument_list
     (constant) @dependency.include.module
   )
@@ -309,8 +309,8 @@ pub fn dependency_query() -> &'static str {
 
 ; extend
 (call
-  method: (identifier) @dependency.extend
-  (#eq? @dependency.extend "extend")
+  method: (identifier) @dependency.extend.keyword
+  (#eq? @dependency.extend.keyword "extend")
   arguments: (argument_list
     (constant) @dependency.extend.module
   )
@@ -318,8 +318,8 @@ pub fn dependency_query() -> &'static str {
 
 ; prepend
 (call
-  method: (identifier) @dependency.prepend
-  (#eq? @dependency.prepend "prepend")
+  method: (identifier) @dependency.prepend.keyword
+  (#eq? @dependency.prepend.keyword "prepend")
   arguments: (argument_list
     (constant) @dependency.prepend.module
   )
@@ -331,8 +331,8 @@ pub fn dependency_query() -> &'static str {
 
 ; autoload
 (call
-  method: (identifier) @dependency.autoload
-  (#eq? @dependency.autoload "autoload")
+  method: (identifier) @dependency.autoload.keyword
+  (#eq? @dependency.autoload.keyword "autoload")
   arguments: (argument_list
     (simple_symbol) @dependency.autoload.const
     (string
@@ -356,8 +356,8 @@ pub fn dependency_query() -> &'static str {
 
 ; gem method (in Gemfile)
 (call
-  method: (identifier) @dependency.gem
-  (#eq? @dependency.gem "gem")
+  method: (identifier) @dependency.gem.keyword
+  (#eq? @dependency.gem.keyword "gem")
   arguments: (argument_list
     (string
       (string_content) @dependency.gem.name
@@ -406,7 +406,52 @@ pub fn control_flow_query() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tree_sitter::Query;
+    use streaming_iterator::StreamingIterator;
+    use tree_sitter::{Parser, Query, QueryCursor};
+
+    /// Run a query over a snippet, returning matches as capture texts.
+    fn run_matches(query_str: &str, code: &str) -> Vec<Vec<(String, String)>> {
+        let lang = tree_sitter_ruby::LANGUAGE;
+        let query = Query::new(&lang.into(), query_str).expect("query should compile");
+        let mut parser = Parser::new();
+        parser.set_language(&lang.into()).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        let names = query.capture_names().to_vec();
+        let mut cursor = QueryCursor::new();
+        let mut out = Vec::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+        while let Some(mat) = matches.next() {
+            out.push(
+                mat.captures
+                    .iter()
+                    .map(|c| {
+                        (
+                            names[c.index as usize].to_string(),
+                            code[c.node.start_byte()..c.node.end_byte()].to_string(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn test_require_with_predicate_hits() {
+        // The method capture must differ from the root capture, otherwise
+        // the equality predicate filters out every match.
+        let matches = run_matches(dependency_query(), "require \"foo\"\n");
+        assert_eq!(matches.len(), 1);
+        let path: Vec<String> = matches
+            .iter()
+            .filter_map(|caps| {
+                caps.iter().find_map(|(name, text)| {
+                    (name == "dependency.require.path").then(|| text.clone())
+                })
+            })
+            .collect();
+        assert_eq!(path, vec!["foo"]);
+    }
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {

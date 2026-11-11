@@ -379,7 +379,7 @@ pub fn dependency_query() -> &'static str {
 
 ; #include <header> (system include)
 (preproc_include
-  path: (string_literal) @dependency.include.path
+  path: (system_lib_string) @dependency.include.path
 ) @dependency.include
 
 ; #include "header" (local include)

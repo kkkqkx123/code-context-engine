@@ -32,7 +32,9 @@ use std::sync::Arc;
 use tree_sitter::Tree;
 
 use call_extractor::{deduplicate_call_relations, extract_macro_inner_calls, process_call_match};
-use dependency_extractor::{deduplicate_generic_import_relations, process_dependency_match};
+use dependency_extractor::{
+    compose_rust_use_list_target, deduplicate_generic_import_relations, process_dependency_match,
+};
 use entity_index::EntityIndex;
 use relation_handlers::{extract_impl_block_relations, find_dependency_capture};
 use require_filter::is_shadowed_require;
@@ -201,6 +203,16 @@ impl RelationExtractor {
         let mut relations = Vec::new();
 
         for mat in &matches {
+            // Rust `use prefix::{item}` matches carry the prefix and the
+            // item as separate captures; compose the full item path first.
+            if let Some(composed) = compose_rust_use_list_target(mat) {
+                if let Some(relation) =
+                    process_dependency_match(&composed, file_id, &entity_index, language)
+                {
+                    relations.push(relation);
+                }
+                continue;
+            }
             if let Some(dep_capture) = find_dependency_capture(mat) {
                 if is_shadowed_require(mat, dep_capture, entities, language) {
                     continue;

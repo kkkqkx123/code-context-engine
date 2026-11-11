@@ -142,11 +142,11 @@ pub fn entity_non_function_patterns() -> &'static str {
 
 ; require() call
 (call_expression
-  function: (identifier) @entity.require
+  function: (identifier) @entity.require.keyword
   arguments: (arguments
     (string) @entity.require.name
   )
-  (#eq? @entity.require "require")
+  (#eq? @entity.require.keyword "require")
 ) @entity.require
 
 ; ============================================
