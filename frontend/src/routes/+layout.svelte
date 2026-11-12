@@ -42,47 +42,66 @@
 		items: NavItem[];
 	}
 
-	const navGroups: NavGroup[] = [
-		{ title: 'Overview', items: [{ href: '/', label: 'Dashboard' }] },
+	interface NavDomain {
+		title: string;
+		groups: NavGroup[];
+	}
+
+	/** Two product surfaces: query workbench vs. operations console. */
+	const navDomains: NavDomain[] = [
 		{
-			title: 'Data',
-			items: [
-				{ href: '/projects', label: 'Projects' },
-				{ href: '/index', label: 'Index' },
-				{ href: '/watch', label: 'Watch' },
+			title: 'Workspace',
+			groups: [
+				{ title: 'Overview', items: [{ href: '/', label: 'Dashboard' }] },
+				{
+					title: 'Search & Analysis',
+					items: [
+						{ href: '/search', label: 'Search' },
+						{ href: '/entities', label: 'Entities' },
+						{ href: '/graph', label: 'Graph' },
+						{ href: '/summary', label: 'Summary' },
+					],
+				},
 			],
 		},
 		{
-			title: 'Search',
-			items: [
-				{ href: '/search', label: 'Search' },
-				{ href: '/entities', label: 'Entities' },
-				{ href: '/graph', label: 'Graph' },
-				{ href: '/summary', label: 'Summary' },
-			],
-		},
-		{
-			title: 'Logs',
-			items: [
-				{ href: '/logs/realtime', label: 'Realtime' },
-				{ href: '/logs/search', label: 'Search' },
-				{ href: '/logs/files', label: 'Files' },
-				{ href: '/logs/config', label: 'Config' },
-			],
-		},
-		{
-			title: 'System',
-			items: [
-				{ href: '/storage', label: 'Storage' },
-				{ href: '/health', label: 'Health' },
-				{ href: '/ops/dead-letters', label: 'Dead Letters' },
-				{ href: '/ops/retry-queue', label: 'Retry Queue' },
-				{ href: '/metrics', label: 'Metrics' },
-				{ href: '/tools', label: 'Tools' },
-				{ href: '/config', label: 'Config' },
+			title: 'Operations',
+			groups: [
+				{
+					title: 'Data',
+					items: [
+						{ href: '/projects', label: 'Projects' },
+						{ href: '/index', label: 'Index' },
+						{ href: '/watch', label: 'Watch' },
+					],
+				},
+				{
+					title: 'Logs',
+					items: [
+						{ href: '/logs/realtime', label: 'Realtime' },
+						{ href: '/logs/search', label: 'Search' },
+						{ href: '/logs/files', label: 'Files' },
+						{ href: '/logs/config', label: 'Config' },
+					],
+				},
+				{
+					title: 'System',
+					items: [
+						{ href: '/storage', label: 'Storage' },
+						{ href: '/health', label: 'Health' },
+						{ href: '/ops/dead-letters', label: 'Dead Letters' },
+						{ href: '/ops/retry-queue', label: 'Retry Queue' },
+						{ href: '/metrics', label: 'Metrics' },
+						{ href: '/tools', label: 'Tools' },
+						{ href: '/config', label: 'Config' },
+					],
+				},
 			],
 		},
 	];
+
+	// Flat view retained for breadcrumb resolution.
+	const navGroups: NavGroup[] = navDomains.flatMap((domain) => domain.groups);
 
 	function resolveCrumb(pathname: string): { group: string; label: string } {
 		for (const group of navGroups) {
@@ -182,24 +201,29 @@
 		</div>
 
 		<nav class="nav" aria-label="Main navigation">
-			{#each navGroups as group (group.title)}
-				<div class="nav-group">
-					<div class="nav-title">{group.title}</div>
-					{#each group.items as item (item.href)}
-						<a
-							href={resolve(item.href)}
-							class="nav-item"
-							class:active={item.href === '/'
-								? currentPage === '/'
-								: currentPage.startsWith(item.href)}
-							onclick={(e) => {
-								e.preventDefault();
-								goto(resolve(item.href));
-								closeMobile();
-							}}
-						>
-							{item.label}
-						</a>
+			{#each navDomains as domain (domain.title)}
+				<div class="nav-domain">
+					<div class="nav-domain-title">{domain.title}</div>
+					{#each domain.groups as group (group.title)}
+						<div class="nav-group">
+							<div class="nav-title">{group.title}</div>
+							{#each group.items as item (item.href)}
+								<a
+									href={resolve(item.href)}
+									class="nav-item"
+									class:active={item.href === '/'
+										? currentPage === '/'
+										: currentPage.startsWith(item.href)}
+									onclick={(e) => {
+										e.preventDefault();
+										goto(resolve(item.href));
+										closeMobile();
+									}}
+								>
+									{item.label}
+								</a>
+							{/each}
+						</div>
 					{/each}
 				</div>
 			{/each}
@@ -598,5 +622,19 @@
 		.clock {
 			display: none;
 		}
+	}
+	.nav-domain + .nav-domain {
+		margin-top: 1.25rem;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--gray-700);
+	}
+
+	.nav-domain-title {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--chrome-muted);
+		margin-bottom: 0.75rem;
 	}
 </style>

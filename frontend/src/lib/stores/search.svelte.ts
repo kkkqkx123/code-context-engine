@@ -153,6 +153,12 @@ function filtersFromUrl(): SearchFilters {
 	};
 }
 
+/** Restore a shared/reloaded query; `#syncUrl` writes `q` on every search. */
+function queryFromUrl(): string {
+	if (typeof window === 'undefined') return '';
+	return new SvelteURLSearchParams(window.location.search).get('q') ?? '';
+}
+
 function modeFromUrl(): SearchMode {
 	if (typeof window === 'undefined') return AGGREGATED_TYPE;
 	const mode = new SvelteURLSearchParams(window.location.search).get('mode');
@@ -182,7 +188,7 @@ let requestSeq = 0;
 let autoSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
 class SearchStore {
-	query = $state('');
+	query = $state(queryFromUrl());
 	mode = $state<SearchMode>(modeFromUrl());
 	/** Aggregated-mode sub-queries; empty list = auto-decompose from the main query */
 	subQueries = $state<SubQueryDraft[]>([]);

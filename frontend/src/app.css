@@ -772,3 +772,24 @@ pre code {
 	border-bottom-color: var(--accent);
 	font-weight: bold;
 }
+
+/* ─── Lightweight code tokens (no external highlighter dependency) ─── */
+/* Tuned for the dark code block background (--black). See utils/code.ts. */
+.tok-keyword {
+	color: #ff7b72;
+}
+.tok-string {
+	color: #a5d6ff;
+}
+.tok-number {
+	color: #79c0ff;
+}
+.tok-comment {
+	color: #8b949e;
+	font-style: italic;
+}
+.tok-match {
+	background: rgba(230, 54, 0, 0.38);
+	color: #fff;
+	border-radius: 2px;
+}

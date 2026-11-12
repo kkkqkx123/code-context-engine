@@ -22,6 +22,9 @@
 		onNavigate(id);
 	}
 
+	let showAllCallers = $state(false);
+	let allCallees = $state(false);
+
 	function handleItemKeydown(event: KeyboardEvent, id: string) {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
@@ -69,7 +72,7 @@
 		<div class="relationships-section">
 			<h3 class="section-title">Called By ({callers.length})</h3>
 			<div class="relationship-list">
-				{#each callers.slice(0, 10) as caller (caller.function_id)}
+				{#each callers.slice(0, showAllCallers ? callers.length : 10) as caller (caller.function_id)}
 					<div
 						class="relationship-item"
 						onclick={() => handleNavigate(caller.function_id)}
@@ -84,7 +87,15 @@
 					</div>
 				{/each}
 				{#if callers.length > 10}
-					<div class="more-indicator">+{callers.length - 10} more...</div>
+					<button
+						type="button"
+						class="more-toggle"
+						onclick={() => (showAllCallers = !showAllCallers)}
+					>
+						{showAllCallers
+							? 'Show fewer'
+							: `+${callers.length - 10} more — show all`}
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -94,7 +105,7 @@
 		<div class="relationships-section">
 			<h3 class="section-title">Calls ({calls.length})</h3>
 			<div class="relationship-list">
-				{#each calls.slice(0, 10) as call (call.function_id)}
+				{#each calls.slice(0, allCallees ? calls.length : 10) as call (call.function_id)}
 					<div
 						class="relationship-item"
 						onclick={() => handleNavigate(call.function_id)}
@@ -109,7 +120,15 @@
 					</div>
 				{/each}
 				{#if calls.length > 10}
-					<div class="more-indicator">+{calls.length - 10} more...</div>
+					<button
+						type="button"
+						class="more-toggle"
+						onclick={() => (allCallees = !allCallees)}
+					>
+						{allCallees
+							? 'Show fewer'
+							: `+${calls.length - 10} more — show all`}
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -228,12 +247,18 @@
 		color: var(--gray-400);
 	}
 
-	.more-indicator {
+	.more-toggle {
+		width: 100%;
 		padding: 0.75rem;
-		text-align: center;
+		background: transparent;
+		border: 1px dashed var(--gray-300);
+		cursor: pointer;
 		font-family: 'Space Mono', monospace;
 		font-size: 0.75rem;
-		color: var(--gray-400);
-		font-style: italic;
+		color: var(--gray-600);
+	}
+
+	.more-toggle:hover {
+		background: var(--gray-100);
 	}
 </style>

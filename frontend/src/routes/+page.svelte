@@ -6,6 +6,46 @@
 	import { projectStore } from '$lib/stores/project.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+
+	const RECENT_KEY = 'cce.recentQueries';
+	const EXAMPLES = [
+		'authentication function',
+		'retry logic',
+		'database connection',
+		'error handling',
+	];
+
+	let homeQuery = $state('');
+	let recentQueries = $state<string[]>([]);
+
+	onMount(() => {
+		try {
+			const raw = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+			if (Array.isArray(raw)) {
+				recentQueries = raw
+					.filter((q): q is string => typeof q === 'string')
+					.slice(0, 6);
+			}
+		} catch {
+			// Storage may be unavailable; recent queries simply stay empty.
+		}
+	});
+
+	function runSearch(query: string) {
+		const trimmed = query.trim();
+		if (!trimmed) return;
+		recentQueries = [
+			trimmed,
+			...recentQueries.filter((q) => q !== trimmed),
+		].slice(0, 6);
+		try {
+			localStorage.setItem(RECENT_KEY, JSON.stringify(recentQueries));
+		} catch {
+			// Ignore storage failures; navigation still works.
+		}
+		goto(resolve(`/search?q=${encodeURIComponent(trimmed)}`));
+	}
 
 	onMount(() => {
 		metricsStore.startAutoRefresh(30000);
@@ -40,6 +80,52 @@
 		title="Dashboard"
 		subtitle="Code indexing, search, and analysis console"
 	/>
+
+	<div class="home-search">
+		<input
+			class="home-search-input"
+			type="text"
+			placeholder="Search the indexed codebase…"
+			bind:value={homeQuery}
+			onkeydown={(e) => {
+				if (e.key === 'Enter') runSearch(homeQuery);
+			}}
+		/>
+		<Button
+			variant="primary"
+			onclick={() => runSearch(homeQuery)}
+			disabled={!homeQuery.trim()}
+		>
+			Search
+		</Button>
+	</div>
+
+	<div class="home-suggestions">
+		{#if recentQueries.length > 0}
+			<span class="suggest-label">Recent:</span>
+			{#each recentQueries as query (query)}
+				<button
+					type="button"
+					class="suggest-chip"
+					onclick={() => runSearch(query)}
+				>
+					{query}
+				</button>
+			{/each}
+		{/if}
+		<span class="suggest-label">Try:</span>
+		{#each EXAMPLES as example (example)}
+			<button
+				type="button"
+				class="suggest-chip"
+				onclick={() => runSearch(example)}
+			>
+				{example}
+			</button>
+		{/each}
+	</div>
+
+	<h2 class="section-heading">System status</h2>
 
 	<div class="kpi-grid">
 		<div class="kpi-card">
@@ -125,3 +211,56 @@
 		</a>
 	</div>
 </div>
+
+<style>
+	.home-search {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 1rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.home-search-input {
+		width: 100%;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--black);
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 1rem;
+	}
+
+	.home-suggestions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 2.5rem;
+	}
+
+	.suggest-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		color: var(--gray-500);
+	}
+
+	.suggest-chip {
+		background: transparent;
+		border: 1px solid var(--gray-300);
+		padding: 0.2rem 0.5rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		cursor: pointer;
+	}
+
+	.suggest-chip:hover {
+		background: var(--gray-100);
+	}
+
+	.section-heading {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+		margin-bottom: 1rem;
+	}
+</style>

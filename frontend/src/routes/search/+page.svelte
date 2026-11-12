@@ -11,15 +11,21 @@
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import SearchRunPanel from '$lib/components/search/SearchRunPanel.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { splitTerms } from '$lib/utils/code';
 
 	// Lazy load FilterPanel component
 	let FilterPanel: Component | null = $state(null);
 	let filterPanelLoaded = $state(false);
 	let filterPanelVisible = $state(false);
+	let compact = $state(false);
 
 	onMount(async () => {
+		// A shared/reloaded URL carries the query in `q`; replay it once so
+		// results are visible without retyping (see stores/search.svelte.ts).
+		if (searchStore.query.trim()) void searchStore.executeSearch(1);
 		// Load FilterPanel after initial render
 		const module = await import('$lib/components/search/FilterPanel.svelte');
 		FilterPanel = module.default;
@@ -27,6 +33,7 @@
 	});
 
 	function handleSearch() {
+		selectedIndex = -1;
 		void searchStore.executeSearch(1);
 	}
 
@@ -45,22 +52,59 @@
 	}
 
 	function nextPage() {
-		searchStore.setPage(searchStore.pagination.page + 1);
+		// Cumulative fetch: re-query with limit = (page + 1) * pageSize.
+		void searchStore.executeSearch(searchStore.pagination.page + 1);
 	}
 
 	// Get paginated results for display
 	let paginatedResults = $derived(searchStore.getPaginatedResults());
 	let totalPages = $derived(searchStore.totalPages());
-	// Backend returns at most `page * pageSize` rows (top-K, no offset), so a
-	// next page exists only when we already hold that many rows. `total` is the
-	// truncated count; once we've reached it there is nothing more to fetch.
+	// Backend has no offset: page N needs a cumulative fetch of N*pageSize
+	// rows (see executeSearch in stores/search.svelte.ts). Whether another
+	// page exists is decided by the reported total, not by the rows already
+	// held — otherwise the first page (rows == page*pageSize) always hides
+	// the Next button.
 	let hasMore = $derived(
-		searchStore.results.length >
-			searchStore.pagination.page * searchStore.pagination.pageSize &&
-			searchStore.total >
-				searchStore.pagination.page * searchStore.pagination.pageSize,
+		searchStore.total >
+			searchStore.pagination.page * searchStore.pagination.pageSize,
 	);
+	let queryTerms = $derived(splitTerms(searchStore.query));
+	let selectedIndex = $state(-1);
+
+	/** IDE-style shortcuts: `/` focus, j/k move, Enter open. */
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		const target = event.target as HTMLElement | null;
+		const typing =
+			!!target &&
+			(target.tagName === 'INPUT' ||
+				target.tagName === 'TEXTAREA' ||
+				target.tagName === 'SELECT' ||
+				target.isContentEditable);
+		if (!typing && event.key === '/') {
+			event.preventDefault();
+			(
+				document.querySelector('.search-hero') as HTMLInputElement | null
+			)?.focus();
+			return;
+		}
+		if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+		const last = paginatedResults.length - 1;
+		if (last < 0) return;
+		if (event.key === 'j') {
+			event.preventDefault();
+			selectedIndex = Math.min(last, selectedIndex + 1);
+		} else if (event.key === 'k') {
+			event.preventDefault();
+			selectedIndex = Math.max(0, selectedIndex - 1);
+		} else if (event.key === 'Enter' && selectedIndex >= 0) {
+			event.preventDefault();
+			const id = paginatedResults[selectedIndex]?.entity_ids?.[0];
+			if (id !== undefined) handleNavigate(String(id));
+		}
+	}
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
 	<title>Search - Code Context Engine</title>
@@ -75,6 +119,11 @@
 
 		<SearchInput onSearch={handleSearch} />
 
+		<div class="shortcut-hint">
+			Shortcuts: <kbd>/</kbd> focus search · <kbd>j</kbd>/<kbd>k</kbd> select
+			result · <kbd>Enter</kbd> open entity
+		</div>
+
 		<div class="filter-toggle">
 			<Button
 				variant="secondary"
@@ -83,6 +132,14 @@
 				onclick={toggleFilterPanel}
 			>
 				{filterPanelVisible ? 'Hide Filters' : 'Show Filters'}
+			</Button>
+			<Button
+				variant="secondary"
+				size="xs"
+				active={compact}
+				onclick={() => (compact = !compact)}
+			>
+				{compact ? 'Comfortable' : 'Compact'}
 			</Button>
 		</div>
 
@@ -93,6 +150,8 @@
 				<LoadingState message="Loading filters..." />
 			{/if}
 		{/if}
+
+		<SearchRunPanel />
 
 		{#if searchStore.error}
 			<ErrorBanner message={`Search failed: ${searchStore.error}`} />
@@ -144,9 +203,14 @@
 				</div>
 			{/if}
 
-			<div class="results-list">
+			<div class="results-list" class:compact>
 				{#each paginatedResults as result, i ((result.entity_ids ?? []).join(',') + '-' + i)}
-					<ResultCard {result} onNavigate={handleNavigate} />
+					<ResultCard
+						{result}
+						onNavigate={handleNavigate}
+						selected={i === selectedIndex}
+						{queryTerms}
+					/>
 				{/each}
 			</div>
 
@@ -177,6 +241,19 @@
 </div>
 
 <style>
+	.shortcut-hint {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+		color: var(--gray-500);
+		margin: -0.75rem 0 1.5rem;
+	}
+
+	kbd {
+		border: 1px solid var(--gray-300);
+		padding: 0 0.3rem;
+		background: var(--gray-100);
+	}
+
 	.filter-toggle {
 		margin-bottom: 1.5rem;
 	}
@@ -198,6 +275,18 @@
 		display: grid;
 		gap: 1rem;
 		margin-bottom: 2rem;
+	}
+
+	.results-list.compact {
+		gap: 0.5rem;
+	}
+
+	.results-list.compact :global(.result-card) {
+		padding: 0.75rem;
+	}
+
+	.results-list.compact :global(.code-preview) {
+		margin-top: 0.5rem;
 	}
 
 	.pagination {
