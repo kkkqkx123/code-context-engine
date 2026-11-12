@@ -30,7 +30,6 @@
 	let BatchCompressTool: Component | null = $state(null);
 
 	// Component props
-	let compressLanguage = $state('typescript');
 	let diagnoseLanguage = $state('typescript');
 	let foldLanguage = $state('rust');
 	let symbolFilePath = $state('');
@@ -166,7 +165,7 @@
 				subtitle="Reduce token count for LLM efficiency"
 			>
 				{#if CompressionTool}
-					<CompressionTool language={compressLanguage} />
+					<CompressionTool />
 				{:else}
 					<LoadingState message="Loading compression tool..." />
 				{/if}

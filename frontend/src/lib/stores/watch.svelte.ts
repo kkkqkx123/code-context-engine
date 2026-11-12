@@ -10,15 +10,6 @@ import { projectStore, onProjectChange } from './project.svelte';
 export interface WatchState {
 	status: WatchStatus | null;
 	isWatching: boolean;
-	// Local event feed is intentionally empty: there is no streaming channel.
-	// The server-side `events_processed` counter in `status` is the source of
-	// truth and is refreshed by `loadStatus` polling.
-	events: Array<{
-		timestamp: Date;
-		eventType: 'create' | 'modify' | 'delete';
-		filePath: string;
-		action: string;
-	}>;
 	isLoading: boolean;
 	error: string | null;
 }
@@ -30,14 +21,6 @@ const VERSION_POLL_MS = 10_000;
 class WatchStore {
 	status = $state<WatchStatus | null>(null);
 	isWatching = $state(false);
-	events = $state<
-		Array<{
-			timestamp: Date;
-			eventType: 'create' | 'modify' | 'delete';
-			filePath: string;
-			action: string;
-		}>
-	>([]);
 	isLoading = $state(false);
 	error = $state<string | null>(null);
 
@@ -105,10 +88,6 @@ class WatchStore {
 			clearInterval(versionPollTimer);
 			versionPollTimer = null;
 		}
-	}
-
-	clearEvents() {
-		this.events = [];
 	}
 }
 

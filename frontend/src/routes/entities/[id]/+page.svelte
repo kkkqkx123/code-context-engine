@@ -63,6 +63,7 @@
 
 	onMount(() => {
 		void loadEntity();
+		void loadEntityDetailComponent();
 	});
 
 	// Entity ids resolve inside one project; after a switch nothing from the
@@ -252,9 +253,7 @@
 						onNavigate={handleNavigate}
 					/>
 				{:else}
-					<Button variant="secondary" block onclick={loadEntityDetailComponent}>
-						Loading entity details... (click to load)
-					</Button>
+					<LoadingState message="Loading entity details..." />
 				{/if}
 			{:else if currentTab === 'call-graph'}
 				<Card title="Call Graph" subtitle="Visual relationship map">

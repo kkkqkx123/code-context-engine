@@ -1,29 +1,20 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import type { Component } from 'svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import { watchStore } from '$lib/stores/watch.svelte';
-
-	// Lazy load LogViewer component
-	let LogViewer: Component | null = $state(null);
-	let logViewerLoaded = $state(false);
 
 	let watchPath = $state('');
 	let extensions = $state('ts,js,tsx,jsx,rs,py,go');
 	let debounceMs = $state(1000);
-	let isPaused = $state(false);
 
 	onMount(() => {
 		watchStore.loadStatus();
 		watchStore.startVersionPoll();
-		// Preload LogViewer component
-		loadLogViewerComponent();
 	});
 
 	onDestroy(() => {
@@ -41,22 +32,6 @@
 
 	async function handleStopWatch() {
 		await watchStore.stopWatch();
-	}
-
-	function togglePause() {
-		isPaused = !isPaused;
-	}
-
-	function clearEvents() {
-		watchStore.clearEvents();
-	}
-
-	async function loadLogViewerComponent() {
-		if (!logViewerLoaded) {
-			const module = await import('$lib/components/ui/LogViewer.svelte');
-			LogViewer = module.default;
-			logViewerLoaded = true;
-		}
 	}
 </script>
 
@@ -201,19 +176,19 @@
 			title="Event Feed"
 			subtitle="No live stream by design — progress comes from status polling (events_processed + epochs). For gateway projects freshness comes from gateway push, not local watching."
 		>
-			<div class="feed-controls">
-				<Button variant="secondary" onclick={togglePause}>
-					{isPaused ? 'Resume' : 'Pause'}
-				</Button>
-				<Button variant="secondary" onclick={clearEvents}>Clear</Button>
-				<span class="event-count">{watchStore.events.length} events</span>
+			<div class="poll-progress">
+				<span class="info-item"
+					>Events processed: {watchStore.status?.events_processed ?? 0}</span
+				>
+				{#if watchStore.status?.relation_epoch !== undefined && watchStore.status?.relation_epoch !== null}
+					<span class="info-item"
+						>Relation epoch: {watchStore.status.relation_epoch}</span
+					>
+				{/if}
 			</div>
-
-			{#if LogViewer}
-				<LogViewer events={watchStore.events} paused={isPaused} />
-			{:else}
-				<LoadingState message="Loading log viewer..." />
-			{/if}
+			<p class="empty-hint">
+				Progress is reported by status polling; there is no live event stream.
+			</p>
 		</Card>
 	</div>
 </div>
@@ -241,7 +216,6 @@
 		flex-direction: column;
 		gap: 0.5rem;
 	}
-
 
 	.debounce-input {
 		width: 100%;
@@ -317,18 +291,11 @@
 		color: var(--gray-600);
 	}
 
-	.feed-controls {
+	.poll-progress {
 		display: flex;
-		gap: 1rem;
-		align-items: center;
+		gap: 1.5rem;
+		flex-wrap: wrap;
 		margin-bottom: 1rem;
-	}
-
-	.event-count {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		color: var(--gray-600);
-		margin-left: auto;
 	}
 
 	@media (max-width: 1024px) {
