@@ -30,6 +30,7 @@ struct PrevPack<'a> {
     member: &'a ConversionResult,
     member_text: &'a str,
     member_source_lines: usize,
+    member_documented: bool,
     first_budget: usize,
     continuation_budget: usize,
     separator_cost: usize,
@@ -246,6 +247,11 @@ impl<'a> HeaderHelper<'a> {
                         member,
                         member_text,
                         member_source_lines,
+                        member_documented: signals
+                            .self_contained
+                            .get(idx)
+                            .copied()
+                            .unwrap_or(false),
                         first_budget,
                         continuation_budget,
                         separator_cost,
@@ -301,7 +307,12 @@ impl<'a> HeaderHelper<'a> {
     /// Returns true when the member was packed (the caller must skip the
     /// standalone push). Packing applies in two cases: adjacent same-name
     /// overloads, which share one declaration identity, and tiny residues
-    /// below the min threshold, which have no retrieval value alone. A residue
+    /// below the min threshold, which have no retrieval value alone. On the
+    /// embedding path a documented member never packs as a residue: its own
+    /// description is a retrieval unit even when short, and merging it only
+    /// dilutes both sides under dense averaging. The keyword path keeps the
+    /// residue packing so one-line splinters do not fill the corpus.
+    /// A residue
     /// is short on both axes: its natural-language cost is below the min
     /// threshold and its source spans fewer than `VIABLE_SOURCE_LINES` lines.
     /// A multi-statement implementation keeps its own chunk even when its
@@ -315,6 +326,7 @@ impl<'a> HeaderHelper<'a> {
             member,
             member_text,
             member_source_lines,
+            member_documented,
             first_budget,
             continuation_budget,
             separator_cost,
@@ -329,6 +341,9 @@ impl<'a> HeaderHelper<'a> {
             return false;
         };
         if member.name.is_empty() || !prev.iter().all(|m| m.name == member.name) {
+            if path == ChunkPath::Embedding && member_documented {
+                return false;
+            }
             let member_cost = self.unit_count(member_text, path);
             if member_cost >= min_cost || member_source_lines >= VIABLE_SOURCE_LINES {
                 return false;
@@ -651,6 +666,33 @@ mod tests {
             assert_eq!(groups.len(), 3);
             assert_eq!(groups[0].len(), 1);
             assert_eq!(groups[1].len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_embedding_documented_tiny_members_stand_alone() {
+        default_helper(|helper| {
+            // A documented one-line member is a retrieval unit of its own
+            // on the embedding path: merging it only dilutes both sides
+            // under dense averaging. The keyword path keeps packing such
+            // residues so one-line splinters do not fill the corpus.
+            let members = member_conversions(2);
+            let self_contained = vec![true; members.len()];
+            let multiline = vec![false; members.len()];
+            let source_lines = vec![1; members.len()];
+            let emb_groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Embedding,
+                MemberSignals {
+                    self_contained: &self_contained,
+                    multiline: &multiline,
+                    source_lines: &source_lines,
+                },
+            );
+            assert_eq!(emb_groups.len(), 2);
+            assert!(emb_groups.iter().all(|g| g.len() == 1));
         });
     }
 }

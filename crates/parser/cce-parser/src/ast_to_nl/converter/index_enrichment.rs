@@ -102,13 +102,6 @@ impl ResolvedCallsIndex {
     }
 }
 
-/// Head token budget for a fact-less function body on the embedding path.
-///
-/// Signatures and early statements carry the most intent per token; the
-/// long implementation tail only feeds keyword search, which keeps the
-/// full body through the gap-filled variant.
-const EMB_BODY_HEAD_TOKENS: usize = 150;
-
 impl<'a> IndexTextEnricher<'a> {
     pub fn new(bm25_cleaner: &'a Bm25TextCleaner, calls_prune_enabled: bool) -> Self {
         Self {
@@ -349,21 +342,13 @@ impl<'a> IndexTextEnricher<'a> {
                 if body.trim().is_empty() {
                     return None;
                 }
-                // Without facts the whole body is the only signal; the
-                // keyword path keeps it entire, the embedding path keeps
-                // only the head where signatures and early statements live.
-                if fill_gaps {
-                    return Some(body);
-                }
-                let head = cce_text::truncate_to_cost(
-                    &body,
-                    cce_text::ChunkUnit::Tokens,
-                    EMB_BODY_HEAD_TOKENS,
-                );
-                if head.trim().is_empty() {
-                    return None;
-                }
-                return Some(head.to_string());
+                // Without facts the whole body is the only signal; both
+                // paths keep it entire. Gap skipping above already removes
+                // the implementation filler when facts exist, so no head
+                // truncation is applied here: cutting a fact-less body
+                // drops the deep tokens some queries need (top5 and
+                // single-query regressions in the previous round).
+                return Some(body);
             }
             return None;
         }
@@ -644,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_extra_text_no_fill_caps_factless_body() {
+    fn test_build_extra_text_no_fill_keeps_factless_body() {
         use crate::grouper::types::{EntityGroup, GroupType};
         use cce_types::Span;
 
@@ -671,13 +656,13 @@ mod tests {
         assert!(full.contains("padding_59"), "keyword path keeps the tail");
         let slim = enricher
             .build_extra_text(EntityId(1), &processing_result, &source, false)
-            .expect("body head should produce text");
+            .expect("body fallback should produce text");
         assert!(
-            !slim.contains("padding_59"),
-            "embedding head must drop the tail, got {} chars",
+            slim.contains("padding_59"),
+            "fact-less embedding keeps the tail, got {} chars",
             slim.len()
         );
-        assert!(slim.contains("padding_0"), "embedding head keeps the start");
+        assert!(slim.contains("padding_0"), "embedding keeps the start");
     }
 
     #[test]
