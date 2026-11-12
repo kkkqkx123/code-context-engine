@@ -169,17 +169,17 @@
 	}
 
 	.file-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		display: block;
 		margin-bottom: 0.5rem;
 	}
 
 	.file-path {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		word-break: break-all;
 	}
@@ -192,7 +192,7 @@
 	}
 
 	.error-count {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-weight: 700;
 		color: var(--danger);
 	}
@@ -234,21 +234,21 @@
 	}
 
 	.target-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.target-name {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-weight: 700;
 		font-size: 1rem;
 	}
 
 	.target-path {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 		overflow: hidden;
@@ -257,7 +257,7 @@
 	}
 
 	.config-hint {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
 		margin: 0;
@@ -279,7 +279,7 @@
 	}
 
 	.toggle-description {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}

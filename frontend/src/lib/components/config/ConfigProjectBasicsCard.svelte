@@ -131,7 +131,7 @@
 	}
 
 	.reload-message {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 	}
 
@@ -149,10 +149,10 @@
 	}
 
 	.form-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 

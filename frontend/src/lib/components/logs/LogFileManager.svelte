@@ -110,14 +110,14 @@
 
 <style>
 	.count {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
 	}
 
 	.row-actions {
@@ -127,10 +127,10 @@
 	}
 
 	.download-link {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 		color: var(--info);
 		text-decoration: none;
 		border-bottom: 1px solid var(--info);

@@ -143,10 +143,10 @@
 	}
 
 	.communities-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-600);
 		margin: 0 0 0.25rem;
 	}
@@ -160,7 +160,7 @@
 	}
 
 	.panel-empty {
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		color: var(--gray-500);
 		font-style: italic;
 		margin: 0;
@@ -196,7 +196,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 
@@ -215,7 +215,7 @@
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 </style>

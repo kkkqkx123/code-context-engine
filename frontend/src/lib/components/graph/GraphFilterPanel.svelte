@@ -158,11 +158,11 @@
 	}
 
 	.panel-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		font-weight: 400;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-500);
 		margin: 0;
 	}
@@ -171,7 +171,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 	}
 
@@ -185,10 +185,10 @@
 		border: 1px solid var(--gray-300);
 		background: var(--white);
 		cursor: pointer;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 	}
 
 	.search-focus-btn:disabled {
@@ -210,7 +210,7 @@
 
 	.domain-state {
 		font-size: 0.6rem;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 	}
 
 	.swatch {

@@ -198,10 +198,10 @@
 	}
 
 	.section-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		text-transform: uppercase;
 		font-size: 0.75rem;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		margin-bottom: 1rem;
 		color: var(--gray-600);
 		padding-bottom: 0.5rem;
@@ -244,12 +244,12 @@
 	}
 
 	.item-name {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-weight: 700;
 	}
 
 	.item-location {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-400);
 	}

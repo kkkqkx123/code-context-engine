@@ -81,7 +81,7 @@
 	.log-container {
 		background: var(--black);
 		color: var(--white);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		padding: 1rem;
 		height: 400px;
@@ -127,7 +127,7 @@
 	}
 
 	.log-event-type {
-		font-weight: bold;
+		font-weight: 700;
 		min-width: 80px;
 		flex-shrink: 0;
 	}

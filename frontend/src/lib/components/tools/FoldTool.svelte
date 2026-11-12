@@ -146,7 +146,7 @@
 	}
 
 	.meta-item {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 	}
@@ -157,7 +157,7 @@
 		border: 1px solid var(--gray-200);
 		background: var(--black);
 		color: var(--white);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		line-height: 1.6;
 		white-space: pre-wrap;

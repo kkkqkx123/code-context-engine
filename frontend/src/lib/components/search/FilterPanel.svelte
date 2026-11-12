@@ -405,10 +405,10 @@
 	}
 
 	.section-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		text-transform: uppercase;
 		font-size: 0.65rem;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 

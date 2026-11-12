@@ -282,7 +282,7 @@
 	}
 
 	.inspector-title {
-		font-size: 1.05rem;
+		font-size: 1.1rem;
 		margin: 0 0 0.75rem;
 		word-break: break-word;
 	}
@@ -295,22 +295,22 @@
 	}
 
 	.meta-list dt {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 
 	.meta-list dd {
 		margin: 0;
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		color: var(--black);
 		word-break: break-all;
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 
@@ -324,11 +324,11 @@
 	}
 
 	.subsection-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		font-weight: 400;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-500);
 		margin: 0 0 0.5rem;
 	}
@@ -354,16 +354,16 @@
 	}
 
 	.relation-domain {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 
 	.relation-name {
 		margin: 0.15rem 0 0;
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		color: var(--black);
 	}
 
@@ -375,10 +375,10 @@
 
 	.relation-confidence {
 		margin: 0.15rem 0 0;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 
@@ -391,8 +391,8 @@
 
 	.relation-meta {
 		margin: 0.15rem 0 0;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		color: var(--gray-500);
 	}
 
@@ -403,7 +403,7 @@
 	}
 
 	.relation-empty {
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		color: var(--gray-500);
 		font-style: italic;
 	}
@@ -423,7 +423,7 @@
 	.structural-controls .text-input {
 		min-width: 0;
 		height: 26px;
-		font-size: 0.68rem;
+		font-size: 0.7rem;
 	}
 
 	.structural-hint {
@@ -439,7 +439,7 @@
 	}
 
 	.panel-empty {
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		color: var(--gray-500);
 		font-style: italic;
 		margin: 0;

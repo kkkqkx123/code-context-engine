@@ -51,10 +51,10 @@
 
 	.candidate-hint {
 		margin: 0 0 0.5rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 
@@ -78,14 +78,14 @@
 	}
 
 	.candidate-meta {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		color: var(--gray-500);
 		word-break: break-all;
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 </style>

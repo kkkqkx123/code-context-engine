@@ -146,7 +146,7 @@
 		padding: 0.75rem;
 		background: var(--gray-900);
 		color: var(--gray-200);
-		font-size: 0.72rem;
+		font-size: 0.7rem;
 		line-height: 1.5;
 		overflow-x: auto;
 	}
@@ -157,7 +157,7 @@
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}

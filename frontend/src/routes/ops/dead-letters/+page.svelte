@@ -403,7 +403,7 @@
 	}
 	.module-detail .code {
 		margin-left: 0.5rem;
-		font-family: monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--warning);
 	}

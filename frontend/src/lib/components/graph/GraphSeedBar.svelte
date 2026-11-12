@@ -388,10 +388,10 @@
 	}
 
 	.seed-section-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin: 0;
 		padding-bottom: 0.35rem;
@@ -413,7 +413,7 @@
 	}
 
 	.path-arrow {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		color: var(--gray-500);
 	}
 
@@ -422,16 +422,16 @@
 		border-top: none;
 		margin: -0.25rem 0 1rem;
 		padding: 0.4rem 0.75rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
 
 	.adv-filter summary {
 		cursor: pointer;
-		font-size: 0.62rem;
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 
@@ -444,7 +444,7 @@
 	}
 
 	.adv-filter-hint {
-		font-size: 0.62rem;
+		font-size: 0.6rem;
 		color: var(--gray-500);
 	}
 

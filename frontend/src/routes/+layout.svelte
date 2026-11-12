@@ -332,10 +332,10 @@
 	}
 
 	.brand {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1.35rem;
 		font-weight: 700;
-		letter-spacing: -0.03em;
+		letter-spacing: var(--tracking-tight);
 		color: var(--chrome-fg);
 		text-decoration: none;
 	}
@@ -376,10 +376,10 @@
 	}
 
 	.status-text {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-300);
 	}
 
@@ -405,10 +405,10 @@
 	}
 
 	.nav-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.15em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-500);
 		padding: 0 0.5rem 0.5rem;
 	}
@@ -418,7 +418,7 @@
 		padding: 0.5rem 0.75rem;
 		color: var(--gray-300);
 		text-decoration: none;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		border-left: 2px solid transparent;
 		transition: all 0.2s;
@@ -441,7 +441,7 @@
 		align-items: center;
 		padding-top: 1rem;
 		border-top: 1px solid var(--gray-800);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		color: var(--gray-500);
 	}
@@ -475,10 +475,10 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 	}
 
 	.crumb-group {
@@ -522,7 +522,7 @@
 	}
 
 	.clock {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
@@ -542,7 +542,7 @@
 		padding: 8px 16px;
 		z-index: 10000;
 		transition: top 0.3s;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-decoration: none;
 	}
@@ -630,9 +630,9 @@
 	}
 
 	.nav-domain-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
-		letter-spacing: 0.16em;
+		letter-spacing: var(--tracking-widest);
 		text-transform: uppercase;
 		color: var(--chrome-muted);
 		margin-bottom: 0.75rem;

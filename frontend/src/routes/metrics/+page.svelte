@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { errorMessage } from '$lib/utils/errors';
+	import type { Tone } from '$lib/utils/tone';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -57,7 +58,7 @@
 
 	function typeBadgeVariant(
 		metricType: string,
-	): 'info' | 'success' | 'warning' {
+	): Extract<Tone, 'info' | 'success' | 'warning'> {
 		if (metricType === 'counter') return 'info';
 		if (metricType === 'gauge') return 'success';
 		return 'warning';
@@ -349,10 +350,10 @@
 	}
 
 	.filter-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
@@ -360,7 +361,7 @@
 		padding: 0.45rem 0.6rem;
 		border: 1px solid var(--gray-300);
 		background: var(--white);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		color: var(--black);
 		min-width: 180px;
@@ -392,10 +393,10 @@
 	}
 
 	th {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		text-align: left;
 		padding: 0.6rem 0.75rem;
@@ -415,18 +416,18 @@
 	}
 
 	.cell-name {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
 
 	.cell-mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
 
 	.result-count {
 		margin-top: 0.75rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
 	}
@@ -443,8 +444,8 @@
 		padding: 1rem;
 		overflow: auto;
 		max-height: 320px;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		line-height: 1.5;
 	}
 
@@ -466,7 +467,7 @@
 		padding: 0.6rem 0.75rem;
 		border: 1px solid var(--success);
 		color: var(--success);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
 

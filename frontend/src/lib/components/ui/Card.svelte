@@ -52,18 +52,18 @@
 	}
 
 	.card-title {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1.25rem;
-		font-weight: 600;
-		letter-spacing: -0.02em;
+		font-weight: 700;
+		letter-spacing: var(--tracking-tight);
 		margin-bottom: 0.5rem;
 	}
 
 	.card-subtitle {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 </style>

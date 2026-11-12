@@ -22,7 +22,7 @@
 		padding: 0.6rem 0.75rem;
 		border: 1px solid var(--danger);
 		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 	}
 </style>

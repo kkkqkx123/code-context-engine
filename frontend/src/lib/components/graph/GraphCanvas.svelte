@@ -460,16 +460,16 @@
 	}
 
 	.canvas-empty p {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-500);
 		margin: 0;
 	}
 
 	.canvas-empty span {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 0.85rem;
 		color: var(--gray-500);
 	}
@@ -482,10 +482,10 @@
 		justify-content: center;
 		background: rgba(255, 255, 255, 0.6);
 		pointer-events: none;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 </style>

@@ -95,8 +95,8 @@
 		margin: 0;
 		padding: 0.4rem 0.75rem;
 		border-top: 1px solid var(--gray-200);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		color: var(--gray-500);
 	}
 </style>

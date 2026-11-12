@@ -134,16 +134,16 @@
 	}
 
 	.communities-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-600);
 		margin: 0 0 0.25rem;
 	}
 
 	.panel-empty {
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 		color: var(--gray-500);
 		font-style: italic;
 		margin: 0;
@@ -156,11 +156,11 @@
 	}
 
 	.subsection-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		font-weight: 400;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-500);
 		margin: 0 0 0.5rem;
 	}
@@ -203,13 +203,13 @@
 	}
 
 	.relation-meta {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		color: var(--gray-500);
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 </style>

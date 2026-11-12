@@ -298,16 +298,16 @@
 
 	.field-label {
 		display: block;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-bottom: 0.5rem;
 	}
 
 	.field-hint {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		color: var(--gray-400);
 		margin-top: 0.25rem;
@@ -343,15 +343,15 @@
 	}
 
 	.stat-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.stat-value {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1.5rem;
 		font-weight: 700;
 	}
@@ -374,7 +374,7 @@
 		padding: 0.75rem 1rem;
 		cursor: pointer;
 		background: var(--gray-50);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		user-select: none;
 	}
@@ -402,17 +402,17 @@
 	.summary-meta {
 		display: flex;
 		gap: 1rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-500);
 		margin-bottom: 1rem;
 	}
 
 	.summary-entities h4 {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-bottom: 0.5rem;
 	}
@@ -429,7 +429,7 @@
 		padding: 0.25rem 0.5rem;
 		background: var(--gray-50);
 		border: 1px solid var(--gray-200);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 

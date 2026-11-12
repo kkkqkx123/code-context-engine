@@ -204,21 +204,21 @@
 	}
 
 	.filter-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.total {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
 
@@ -230,8 +230,8 @@
 	}
 
 	.page-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
 </style>

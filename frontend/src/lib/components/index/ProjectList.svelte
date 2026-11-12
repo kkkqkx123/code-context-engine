@@ -322,7 +322,7 @@
 	}
 
 	.project-path {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		color: var(--gray-600);
 		margin-bottom: 0.75rem;
@@ -336,15 +336,15 @@
 	}
 
 	.meta-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.meta-value {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
 

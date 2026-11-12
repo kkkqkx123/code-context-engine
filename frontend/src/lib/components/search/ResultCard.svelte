@@ -160,7 +160,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 	}

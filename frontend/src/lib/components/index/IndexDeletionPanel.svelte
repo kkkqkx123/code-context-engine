@@ -282,18 +282,18 @@
 	}
 
 	.field-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.arm-warning {
 		margin: 0.5rem 0 0;
 		color: var(--warning);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 	}
 
 	.result-row {
@@ -305,7 +305,7 @@
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}

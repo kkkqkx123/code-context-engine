@@ -695,8 +695,8 @@
 		margin: 0;
 		padding: 0.4rem 0.75rem;
 		border-top: 1px solid var(--gray-200);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		color: var(--gray-500);
 	}
 
@@ -705,7 +705,7 @@
 		padding: 0.6rem 0.75rem;
 		border: 1px solid var(--gray-300);
 		background: var(--gray-50);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 
@@ -717,7 +717,7 @@
 		cursor: pointer;
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-600);
 	}
 
@@ -734,7 +734,7 @@
 		margin: 0.5rem 0 0;
 		border: 1px solid var(--gray-300);
 		padding: 0.35rem 0.6rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		color: var(--gray-600);
 	}
@@ -742,7 +742,7 @@
 	.canvas-help summary {
 		cursor: pointer;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 
@@ -766,10 +766,10 @@
 	.result-section-summary {
 		cursor: pointer;
 		padding: 0.5rem 0.75rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-600);
 		background: var(--gray-50);
 	}

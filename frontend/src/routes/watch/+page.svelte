@@ -225,7 +225,7 @@
 		padding: 1rem;
 		margin-bottom: 2rem;
 		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 	}
 
@@ -243,10 +243,10 @@
 	}
 
 	.field-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
@@ -254,7 +254,7 @@
 		width: 100%;
 		padding: 0.75rem;
 		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.9rem;
 		background: var(--white);
 	}
@@ -319,7 +319,7 @@
 	}
 
 	.info-item {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 	}
@@ -332,7 +332,7 @@
 	}
 
 	.event-count {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 		margin-left: auto;

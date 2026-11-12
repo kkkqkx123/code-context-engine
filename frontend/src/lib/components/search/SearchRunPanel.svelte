@@ -163,7 +163,7 @@
 	}
 
 	.run-meta {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-500);
 	}
@@ -182,10 +182,10 @@
 	}
 
 	h3 {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		margin-bottom: 0.75rem;
 	}
 
@@ -199,14 +199,14 @@
 
 	li,
 	p {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-700);
 		word-break: break-word;
 	}
 
 	code {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		color: var(--black);
 	}
 

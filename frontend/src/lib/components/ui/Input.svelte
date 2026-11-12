@@ -103,7 +103,7 @@
 	}
 
 	.error-message {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--danger);
 		margin-top: 0.5rem;

@@ -220,7 +220,7 @@
 	}
 	.stat-value {
 		font-size: 1.8rem;
-		font-weight: 600;
+		font-weight: 700;
 	}
 	.stat-label {
 		color: var(--ops-text-muted);

@@ -50,6 +50,26 @@
 	--status-created: #4ade80; /* bright green on black */
 	--status-modified: #fbbf24; /* amber on black */
 	--status-deleted: #f87171; /* light red on black */
+
+	/* Typography tokens — single source for font family, scale, tracking, leading */
+	--font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+	--font-mono: 'Space Mono', monospace;
+	--text-micro: 0.6rem;
+	--text-xs: 0.65rem;
+	--text-sm: 0.7rem;
+	--text-md: 0.75rem;
+	--text-code: 0.85rem;
+	--text-body: 1rem;
+	--text-title: 1.25rem;
+	--tracking-tight: -0.03em;
+	--tracking-wide: 0.05em;
+	--tracking-wider: 0.08em;
+	--tracking-widest: 0.1em;
+	--leading-tight: 1.05;
+	--leading-snug: 1.1;
+	--leading-normal: 1.5;
+	--leading-relaxed: 1.6;
+	--leading-loose: 1.7;
 }
 
 /* Reset & Base Styles */
@@ -66,11 +86,7 @@ html {
 }
 
 body {
-	font-family:
-		'Space Grotesk',
-		-apple-system,
-		BlinkMacSystemFont,
-		sans-serif;
+	font-family: var(--font-sans);
 	background: var(--white);
 	color: var(--black);
 	line-height: 1.5;
@@ -84,10 +100,10 @@ h3,
 h4,
 h5,
 h6 {
-	font-family: 'Space Grotesk', sans-serif;
+	font-family: var(--font-sans);
 	font-weight: 700;
-	letter-spacing: -0.03em;
-	line-height: 1.05;
+	letter-spacing: var(--tracking-tight);
+	line-height: var(--leading-tight);
 	color: var(--black);
 }
 
@@ -104,7 +120,7 @@ h3 {
 }
 
 p {
-	font-family: 'Space Grotesk', sans-serif;
+	font-family: var(--font-sans);
 	font-size: 1rem;
 	color: var(--gray-600);
 	line-height: 1.7;
@@ -114,17 +130,17 @@ p {
 .label,
 .meta,
 small {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.7rem;
 	text-transform: uppercase;
-	letter-spacing: 0.1em;
+	letter-spacing: var(--tracking-widest);
 	color: var(--gray-600);
 }
 
 /* Code Blocks */
 code,
 pre {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.85rem;
 }
 
@@ -144,6 +160,15 @@ code {
 pre code {
 	background: transparent;
 	padding: 0;
+}
+
+/* Font helpers — prefer these over scoped font-family declarations. */
+.font-sans {
+	font-family: var(--font-sans);
+}
+
+.font-mono {
+	font-family: var(--font-mono);
 }
 
 /* Layout System */
@@ -182,10 +207,10 @@ pre code {
 	padding: 1rem 1.75rem;
 	background: var(--black);
 	color: var(--white);
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.8rem;
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--tracking-wide);
 	border: none;
 	cursor: pointer;
 	transition: all 0.3s;
@@ -264,7 +289,7 @@ pre code {
 .btn-sm {
 	height: 32px;
 	padding: 0 0.9rem;
-	font-size: 0.68rem;
+	font-size: 0.7rem;
 }
 
 .btn-lg {
@@ -290,7 +315,7 @@ pre code {
 .textarea {
 	width: 100%;
 	padding: 0.75rem 1rem;
-	font-family: 'Space Grotesk', sans-serif;
+	font-family: var(--font-sans);
 	font-size: 1rem;
 	color: var(--black);
 	background: var(--white);
@@ -316,8 +341,8 @@ pre code {
 	padding: 0.5rem 0.6rem;
 	border: 1px solid var(--gray-300);
 	background: var(--white);
-	font-family: 'Space Mono', monospace;
-	font-size: 0.78rem;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
 	color: var(--black);
 }
 
@@ -343,7 +368,7 @@ pre code {
 .search-hero,
 .search-input {
 	width: 100%;
-	font-family: 'Space Grotesk', sans-serif;
+	font-family: var(--font-sans);
 	font-size: 1.25rem;
 	padding: 1rem 1.5rem;
 	border: 1px solid var(--black);
@@ -371,7 +396,7 @@ pre code {
 	border: 1px solid var(--black);
 	background: var(--black);
 	color: var(--white);
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.85rem;
 	resize: none;
 	min-height: 300px;
@@ -396,10 +421,10 @@ pre code {
 }
 
 .table th {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.7rem;
 	text-transform: uppercase;
-	letter-spacing: 0.1em;
+	letter-spacing: var(--tracking-widest);
 	color: var(--gray-600);
 	font-weight: 400;
 }
@@ -408,10 +433,10 @@ pre code {
 .badge {
 	display: inline-block;
 	padding: 0.25rem 0.75rem;
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.65rem;
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--tracking-wide);
 	border: 1px solid var(--black);
 }
 
@@ -452,7 +477,7 @@ pre code {
 
 /* Navigation Links */
 .nav-link {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.75rem;
 	text-transform: uppercase;
 	color: var(--black);
@@ -587,23 +612,23 @@ pre code {
 }
 
 .kpi-label {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.65rem;
 	text-transform: uppercase;
-	letter-spacing: 0.1em;
+	letter-spacing: var(--tracking-widest);
 	color: var(--gray-600);
 }
 
 .kpi-value {
-	font-family: 'Space Grotesk', sans-serif;
+	font-family: var(--font-sans);
 	font-size: 2rem;
 	font-weight: 700;
 	line-height: 1;
-	letter-spacing: -0.03em;
+	letter-spacing: var(--tracking-tight);
 }
 
 .kpi-meta {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.7rem;
 	color: var(--gray-500);
 }
@@ -659,10 +684,10 @@ pre code {
 }
 
 .graph-inline-label {
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.6rem;
 	text-transform: uppercase;
-	letter-spacing: 0.08em;
+	letter-spacing: var(--tracking-wider);
 	color: var(--gray-500);
 }
 
@@ -716,7 +741,7 @@ pre code {
 	border: 1px solid var(--gray-300);
 	cursor: pointer;
 	text-align: left;
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.7rem;
 	color: var(--gray-600);
 	word-break: break-all;
@@ -754,10 +779,10 @@ pre code {
 	border: none;
 	border-bottom: 2px solid transparent;
 	margin-bottom: -2px;
-	font-family: 'Space Mono', monospace;
+	font-family: var(--font-mono);
 	font-size: 0.85rem;
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--tracking-wide);
 	cursor: pointer;
 	transition: all 0.3s ease;
 	color: var(--gray-600);
@@ -770,7 +795,7 @@ pre code {
 .tab-btn.active {
 	color: var(--black);
 	border-bottom-color: var(--accent);
-	font-weight: bold;
+	font-weight: 700;
 }
 
 /* ─── Lightweight code tokens (no external highlighter dependency) ─── */

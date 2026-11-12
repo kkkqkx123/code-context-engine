@@ -83,7 +83,7 @@
 
 	.toast-icon {
 		font-size: 1.25rem;
-		font-weight: bold;
+		font-weight: 700;
 		flex-shrink: 0;
 	}
 

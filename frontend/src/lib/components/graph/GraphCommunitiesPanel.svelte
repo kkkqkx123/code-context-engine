@@ -46,10 +46,10 @@
 	}
 
 	.communities-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-600);
 		margin: 0 0 0.25rem;
 	}
@@ -80,7 +80,7 @@
 		border: 1px solid var(--gray-300);
 		cursor: pointer;
 		text-align: left;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 		transition: all 0.15s;
@@ -106,7 +106,7 @@
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}
 </style>

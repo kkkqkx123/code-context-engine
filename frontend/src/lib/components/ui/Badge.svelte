@@ -1,15 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { BadgeVariant } from '$lib/utils/tone';
 
 	interface Props {
-		variant?:
-			| 'default'
-			| 'active'
-			| 'inactive'
-			| 'info'
-			| 'success'
-			| 'warning'
-			| 'danger';
+		variant?: BadgeVariant;
 		label?: string;
 		children?: Snippet;
 	}

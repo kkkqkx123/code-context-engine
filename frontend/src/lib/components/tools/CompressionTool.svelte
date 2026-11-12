@@ -128,15 +128,15 @@
 	}
 
 	.info-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.info-value {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		color: var(--black);
 	}
@@ -153,10 +153,10 @@
 	}
 
 	.semantic-text h3 {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-bottom: 1rem;
 	}
@@ -166,8 +166,8 @@
 		padding: 1rem;
 		background: var(--gray-50);
 		border: 1px solid var(--gray-200);
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 0.95rem;
+		font-family: var(--font-sans);
+		font-size: 1rem;
 		line-height: 1.6;
 		color: var(--gray-800);
 		white-space: pre-wrap;

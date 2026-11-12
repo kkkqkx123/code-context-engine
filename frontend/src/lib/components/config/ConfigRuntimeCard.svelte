@@ -130,10 +130,10 @@
 	}
 
 	.config-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
@@ -161,7 +161,7 @@
 	}
 
 	.reload-message {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 	}
 
@@ -178,7 +178,7 @@
 		padding: 1rem;
 		background: var(--gray-50);
 		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		line-height: 1.6;
 		color: var(--black);

@@ -1,9 +1,11 @@
 <script lang="ts">
+	import type { ProgressVariant } from '$lib/utils/tone';
+
 	interface Props {
 		progress?: number;
 		showLabel?: boolean;
 		label?: string;
-		variant?: 'default' | 'success' | 'warning' | 'danger' | 'info';
+		variant?: ProgressVariant;
 	}
 
 	let {
@@ -74,10 +76,10 @@
 	}
 
 	.progress-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-top: 0.5rem;
 	}

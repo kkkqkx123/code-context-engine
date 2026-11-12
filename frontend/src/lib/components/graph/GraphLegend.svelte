@@ -61,10 +61,10 @@
 	.legend-separator {
 		width: 100%;
 		margin-top: 0.35rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-500);
 	}
 
@@ -138,10 +138,10 @@
 	}
 
 	.legend-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 		color: var(--gray-600);
 	}
 </style>

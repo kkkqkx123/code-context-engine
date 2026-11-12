@@ -114,17 +114,17 @@
 	}
 
 	.stat-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.stat-value {
 		font-size: 1.4rem;
 		font-weight: 700;
-		letter-spacing: -0.03em;
+		letter-spacing: var(--tracking-tight);
 	}
 
 	.stats-meta {
@@ -134,8 +134,8 @@
 	.stats-loading {
 		margin-top: 0.75rem;
 		color: var(--gray-500);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 	}
 
 	.placeholder {
@@ -144,7 +144,7 @@
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}

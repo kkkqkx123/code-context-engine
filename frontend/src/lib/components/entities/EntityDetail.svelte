@@ -151,10 +151,10 @@
 	}
 
 	.entity-name {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1.75rem;
 		font-weight: 700;
-		letter-spacing: -0.04em;
+		letter-spacing: var(--tracking-tight);
 		line-height: 1.05;
 		margin: 0;
 	}
@@ -176,24 +176,24 @@
 	}
 
 	.label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		text-transform: uppercase;
 		font-size: 0.65rem;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.value {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		word-break: break-all;
 	}
 
 	.section-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		text-transform: uppercase;
 		font-size: 0.75rem;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		margin-bottom: 1rem;
 		color: var(--gray-600);
 	}
@@ -206,7 +206,7 @@
 	}
 
 	.description-text {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1rem;
 		line-height: 1.6;
 		color: var(--gray-600);
@@ -237,12 +237,12 @@
 	}
 
 	.item-name {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-weight: 700;
 	}
 
 	.item-location {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-400);
 	}
@@ -253,7 +253,7 @@
 		background: transparent;
 		border: 1px dashed var(--gray-300);
 		cursor: pointer;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 	}

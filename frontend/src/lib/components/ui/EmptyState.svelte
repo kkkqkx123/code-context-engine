@@ -50,7 +50,7 @@
 	}
 
 	.empty-hint {
-		font-size: 0.85em;
+		font-size: 0.85rem;
 		color: var(--gray-400);
 	}
 

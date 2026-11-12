@@ -64,13 +64,13 @@
 	.page-header h1 {
 		font-size: clamp(1.5rem, 3vw, 2rem);
 		line-height: 1.1;
-		letter-spacing: -0.03em;
+		letter-spacing: var(--tracking-tight);
 		margin: 0;
 	}
 
 	.page-header-subtitle {
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 0.95rem;
+		font-family: var(--font-sans);
+		font-size: 1rem;
 		color: var(--gray-600);
 		margin: 0.5rem 0 0;
 	}
@@ -80,7 +80,7 @@
 		align-items: baseline;
 		gap: 0.5rem;
 		margin: 0.35rem 0 0;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		min-width: 0;
 	}

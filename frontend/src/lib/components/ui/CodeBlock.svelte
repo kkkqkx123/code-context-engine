@@ -67,10 +67,10 @@
 	}
 
 	.code-language {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-400);
 	}
 
@@ -82,7 +82,7 @@
 	}
 
 	code {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		background: transparent;
 		padding: 0;

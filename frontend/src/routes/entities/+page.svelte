@@ -303,7 +303,7 @@
 		padding: 0.55rem 0.6rem;
 		border: 1px solid var(--gray-300);
 		background: var(--white);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		color: var(--black);
 	}
@@ -326,10 +326,10 @@
 	}
 
 	th {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		text-align: left;
 		padding: 0.6rem 0.75rem;
@@ -349,7 +349,7 @@
 
 	.entity-link {
 		color: var(--black);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		font-weight: 700;
 		text-decoration: none;
@@ -361,8 +361,8 @@
 	}
 
 	.cell-signature {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		color: var(--gray-600);
 		max-width: 380px;
 		overflow: hidden;
@@ -371,15 +371,15 @@
 	}
 
 	.cell-mono {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		color: var(--gray-600);
 		white-space: nowrap;
 	}
 
 	.result-meta {
 		margin-top: 0.75rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
 	}

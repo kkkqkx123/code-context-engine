@@ -63,10 +63,10 @@
 	}
 
 	.project-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--chrome-muted, var(--gray-500));
 	}
 
@@ -76,7 +76,7 @@
 		background: var(--chrome-input-bg, var(--gray-900));
 		color: var(--chrome-input-fg, var(--white));
 		border: 1px solid var(--chrome-input-border, var(--gray-700));
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 	}
 
@@ -86,7 +86,7 @@
 	}
 
 	.project-path {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		color: var(--chrome-muted, var(--gray-500));
 		margin: 0;
@@ -96,7 +96,7 @@
 	}
 
 	.empty-link {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--accent);
 		text-decoration: none;

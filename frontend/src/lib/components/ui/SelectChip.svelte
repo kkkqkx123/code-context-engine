@@ -39,7 +39,7 @@
 		border: 1px solid var(--gray-300);
 		cursor: pointer;
 		text-align: left;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 		word-break: break-all;

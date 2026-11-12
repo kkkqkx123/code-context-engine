@@ -152,10 +152,10 @@
 	}
 
 	.tool-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
@@ -164,7 +164,7 @@
 		padding: 0 0.4rem;
 		background: var(--white);
 		border: 1px solid var(--gray-300);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--black);
 	}
@@ -180,10 +180,10 @@
 	}
 
 	.stat {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 		color: var(--gray-500);
 	}
 

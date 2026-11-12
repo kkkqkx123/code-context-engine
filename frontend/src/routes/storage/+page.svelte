@@ -320,10 +320,10 @@
 	}
 
 	.spec-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-bottom: 0.5rem;
 	}
@@ -347,10 +347,10 @@
 	}
 
 	.disk-usage .label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		text-transform: uppercase;
 		font-size: 0.65rem;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
@@ -377,17 +377,17 @@
 	}
 
 	.process-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		min-width: 120px;
 	}
 
 	.process-error {
 		color: var(--danger);
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		margin-top: 0.5rem;
 	}

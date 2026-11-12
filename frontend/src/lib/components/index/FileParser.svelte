@@ -165,7 +165,7 @@
 
 	.error-display p {
 		margin-top: 0.75rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		color: var(--danger);
 	}
@@ -194,10 +194,10 @@
 	}
 
 	.entity-count {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
@@ -209,16 +209,16 @@
 	}
 
 	.info-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-right: 0.5rem;
 	}
 
 	.info-value {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 	}
 
@@ -230,7 +230,7 @@
 		font-size: 1rem;
 		margin-bottom: 1rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 	}
 
 	.no-entities {
@@ -259,37 +259,37 @@
 	}
 
 	.entity-type {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		padding: 0.25rem 0.5rem;
 		background: var(--black);
 		color: var(--white);
 	}
 
 	.entity-name {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-weight: 700;
 		font-size: 1.1rem;
 	}
 
 	.entity-description {
-		font-size: 0.95rem;
+		font-size: 1rem;
 		color: var(--gray-600);
 		line-height: 1.6;
 		margin-bottom: 0.75rem;
 	}
 
 	.entity-location {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 	}
 
 	.location-label {
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 		margin-right: 0.5rem;
 	}
 
@@ -301,6 +301,6 @@
 		font-size: 1rem;
 		margin-bottom: 1rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 	}
 </style>

@@ -424,14 +424,14 @@
 	}
 
 	.project-info strong {
-		font-size: 0.95rem;
+		font-size: 1rem;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
 	.project-path {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
 		overflow: hidden;
@@ -440,7 +440,7 @@
 	}
 
 	.project-indexed {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		color: var(--gray-400);
 		flex-shrink: 0;
@@ -461,7 +461,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		cursor: pointer;
 	}
@@ -490,29 +490,29 @@
 	}
 
 	.detail-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.65rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.detail-value {
-		font-size: 0.95rem;
+		font-size: 1rem;
 	}
 
 	.detail-value.code {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		word-break: break-all;
 	}
 
 	.section-title {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1rem;
 		font-weight: 700;
 		margin-bottom: 0.75rem;
-		letter-spacing: -0.03em;
+		letter-spacing: var(--tracking-tight);
 	}
 
 	.action-buttons {

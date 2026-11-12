@@ -83,7 +83,7 @@
 	}
 
 	.chain-number {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 1.25rem;
 		font-weight: 700;
 		color: var(--gray-400);
@@ -97,14 +97,14 @@
 	}
 
 	.chain-name {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1rem;
 		font-weight: 700;
 		margin: 0;
 	}
 
 	.chain-location {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--gray-600);
 		margin: 0;

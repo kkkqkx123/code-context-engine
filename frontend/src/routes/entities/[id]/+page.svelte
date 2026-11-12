@@ -395,10 +395,10 @@
 
 	.path-meta {
 		margin: 0.75rem 0 0;
-		font-family: 'Space Mono', monospace;
-		font-size: 0.68rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-500);
 	}
 </style>

@@ -161,8 +161,8 @@
 	.realtime-log {
 		background: var(--black);
 		color: var(--white);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
 		line-height: 1.6;
 		padding: 1rem;
 		height: 480px;

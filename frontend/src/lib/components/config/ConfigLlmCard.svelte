@@ -396,10 +396,10 @@
 		flex-wrap: wrap;
 	}
 	.config-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 	.validate-spacer {
@@ -412,7 +412,7 @@
 		font-size: 0.85rem;
 	}
 	.section-title {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1rem;
 		font-weight: 700;
 		margin: 1.5rem 0 0.75rem;
@@ -433,15 +433,15 @@
 		border-bottom: 1px solid var(--gray-200);
 	}
 	.model-table th {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--tracking-wider);
 		color: var(--gray-600);
 		background: var(--gray-50);
 	}
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 	}
 	.form-grid {
 		display: grid;
@@ -476,7 +476,7 @@
 		flex-wrap: wrap;
 	}
 	.reload-message {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 	}
 </style>

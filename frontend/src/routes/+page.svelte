@@ -224,7 +224,7 @@
 		width: 100%;
 		padding: 0.9rem 1rem;
 		border: 1px solid var(--black);
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1rem;
 	}
 
@@ -237,7 +237,7 @@
 	}
 
 	.suggest-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
 	}
@@ -246,7 +246,7 @@
 		background: transparent;
 		border: 1px solid var(--gray-300);
 		padding: 0.2rem 0.5rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		cursor: pointer;
 	}
@@ -256,10 +256,10 @@
 	}
 
 	.section-heading {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 		margin-bottom: 1rem;
 	}

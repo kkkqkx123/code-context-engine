@@ -111,21 +111,21 @@
 	}
 
 	.results-title {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: var(--tracking-wide);
 		color: var(--gray-600);
 		margin-bottom: 1rem;
 	}
 
 	.sym-name {
-		font-weight: 600;
+		font-weight: 700;
 		color: var(--black);
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.78rem;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
 	}
 </style>

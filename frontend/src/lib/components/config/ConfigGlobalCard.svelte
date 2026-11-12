@@ -122,15 +122,15 @@
 	}
 
 	.config-label {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.config-value {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 1rem;
 		font-weight: 700;
 	}
@@ -140,18 +140,18 @@
 	}
 
 	.section-title {
-		font-family: 'Space Grotesk', sans-serif;
+		font-family: var(--font-sans);
 		font-size: 1rem;
 		font-weight: 700;
 		margin-bottom: 0.75rem;
-		letter-spacing: -0.03em;
+		letter-spacing: var(--tracking-tight);
 	}
 
 	.config-json {
 		background: var(--gray-50);
 		border: 1px solid var(--gray-200);
 		padding: 1rem;
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		overflow-x: auto;
 		white-space: pre-wrap;

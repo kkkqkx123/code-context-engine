@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { NoticeVariant } from '$lib/utils/tone';
 
 	interface Props {
-		variant?: 'info' | 'warning';
+		variant?: NoticeVariant;
 		message?: string;
 		label?: string;
 		children?: Snippet;

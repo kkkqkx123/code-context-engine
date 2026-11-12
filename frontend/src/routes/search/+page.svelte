@@ -242,8 +242,8 @@
 
 <style>
 	.shortcut-hint {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
 		color: var(--gray-500);
 		margin: -0.75rem 0 1.5rem;
 	}
@@ -261,11 +261,11 @@
 	.results-title {
 		font-size: 1.25rem;
 		font-weight: 700;
-		letter-spacing: -0.03em;
+		letter-spacing: var(--tracking-tight);
 	}
 
 	.elapsed {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		font-weight: 400;
 		color: var(--gray-500);
@@ -299,7 +299,7 @@
 	}
 
 	.page-info {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85rem;
 	}
 </style>

@@ -235,11 +235,11 @@
 	.folded {
 		margin: 0;
 		white-space: pre-wrap;
-		font-size: 0.78rem;
+		font-size: 0.75rem;
 	}
 
 	.mono {
-		font-family: 'Space Mono', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}

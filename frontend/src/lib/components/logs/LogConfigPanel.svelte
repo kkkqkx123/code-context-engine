@@ -144,16 +144,16 @@
 	}
 
 	.spec-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
 	.spec-value {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.82rem;
+		font-family: var(--font-mono);
+		font-size: 0.8rem;
 		word-break: break-all;
 	}
 
@@ -179,10 +179,10 @@
 	}
 
 	.form-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.62rem;
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: var(--tracking-widest);
 		color: var(--gray-600);
 	}
 
