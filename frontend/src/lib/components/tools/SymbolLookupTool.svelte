@@ -90,7 +90,7 @@
 							<tr>
 								<td class="sym-name">{sym.name}</td>
 								<td><Badge label={sym.kind} variant="default" /></td>
-								<td class="mono">Lines {sym.line}-{sym.end_line}</td>
+								<td class="font-mono">Lines {sym.line}-{sym.end_line}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -124,8 +124,4 @@
 		color: var(--black);
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-	}
 </style>

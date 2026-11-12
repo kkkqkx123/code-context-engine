@@ -137,7 +137,7 @@
 				<ul class="ref-list">
 					{#each group.references as ref, i (i)}
 						<li class="ref-item">
-							<span class="mono">
+							<span class="font-mono">
 								L{ref.line}{ref.end_line && ref.end_line !== ref.line
 									? `-${ref.end_line}`
 									: ''}:C{ref.column}
@@ -193,11 +193,6 @@
 		font-size: 0.75rem;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		color: var(--gray-600);
-	}
 
 	.ref-caller {
 		color: var(--gray-500);

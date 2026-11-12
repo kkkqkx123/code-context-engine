@@ -25,7 +25,7 @@
 			<li>
 				<SelectChip onclick={() => onPick(candidate)}>
 					<span class="candidate-text">
-						<span class="candidate-name mono">{candidate.scoped_name}</span>
+						<span class="candidate-name font-mono">{candidate.scoped_name}</span>
 						<span class="candidate-meta"
 							>{candidate.kind} · {candidate.file_path}</span
 						>
@@ -84,8 +84,4 @@
 		word-break: break-all;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-	}
 </style>

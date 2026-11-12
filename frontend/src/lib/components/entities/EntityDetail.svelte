@@ -55,14 +55,14 @@
 
 		{#if func.signature}
 			<div class="signature-section">
-				<h3 class="section-title">Signature</h3>
+				<h3 class="eyebrow-title">Signature</h3>
 				<CodeBlock code={func.signature} language="text" />
 			</div>
 		{/if}
 
 		{#if func.doc_comment}
 			<div class="description-section">
-				<h3 class="section-title">Description</h3>
+				<h3 class="eyebrow-title">Description</h3>
 				<p class="description-text">{func.doc_comment}</p>
 			</div>
 		{/if}
@@ -70,7 +70,7 @@
 
 	{#if callers && callers.length > 0}
 		<div class="relationships-section">
-			<h3 class="section-title">Called By ({callers.length})</h3>
+			<h3 class="eyebrow-title">Called By ({callers.length})</h3>
 			<div class="relationship-list">
 				{#each callers.slice(0, showAllCallers ? callers.length : 10) as caller (caller.function_id)}
 					<div
@@ -103,7 +103,7 @@
 
 	{#if calls && calls.length > 0}
 		<div class="relationships-section">
-			<h3 class="section-title">Calls ({calls.length})</h3>
+			<h3 class="eyebrow-title">Calls ({calls.length})</h3>
 			<div class="relationship-list">
 				{#each calls.slice(0, allCallees ? calls.length : 10) as call (call.function_id)}
 					<div
@@ -189,14 +189,6 @@
 		word-break: break-all;
 	}
 
-	.section-title {
-		font-family: var(--font-mono);
-		text-transform: uppercase;
-		font-size: 0.75rem;
-		letter-spacing: var(--tracking-widest);
-		margin-bottom: 1rem;
-		color: var(--gray-600);
-	}
 
 	.signature-section,
 	.description-section,

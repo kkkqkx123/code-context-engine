@@ -157,7 +157,7 @@
 			{#if error}
 				<InlineError message={error} />
 			{:else if searched && results.length === 0}
-				<p class="placeholder-text">No entities matched the query.</p>
+				<p class="empty-hint">No entities matched the query.</p>
 			{:else if results.length > 0}
 				<div class="table-wrap">
 					<table>
@@ -212,7 +212,7 @@
 					{results.length} of {total} matches · {elapsedMs} ms
 				</div>
 			{:else}
-				<p class="placeholder-text">
+				<p class="empty-hint">
 					Search the entity index by name. Results link to entity details with
 					call chains and relationships.
 				</p>
@@ -283,7 +283,7 @@
 					{/if}
 				</div>
 			{:else}
-				<p class="placeholder-text">
+				<p class="empty-hint">
 					Load per-category counts, then drill into one category.
 				</p>
 			{/if}
@@ -384,10 +384,4 @@
 		color: var(--gray-500);
 	}
 
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		padding: 1.5rem 0;
-		text-align: center;
-	}
 </style>

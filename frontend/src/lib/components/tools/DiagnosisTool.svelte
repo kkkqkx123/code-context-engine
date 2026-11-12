@@ -163,13 +163,6 @@
 </ToolShell>
 
 <style>
-	.tool-input,
-	.tool-output {
-		height: 100%;
-		display: flex;
-		flex-direction: column;
-		padding: 1rem;
-	}
 
 	.no-issues {
 		text-align: center;

@@ -7,6 +7,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import { onMount } from 'svelte';
 	import { metricsApi, type AggregatedMetric } from '$lib/api/metrics';
 	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
@@ -141,27 +142,27 @@
 			title="Metric History"
 			subtitle="Aggregated metric windows over a time range"
 		>
-			<div class="filter-bar">
-				<label class="filter-field">
-					<span class="filter-label">From</span>
+			<div class="tool-form-row">
+				<label class="form-field">
+					<span class="form-label">From</span>
 					<input
-						class="filter-input"
+						class="text-input"
 						type="datetime-local"
 						bind:value={historyFrom}
 					/>
 				</label>
-				<label class="filter-field">
-					<span class="filter-label">To</span>
+				<label class="form-field">
+					<span class="form-label">To</span>
 					<input
-						class="filter-input"
+						class="text-input"
 						type="datetime-local"
 						bind:value={historyTo}
 					/>
 				</label>
-				<label class="filter-field">
-					<span class="filter-label">Metric name</span>
+				<label class="form-field">
+					<span class="form-label">Metric name</span>
 					<input
-						class="filter-input"
+						class="text-input"
 						type="text"
 						bind:value={metricFilter}
 						placeholder="e.g. index_duration"
@@ -190,7 +191,7 @@
 				/>
 			{:else}
 				<div class="table-wrap">
-					<table>
+					<table class="table">
 						<thead>
 							<tr>
 								<th>Metric</th>
@@ -207,14 +208,14 @@
 						<tbody>
 							{#each historyRows as row (row.metric_name + row.timestamp + row.operation_type)}
 								<tr>
-									<td class="cell-name">{row.metric_name}</td>
+									<td class="font-mono">{row.metric_name}</td>
 									<td
 										><Badge
 											label={row.metric_type}
 											variant={typeBadgeVariant(row.metric_type)}
 										/></td
 									>
-									<td class="cell-mono">{row.operation_type ?? '-'}</td>
+									<td class="font-mono">{row.operation_type ?? '-'}</td>
 									<td>{row.count}</td>
 									<td>{formatNumber(row.avg)}</td>
 									<td>{formatNumber(row.median)}</td>
@@ -234,7 +235,7 @@
 			title="Prometheus Export"
 			subtitle="Text exposition format for scraping"
 		>
-			<div class="prom-actions">
+			<div class="tool-form-row">
 				<Button
 					variant="secondary"
 					onclick={loadPrometheus}
@@ -262,15 +263,15 @@
 				Deleted metric history cannot be recovered. Live system metrics are
 				unaffected.
 			</p>
-			<div class="cleanup-form">
+			<div class="tool-form-row">
 				<label class="filter-check">
 					<input type="checkbox" bind:checked={cleanupAll} />
 					<span>Delete all records</span>
 				</label>
-				<label class="filter-field">
-					<span class="filter-label">Delete records before</span>
+				<label class="form-field">
+					<span class="form-label">Delete records before</span>
 					<input
-						class="filter-input"
+						class="text-input"
 						type="datetime-local"
 						bind:value={cleanupBefore}
 						disabled={cleanupAll}
@@ -295,82 +296,26 @@
 </div>
 
 {#if cleanupConfirmOpen}
-	<div
-		class="dialog-overlay"
-		onclick={() => (cleanupConfirmOpen = false)}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') cleanupConfirmOpen = false;
-		}}
-		role="button"
-		tabindex="0"
-		aria-label="Close dialog"
-	>
-		<div
-			class="dialog"
-			onclick={(e) => e.stopPropagation()}
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="cleanup-dialog-title"
-			tabindex="-1"
-			onkeydown={(e) => {
-				if (e.key === 'Escape') cleanupConfirmOpen = false;
-			}}
-		>
-			<h2 id="cleanup-dialog-title">Confirm Metrics Cleanup</h2>
-			<p class="dialog-warning">
-				{cleanupAll
-					? 'All historical metric records will be permanently deleted.'
-					: `All metric records before ${cleanupBefore} will be permanently deleted.`}
-			</p>
-			<div class="dialog-actions">
-				<Button variant="secondary" onclick={() => (cleanupConfirmOpen = false)}
-					>Cancel</Button
-				>
-				<Button variant="danger" onclick={runCleanup} disabled={cleanupBusy}>
-					{cleanupBusy ? 'Cleaning...' : 'Confirm Cleanup'}
-				</Button>
-			</div>
-		</div>
-	</div>
+	<Modal title="Confirm Metrics Cleanup" onClose={() => (cleanupConfirmOpen = false)}>
+		<p>
+			{cleanupAll
+				? 'All historical metric records will be permanently deleted.'
+				: `All metric records before ${cleanupBefore} will be permanently deleted.`}
+		</p>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={() => (cleanupConfirmOpen = false)}>Cancel</Button>
+			<Button variant="danger" onclick={runCleanup} disabled={cleanupBusy}>
+				{cleanupBusy ? 'Cleaning...' : 'Confirm Cleanup'}
+			</Button>
+		{/snippet}
+	</Modal>
 {/if}
 
 <style>
-	.filter-bar {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
-	}
 
-	.filter-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
 
-	.filter-label {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
-	.filter-input {
-		padding: 0.45rem 0.6rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		color: var(--black);
-		min-width: 180px;
-	}
 
-	.filter-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
 
 	.filter-check {
 		display: flex;
@@ -381,10 +326,6 @@
 		padding-bottom: 0.45rem;
 	}
 
-	.table-wrap {
-		overflow-x: auto;
-		border: 1px solid var(--gray-200);
-	}
 
 	table {
 		width: 100%;
@@ -415,15 +356,7 @@
 		border-bottom: none;
 	}
 
-	.cell-name {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-	}
 
-	.cell-mono {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-	}
 
 	.result-count {
 		margin-top: 0.75rem;
@@ -432,11 +365,6 @@
 		color: var(--gray-500);
 	}
 
-	.prom-actions {
-		display: flex;
-		gap: 0.75rem;
-		margin-bottom: 1rem;
-	}
 
 	.prom-output {
 		background: var(--gray-900);
@@ -455,12 +383,6 @@
 		line-height: 1.6;
 	}
 
-	.cleanup-form {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 1rem;
-	}
 
 	.inline-success {
 		margin-top: 1rem;
@@ -471,38 +393,8 @@
 		font-size: 0.75rem;
 	}
 
-	.dialog-overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.7);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
 
-	.dialog {
-		background: var(--white);
-		border: 2px solid var(--danger);
-		padding: 2rem;
-		max-width: 480px;
-		width: 90%;
-	}
 
-	.dialog h2 {
-		margin-bottom: 1rem;
-		color: var(--black);
-	}
 
-	.dialog-warning {
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-		line-height: 1.6;
-	}
 
-	.dialog-actions {
-		display: flex;
-		gap: 1rem;
-		justify-content: flex-end;
-	}
 </style>

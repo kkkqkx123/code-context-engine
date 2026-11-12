@@ -93,7 +93,7 @@
 			</div>
 
 			<div class="file-info">
-				<span class="info-label">File:</span>
+				<span class="form-label">File:</span>
 				<span class="info-value">{parseResult.file_path}</span>
 			</div>
 
@@ -208,14 +208,6 @@
 		margin-bottom: 2rem;
 	}
 
-	.info-label {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		margin-right: 0.5rem;
-	}
 
 	.info-value {
 		font-family: var(--font-mono);

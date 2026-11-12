@@ -83,7 +83,7 @@
 		{:else}
 			{#if inheritance?.base_classes && inheritance.base_classes.length > 0}
 				<div class="tree-section">
-					<h3 class="section-title">Base Classes</h3>
+					<h3 class="eyebrow-title">Base Classes</h3>
 					<div class="tree-list">
 						{#each inheritance.base_classes as baseClass (baseClass.class_id)}
 							<div
@@ -106,7 +106,7 @@
 
 			{#if inheritance?.derived_classes && inheritance.derived_classes.length > 0}
 				<div class="tree-section">
-					<h3 class="section-title">Derived Classes</h3>
+					<h3 class="eyebrow-title">Derived Classes</h3>
 					<div class="tree-list">
 						{#each inheritance.derived_classes as derivedClass (derivedClass.class_id)}
 							<div
@@ -129,7 +129,7 @@
 
 			{#if implementations?.implemented_interfaces && implementations.implemented_interfaces.length > 0}
 				<div class="tree-section">
-					<h3 class="section-title">Implemented Interfaces</h3>
+					<h3 class="eyebrow-title">Implemented Interfaces</h3>
 					<div class="tree-list">
 						{#each implementations.implemented_interfaces as iface (iface.interface_id)}
 							<div
@@ -152,7 +152,7 @@
 
 			{#if implementations?.implementing_classes && implementations.implementing_classes.length > 0}
 				<div class="tree-section">
-					<h3 class="section-title">Implementing Classes</h3>
+					<h3 class="eyebrow-title">Implementing Classes</h3>
 					<div class="tree-list">
 						{#each implementations.implementing_classes as impl (impl.class_id)}
 							<div
@@ -195,17 +195,6 @@
 
 	.tree-section:last-child {
 		margin-bottom: 0;
-	}
-
-	.section-title {
-		font-family: var(--font-mono);
-		text-transform: uppercase;
-		font-size: 0.75rem;
-		letter-spacing: var(--tracking-widest);
-		margin-bottom: 1rem;
-		color: var(--gray-600);
-		padding-bottom: 0.5rem;
-		border-bottom: 1px solid var(--gray-200);
 	}
 
 	.tree-list {

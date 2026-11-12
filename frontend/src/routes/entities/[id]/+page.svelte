@@ -296,7 +296,7 @@
 					{#if entityStore.callChain.length > 0}
 						<CallChainList nodes={entityStore.callChain} />
 					{:else}
-						<p class="placeholder-text">No call chain data available</p>
+						<p class="empty-hint">No call chain data available</p>
 					{/if}
 				</Card>
 			{:else if currentTab === 'call-path'}
@@ -348,7 +348,7 @@
 						<CallChainList nodes={entityStore.callPath} />
 						<p class="path-meta">{entityStore.callPathLength} hop(s)</p>
 					{:else if !entityStore.callPathFound && !entityStore.isLoading}
-						<p class="placeholder-text">
+						<p class="empty-hint">
 							No call path found between the two functions.
 						</p>
 					{/if}

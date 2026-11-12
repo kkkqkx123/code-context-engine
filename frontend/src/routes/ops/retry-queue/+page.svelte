@@ -218,10 +218,6 @@
 		align-items: baseline;
 		gap: 0.6rem;
 	}
-	.stat-value {
-		font-size: 1.8rem;
-		font-weight: 700;
-	}
 	.stat-label {
 		color: var(--ops-text-muted);
 	}

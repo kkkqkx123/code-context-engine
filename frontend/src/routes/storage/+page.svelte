@@ -7,6 +7,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+import Modal from '$lib/components/ui/Modal.svelte';
 	import { storageStore } from '$lib/stores/storage.svelte';
 	import { qdrantApi, type QdrantProcessStatus } from '$lib/api/qdrant';
 
@@ -108,10 +109,10 @@
 				server configuration file, then restarting and performing a full
 				reindex.
 			</p>
-			<div class="spec-bar">
+			<div class="stat-grid">
 				{#if storageStore.status}
 					<div class="spec-item">
-						<div class="spec-label">
+						<div class="form-label">
 							Vector DB ({backendName(storageStore.status.vector_storage)})
 						</div>
 						<div class="spec-value">
@@ -137,7 +138,7 @@
 					</div>
 
 					<div class="spec-item">
-						<div class="spec-label">
+						<div class="form-label">
 							BM25 Index ({backendName(storageStore.status.bm25_storage)})
 						</div>
 						<div class="spec-value">
@@ -158,7 +159,7 @@
 					</div>
 
 					<div class="spec-item">
-						<div class="spec-label">
+						<div class="form-label">
 							Relations ({backendName(storageStore.status.relation_storage)})
 						</div>
 						<div class="spec-value">
@@ -197,7 +198,7 @@
 			<Card title="Qdrant Process" subtitle="Subprocess lifecycle management">
 				<div class="process-info">
 					<div class="process-row">
-						<span class="process-label">Status</span>
+						<span class="form-label">Status</span>
 						<Badge
 							label={formatQdrantStatus(qdrantStatus)}
 							variant={qdrantStatus.type === 'Failed'
@@ -213,7 +214,7 @@
 						<div class="process-error">{qdrantError}</div>
 					{/if}
 				</div>
-				<div class="process-actions">
+				<div class="tool-actions">
 					<Button
 						variant="secondary"
 						onclick={() => handleQdrantAction('start')}
@@ -248,7 +249,7 @@
 				This action will permanently delete all index data for the current
 				project. This cannot be undone.
 			</p>
-			<div class="clear-actions">
+			<div class="reload-actions">
 				<Button onclick={handleClearIndex} disabled={storageStore.isLoading}>
 					{#if storageStore.isLoading}Clearing...{:else}Clear All Index Data{/if}
 				</Button>
@@ -257,47 +258,19 @@
 	</div>
 </div>
 
-<!-- Confirmation Dialog -->
 {#if showConfirmDialog}
-	<div
-		class="dialog-overlay"
-		onclick={cancelClear}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') {
-				cancelClear();
-			}
-		}}
-		role="button"
-		tabindex="0"
-		aria-label="Close dialog"
-	>
-		<div
-			class="dialog"
-			onclick={(e) => e.stopPropagation()}
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="dialog-title"
-			aria-describedby="dialog-description"
-			tabindex="-1"
-			onkeydown={(e) => {
-				if (e.key === 'Escape') {
-					cancelClear();
-				}
-			}}
-		>
-			<h2 id="dialog-title">Confirm Clear Operation</h2>
-			<p id="dialog-description" class="dialog-warning">
-				This action will permanently delete all index data for the current
-				project. This cannot be undone.
-			</p>
-			<div class="dialog-actions">
-				<Button variant="secondary" onclick={cancelClear}>Cancel</Button>
-				<Button onclick={confirmClear} disabled={storageStore.isLoading}>
-					{#if storageStore.isLoading}Clearing...{:else}Confirm Clear{/if}
-				</Button>
-			</div>
-		</div>
-	</div>
+	<Modal title="Confirm Clear Operation" onClose={cancelClear}>
+		<p>
+			This action will permanently delete all index data for the current
+			project. This cannot be undone.
+		</p>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={cancelClear}>Cancel</Button>
+			<Button onclick={confirmClear} disabled={storageStore.isLoading}>
+				{#if storageStore.isLoading}Clearing...{:else}Confirm Clear{/if}
+			</Button>
+		{/snippet}
+	</Modal>
 {/if}
 
 <style>
@@ -308,25 +281,11 @@
 		line-height: 1.6;
 	}
 
-	.spec-bar {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 1.5rem;
-	}
-
 	.spec-item {
 		padding: 1rem;
 		border: 1px solid var(--gray-200);
 	}
 
-	.spec-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		margin-bottom: 0.5rem;
-	}
 
 	.spec-value {
 		margin-bottom: 0.5rem;
@@ -376,14 +335,6 @@
 		border-bottom: none;
 	}
 
-	.process-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		min-width: 120px;
-	}
 
 	.process-error {
 		color: var(--danger);
@@ -392,13 +343,6 @@
 		margin-top: 0.5rem;
 	}
 
-	.process-actions {
-		display: flex;
-		gap: 0.75rem;
-		margin-top: 1rem;
-		padding-top: 1rem;
-		border-top: 1px solid var(--gray-100);
-	}
 
 	.version {
 		font-size: 0.75rem;
@@ -411,59 +355,4 @@
 		line-height: 1.6;
 	}
 
-	.clear-actions {
-		display: flex;
-		justify-content: flex-end;
-	}
-
-	/* Dialog Styles */
-	.dialog-overlay {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: rgba(0, 0, 0, 0.7);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
-
-	.dialog {
-		background: var(--white);
-		border: 2px solid var(--danger);
-		padding: 2rem;
-		max-width: 500px;
-		width: 90%;
-	}
-
-	.dialog h2 {
-		margin-bottom: 1rem;
-		color: var(--black);
-	}
-
-	.dialog-warning {
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-		line-height: 1.6;
-	}
-
-	.dialog-actions {
-		display: flex;
-		gap: 1rem;
-		justify-content: flex-end;
-	}
-
-	@media (max-width: 1024px) {
-		.spec-bar {
-			grid-template-columns: repeat(2, 1fr);
-		}
-	}
-
-	@media (max-width: 768px) {
-		.spec-bar {
-			grid-template-columns: 1fr;
-		}
-	}
 </style>

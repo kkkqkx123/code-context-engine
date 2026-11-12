@@ -50,33 +50,33 @@
 
 {#if config}
 	<Card title="Current Configuration" subtitle="Read-only runtime values">
-		<div class="spec-grid">
+		<div class="form-grid">
 			<div class="spec-item">
-				<span class="spec-label">Output</span>
+				<span class="form-label">Output</span>
 				<span class="spec-value">{config.output}</span>
 			</div>
 			<div class="spec-item">
-				<span class="spec-label">File</span>
+				<span class="form-label">File</span>
 				<span class="spec-value">{config.file ?? '-'}</span>
 			</div>
 			<div class="spec-item">
-				<span class="spec-label">Max file size (MB)</span>
+				<span class="form-label">Max file size (MB)</span>
 				<span class="spec-value">{config.max_file_size_mb ?? '-'}</span>
 			</div>
 			<div class="spec-item">
-				<span class="spec-label">Max files</span>
+				<span class="form-label">Max files</span>
 				<span class="spec-value">{config.max_files ?? '-'}</span>
 			</div>
 			<div class="spec-item">
-				<span class="spec-label">Max total size (MB)</span>
+				<span class="form-label">Max total size (MB)</span>
 				<span class="spec-value">{config.max_total_size_mb ?? '-'}</span>
 			</div>
 			<div class="spec-item">
-				<span class="spec-label">WS capacity</span>
+				<span class="form-label">WS capacity</span>
 				<span class="spec-value">{config.ws_capacity}</span>
 			</div>
 			<div class="spec-item">
-				<span class="spec-label">Buffer size</span>
+				<span class="form-label">Buffer size</span>
 				<span class="spec-value">{config.memory_buffer_size}</span>
 			</div>
 		</div>
@@ -121,7 +121,7 @@
 			placeholder="info,cce_server=debug"
 		/>
 	</div>
-	<div class="form-actions">
+	<div class="reload-actions">
 		<Button onclick={save} disabled={saving}>
 			{saving ? 'Saving...' : 'Save'}
 		</Button>
@@ -129,11 +129,6 @@
 </Card>
 
 <style>
-	.spec-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		gap: 1rem;
-	}
 
 	.spec-item {
 		display: flex;
@@ -143,13 +138,6 @@
 		border: 1px solid var(--gray-200);
 	}
 
-	.spec-label {
-		font-family: var(--font-mono);
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.spec-value {
 		font-family: var(--font-mono);
@@ -165,39 +153,11 @@
 		font-size: 0.85rem;
 	}
 
-	.form-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
 
-	.form-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
 
-	.form-label {
-		font-family: var(--font-mono);
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.full-row {
 		margin-bottom: 1rem;
 	}
 
-	.form-actions {
-		display: flex;
-		justify-content: flex-end;
-	}
-
-	@media (max-width: 768px) {
-		.form-grid {
-			grid-template-columns: 1fr;
-		}
-	}
 </style>

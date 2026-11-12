@@ -24,7 +24,7 @@
 	class:tool-field-inline={inline}
 	for={htmlFor || undefined}
 >
-	<span class="tool-field-label">{label}</span>
+	<span class="form-label">{label}</span>
 	{@render children?.()}
 </label>
 
@@ -48,11 +48,4 @@
 		width: auto;
 	}
 
-	.tool-field-label {
-		font-family: var(--font-mono);
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 </style>

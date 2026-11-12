@@ -137,7 +137,7 @@
 
 <div class="filter-panel">
 	<div class="filter-section">
-		<span class="section-label" id="query-mode-label">Query Mode</span>
+		<span class="form-label" id="query-mode-label">Query Mode</span>
 		<div class="mode-tabs" role="group" aria-labelledby="query-mode-label">
 			{#each [...QUERY_TYPES, AGGREGATED_TYPE] as mode (mode)}
 				<Button
@@ -154,7 +154,7 @@
 
 	{#if searchStore.mode === AGGREGATED_TYPE}
 		<div class="filter-section agg-section">
-			<span class="section-label">Aggregated Sub-queries (optional)</span>
+			<span class="form-label">Aggregated Sub-queries (optional)</span>
 			{#each searchStore.subQueries as sq, i (i)}
 				<div class="sub-query-row">
 					<input
@@ -219,7 +219,7 @@
 	{/if}
 
 	<div class="filter-section">
-		<label class="section-label" for="directory-input">Directory Prefix</label>
+		<label class="form-label" for="directory-input">Directory Prefix</label>
 		<input
 			class="text-input"
 			id="directory-input"
@@ -231,7 +231,7 @@
 	</div>
 
 	<div class="filter-section">
-		<label class="section-label" for="min-score-range"
+		<label class="form-label" for="min-score-range"
 			>Min Score Threshold</label
 		>
 		<div class="range-row">
@@ -258,7 +258,7 @@
 	</div>
 
 	<div class="filter-section">
-		<label class="section-label" for="exclude-types-input"
+		<label class="form-label" for="exclude-types-input"
 			>Exclude Content Types (comma-separated)</label
 		>
 		<input
@@ -271,9 +271,9 @@
 		/>
 	</div>
 
-	<div class="filter-grid">
+	<div class="form-grid">
 		<div class="filter-section">
-			<label class="section-label" for="exclude-cats-input"
+			<label class="form-label" for="exclude-cats-input"
 				>Exclude Categories</label
 			>
 			<input
@@ -286,7 +286,7 @@
 			/>
 		</div>
 		<div class="filter-section">
-			<label class="section-label" for="include-cats-input"
+			<label class="form-label" for="include-cats-input"
 				>Include Categories</label
 			>
 			<input
@@ -301,7 +301,7 @@
 	</div>
 
 	<div class="filter-section">
-		<label class="section-label" for="exclude-glob-input"
+		<label class="form-label" for="exclude-glob-input"
 			>Exclude Glob Patterns</label
 		>
 		<input
@@ -315,7 +315,7 @@
 	</div>
 
 	<div class="filter-section">
-		<label class="section-label" for="include-glob-input"
+		<label class="form-label" for="include-glob-input"
 			>Include Glob Patterns</label
 		>
 		<input
@@ -328,9 +328,9 @@
 		/>
 	</div>
 
-	<div class="filter-grid">
+	<div class="form-grid">
 		<div class="filter-section">
-			<label class="section-label" for="rerank-select">Rerank</label>
+			<label class="form-label" for="rerank-select">Rerank</label>
 			<select
 				class="text-input"
 				id="rerank-select"
@@ -343,7 +343,7 @@
 			</select>
 		</div>
 		<div class="filter-section">
-			<label class="section-label" for="rerank-max-input"
+			<label class="form-label" for="rerank-max-input"
 				>Rerank Max Candidates</label
 			>
 			<input
@@ -358,9 +358,9 @@
 		</div>
 	</div>
 
-	<div class="filter-grid">
+	<div class="form-grid">
 		<div class="filter-section">
-			<label class="section-label" for="intent-select">Query Intent</label>
+			<label class="form-label" for="intent-select">Query Intent</label>
 			<select
 				class="text-input"
 				id="intent-select"
@@ -373,7 +373,7 @@
 			</select>
 		</div>
 		<div class="filter-section">
-			<label class="section-label" for="expand-select"
+			<label class="form-label" for="expand-select"
 				>Call-graph Expansion</label
 			>
 			<select
@@ -404,13 +404,6 @@
 		gap: 0.75rem;
 	}
 
-	.section-label {
-		font-family: var(--font-mono);
-		text-transform: uppercase;
-		font-size: 0.65rem;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.mode-tabs {
 		display: grid;
@@ -456,16 +449,11 @@
 		flex-shrink: 0;
 	}
 
-	.filter-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1rem;
-	}
 
 	@media (max-width: 768px) {
 		.mode-tabs,
 		.sub-query-row,
-		.filter-grid {
+		.form-grid {
 			grid-template-columns: 1fr;
 		}
 	}

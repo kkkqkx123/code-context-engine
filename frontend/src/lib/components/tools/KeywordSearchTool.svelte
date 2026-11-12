@@ -158,9 +158,4 @@
 		font-style: italic;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		color: var(--gray-600);
-	}
 </style>

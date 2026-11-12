@@ -80,9 +80,9 @@
 				<tbody>
 					{#each files as f (f.name)}
 						<tr>
-							<td class="mono">{f.name}</td>
-							<td class="mono">{formatSize(f.size)}</td>
-							<td class="mono">{f.modified}</td>
+							<td class="font-mono">{f.name}</td>
+							<td class="font-mono">{formatSize(f.size)}</td>
+							<td class="font-mono">{f.modified}</td>
 							<td>
 								<div class="row-actions">
 									<a
@@ -115,10 +115,6 @@
 		color: var(--gray-600);
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-	}
 
 	.row-actions {
 		display: flex;

@@ -95,7 +95,7 @@
 
 <div class="seed-bar">
 	<section class="seed-section" aria-label="Load a graph view">
-		<h3 class="seed-section-title">Load</h3>
+		<h3 class="eyebrow-title">Load</h3>
 		<div class="seed-section-body">
 			<div class="seed-mode" role="group" aria-label="Seed mode">
 				<Button
@@ -231,7 +231,7 @@
 	</section>
 
 	<section class="seed-section" aria-label="Impact analysis">
-		<h3 class="seed-section-title">Impact</h3>
+		<h3 class="eyebrow-title">Impact</h3>
 		<div class="seed-section-body">
 			<div class="impact-mode" role="group" aria-label="Impact mode">
 				<Button
@@ -315,7 +315,7 @@
 	</section>
 
 	<section class="seed-section" aria-label="Module relations">
-		<h3 class="seed-section-title">Module</h3>
+		<h3 class="eyebrow-title">Module</h3>
 		<div class="seed-section-body">
 			<input
 				class="text-input text-input--inline"
@@ -387,16 +387,6 @@
 		background: var(--white);
 	}
 
-	.seed-section-title {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		margin: 0;
-		padding-bottom: 0.35rem;
-		border-bottom: 1px solid var(--gray-200);
-	}
 
 	.seed-section-body {
 		display: flex;

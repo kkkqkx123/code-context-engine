@@ -38,9 +38,9 @@
 	}
 </script>
 
-<section class="panel-section-block" aria-label="Dependency cycles">
+<section class="panel-section" aria-label="Dependency cycles">
 	<div class="panel-head">
-		<h4 class="communities-title">Dependency cycles</h4>
+		<h4 class="panel-title">Dependency cycles</h4>
 		{#if query.stale}
 			<Badge
 				variant="warning"
@@ -84,11 +84,11 @@
 		<InlineError message={query.error} />
 	{:else if query.data !== null}
 		{#if sortedCycles.length === 0}
-			<p class="panel-empty">
+			<p class="empty-hint empty-hint--compact">
 				No dependency cycles detected at {query.data.level} level.
 			</p>
 		{:else}
-			<p class="communities-hint">
+			<p class="panel-hint">
 				{query.data.cycles.length} cycle{query.data.cycles.length === 1
 					? ''
 					: 's'} at
@@ -124,32 +124,13 @@
 			</ul>
 		{/if}
 	{:else}
-		<p class="panel-empty">Not checked yet — pick a level and run detection.</p>
+		<p class="empty-hint empty-hint--compact">Not checked yet — pick a level and run detection.</p>
 	{/if}
 </section>
 
 <style>
-	.panel-section-block {
-		margin-top: 1rem;
-		padding: 1rem;
-		border: 1px solid var(--black);
-	}
 
-	.panel-head {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin-bottom: 0.25rem;
-	}
 
-	.communities-title {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-wider);
-		color: var(--gray-600);
-		margin: 0 0 0.25rem;
-	}
 
 	.panel-controls {
 		display: flex;
@@ -159,18 +140,7 @@
 		margin: 0.5rem 0 0.75rem;
 	}
 
-	.panel-empty {
-		font-size: 0.75rem;
-		color: var(--gray-500);
-		font-style: italic;
-		margin: 0;
-	}
 
-	.communities-hint {
-		font-size: 0.7rem;
-		color: var(--gray-500);
-		margin: 0 0 0.75rem;
-	}
 
 	.cycle-list {
 		list-style: none;
@@ -214,8 +184,4 @@
 		white-space: nowrap;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-	}
 </style>

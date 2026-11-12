@@ -29,7 +29,7 @@
 				label={validateResult.valid ? 'Valid' : 'Invalid'}
 				variant={validateResult.valid ? 'active' : 'inactive'}
 			/>
-			<span class="validate-spacer"></span>
+			<span style="flex: 1"></span>
 			<Button onclick={onValidate} disabled={validating}>
 				{#if validating}Checking...{:else}Re-validate{/if}
 			</Button>
@@ -78,10 +78,10 @@
 		{/if}
 
 		{#if validateResult.valid && validateResult.errors.length === 0 && validateResult.warnings.length === 0 && validateResult.dependency_warnings.length === 0}
-			<p class="placeholder-text">No issues found — configuration is clean.</p>
+			<p class="empty-hint">No issues found — configuration is clean.</p>
 		{/if}
 	{:else}
-		<p class="placeholder-text">Loading validation results...</p>
+		<p class="empty-hint">Loading validation results...</p>
 	{/if}
 </Card>
 
@@ -93,25 +93,8 @@
 		margin-bottom: 1.5rem;
 	}
 
-	.validate-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
-	.validate-spacer {
-		flex: 1;
-	}
 
-	.section-title {
-		font-family: var(--font-sans);
-		font-size: 1rem;
-		font-weight: 700;
-		margin-bottom: 0.75rem;
-		letter-spacing: var(--tracking-tight);
-	}
 
 	.issue-section {
 		margin-top: 1.5rem;
@@ -146,10 +129,4 @@
 		background: var(--warning-bg, #fffbe6);
 	}
 
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 2rem;
-	}
 </style>

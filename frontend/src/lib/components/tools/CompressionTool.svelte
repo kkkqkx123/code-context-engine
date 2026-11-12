@@ -77,15 +77,15 @@
 				{#if result}
 					<div class="compression-info">
 						<div class="info-row">
-							<span class="info-label">Language:</span>
+							<span class="form-label">Language:</span>
 							<span class="info-value">{result.language}</span>
 						</div>
 						<div class="info-row">
-							<span class="info-label">File Hash:</span>
+							<span class="form-label">File Hash:</span>
 							<span class="info-value hash">{result.file_hash}</span>
 						</div>
 						<div class="info-row">
-							<span class="info-label">From Cache:</span>
+							<span class="form-label">From Cache:</span>
 							<span class="info-value">{result.from_cache ? 'Yes' : 'No'}</span>
 						</div>
 					</div>
@@ -102,13 +102,6 @@
 </ToolShell>
 
 <style>
-	.tool-input,
-	.tool-output {
-		height: 100%;
-		display: flex;
-		flex-direction: column;
-		padding: 1rem;
-	}
 
 	.compression-info {
 		padding: 1rem;
@@ -127,13 +120,6 @@
 		border-bottom: none;
 	}
 
-	.info-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.info-value {
 		font-family: var(--font-mono);

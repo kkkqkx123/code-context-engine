@@ -81,7 +81,7 @@
 	subtitle="Masked overview; chat/rerank edits apply in memory"
 >
 	{#if loading && !loaded}
-		<p class="placeholder-text">Loading model overview...</p>
+		<p class="empty-hint">Loading model overview...</p>
 	{:else if loadError && !overview}
 		<InlineError message={loadError} />
 		<div class="reload-actions">
@@ -91,7 +91,7 @@
 		</div>
 	{:else if overview}
 		<div class="version-row">
-			<span class="config-label">Project #{projectId}</span>
+			<span class="form-label">Project #{projectId}</span>
 			{#if overview.config_version !== undefined}
 				<Badge label={`v${overview.config_version}`} variant="active" />
 			{/if}
@@ -105,7 +105,7 @@
 					: 'Dimension Mismatch'}
 				variant={overview.dimension.matches ? 'success' : 'danger'}
 			/>
-			<span class="validate-spacer"></span>
+			<span style="flex: 1"></span>
 			<Button onclick={onReload} disabled={loading} variant="secondary">
 				{#if loading}Refreshing...{:else}Refresh{/if}
 			</Button>
@@ -122,7 +122,7 @@
 				vs backend {overview.dimension.effective_vector_size}). Embedding
 				selection is global: edit config.toml and restart, then reindex.
 			</InlineError>
-			<div class="reload-actions split">
+			<div class="reload-actions reload-actions--split">
 				<Button
 					onclick={onClearVectors}
 					disabled={reindexBusy}
@@ -159,7 +159,7 @@
 
 		<h3 class="section-title">Providers (masked, read-only)</h3>
 		<div class="table-wrap">
-			<table class="model-table">
+			<table class="table">
 				<thead>
 					<tr
 						><th>ID</th><th>Name</th><th>Base URL</th><th>Keys</th><th
@@ -172,7 +172,7 @@
 						<tr>
 							<td><code>{provider.id}</code></td>
 							<td>{provider.name}</td>
-							<td class="mono">{provider.base_url}</td>
+							<td class="font-mono">{provider.base_url}</td>
 							<td>
 								{#if provider.has_api_keys}
 									<Badge label={`${provider.key_count} set`} variant="active" />
@@ -183,7 +183,7 @@
 									<Badge label="placeholder?" variant="warning" />
 								{/if}
 							</td>
-							<td class="mono">
+							<td class="font-mono">
 								E:{provider.embedding_model_count} C:{provider.chat_model_count} R:{provider.rerank_model_count}
 							</td>
 						</tr>
@@ -196,7 +196,7 @@
 			Embedding models (global-effective, read-only)
 		</h3>
 		<div class="table-wrap">
-			<table class="model-table">
+			<table class="table">
 				<thead>
 					<tr
 						><th>Key</th><th>Model</th><th>Dim</th><th>Default</th><th>Probe</th
@@ -207,7 +207,7 @@
 					{#each overview.embedding_models as model (model.key)}
 						<tr>
 							<td><code>{model.key}</code></td>
-							<td class="mono">{model.model}</td>
+							<td class="font-mono">{model.model}</td>
 							<td>{model.vector_dimension}</td>
 							<td>
 								{#if model.is_default}<Badge
@@ -233,8 +233,8 @@
 			Chat defaults and parameters (project-effective)
 		</h3>
 		<div class="form-grid">
-			<label class="field">
-				<span class="config-label">Default chat model</span>
+			<label class="form-field">
+				<span class="form-label">Default chat model</span>
 				<select
 					bind:value={defaultChat}
 					class="text-input"
@@ -246,8 +246,8 @@
 					{/each}
 				</select>
 			</label>
-			<label class="field">
-				<span class="config-label">Default rerank model</span>
+			<label class="form-field">
+				<span class="form-label">Default rerank model</span>
 				<select
 					bind:value={defaultRerank}
 					class="text-input"
@@ -261,20 +261,20 @@
 			</label>
 		</div>
 		<div class="form-grid">
-			<label class="field">
-				<span class="config-label">Temperature (selected chat model)</span>
+			<label class="form-field">
+				<span class="form-label">Temperature (selected chat model)</span>
 				<Input bind:value={chatTemperature} placeholder="e.g. 0.3" />
 			</label>
-			<label class="field">
-				<span class="config-label">Max tokens</span>
+			<label class="form-field">
+				<span class="form-label">Max tokens</span>
 				<Input bind:value={chatMaxTokens} placeholder="e.g. 2048" />
 			</label>
-			<label class="field">
-				<span class="config-label">Top P</span>
+			<label class="form-field">
+				<span class="form-label">Top P</span>
 				<Input bind:value={chatTopP} placeholder="e.g. 1.0" />
 			</label>
-			<label class="field">
-				<span class="config-label">Max input tokens</span>
+			<label class="form-field">
+				<span class="form-label">Max input tokens</span>
 				<Input bind:value={chatMaxInputTokens} placeholder="e.g. 8192" />
 			</label>
 		</div>
@@ -284,15 +284,15 @@
 				label="Rerank enabled"
 				onchange={(e) => (rerankEnabled = e.checked)}
 			/>
-			<label class="field">
-				<span class="config-label">Rerank max candidates</span>
+			<label class="form-field">
+				<span class="form-label">Rerank max candidates</span>
 				<Input bind:value={rerankMaxCandidates} placeholder="e.g. 50" />
 			</label>
 		</div>
 
 		<h3 class="section-title">Chat models</h3>
 		<div class="table-wrap">
-			<table class="model-table">
+			<table class="table">
 				<thead>
 					<tr
 						><th>Key</th><th>Model</th><th>Temp</th><th>Default</th><th
@@ -304,7 +304,7 @@
 					{#each overview.chat_models as model (model.key)}
 						<tr>
 							<td><code>{model.key}</code></td>
-							<td class="mono">{model.model}</td>
+							<td class="font-mono">{model.model}</td>
 							<td>{model.temperature}</td>
 							<td>
 								{#if model.is_default}<Badge
@@ -327,7 +327,7 @@
 		</div>
 
 		{#if testing}
-			<p class="placeholder-text">Probing model...</p>
+			<p class="empty-hint">Probing model...</p>
 		{/if}
 		{#if testError}
 			<InlineError message={testError} />
@@ -346,8 +346,8 @@
 			</div>
 		{/if}
 
-		<div class="reload-actions split">
-			<span class="config-label">Edits stay in memory until reload/restart</span
+		<div class="reload-actions reload-actions--split">
+			<span class="form-label">Edits stay in memory until reload/restart</span
 			>
 			<Button onclick={onSave} disabled={saving || loading}>
 				{#if saving}Saving...{:else}Save Chat/Rerank Config{/if}
@@ -375,108 +375,11 @@
 			</div>
 		{/if}
 	{:else}
-		<p class="placeholder-text">
+		<p class="empty-hint">
 			No model data. Open a project to load its merged LLM view.
 		</p>
 	{/if}
 </Card>
 
 <style>
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 1.5rem;
-	}
-	.version-row {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin-bottom: 1rem;
-		flex-wrap: wrap;
-	}
-	.config-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
-	.validate-spacer {
-		flex: 1;
-	}
-	.reload-description {
-		color: var(--gray-600);
-		margin-bottom: 1rem;
-		line-height: 1.6;
-		font-size: 0.85rem;
-	}
-	.section-title {
-		font-family: var(--font-sans);
-		font-size: 1rem;
-		font-weight: 700;
-		margin: 1.5rem 0 0.75rem;
-	}
-	.table-wrap {
-		overflow-x: auto;
-		border: 1px solid var(--gray-200);
-	}
-	.model-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.8rem;
-	}
-	.model-table th,
-	.model-table td {
-		text-align: left;
-		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid var(--gray-200);
-	}
-	.model-table th {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-wider);
-		color: var(--gray-600);
-		background: var(--gray-50);
-	}
-	.mono {
-		font-family: var(--font-mono);
-	}
-	.form-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 0.75rem;
-		margin: 0.75rem 0;
-		align-items: end;
-	}
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
-	}
-	.reload-actions {
-		display: flex;
-		justify-content: flex-end;
-		margin: 1rem 0;
-	}
-	.reload-actions.split {
-		justify-content: space-between;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-	}
-	.reload-result {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.75rem 1rem;
-		border: 1px solid var(--gray-200);
-		margin-top: 0.75rem;
-		flex-wrap: wrap;
-	}
-	.reload-message {
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-	}
 </style>

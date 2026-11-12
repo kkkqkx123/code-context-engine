@@ -80,9 +80,9 @@
 	title="Search Filters"
 	subtitle="Query historical logs by level, module and time"
 >
-	<div class="filter-grid">
-		<label class="filter-field">
-			<span class="filter-label">Level</span>
+	<div class="form-grid">
+		<label class="form-field">
+			<span class="form-label">Level</span>
 			<select class="text-input" bind:value={level} aria-label="Log level">
 				<option value="">All levels</option>
 				<option value="TRACE">TRACE</option>
@@ -92,32 +92,32 @@
 				<option value="ERROR">ERROR</option>
 			</select>
 		</label>
-		<label class="filter-field">
-			<span class="filter-label">Module</span>
+		<label class="form-field">
+			<span class="form-label">Module</span>
 			<input class="text-input" placeholder="module" bind:value={module} />
 		</label>
-		<label class="filter-field">
-			<span class="filter-label">Keyword</span>
+		<label class="form-field">
+			<span class="form-label">Keyword</span>
 			<input class="text-input" placeholder="keyword" bind:value={query} />
 		</label>
-		<label class="filter-field">
-			<span class="filter-label">Start time (ISO)</span>
+		<label class="form-field">
+			<span class="form-label">Start time (ISO)</span>
 			<input
 				class="text-input"
 				placeholder="start time (ISO)"
 				bind:value={startTime}
 			/>
 		</label>
-		<label class="filter-field">
-			<span class="filter-label">End time (ISO)</span>
+		<label class="form-field">
+			<span class="form-label">End time (ISO)</span>
 			<input
 				class="text-input"
 				placeholder="end time (ISO)"
 				bind:value={endTime}
 			/>
 		</label>
-		<label class="filter-field">
-			<span class="filter-label">Page size</span>
+		<label class="form-field">
+			<span class="form-label">Page size</span>
 			<input class="text-input" type="number" bind:value={pageSize} />
 		</label>
 	</div>
@@ -152,9 +152,9 @@
 				<tbody>
 					{#each entries as e, i (i)}
 						<tr>
-							<td class="mono">{e.timestamp}</td>
+							<td class="font-mono">{e.timestamp}</td>
 							<td><Badge label={e.level} variant={levelVariant(e.level)} /></td>
-							<td class="mono">{e.target}</td>
+							<td class="font-mono">{e.target}</td>
 							<td>{e.message}</td>
 						</tr>
 					{/each}
@@ -190,26 +190,8 @@
 </Card>
 
 <style>
-	.filter-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		gap: 1rem;
-		margin-bottom: 1.5rem;
-	}
 
-	.filter-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-	}
 
-	.filter-label {
-		font-family: var(--font-mono);
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.total {
 		font-family: var(--font-mono);
@@ -217,10 +199,6 @@
 		color: var(--gray-600);
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-	}
 
 	.pagination {
 		display: flex;

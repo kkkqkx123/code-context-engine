@@ -48,7 +48,7 @@
 	subtitle="Identity and file filters stored in the project registry"
 >
 	{#if basicLoading && !basicLoaded}
-		<p class="placeholder-text">Loading project...</p>
+		<p class="empty-hint">Loading project...</p>
 	{:else}
 		<p class="reload-description">
 			Root path is managed at creation time and cannot be changed here:
@@ -102,59 +102,13 @@
 </Card>
 
 <style>
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 2rem;
-	}
 
-	.reload-description {
-		color: var(--gray-600);
-		margin-bottom: 1.5rem;
-		line-height: 1.6;
-	}
 
-	.reload-actions {
-		display: flex;
-		justify-content: flex-end;
-		margin-bottom: 1.5rem;
-	}
 
-	.reload-result {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 1rem;
-		border: 1px solid var(--gray-200);
-		margin-top: 1rem;
-	}
 
-	.reload-message {
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-	}
 
-	.form-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
 
-	.form-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
 
-	.form-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.toggle-row {
 		margin: 0.5rem 0 1rem;

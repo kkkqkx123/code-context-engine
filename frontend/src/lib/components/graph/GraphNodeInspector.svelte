@@ -107,7 +107,7 @@
 				>
 			</dd>
 			<dt>Location</dt>
-			<dd class="mono">
+			<dd class="font-mono">
 				{node.source_file || node.source_location
 					? `${node.source_file || '—'}:${node.source_location || ''}`
 					: '—'}
@@ -128,7 +128,7 @@
 			</Button>
 		</div>
 
-		<h5 class="subsection-title">Relations ({edges.length})</h5>
+		<h5 class="eyebrow-title">Relations ({edges.length})</h5>
 		<ul class="relation-list">
 			{#each edges.slice(0, 40) as edge (edge.source + edge.target + edge.relation)}
 				{@const outgoing = edge.source === node.id}
@@ -165,7 +165,7 @@
 			{/if}
 		</ul>
 
-		<h5 class="subsection-title">
+		<h5 class="eyebrow-title">
 			Structural relations
 			{#if query.stale}
 				<Badge variant="warning" label="Stale" />
@@ -219,7 +219,7 @@
 			<InlineError message={query.error} />
 		{:else if query.data !== null && structuralFor === node.id}
 			{#if query.data.relations.length === 0}
-				<p class="panel-empty">
+				<p class="empty-hint empty-hint--compact">
 					No {query.data.kind} relations for this entity ({query.data
 						.direction}).
 				</p>
@@ -264,7 +264,7 @@
 				</ul>
 			{/if}
 		{:else}
-			<p class="panel-empty">Pick a relation family and run the query.</p>
+			<p class="empty-hint empty-hint--compact">Pick a relation family and run the query.</p>
 		{/if}
 	{:else}
 		<EmptyState
@@ -309,10 +309,6 @@
 		word-break: break-all;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-	}
 
 	.inspector-actions {
 		display: flex;
@@ -323,15 +319,6 @@
 		margin-bottom: 0.75rem;
 	}
 
-	.subsection-title {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		font-weight: 400;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-500);
-		margin: 0 0 0.5rem;
-	}
 
 	.relation-list {
 		list-style: none;
@@ -438,12 +425,6 @@
 		margin-top: 0.3rem;
 	}
 
-	.panel-empty {
-		font-size: 0.75rem;
-		color: var(--gray-500);
-		font-style: italic;
-		margin: 0;
-	}
 
 	@media (max-width: 1200px) {
 		.inspector {

@@ -798,6 +798,171 @@ pre code {
 	font-weight: 700;
 }
 
+/* Form layout — single source for config cards, log panels and filter rows. */
+.form-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 1rem;
+	margin-bottom: 1rem;
+}
+
+.form-field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.form-label {
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-widest);
+	color: var(--gray-600);
+}
+
+/* Section titles — two distinct semantics. .section-title is the card-level
+   sans heading; .eyebrow-title is the mono uppercase panel heading. */
+.section-title {
+	font-family: var(--font-sans);
+	font-size: 1rem;
+	font-weight: 700;
+	margin-bottom: 0.75rem;
+	letter-spacing: var(--tracking-tight);
+}
+
+.eyebrow-title {
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	font-weight: 400;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-widest);
+	color: var(--gray-500);
+	margin: 0 0 0.5rem;
+}
+
+/* Empty state hint — replaces per-component placeholder and panel-empty copies. */
+.empty-hint {
+	color: var(--gray-400);
+	font-style: italic;
+	text-align: center;
+	padding: 2rem;
+}
+
+.empty-hint--compact {
+	padding: 1.5rem;
+}
+
+/* Statistic group — single source for KPI-like numbers outside .kpi-card. */
+.stat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 1rem;
+}
+
+.stat-label {
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-widest);
+	color: var(--gray-600);
+}
+
+.stat-value {
+	font-family: var(--font-sans);
+	font-size: 1.5rem;
+	font-weight: 700;
+	letter-spacing: var(--tracking-tight);
+	line-height: 1;
+}
+
+.stat-meta {
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	color: var(--gray-500);
+}
+
+/* Panel blocks — single source for graph side panels and similar sections. */
+.panel-section {
+	margin-top: 1rem;
+	padding: 1rem;
+	border: 1px solid var(--black);
+}
+
+.panel-head {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-bottom: 0.25rem;
+}
+
+.panel-title {
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-wider);
+	color: var(--gray-600);
+	margin: 0 0 0.25rem;
+}
+
+.panel-hint {
+	font-size: 0.7rem;
+	color: var(--gray-500);
+	margin: 0 0 0.75rem;
+	line-height: 1.4;
+}
+
+/* Tool panes — single source for tool input/output columns. */
+.tool-input,
+.tool-output {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	padding: 1rem;
+}
+
+/* Config reload rows — shared by config cards. */
+.reload-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: 1.5rem;
+}
+
+.reload-actions--split {
+	justify-content: space-between;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+}
+
+.reload-result {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 1rem;
+	border: 1px solid var(--gray-200);
+	margin-top: 1rem;
+	flex-wrap: wrap;
+}
+
+.reload-message {
+	font-family: var(--font-mono);
+	font-size: 0.85rem;
+}
+
+.reload-description {
+	color: var(--gray-600);
+	margin-bottom: 1.5rem;
+	line-height: 1.6;
+}
+
+.version-row {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-bottom: 1rem;
+	flex-wrap: wrap;
+}
+
 /* ─── Lightweight code tokens (no external highlighter dependency) ─── */
 /* Tuned for the dark code block background (--black). See utils/code.ts. */
 .tok-keyword {

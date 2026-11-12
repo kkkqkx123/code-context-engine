@@ -14,8 +14,8 @@
 
 {#if communities.length > 0}
 	<section class="communities" aria-label="Connected components">
-		<h4 class="communities-title">Communities ({communities.length})</h4>
-		<p class="communities-hint">
+		<h4 class="panel-title">Communities ({communities.length})</h4>
+		<p class="panel-hint">
 			Click a community to load its members as an induced subgraph.
 		</p>
 		<ul class="community-list">
@@ -28,7 +28,7 @@
 					>
 						<span class="community-index">#{index}</span>
 						<span class="community-size">{ids.length}</span>
-						<span class="community-preview mono">
+						<span class="community-preview font-mono">
 							{ids.slice(0, 3).join(', ')}{ids.length > 3 ? ' …' : ''}
 						</span>
 					</button>
@@ -45,20 +45,7 @@
 		border: 1px solid var(--black);
 	}
 
-	.communities-title {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-wider);
-		color: var(--gray-600);
-		margin: 0 0 0.25rem;
-	}
 
-	.communities-hint {
-		font-size: 0.7rem;
-		color: var(--gray-500);
-		margin: 0 0 0.75rem;
-	}
 
 	.community-list {
 		list-style: none;
@@ -105,8 +92,4 @@
 		white-space: nowrap;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-	}
 </style>

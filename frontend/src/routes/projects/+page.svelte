@@ -271,7 +271,7 @@
 							</div>
 						</div>
 
-						<div class="form-actions">
+						<div class="tool-actions">
 							<Button type="submit" disabled={loading}>
 								{editingProject ? 'Update' : 'Create'}
 							</Button>
@@ -289,16 +289,16 @@
 				<Card title={detailProject.name} subtitle="Project details and actions">
 					<div class="detail-grid">
 						<div class="detail-item">
-							<span class="detail-label">Name</span>
+							<span class="form-label">Name</span>
 							<span class="detail-value">{detailProject.name}</span>
 						</div>
 						<div class="detail-item">
-							<span class="detail-label">Path</span>
+							<span class="form-label">Path</span>
 							<span class="detail-value code">{detailProject.root_path}</span>
 						</div>
 						{#if detailProject.extensions && detailProject.extensions.length > 0}
 							<div class="detail-item">
-								<span class="detail-label">Extensions</span>
+								<span class="form-label">Extensions</span>
 								<span class="detail-value"
 									>{detailProject.extensions.join(', ')}</span
 								>
@@ -306,7 +306,7 @@
 						{/if}
 						{#if detailProject.exclude_dirs && detailProject.exclude_dirs.length > 0}
 							<div class="detail-item">
-								<span class="detail-label">Excluded Dirs</span>
+								<span class="form-label">Excluded Dirs</span>
 								<span class="detail-value"
 									>{detailProject.exclude_dirs.join(', ')}</span
 								>
@@ -314,14 +314,14 @@
 						{/if}
 						{#if detailProject.last_indexed}
 							<div class="detail-item">
-								<span class="detail-label">Last Indexed</span>
+								<span class="form-label">Last Indexed</span>
 								<span class="detail-value">{detailProject.last_indexed}</span>
 							</div>
 						{/if}
 					</div>
 
 					<h3 class="section-title">Actions</h3>
-					<div class="action-buttons">
+					<div class="tool-form-row">
 						<Button
 							onclick={() => handleIndex(detailProject!)}
 							disabled={loading}
@@ -356,7 +356,7 @@
 					title="Select a Project"
 					subtitle="Choose a project from the list to view details"
 				>
-					<p class="placeholder-text">
+					<p class="empty-hint">
 						Select a project on the left to view its details and available
 						actions.
 					</p>
@@ -446,13 +446,6 @@
 		flex-shrink: 0;
 	}
 
-	/* Detail / Form Column */
-	.form-grid {
-		display: flex;
-		flex-direction: column;
-		gap: 1.5rem;
-	}
-
 	.checkbox-field {
 		margin-top: 0.5rem;
 	}
@@ -464,14 +457,6 @@
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		cursor: pointer;
-	}
-
-	.form-actions {
-		display: flex;
-		gap: 1rem;
-		margin-top: 1.5rem;
-		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
 	}
 
 	.detail-grid {
@@ -489,14 +474,6 @@
 		border-bottom: 1px solid var(--gray-100);
 	}
 
-	.detail-label {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
-
 	.detail-value {
 		font-size: 1rem;
 	}
@@ -507,25 +484,4 @@
 		word-break: break-all;
 	}
 
-	.section-title {
-		font-family: var(--font-sans);
-		font-size: 1rem;
-		font-weight: 700;
-		margin-bottom: 0.75rem;
-		letter-spacing: var(--tracking-tight);
-	}
-
-	.action-buttons {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-		margin-bottom: 1rem;
-	}
-
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 3rem;
-	}
 </style>

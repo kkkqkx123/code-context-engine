@@ -55,10 +55,10 @@
 	subtitle="Merged global defaults plus project overrides (full document)"
 >
 	{#if runtimeLoading && !runtimeLoaded}
-		<p class="placeholder-text">Loading runtime config...</p>
+		<p class="empty-hint">Loading runtime config...</p>
 	{:else}
 		<div class="version-row">
-			<span class="config-label">Project #{projectId}</span>
+			<span class="form-label">Project #{projectId}</span>
 			{#if runtimeVersion !== null}
 				<Badge label={`v${runtimeVersion}`} variant="active" />
 			{/if}
@@ -68,7 +68,7 @@
 					variant={validateResult.valid ? 'active' : 'inactive'}
 				/>
 			{/if}
-			<span class="validate-spacer"></span>
+			<span style="flex: 1"></span>
 			<Button onclick={onValidate} disabled={validating}>
 				{#if validating}Checking...{:else}Re-validate{/if}
 			</Button>
@@ -79,7 +79,7 @@
 			spellcheck="false"
 			aria-label="Project runtime configuration JSON"></textarea>
 
-		<div class="reload-actions split">
+		<div class="reload-actions reload-actions--split">
 			<Button
 				onclick={onReloadFromFile}
 				disabled={reloading || runtimeLoading}
@@ -122,55 +122,13 @@
 </Card>
 
 <style>
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 2rem;
-	}
 
-	.config-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
-	.validate-spacer {
-		flex: 1;
-	}
 
-	.reload-actions {
-		display: flex;
-		justify-content: flex-end;
-		margin-bottom: 1.5rem;
-	}
 
-	.reload-actions.split {
-		justify-content: space-between;
-	}
 
-	.reload-result {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 1rem;
-		border: 1px solid var(--gray-200);
-		margin-top: 1rem;
-	}
 
-	.reload-message {
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-	}
 
-	.version-row {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin-bottom: 1rem;
-	}
 
 	.config-editor {
 		width: 100%;

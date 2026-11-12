@@ -31,9 +31,9 @@
 	}: Props = $props();
 </script>
 
-<section class="panel-section-block" aria-label="Module relations">
+<section class="panel-section" aria-label="Module relations">
 	<div class="panel-head">
-		<h4 class="communities-title">Module relations</h4>
+		<h4 class="panel-title">Module relations</h4>
 		{#if stale}
 			<Badge
 				variant="warning"
@@ -44,20 +44,20 @@
 	{#if error}
 		<InlineError message={error} />
 	{:else if loading && data === null}
-		<p class="panel-empty">Loading module relations…</p>
+		<p class="empty-hint empty-hint--compact">Loading module relations…</p>
 	{:else if data !== null}
 		{#if loading}
-			<p class="panel-empty">Refreshing module relations…</p>
+			<p class="empty-hint empty-hint--compact">Refreshing module relations…</p>
 		{/if}
-		<p class="communities-hint">
-			File <span class="mono">{data.file}</span> — exports, caller files and outgoing
+		<p class="panel-hint">
+			File <span class="font-mono">{data.file}</span> — exports, caller files and outgoing
 			module edges.
 		</p>
 		<div class="module-groups">
 			<div class="module-group">
-				<h5 class="subsection-title">Exports ({data.exports.length})</h5>
+				<h5 class="eyebrow-title">Exports ({data.exports.length})</h5>
 				{#if data.exports.length === 0}
-					<p class="panel-empty">No exported symbols for this file.</p>
+					<p class="empty-hint empty-hint--compact">No exported symbols for this file.</p>
 				{:else}
 					<ul class="chip-list">
 						{#each data.exports as symbol (symbol)}
@@ -66,7 +66,7 @@
 									onclick={() => onFocusEntity(symbol)}
 									title="Load neighborhood for this symbol"
 								>
-									<span class="mono">{symbol}</span>
+									<span class="font-mono">{symbol}</span>
 								</SelectChip>
 							</li>
 						{/each}
@@ -74,11 +74,11 @@
 				{/if}
 			</div>
 			<div class="module-group">
-				<h5 class="subsection-title">
+				<h5 class="eyebrow-title">
 					Caller files ({data.caller_files.length})
 				</h5>
 				{#if data.caller_files.length === 0}
-					<p class="panel-empty">No caller files target this file.</p>
+					<p class="empty-hint empty-hint--compact">No caller files target this file.</p>
 				{:else}
 					<ul class="chip-list">
 						{#each data.caller_files as file (file)}
@@ -87,7 +87,7 @@
 									onclick={() => onImpactFile(file)}
 									title="Run file impact analysis for this file"
 								>
-									<span class="mono">{file}</span>
+									<span class="font-mono">{file}</span>
 								</SelectChip>
 							</li>
 						{/each}
@@ -95,14 +95,14 @@
 				{/if}
 			</div>
 			<div class="module-group">
-				<h5 class="subsection-title">Module edges ({data.imports.length})</h5>
+				<h5 class="eyebrow-title">Module edges ({data.imports.length})</h5>
 				{#if data.imports.length === 0}
-					<p class="panel-empty">No outgoing module edges.</p>
+					<p class="empty-hint empty-hint--compact">No outgoing module edges.</p>
 				{:else}
 					<ul class="module-edge-list">
 						{#each data.imports as edge, index (index)}
 							<li class="module-edge-item">
-								<span class="mono">{edge.target}</span>
+								<span class="font-mono">{edge.target}</span>
 								<span class="relation-meta"
 									>{edge.relation} · {edge.domain}</span
 								>
@@ -113,57 +113,18 @@
 			</div>
 		</div>
 	{:else}
-		<p class="panel-empty">
+		<p class="empty-hint empty-hint--compact">
 			Not queried yet — enter a file path above and press Module.
 		</p>
 	{/if}
 </section>
 
 <style>
-	.panel-section-block {
-		margin-top: 1rem;
-		padding: 1rem;
-		border: 1px solid var(--black);
-	}
 
-	.panel-head {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin-bottom: 0.25rem;
-	}
 
-	.communities-title {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-wider);
-		color: var(--gray-600);
-		margin: 0 0 0.25rem;
-	}
 
-	.panel-empty {
-		font-size: 0.75rem;
-		color: var(--gray-500);
-		font-style: italic;
-		margin: 0;
-	}
 
-	.communities-hint {
-		font-size: 0.7rem;
-		color: var(--gray-500);
-		margin: 0 0 0.75rem;
-	}
 
-	.subsection-title {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		font-weight: 400;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-500);
-		margin: 0 0 0.5rem;
-	}
 
 	.module-groups {
 		display: grid;
@@ -208,8 +169,4 @@
 		color: var(--gray-500);
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-	}
 </style>

@@ -29,30 +29,30 @@
 	subtitle="Active server snapshot (read-only)"
 >
 	{#if loading && !configInfo}
-		<p class="placeholder-text">Loading configuration...</p>
+		<p class="empty-hint">Loading configuration...</p>
 	{:else if configInfo}
 		<div class="config-grid">
 			<div class="config-item">
-				<span class="config-label">Vector backend</span>
+				<span class="form-label">Vector backend</span>
 				<span class="config-value">{databaseField('vector_backend')}</span>
 			</div>
 			<div class="config-item">
-				<span class="config-label">Relation backend</span>
+				<span class="form-label">Relation backend</span>
 				<span class="config-value">{databaseField('relation_backend')}</span>
 			</div>
 			<div class="config-item">
-				<span class="config-label">Fulltext backend</span>
+				<span class="form-label">Fulltext backend</span>
 				<span class="config-value">{databaseField('fulltext_backend')}</span>
 			</div>
 			<div class="config-item">
-				<span class="config-label">Initialized</span>
+				<span class="form-label">Initialized</span>
 				<Badge
 					label={configInfo.initialized ? 'Yes' : 'No'}
 					variant={configInfo.initialized ? 'active' : 'inactive'}
 				/>
 			</div>
 			<div class="config-item">
-				<span class="config-label">Projects</span>
+				<span class="form-label">Projects</span>
 				<span class="config-value">{configInfo.project_count}</span>
 			</div>
 		</div>
@@ -101,7 +101,7 @@
 			</Button>
 		</div>
 	{:else}
-		<p class="placeholder-text">No configuration data available</p>
+		<p class="empty-hint">No configuration data available</p>
 	{/if}
 </Card>
 
@@ -121,14 +121,6 @@
 		border: 1px solid var(--gray-200);
 	}
 
-	.config-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
-
 	.config-value {
 		font-family: var(--font-mono);
 		font-size: 1rem;
@@ -137,14 +129,6 @@
 
 	.config-section {
 		margin-top: 1.5rem;
-	}
-
-	.section-title {
-		font-family: var(--font-sans);
-		font-size: 1rem;
-		font-weight: 700;
-		margin-bottom: 0.75rem;
-		letter-spacing: var(--tracking-tight);
 	}
 
 	.config-json {
@@ -160,22 +144,4 @@
 		overflow-y: auto;
 	}
 
-	.placeholder-text {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 2rem;
-	}
-
-	.reload-description {
-		color: var(--gray-600);
-		margin-bottom: 1.5rem;
-		line-height: 1.6;
-	}
-
-	.reload-actions {
-		display: flex;
-		justify-content: flex-end;
-		margin-bottom: 1.5rem;
-	}
 </style>

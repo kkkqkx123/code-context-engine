@@ -70,36 +70,8 @@
 </Card>
 
 <style>
-	.reload-description {
-		color: var(--gray-600);
-		margin-bottom: 1.5rem;
-		line-height: 1.6;
-	}
 
-	.reload-actions {
-		display: flex;
-		justify-content: flex-end;
-		margin-bottom: 1.5rem;
-	}
 
-	.form-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
 
-	.form-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
 
-	.form-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 </style>

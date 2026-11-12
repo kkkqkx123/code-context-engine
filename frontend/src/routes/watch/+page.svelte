@@ -95,7 +95,7 @@
 		>
 			<div class="control-grid">
 				<div class="control-group">
-					<label class="field-label" for="watch-path">Directory Path</label>
+					<label class="form-label" for="watch-path">Directory Path</label>
 					<Input
 						id="watch-path"
 						type="text"
@@ -106,7 +106,7 @@
 				</div>
 
 				<div class="control-group">
-					<label class="field-label" for="file-extensions"
+					<label class="form-label" for="file-extensions"
 						>File Extensions (comma-separated)</label
 					>
 					<Input
@@ -119,7 +119,7 @@
 				</div>
 
 				<div class="control-group">
-					<label class="field-label" for="debounce-interval"
+					<label class="form-label" for="debounce-interval"
 						>Debounce Interval (ms)</label
 					>
 					<input
@@ -242,13 +242,6 @@
 		gap: 0.5rem;
 	}
 
-	.field-label {
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.debounce-input {
 		width: 100%;

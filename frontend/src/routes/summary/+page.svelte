@@ -121,7 +121,7 @@
 			<!-- Single File Mode -->
 			{#if activeTab === 'single'}
 				<div class="input-group">
-					<label class="field-label" for="file-path">File Path</label>
+					<label class="form-label" for="file-path">File Path</label>
 					<Input
 						id="file-path"
 						type="text"
@@ -134,7 +134,7 @@
 			<!-- Batch Mode -->
 			{#if activeTab === 'batch'}
 				<div class="input-group">
-					<label class="field-label" for="file-paths"
+					<label class="form-label" for="file-paths"
 						>File Paths (one per line)</label
 					>
 					<textarea
@@ -150,7 +150,7 @@
 			<!-- Directory Mode -->
 			{#if activeTab === 'directory'}
 				<div class="input-group">
-					<label class="field-label" for="dir-path">Directory Path</label>
+					<label class="form-label" for="dir-path">Directory Path</label>
 					<Input
 						id="dir-path"
 						type="text"
@@ -160,7 +160,7 @@
 				</div>
 				<div class="input-row">
 					<div class="input-group">
-						<label class="field-label" for="dir-ext"
+						<label class="form-label" for="dir-ext"
 							>Extensions (comma-separated)</label
 						>
 						<Input
@@ -171,7 +171,7 @@
 						/>
 					</div>
 					<div class="input-group">
-						<label class="field-label" for="dir-exclude"
+						<label class="form-label" for="dir-exclude"
 							>Exclude Dirs (comma-separated)</label
 						>
 						<Input
@@ -296,15 +296,6 @@
 		gap: 1rem;
 	}
 
-	.field-label {
-		display: block;
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		margin-bottom: 0.5rem;
-	}
 
 	.field-hint {
 		font-family: var(--font-mono);
@@ -342,19 +333,7 @@
 		gap: 0.25rem;
 	}
 
-	.stat-label {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
-	.stat-value {
-		font-family: var(--font-sans);
-		font-size: 1.5rem;
-		font-weight: 700;
-	}
 
 	.summary-list {
 		display: flex;

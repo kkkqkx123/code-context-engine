@@ -174,7 +174,7 @@
 				label={deleteFileResult.success ? 'Deleted' : 'Failed'}
 				variant={deleteFileResult.success ? 'success' : 'danger'}
 			/>
-			<span class="mono">
+			<span class="font-mono">
 				{deleteFileResult.vectors_deleted} vectors · {deleteFileResult.bm25_documents_deleted}
 				BM25 docs · {deleteFileResult.relations_deleted} relations · {deleteFileResult.elapsed_ms}
 				ms
@@ -210,7 +210,7 @@
 	{#if deleteEntityMessage}
 		<div class="result-row">
 			<Badge label="Deleted" variant="success" />
-			<span class="mono">{deleteEntityMessage}</span>
+			<span class="font-mono">{deleteEntityMessage}</span>
 		</div>
 	{/if}
 </Card>
@@ -220,7 +220,7 @@
 	subtitle="Delete multiple files and entities in one request"
 >
 	<label class="field">
-		<span class="field-label">File paths (one per line)</span>
+		<span class="form-label">File paths (one per line)</span>
 		<textarea
 			class="text-input"
 			rows="4"
@@ -228,7 +228,7 @@
 			spellcheck="false"></textarea>
 	</label>
 	<label class="field">
-		<span class="field-label">Entity ids (separated by spaces or commas)</span>
+		<span class="form-label">Entity ids (separated by spaces or commas)</span>
 		<input
 			class="text-input text-input--inline"
 			type="text"
@@ -281,13 +281,6 @@
 		margin-bottom: 0.75rem;
 	}
 
-	.field-label {
-		font-family: var(--font-mono);
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
 
 	.arm-warning {
 		margin: 0.5rem 0 0;
@@ -304,9 +297,4 @@
 		flex-wrap: wrap;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		color: var(--gray-600);
-	}
 </style>

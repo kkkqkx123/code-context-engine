@@ -117,7 +117,7 @@
 				{#if healthStore.bm25.index_path}
 					<div class="kv-row">
 						<span class="kv-label">Index path</span>
-						<span class="kv-value mono">{healthStore.bm25.index_path}</span>
+						<span class="kv-value font-mono">{healthStore.bm25.index_path}</span>
 					</div>
 				{/if}
 			</div>
@@ -170,11 +170,6 @@
 		color: var(--black);
 		text-align: right;
 		overflow-wrap: anywhere;
-	}
-
-	.kv-value.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
 	}
 
 	@media (max-width: 1024px) {

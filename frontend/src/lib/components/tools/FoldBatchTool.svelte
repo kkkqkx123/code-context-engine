@@ -103,7 +103,7 @@
 	{#each items as item, i (i)}
 		<div class="item">
 			<div class="item-head">
-				<span class="mono">Item {i + 1}</span>
+				<span class="font-mono">Item {i + 1}</span>
 				<Button
 					variant="ghost"
 					size="xs"
@@ -238,9 +238,4 @@
 		font-size: 0.75rem;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		color: var(--gray-600);
-	}
 </style>
