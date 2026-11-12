@@ -1054,4 +1054,57 @@ mod tests {
             "override tier must run before the built-in and the fallback tier, got: {bm25}"
         );
     }
+
+    #[test]
+    fn test_file_role_line_names_owning_file() {
+        let config = AstToNlConfig {
+            default_mode: OutputMode::Embedding,
+            ..Default::default()
+        };
+        let converter = AstToNlConverter::with_config(&config);
+        let header = create_test_header(1, "OnceCell", EntityKind::Struct, Some("/// A cell."));
+        let mut group = create_test_group(1, "OnceCell", Language::Rust);
+        group.header = Some(header);
+        let results = converter
+            .convert_entity_groups(&[group], "src/imp_cs.rs", None, None, None)
+            .groups;
+        let conv = results[0].header_conversion.as_ref().unwrap();
+        let emb = conv.embedding_text.as_deref().unwrap();
+        assert!(
+            emb.contains("In file imp cs."),
+            "stem words must name the file, got: {emb}"
+        );
+    }
+
+    #[test]
+    fn test_file_role_line_uses_parent_for_module_index() {
+        let config = AstToNlConfig {
+            default_mode: OutputMode::Embedding,
+            ..Default::default()
+        };
+        let converter = AstToNlConverter::with_config(&config);
+        let header = create_test_header(
+            1,
+            "search_reader",
+            EntityKind::Function,
+            Some("/// Searches."),
+        );
+        let mut group = create_test_group(1, "search_reader", Language::Rust);
+        group.header = Some(header);
+        let results = converter
+            .convert_entity_groups(
+                &[group],
+                "crates/searcher/src/searcher/mod.rs",
+                None,
+                None,
+                None,
+            )
+            .groups;
+        let conv = results[0].header_conversion.as_ref().unwrap();
+        let emb = conv.embedding_text.as_deref().unwrap();
+        assert!(
+            emb.contains("In file searcher."),
+            "module index files resolve to the parent directory, got: {emb}"
+        );
+    }
 }

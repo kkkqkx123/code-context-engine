@@ -102,6 +102,13 @@ impl ResolvedCallsIndex {
     }
 }
 
+/// Head token budget for a fact-less function body on the embedding path.
+///
+/// Signatures and early statements carry the most intent per token; the
+/// long implementation tail only feeds keyword search, which keeps the
+/// full body through the gap-filled variant.
+const EMB_BODY_HEAD_TOKENS: usize = 150;
+
 impl<'a> IndexTextEnricher<'a> {
     pub fn new(bm25_cleaner: &'a Bm25TextCleaner, calls_prune_enabled: bool) -> Self {
         Self {
@@ -133,12 +140,25 @@ impl<'a> IndexTextEnricher<'a> {
             }
         }
 
-        let extra_text = self
-            .build_extra_text(conversion.entity_id, processing_result, source)
+        let full_text = self
+            .build_extra_text(conversion.entity_id, processing_result, source, true)
             .unwrap_or_default();
 
-        if !extra_text.trim().is_empty() {
-            let bm25_cleaned = self.bm25_cleaner.clean(&extra_text);
+        if !full_text.trim().is_empty() {
+            let bm25_cleaned = self.bm25_cleaner.clean(&full_text);
+
+            // The embedding variant skips gap filling: fact fragments stay,
+            // implementation filler goes. Falls back to the full text only
+            // when the entity has no span at all, which cannot happen when
+            // the full text above is non-empty.
+            let emb_source = self
+                .build_extra_text(conversion.entity_id, processing_result, source, false)
+                .unwrap_or_default();
+            let emb_source = if emb_source.trim().is_empty() {
+                &full_text
+            } else {
+                &emb_source
+            };
 
             // Embedding path: strip language-specific syntax noise (`unsafe {}`,
             // `&*`, `&mut *` for Rust) while preserving implementation logic, then
@@ -146,7 +166,7 @@ impl<'a> IndexTextEnricher<'a> {
             // tokenizer can produce dual-form tokens (whole identifier + subword
             // splits), maximizing recall for both exact-spelling and fuzzy queries.
             let profile = NoiseProfile::for_language(language);
-            let stripped = strip_syntax_noise(&extra_text, profile);
+            let stripped = strip_syntax_noise(emb_source, profile);
             let emb_cleaned = crate::ast_to_nl::common::filter_nl_noise(&stripped, profile);
 
             conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
@@ -180,7 +200,7 @@ impl<'a> IndexTextEnricher<'a> {
         };
 
         if let Some(vocabulary) = vocabulary {
-            self.compute_glossary(conversion, processing_result, &extra_text, vocabulary);
+            self.compute_glossary(conversion, processing_result, &full_text, vocabulary);
         }
         stats
     }
@@ -216,14 +236,21 @@ impl<'a> IndexTextEnricher<'a> {
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by
-    /// byte offset. Overlapping ranges are deduplicated. Uncovered body gaps
-    /// inside the entity span are filled from de-commented source so the full
-    /// function body stays searchable. No label headers.
+    /// byte offset. Overlapping ranges are deduplicated. When `fill_gaps`
+    /// holds, uncovered body gaps inside the entity span are filled from
+    /// de-commented source so the full function body stays searchable; the
+    /// keyword path always passes true. The embedding path passes false:
+    /// a dense vector averages every token, so hundreds of implementation
+    /// tokens drown the identity and documentation lines that semantic
+    /// queries actually match, while the fact fragments (branch
+    /// conditions, call sites) already carry the intent skeleton the
+    /// embedding needs. No label headers.
     fn build_extra_text(
         &self,
         entity_id: EntityId,
         processing_result: &ProcessingResult,
         source: &str,
+        fill_gaps: bool,
     ) -> Option<String> {
         // FileDocumentation groups are pure prose; their span covers the doc
         // comment itself. Extracting a "body" from it would re-append the
@@ -319,9 +346,24 @@ impl<'a> IndexTextEnricher<'a> {
         if all_fragments.is_empty() {
             if let Some((span_start, span_end)) = entity_span {
                 let body = extract_body_without_signature(source, span_start, span_end);
-                if !body.trim().is_empty() {
+                if body.trim().is_empty() {
+                    return None;
+                }
+                // Without facts the whole body is the only signal; the
+                // keyword path keeps it entire, the embedding path keeps
+                // only the head where signatures and early statements live.
+                if fill_gaps {
                     return Some(body);
                 }
+                let head = cce_text::truncate_to_cost(
+                    &body,
+                    cce_text::ChunkUnit::Tokens,
+                    EMB_BODY_HEAD_TOKENS,
+                );
+                if head.trim().is_empty() {
+                    return None;
+                }
+                return Some(head.to_string());
             }
             return None;
         }
@@ -340,34 +382,39 @@ impl<'a> IndexTextEnricher<'a> {
             last_end = Some(*end);
         }
 
-        if let Some((span_start, span_end)) = entity_span {
-            let mut gap_texts: Vec<(usize, String)> = Vec::new();
-            for window in merged.windows(2) {
-                let gap_start = window[0].1;
-                let gap_end = window[1].0;
-                if gap_end > gap_start {
-                    let gap = extract_clean_source(source, gap_start, gap_end);
-                    if is_meaningful_code(&gap) {
-                        gap_texts.push((gap_start, gap));
+        // Gap and tail filling restores the full body for keyword search;
+        // the embedding path skips it so implementation detail cannot
+        // outnumber the intent skeleton kept above.
+        if fill_gaps {
+            if let Some((span_start, span_end)) = entity_span {
+                let mut gap_texts: Vec<(usize, String)> = Vec::new();
+                for window in merged.windows(2) {
+                    let gap_start = window[0].1;
+                    let gap_end = window[1].0;
+                    if gap_end > gap_start {
+                        let gap = extract_clean_source(source, gap_start, gap_end);
+                        if is_meaningful_code(&gap) {
+                            gap_texts.push((gap_start, gap));
+                        }
                     }
                 }
-            }
-            if let Some((_, last_end_byte, _)) = merged.last() {
-                if span_end > *last_end_byte {
-                    let tail = extract_clean_source(source, *last_end_byte, span_end);
-                    let tail = strip_trailing_closers(&tail);
-                    if is_meaningful_code(&tail) {
-                        gap_texts.push((*last_end_byte, tail));
+                if let Some((_, last_end_byte, _)) = merged.last() {
+                    if span_end > *last_end_byte {
+                        let tail = extract_clean_source(source, *last_end_byte, span_end);
+                        let tail = strip_trailing_closers(&tail);
+                        if is_meaningful_code(&tail) {
+                            gap_texts.push((*last_end_byte, tail));
+                        }
                     }
                 }
-            }
-            let _ = span_start;
-            for (gap_start, gap) in gap_texts {
-                let pos = merged
-                    .iter()
-                    .position(|(s, _, _)| *s > gap_start)
-                    .unwrap_or(merged.len());
-                merged.insert(pos, (gap_start, gap_start, gap));
+                let _ = span_start;
+                for (gap_start, gap) in gap_texts {
+                    let pos = merged
+                        .iter()
+                        .position(|(s, _, _)| *s > gap_start)
+                        .unwrap_or(merged.len());
+                    merged.insert(pos, (gap_start, gap_start, gap));
+                }
             }
         }
 
@@ -419,7 +466,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("should produce text");
         assert!(result.contains("let x = 1;"));
         assert!(result.contains("if x > 0"));
@@ -450,7 +497,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("should produce text");
         assert!(result.contains("let x = 1;"));
     }
@@ -487,7 +534,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("code facts should still produce text");
         assert!(!result.contains("\"\"\""), "raw docstring must be skipped");
         assert!(
@@ -541,7 +588,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("call fact should still produce text");
         assert!(!result.contains("\"\"\""), "raw docstring must go");
         assert!(
@@ -550,6 +597,87 @@ mod tests {
         );
         assert!(!result.contains("setupmethod"), "decorators must go");
         assert!(result.contains(call_text), "code body must stay");
+    }
+
+    #[test]
+    fn test_build_extra_text_no_fill_skips_gaps() {
+        use crate::grouper::types::{EntityGroup, GroupType};
+        use cce_types::Span;
+
+        let source = "fn demo() {\n    let marker_a = 1;\n    let filler_one = 2;\n    let filler_two = 3;\n    let marker_b = 4;\n}";
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group
+            .entity_spans
+            .insert(EntityId(1), Span::new(0, source.len(), 0, 0, 0, 0));
+        let mut bf_store = BehaviorStore::default();
+        for marker in ["let marker_a = 1;", "let marker_b = 4;"] {
+            let start = source.find(marker).expect("fact");
+            bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+                BehaviorFactKind::DataBind,
+                marker,
+                start,
+                start + marker.len(),
+            ));
+        }
+        let processing_result = ProcessingResult {
+            groups: vec![group],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let full = enricher
+            .build_extra_text(EntityId(1), &processing_result, source, true)
+            .expect("facts should produce text");
+        assert!(full.contains("filler_one"), "gap fill stays for keywords");
+        let slim = enricher
+            .build_extra_text(EntityId(1), &processing_result, source, false)
+            .expect("facts should produce text");
+        assert!(slim.contains("marker_a"), "fact fragments stay");
+        assert!(slim.contains("marker_b"), "fact fragments stay");
+        assert!(
+            !slim.contains("filler_one") && !slim.contains("filler_two"),
+            "gap filler must go for embeddings, got: {}",
+            slim
+        );
+    }
+
+    #[test]
+    fn test_build_extra_text_no_fill_caps_factless_body() {
+        use crate::grouper::types::{EntityGroup, GroupType};
+        use cce_types::Span;
+
+        let mut source = String::from("fn demo() {\n");
+        for i in 0..60 {
+            source.push_str(&format!("    let padding_{} = {};\n", i, i));
+        }
+        source.push('}');
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group
+            .entity_spans
+            .insert(EntityId(1), Span::new(0, source.len(), 0, 0, 0, 0));
+        let processing_result = ProcessingResult {
+            groups: vec![group],
+            behavior: BehaviorStore::default(),
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let full = enricher
+            .build_extra_text(EntityId(1), &processing_result, &source, true)
+            .expect("body fallback should produce text");
+        assert!(full.contains("padding_59"), "keyword path keeps the tail");
+        let slim = enricher
+            .build_extra_text(EntityId(1), &processing_result, &source, false)
+            .expect("body head should produce text");
+        assert!(
+            !slim.contains("padding_59"),
+            "embedding head must drop the tail, got {} chars",
+            slim.len()
+        );
+        assert!(slim.contains("padding_0"), "embedding head keeps the start");
     }
 
     #[test]
@@ -578,7 +706,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("should produce text");
         assert!(result.contains("for i in"));
         assert!(result.contains("process(i)"));
@@ -628,7 +756,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("should produce text");
         assert!(result.contains("log(config.verbosity);"));
         assert!(result.contains("value = compute();"));
@@ -648,7 +776,7 @@ mod tests {
 
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
-        let result = enricher.build_extra_text(EntityId(1), &processing_result, "");
+        let result = enricher.build_extra_text(EntityId(1), &processing_result, "", true);
         assert!(result.is_none());
     }
 
@@ -679,6 +807,7 @@ mod tests {
             EntityId(1),
             &processing_result,
             "//! The crate docs.\n//! More docs.\n",
+            true,
         );
         assert!(
             result.is_none(),
@@ -723,7 +852,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("should produce text");
         // Outer loop covers inner — only one text block
         assert!(result.contains("loop"));
@@ -759,7 +888,7 @@ mod tests {
         let bm25_cleaner = Bm25TextCleaner::new();
         let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
         let result = enricher
-            .build_extra_text(EntityId(1), &processing_result, source)
+            .build_extra_text(EntityId(1), &processing_result, source, true)
             .expect("should produce text");
         assert!(
             result.contains("if ready"),

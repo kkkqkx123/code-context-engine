@@ -37,6 +37,12 @@ use cce_utils::token_estimation::estimate_tokens;
 /// the text is not written twice.
 const LONG_DOC_THRESHOLD: usize = 500;
 
+/// Maximum call targets listed in a `calls:` line.
+///
+/// Mirrors the branch-anchor budget: enough to name the distinctive
+/// callees, few enough that internal plumbing cannot dominate the line.
+const MAX_CALL_TARGETS: usize = 8;
+
 /// Regular entity group template
 ///
 /// Generates descriptions for regular entities without detected patterns.
@@ -367,13 +373,20 @@ impl RegularGroupTemplate {
         if let Some(relation) = Self::variable_relation_description(member) {
             // The full assignment is appended below whenever the signature
             // carries `=` or `.`; a relation line restating an identifier
-            // already present there only dilutes the text.
+            // already present there only dilutes the text. Loop variables
+            // skip the relation as well when the signature is emitted: the
+            // identity kind label already marks the production mode.
             let signature = member.signature.trim();
             let signature_emitted =
                 !signature.is_empty() && (signature.contains('=') || signature.contains('.'));
+            let is_loop = member
+                .subtype
+                .as_deref()
+                .is_some_and(|s| s.to_lowercase().contains("loop"));
             if !member_desc.contains(&relation)
                 && (!signature_emitted
-                    || !Self::is_redundant_relation(&relation, &member_desc, signature))
+                    || (!is_loop
+                        && !Self::is_redundant_relation(&relation, &member_desc, signature)))
             {
                 member_desc.push('\n');
                 member_desc.push_str(&relation);
@@ -410,12 +423,44 @@ impl RegularGroupTemplate {
     /// identifiers that match a query verbatim. The metadata key is filled by
     /// the grouper's call-path injection stage, which knows the resolved
     /// call targets of every entity.
+    ///
+    /// The list is capped and self-references are dropped. An uncapped dump
+    /// repeats internal plumbing (`self`, `self.buf`) on nearly every
+    /// callable chunk, adding a shared common component that pulls
+    /// unrelated vectors toward each other while the distinctive callees
+    /// drown at the tail. The keyword path keeps the raw list; only the
+    /// embedding text is capped here because this template is embedding-only.
     fn call_targets_line(entity: Option<&cce_types::entity::GroupedEntity>) -> Option<String> {
         let calls = entity?.metadata.get(meta_keys::CALL_PATHS)?.trim();
         if calls.is_empty() {
             return None;
         }
-        Some(format!("calls: {}.", calls))
+        let mut seen = std::collections::HashSet::new();
+        let mut kept = Vec::new();
+        for raw in calls.split(',') {
+            let target = raw
+                .trim()
+                .trim_start_matches(['&', '*'])
+                .trim()
+                .trim_end_matches([';', '.']);
+            if target.is_empty()
+                || target == "self"
+                || target.starts_with("self.")
+                || target.starts_with("self::")
+            {
+                continue;
+            }
+            if seen.insert(target.to_string()) {
+                kept.push(target);
+            }
+            if kept.len() >= MAX_CALL_TARGETS {
+                break;
+            }
+        }
+        if kept.is_empty() {
+            return None;
+        }
+        Some(format!("calls: {}.", kept.join(", ")))
     }
 
     /// Whether a variable relation line restates information already present.
@@ -679,12 +724,25 @@ impl RegularGroupTemplate {
         ]
         .into_iter()
         .collect();
+        // Visibility scopes carry no behavioral retrieval signal and repeat
+        // on nearly every chunk, so the embedding path drops them while
+        // keeping behavioral modifiers.
+        let visibility: std::collections::BTreeSet<&str> = [
+            "pub",
+            "pub(crate)",
+            "pub(super)",
+            "pub(self)",
+            "private",
+            "protected",
+        ]
+        .into_iter()
+        .collect();
 
         let relevant: Vec<&str> = modifiers
             .iter()
             .filter_map(|m| {
                 let trimmed = m.trim();
-                if known.contains(trimmed) {
+                if known.contains(trimmed) && !visibility.contains(trimmed) {
                     Some(trimmed)
                 } else {
                     None
@@ -882,7 +940,7 @@ mod tests {
                 field.kind,
                 Some(&field)
             ),
-            "pub field state."
+            "field state."
         );
         assert_eq!(
             RegularGroupTemplate::semantic_entity_description(
@@ -899,6 +957,103 @@ mod tests {
                 Some(&method)
             ),
             "method get_mut."
+        );
+    }
+
+    #[test]
+    fn test_modifier_text_drops_visibility_keeps_behavior() {
+        assert_eq!(
+            RegularGroupTemplate::modifier_text(&["pub".to_string()]),
+            None,
+            "visibility alone leaves no modifier"
+        );
+        assert_eq!(
+            RegularGroupTemplate::modifier_text(&["pub(crate)".to_string(), "async".to_string()]),
+            Some("async".to_string()),
+            "behavioral modifiers survive visibility filtering"
+        );
+        assert_eq!(
+            RegularGroupTemplate::modifier_text(&["unsafe".to_string()]),
+            Some("unsafe".to_string()),
+            "standalone behavioral modifier is kept"
+        );
+    }
+
+    #[test]
+    fn test_call_targets_line_caps_and_dedupes() {
+        use cce_types::entity::meta_keys;
+        let mut member = cce_types::entity::GroupedEntity {
+            id: cce_types::entity::EntityId(1),
+            name: "demo".to_string(),
+            kind: EntityKind::Function,
+            ..Default::default()
+        };
+        member.metadata.insert(
+            meta_keys::CALL_PATHS.to_string(),
+            "self, self.buf.flush, ReadByLine::new, ReadByLine::new, a, b, c, d, e, f, g, h, i"
+                .to_string(),
+        );
+        let line = RegularGroupTemplate::call_targets_line(Some(&member))
+            .expect("distinctive callees should survive");
+        assert!(
+            !line.contains("self"),
+            "self plumbing must go, got: {}",
+            line
+        );
+        assert_eq!(
+            line.matches("ReadByLine::new").count(),
+            1,
+            "duplicates must collapse, got: {}",
+            line
+        );
+        assert!(
+            line.split(',').count() <= MAX_CALL_TARGETS,
+            "line must respect the cap, got: {}",
+            line
+        );
+        assert!(line.contains("ReadByLine::new"), "got: {}", line);
+    }
+
+    #[test]
+    fn test_loop_variable_with_signature_emits_single_line() {
+        let group = EntityGroup {
+            name: "Context".into(),
+            kind: EntityKind::Struct,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1),
+                name: "v".to_string(),
+                kind: EntityKind::Variable,
+                subtype: Some("loop".to_string()),
+                signature: "for _, v := range c.Params.".to_string(),
+                metadata: [("source_type".to_string(), "c.Params".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        let member_desc = results
+            .iter()
+            .find(|r| r.contains("Context.v"))
+            .expect("member description should be emitted");
+        assert!(
+            member_desc.contains("loop variable"),
+            "identity keeps the production mode, got: {}",
+            member_desc
+        );
+        assert!(
+            !member_desc.contains("(loop iteration)"),
+            "relation line is skipped when the signature carries the source, got: {}",
+            member_desc
+        );
+        assert!(
+            member_desc.contains("c.Params"),
+            "source survives via the signature, got: {}",
+            member_desc
         );
     }
 

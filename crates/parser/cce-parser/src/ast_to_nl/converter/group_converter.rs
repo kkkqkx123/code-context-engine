@@ -1041,7 +1041,76 @@ impl super::AstToNlConverter {
             }
         }
 
+        // File-role line for the embedding path. File and module words have
+        // no other carrier in embedding text: the template never sees the
+        // file path, and continuation chunks do not repeat the header, so
+        // each header and member text carries its own copy. Appended rather
+        // than prepended to keep the identity line first. Prose file docs
+        // are skipped: their summary already names the document.
+        if group.group_type != cce_types::GroupType::FileDocumentation {
+            if let Some(stem) = module_stem.as_deref() {
+                if let Some(role) = Self::file_role_line(file_path, stem) {
+                    for result in &mut results {
+                        if let Some(ref mut emb) = result.embedding_text {
+                            if !emb.is_empty() && !emb.contains(&role) {
+                                emb.push('\n');
+                                emb.push_str(&role);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         results
+    }
+
+    /// File-role line naming the owning file in natural words.
+    ///
+    /// Only the stem is used: extensions carry no retrieval signal.
+    /// Module-index files (`mod.rs`, `__init__.py`) are named after their
+    /// parent directory, which is the meaningful module name; a `mod.rs`
+    /// directly under `src/` names the crate itself, so the grandparent
+    /// (the crate directory) is used there. Words come
+    /// from the file name itself, so the line cannot invent a subject the
+    /// file does not have; import harvesting stays a follow-up.
+    fn file_role_line(file_path: &str, stem: &str) -> Option<String> {
+        let words = if matches!(stem, "mod" | "__init__") {
+            let path = std::path::Path::new(file_path);
+            let mut dir = path.parent();
+            if stem == "mod" && dir.is_some_and(|d| d.file_name().is_some_and(|n| n == "src")) {
+                dir = dir.and_then(|d| d.parent());
+            }
+            let dir_name = dir?.file_name()?.to_string_lossy().into_owned();
+            Self::split_stem_words(&dir_name)
+        } else {
+            Self::split_stem_words(stem)
+        };
+        if words.is_empty() {
+            return None;
+        }
+        Some(format!("In file {}.", words.join(" ")))
+    }
+
+    /// Split a file stem into lowercase natural words.
+    ///
+    /// Separators and camel-case boundaries mark word breaks; empty
+    /// segments are dropped without deduplication since stems rarely repeat.
+    fn split_stem_words(stem: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        for part in stem.split(|c: char| !c.is_alphanumeric()) {
+            let mut current = String::new();
+            for c in part.chars() {
+                if c.is_uppercase() && !current.is_empty() {
+                    words.push(std::mem::take(&mut current).to_lowercase());
+                }
+                current.push(c);
+            }
+            if !current.is_empty() {
+                words.push(current.to_lowercase());
+            }
+        }
+        words.into_iter().filter(|w| !w.is_empty()).collect()
     }
 
     fn trait_impl_summary(group: &EntityGroup) -> Option<String> {
