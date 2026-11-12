@@ -659,15 +659,25 @@ mod tests {
             enriched_text
         );
         assert!(
-            enriched_text.contains("if value > 0"),
-            "expected raw source, got: {}",
+            enriched_text.contains("checks value > 0."),
+            "expected condition proposition, got: {}",
             enriched_text
         );
         assert!(
-            enriched_text.contains("return true"),
-            "expected return true"
+            enriched_text.contains("checks value > 0."),
+            "expected condition proposition, got: {}",
+            enriched_text
         );
-        assert!(enriched_text.contains("let x = 1;"));
+        assert!(
+            !enriched_text.contains("return true"),
+            "covered facts must not repeat as raw tail, got: {}",
+            enriched_text
+        );
+        assert!(
+            !enriched_text.contains("let x = 1;"),
+            "vacuous binds stay silent, got: {}",
+            enriched_text
+        );
     }
 
     #[test]
@@ -877,7 +887,7 @@ mod tests {
             !text.contains("Control flow:"),
             "embedding text should not contain 'Control flow:' label"
         );
-        assert!(text.contains("for i in"));
+        assert!(text.contains("iterates over i in 0..10."));
         assert!(
             !text.contains("Behavior:"),
             "empty behavior should not be appended"

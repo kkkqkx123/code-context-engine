@@ -15,6 +15,8 @@
 pub(crate) mod calls_prune;
 pub use calls_prune::CallsPruneStats;
 
+mod proposition;
+
 pub(crate) use calls_prune::is_boilerplate_name_with_plugin;
 pub(crate) use calls_prune::is_local_callee;
 pub(crate) use calls_prune::parse_call_set;
@@ -124,6 +126,18 @@ impl<'a> IndexTextEnricher<'a> {
         // those constants, but they sit deep inside a syntax-heavy body.
         // The anchor lifts them to the head of the text, where a retriever
         // reads them before the body drowns them.
+        // Proposition sentences for the embedding path: each fact restated
+        // as one intent sentence. They land behind the identity line, so the
+        // anchor inserted below ends up above them and the head reads
+        // identity, anchor, propositions.
+        let propositions =
+            proposition::render_propositions(conversion.entity_id, processing_result, source);
+        if !propositions.head.is_empty() {
+            if let Some(text) = conversion.embedding_text.as_mut() {
+                *text = insert_after_first_line(text, &propositions.head.join("\n"));
+            }
+        }
+
         if let Some(anchor) = topic_anchor(conversion.entity_id, processing_result) {
             if let Some(text) = conversion.embedding_text.as_mut() {
                 *text = insert_after_first_line(text, &anchor);
@@ -140,29 +154,52 @@ impl<'a> IndexTextEnricher<'a> {
         if !full_text.trim().is_empty() {
             let bm25_cleaned = self.bm25_cleaner.clean(&full_text);
 
-            // The embedding variant skips gap filling: fact fragments stay,
-            // implementation filler goes. Falls back to the full text only
-            // when the entity has no span at all, which cannot happen when
-            // the full text above is non-empty.
-            let emb_source = self
-                .build_extra_text(conversion.entity_id, processing_result, source, false)
-                .unwrap_or_default();
-            let emb_source = if emb_source.trim().is_empty() {
-                &full_text
+            // Propositions replace the raw code tail on the embedding path:
+            // keeping both would re-lengthen the denominator the gap-fill
+            // removal just shortened. Without propositions the previous
+            // fallback stays untouched, so fact-less entities are unaffected.
+            // When facts overflow the head budget the uncovered remainder
+            // stays as raw code: eight sentences cannot speak for a whole
+            // mega-function, and dropping the body would amputate the deep
+            // tokens the head budget removed.
+            if propositions.head.is_empty() {
+                // The embedding variant skips gap filling: fact fragments stay,
+                // implementation filler goes. Falls back to the full text only
+                // when the entity has no span at all, which cannot happen when
+                // the full text above is non-empty.
+                let emb_source = self
+                    .build_extra_text(conversion.entity_id, processing_result, source, false)
+                    .unwrap_or_default();
+                let emb_source = if emb_source.trim().is_empty() {
+                    &full_text
+                } else {
+                    &emb_source
+                };
+
+                // Embedding path: strip language-specific syntax noise (`unsafe {}`,
+                // `&*`, `&mut *` for Rust) while preserving implementation logic, then
+                // remove safety boilerplate comments. BM25 keeps the raw code so the
+                // tokenizer can produce dual-form tokens (whole identifier + subword
+                // splits), maximizing recall for both exact-spelling and fuzzy queries.
+                let profile = NoiseProfile::for_language(language);
+                let stripped = strip_syntax_noise(emb_source, profile);
+                let emb_cleaned = crate::ast_to_nl::common::filter_nl_noise(&stripped, profile);
+
+                conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
+            } else if propositions.overflow {
+                let tail_raw = propositions
+                    .tail
+                    .iter()
+                    .map(|(_, _, text)| text.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let profile = NoiseProfile::for_language(language);
+                let stripped = strip_syntax_noise(&tail_raw, profile);
+                let emb_cleaned = crate::ast_to_nl::common::filter_nl_noise(&stripped, profile);
+                conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
             } else {
-                &emb_source
-            };
-
-            // Embedding path: strip language-specific syntax noise (`unsafe {}`,
-            // `&*`, `&mut *` for Rust) while preserving implementation logic, then
-            // remove safety boilerplate comments. BM25 keeps the raw code so the
-            // tokenizer can produce dual-form tokens (whole identifier + subword
-            // splits), maximizing recall for both exact-spelling and fuzzy queries.
-            let profile = NoiseProfile::for_language(language);
-            let stripped = strip_syntax_noise(emb_source, profile);
-            let emb_cleaned = crate::ast_to_nl::common::filter_nl_noise(&stripped, profile);
-
-            conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
+                conversion.append_index_context_raw_separate(&bm25_cleaned, "");
+            }
         }
 
         // The template emits a `calls:` line naming the entity's call
@@ -936,5 +973,136 @@ mod tests {
             "disabled leaves calls line intact: {kept:?}"
         );
         assert_eq!(stats_off.callees_pruned, 0);
+    }
+
+    #[test]
+    fn test_enrich_renders_propositions_for_embedding_only() {
+        use cce_types::language::Language;
+        use cce_types::{EntityKind, ast_to_nl::ConversionResult};
+
+        let source = "func demo() { body, err = io.ReadAll(c.Request.Body) }";
+        let bind_text = "body, err = io.ReadAll(c.Request.Body)";
+        let start = source.find(bind_text).expect("bind in source");
+        let mut bf_store = BehaviorStore::default();
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataBind,
+            bind_text,
+            start,
+            start + bind_text.len(),
+        ));
+        let processing_result = ProcessingResult {
+            groups: vec![],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let mut conversion = ConversionResult::new(
+            EntityId(1),
+            EntityKind::Function,
+            "demo".to_string(),
+            "demo.go".to_string(),
+            "function demo.".to_string(),
+            "function demo.".to_string(),
+            vec![],
+        );
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let resolved_index = super::ResolvedCallsIndex::from_processing_result(&processing_result);
+        enricher.enrich_conversion(
+            &mut conversion,
+            &processing_result,
+            source,
+            Language::Go,
+            None,
+            super::PluginSupport {
+                resolved: Some(&resolved_index),
+                ..Default::default()
+            },
+        );
+        let emb = conversion.embedding_text.expect("emb survives");
+        assert!(
+            emb.contains("derived from call io.ReadAll(c.Request.Body)"),
+            "emb carries the proposition, got: {emb:?}"
+        );
+        assert!(
+            !emb.contains("body, err = io.ReadAll"),
+            "emb drops the raw dump, got: {emb:?}"
+        );
+        let bm25 = conversion.bm25_text.expect("bm25 survives");
+        assert!(
+            bm25.contains("body, err = io.ReadAll(c.Request.Body)"),
+            "bm25 keeps the raw text, got: {bm25:?}"
+        );
+    }
+
+    #[test]
+    fn test_enrich_overflow_keeps_uncovered_tail() {
+        use cce_types::language::Language;
+        use cce_types::{EntityKind, ast_to_nl::ConversionResult};
+
+        // Nine distinct binds overflow the eight-sentence head budget.
+        let mut source = String::from("func demo() {\n");
+        let mut statements = Vec::new();
+        for i in 0..9 {
+            statements.push(format!("v{i} = load_{i}(arg_{i})"));
+        }
+        for statement in &statements {
+            source.push_str(statement);
+            source.push_str(";\n");
+        }
+        source.push('}');
+        let mut bf_store = BehaviorStore::default();
+        for statement in &statements {
+            let start = source.find(statement.as_str()).expect("bind in source");
+            bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+                BehaviorFactKind::DataBind,
+                statement.as_str(),
+                start,
+                start + statement.len(),
+            ));
+        }
+        let processing_result = ProcessingResult {
+            groups: vec![],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let mut conversion = ConversionResult::new(
+            EntityId(1),
+            EntityKind::Function,
+            "demo".to_string(),
+            "demo.go".to_string(),
+            "function demo.".to_string(),
+            "function demo.".to_string(),
+            vec![],
+        );
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let resolved_index = super::ResolvedCallsIndex::from_processing_result(&processing_result);
+        enricher.enrich_conversion(
+            &mut conversion,
+            &processing_result,
+            &source,
+            Language::Go,
+            None,
+            super::PluginSupport {
+                resolved: Some(&resolved_index),
+                ..Default::default()
+            },
+        );
+        let emb = conversion.embedding_text.expect("emb survives");
+        assert!(
+            emb.contains("derived from call"),
+            "emb carries head propositions, got: {emb:?}"
+        );
+        assert!(
+            emb.contains("v8 = load_8(arg_8)"),
+            "emb keeps the uncovered tail as raw code, got: {emb:?}"
+        );
+        let bm25 = conversion.bm25_text.expect("bm25 survives");
+        assert!(
+            bm25.contains("v0 = load_0(arg_0)"),
+            "bm25 keeps the raw text, got: {bm25:?}"
+        );
     }
 }
