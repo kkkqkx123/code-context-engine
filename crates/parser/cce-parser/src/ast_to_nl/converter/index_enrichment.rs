@@ -15,7 +15,7 @@
 pub(crate) mod calls_prune;
 pub use calls_prune::CallsPruneStats;
 
-mod proposition;
+pub(crate) mod proposition;
 
 pub(crate) use calls_prune::is_boilerplate_name_with_plugin;
 pub(crate) use calls_prune::is_local_callee;

@@ -21,7 +21,7 @@ use super::super::source_extract::{code_body_start, find_entity_span, is_docstri
 /// head of the embedding text. `tail` holds the raw fragments of mapped
 /// facts the head could not cover, for the embedding tail. `overflow`
 /// tells whether such a tail exists.
-pub(in super::super) struct PropositionSet {
+pub(crate) struct PropositionSet {
     pub head: Vec<String>,
     pub tail: Vec<(usize, usize, String)>,
     pub overflow: bool,
@@ -37,7 +37,7 @@ pub(in super::super) struct PropositionSet {
 /// the head is capped. Facts that only restate already-rendered sentences
 /// need no tail of their own. An empty head means the entity keeps its
 /// previous sidecar.
-pub(in super::super) fn render_propositions(
+pub(crate) fn render_propositions(
     entity_id: EntityId,
     processing_result: &ProcessingResult,
     source: &str,
@@ -139,6 +139,91 @@ pub(in super::super) fn render_propositions(
         tail: merged,
         overflow,
     }
+}
+
+/// Coverage of data-reference facts that no proposition sentence speaks for.
+///
+/// References never render a sentence: they usually repeat an enclosing
+/// bind that already speaks. A reference whose byte range sits inside
+/// another fact's range is covered by that facts sentence or raw tail;
+/// one standing alone carries signal the current mapping silently drops.
+/// The ratio guides whether a reference sentence shape is warranted.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub(crate) struct DataReferenceStats {
+    /// Data-reference facts with content, across all entities.
+    pub total: usize,
+    /// References not contained in any other fact range of the same entity.
+    pub independent: usize,
+}
+
+impl DataReferenceStats {
+    /// Share of references standing alone, `0.0` when there are none.
+    pub(crate) fn proportion(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.independent as f64 / self.total as f64
+        }
+    }
+}
+
+/// Count independent data-reference facts in one file result.
+///
+/// Only the entity's own facts are consulted, never cross-entity ranges.
+/// Empty facts carry no signal and are excluded from both counters.
+pub(crate) fn data_reference_stats(processing_result: &ProcessingResult) -> DataReferenceStats {
+    let mut total = 0usize;
+    let mut independent = 0usize;
+    // Collect every entity id from the groups plus the behavior sidecar
+    // so reference-only entities are still visited. Control-flow ids are
+    // a subset of the group entities.
+    let mut entity_ids: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    for group in &processing_result.groups {
+        for id in group.all_entity_ids() {
+            entity_ids.insert(id);
+        }
+    }
+    for (id, _) in processing_result.behavior.iter() {
+        entity_ids.insert(id);
+    }
+    for entity_id in entity_ids {
+        let mut reference_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut cover_ranges: Vec<(usize, usize)> = Vec::new();
+        if let Some(store) = processing_result.behavior.get(entity_id) {
+            for fact in &store.facts {
+                if fact.content_line_count == 0 {
+                    continue;
+                }
+                if matches!(fact.kind, BehaviorFactKind::Comment) {
+                    continue;
+                }
+                let range = (fact.start_byte, fact.end_byte);
+                if matches!(fact.kind, BehaviorFactKind::DataReference) {
+                    reference_ranges.push(range);
+                } else {
+                    cover_ranges.push(range);
+                }
+            }
+        }
+        if let Some(store) = processing_result.control_flow.get(entity_id) {
+            for fact in &store.facts {
+                if fact.content_line_count == 0 {
+                    continue;
+                }
+                cover_ranges.push((fact.start_byte, fact.end_byte));
+            }
+        }
+        for (start, end) in reference_ranges {
+            total += 1;
+            let covered = cover_ranges
+                .iter()
+                .any(|(s, e)| *s <= start && end <= *e && (*s, *e) != (start, end));
+            if !covered {
+                independent += 1;
+            }
+        }
+    }
+    DataReferenceStats { total, independent }
 }
 
 #[cfg(test)]
@@ -331,5 +416,51 @@ mod tests {
     fn identifier_tokens(text: &str) -> impl Iterator<Item = &str> {
         text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
             .filter(|t| !t.is_empty())
+    }
+
+    #[test]
+    fn test_reference_stats_counts_independent() {
+        let mut bf_store = BehaviorStore::default();
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataBind,
+            "body = compute(x)",
+            0,
+            17,
+        ));
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataReference,
+            "x",
+            15,
+            16,
+        ));
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataReference,
+            "lonely",
+            100,
+            106,
+        ));
+        let processing_result = ProcessingResult {
+            groups: vec![],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let stats = data_reference_stats(&processing_result);
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.independent, 1);
+        assert!((stats.proportion() - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_reference_stats_empty_is_zero() {
+        let processing_result = ProcessingResult {
+            groups: vec![],
+            behavior: BehaviorStore::default(),
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let stats = data_reference_stats(&processing_result);
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.proportion(), 0.0);
     }
 }

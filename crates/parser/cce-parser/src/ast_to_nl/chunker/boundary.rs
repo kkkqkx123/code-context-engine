@@ -30,6 +30,29 @@ pub fn cost(text: &str, path: ChunkPath) -> usize {
     unit(path).cost(text)
 }
 
+/// Deduplicate identical file-role lines within one chunk text.
+///
+/// The converter appends one `In file X.` line per entity, so a chunk
+/// holding several members of one file repeats the same line. Same file
+/// with the same line carries no new signal, so only the first occurrence
+/// is kept. Comparison uses the trimmed line; non-role lines pass through
+/// untouched and line order is preserved.
+pub fn dedup_file_role_lines(text: &str) -> String {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut kept: Vec<&str> = Vec::new();
+    for line in text.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("In file ")
+            && trimmed.ends_with('.')
+            && !seen.insert(trimmed.to_string())
+        {
+            continue;
+        }
+        kept.push(line);
+    }
+    kept.join("\n")
+}
+
 /// Resolve the `(min, ceiling)` merge thresholds for `path`.
 ///
 /// The min threshold is the undersized-chunk trigger; the ceiling is the
@@ -480,5 +503,22 @@ mod tests {
         );
         assert_eq!(boundaries[1].entity_id, EntityId(3));
         assert_eq!(boundaries[1].start_byte, boundaries[0].end_byte + 2);
+    }
+
+    #[test]
+    fn test_dedup_file_role_lines_keeps_first() {
+        let text = "macro guard.\nIn file dash mpd.\nmacro other.\nIn file dash mpd.";
+        let deduped = dedup_file_role_lines(text);
+        assert_eq!(deduped.matches("In file dash mpd.").count(), 1);
+        assert!(deduped.contains("macro guard."));
+        assert!(deduped.contains("macro other."));
+    }
+
+    #[test]
+    fn test_dedup_file_role_lines_keeps_distinct_files() {
+        let text = "a.\nIn file foo.\nb.\nIn file bar.\nc.\nIn file foo.";
+        let deduped = dedup_file_role_lines(text);
+        assert_eq!(deduped.matches("In file foo.").count(), 1);
+        assert_eq!(deduped.matches("In file bar.").count(), 1);
     }
 }

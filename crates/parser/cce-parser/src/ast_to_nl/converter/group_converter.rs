@@ -117,7 +117,13 @@ impl super::AstToNlConverter {
                 let file_paths: Vec<&str> = vec![file_path; groups.len()];
 
                 let mut group_conversions = self
-                    .convert_entity_groups_batch(&group_refs, &file_paths, request)
+                    .convert_entity_groups_batch(
+                        &group_refs,
+                        &file_paths,
+                        request,
+                        processing_result,
+                        source,
+                    )
                     .into_iter()
                     .zip(groups.iter())
                     .map(|(conversions, group)| {
@@ -215,8 +221,14 @@ impl super::AstToNlConverter {
                 }
             }
 
-            let conversions =
-                self.convert_entity_group(group, file_path, request, &header_only_ids);
+            let conversions = self.convert_entity_group(
+                group,
+                file_path,
+                request,
+                &header_only_ids,
+                processing_result,
+                source,
+            );
             let assembled = Self::assemble_group_conversions(group, conversions);
 
             // Track all entity IDs covered by this group
@@ -278,6 +290,55 @@ impl super::AstToNlConverter {
                 lines_guard_retained = prune_stats.lines_guard_retained,
                 "calls prune totals for file",
             );
+            let reference_stats = super::index_enrichment::proposition::data_reference_stats(pr);
+            tracing::debug!(
+                file_path,
+                reference_total = reference_stats.total,
+                reference_independent = reference_stats.independent,
+                reference_ratio = reference_stats.proportion(),
+                "data reference coverage for file",
+            );
+            // Vector-path gate post-pass: enrichment appends sidecars
+            // (propositions, raw tails, anchors) that can resurrect a member
+            // cleared before enrichment. Re-clearing here keeps the keyword
+            // side intact while the vector block stays dropped.
+            if matches!(
+                self.resolve_mode(request),
+                OutputMode::Embedding | OutputMode::Both
+            ) {
+                for gc in &mut group_conversions {
+                    if gc.group.group_type == cce_types::GroupType::FileDocumentation {
+                        continue;
+                    }
+                    for member_conv in &mut gc.member_conversions {
+                        let Some(entity) = gc
+                            .group
+                            .members
+                            .iter()
+                            .find(|m| m.id == member_conv.entity_id)
+                        else {
+                            continue;
+                        };
+                        if Self::vector_gate_drops(entity, &gc.group, Some(pr), Some(src)) {
+                            member_conv.embedding_text = None;
+                        }
+                    }
+                    if gc.group.members.is_empty() {
+                        if let (Some(header_entity), Some(header_conv)) =
+                            (gc.group.header.as_ref(), gc.header_conversion.as_mut())
+                        {
+                            if Self::vector_gate_drops(
+                                header_entity,
+                                &gc.group,
+                                Some(pr),
+                                Some(src),
+                            ) {
+                                header_conv.embedding_text = None;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         GroupConvertOutput {
@@ -777,6 +838,8 @@ impl super::AstToNlConverter {
         file_path: &str,
         request: Option<&ConversionRequest>,
         header_only_ids: &HashSet<EntityId>,
+        processing_result: Option<&ProcessingResult>,
+        source: Option<&str>,
     ) -> Vec<ConversionResult> {
         if let Some(ref registry) = self.plugin_registry {
             let language_str = group.language.to_string();
@@ -796,8 +859,14 @@ impl super::AstToNlConverter {
             // Step 2: built-in generation uses the same group-aware BM25/Embedding
             // dispatchers as the public generators. This keeps the indexing pipeline
             // aligned with direct generator calls.
-            let builtin =
-                self.convert_group_with_generators(group, file_path, request, header_only_ids);
+            let builtin = self.convert_group_with_generators(
+                group,
+                file_path,
+                request,
+                header_only_ids,
+                processing_result,
+                source,
+            );
 
             // Step 3: below-builtin fallback tier — consulted only when the
             // built-in produced no conversions (e.g. an unsupported language).
@@ -815,7 +884,14 @@ impl super::AstToNlConverter {
             return builtin;
         }
 
-        self.convert_group_with_generators(group, file_path, request, header_only_ids)
+        self.convert_group_with_generators(
+            group,
+            file_path,
+            request,
+            header_only_ids,
+            processing_result,
+            source,
+        )
     }
 
     /// Convert a group through the BM25/Embedding generator dispatchers.
@@ -828,6 +904,8 @@ impl super::AstToNlConverter {
         file_path: &str,
         request: Option<&ConversionRequest>,
         header_only_ids: &HashSet<EntityId>,
+        processing_result: Option<&ProcessingResult>,
+        source: Option<&str>,
     ) -> Vec<ConversionResult> {
         let mut results = Vec::new();
         let mode = self.resolve_mode(request);
@@ -848,9 +926,42 @@ impl super::AstToNlConverter {
                 String::new()
             };
 
-            let (embedding_text, embedding_line_offsets) =
+            // Vector-path trivial-fragment gate: members meeting all five
+            // drop conditions are excluded from the embedding header join.
+            // The keyword path keeps the full group so term recall is intact.
+            let embedding_group: Option<EntityGroup> =
                 if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
-                    let descriptions = self.embedding_generator.generate_for_group(group);
+                    if group.group_type == cce_types::GroupType::FileDocumentation
+                        || group.members.is_empty()
+                    {
+                        None
+                    } else {
+                        let kept: Vec<GroupedEntity> = group
+                            .members
+                            .iter()
+                            .filter(|m| {
+                                !Self::vector_gate_drops(m, group, processing_result, source)
+                            })
+                            .cloned()
+                            .collect();
+                        if kept.len() == group.members.len() {
+                            None
+                        } else {
+                            let mut filtered = group.clone();
+                            filtered.members = kept.into_iter().collect();
+                            Some(filtered)
+                        }
+                    }
+                } else {
+                    None
+                };
+            let embedding_source_group = embedding_group.as_ref().unwrap_or(group);
+
+            let (mut embedding_text, embedding_line_offsets) =
+                if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
+                    let descriptions = self
+                        .embedding_generator
+                        .generate_for_group(embedding_source_group);
                     if descriptions.is_empty() {
                         let text = self.embedding_generator.generate(header, group.language);
                         let text = qualify(group, &text);
@@ -878,6 +989,26 @@ impl super::AstToNlConverter {
                 } else {
                     (String::new(), Vec::new())
                 };
+
+            // Standalone headers and fully-emptied merged groups carry no
+            // group context beyond the header itself: when the header alone
+            // meets all five drop conditions its vector block disappears
+            // while the keyword block stays.
+            if matches!(mode, OutputMode::Embedding | OutputMode::Both)
+                && group.group_type != cce_types::GroupType::FileDocumentation
+            {
+                let header_gated = if group.members.is_empty() {
+                    Self::vector_gate_drops(header, group, processing_result, source)
+                } else if let Some(ref filtered) = embedding_group {
+                    filtered.members.is_empty()
+                        && Self::vector_gate_drops(header, group, processing_result, source)
+                } else {
+                    false
+                };
+                if header_gated {
+                    embedding_text.clear();
+                }
+            }
 
             let keywords = if matches!(mode, OutputMode::Bm25 | OutputMode::Both) {
                 self.collect_group_keywords(group)
@@ -952,6 +1083,16 @@ impl super::AstToNlConverter {
             if self.should_convert_member(group, member, header_only_ids) {
                 let mut member_result =
                     self.convert_grouped(member, file_path, request, group.language);
+                // Vector-path trivial-fragment gate: a member meeting all
+                // five drop conditions loses its embedding block while the
+                // keyword block stays for exact navigation. Cleared before
+                // the file-role append below so no role line resurrects it.
+                if matches!(mode, OutputMode::Embedding | OutputMode::Both)
+                    && group.group_type != cce_types::GroupType::FileDocumentation
+                    && Self::vector_gate_drops(member, group, processing_result, source)
+                {
+                    member_result.embedding_text = None;
+                }
                 // Member conversion runs without group context; re-attach the
                 // owner so chunk bodies carry `Group.member` for disambiguation.
                 // MergedFragments groups are named after their first fragment,
@@ -1148,6 +1289,131 @@ impl super::AstToNlConverter {
             return true;
         }
         is_export_assignment_name(&entity.name)
+    }
+
+    /// Vector-path trivial-fragment gate: whether `entity` loses its
+    /// embedding block while keeping its keyword block.
+    ///
+    /// All five conditions must hold to drop; any single hold keeps the
+    /// vector block. Only the entity's own information is consulted, never
+    /// cross-entity indexes: documentation, call metadata, variable
+    /// relation metadata, the entity's own propositions, and whether a
+    /// function-like entity carries an implementation body.
+    fn vector_gate_drops(
+        entity: &GroupedEntity,
+        group: &EntityGroup,
+        processing_result: Option<&ProcessingResult>,
+        source: Option<&str>,
+    ) -> bool {
+        if entity
+            .doc_comment
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty())
+        {
+            return false;
+        }
+        if Self::entity_has_distinctive_calls(entity) {
+            return false;
+        }
+        if Self::entity_has_variable_relation(entity) {
+            return false;
+        }
+        let (Some(pr), Some(src)) = (processing_result, source) else {
+            return false;
+        };
+        let propositions =
+            super::index_enrichment::proposition::render_propositions(entity.id, pr, src);
+        if !propositions.head.is_empty() || !propositions.tail.is_empty() {
+            return false;
+        }
+        if Self::entity_has_impl_body(entity, group, source) {
+            return false;
+        }
+        true
+    }
+
+    /// Whether the entity names a distinctive call target of its own.
+    ///
+    /// Mirrors the template `calls:` line: self plumbing is dropped, the
+    /// keyword path keeps the raw list. An empty or self-only list carries
+    /// no call signal.
+    fn entity_has_distinctive_calls(entity: &GroupedEntity) -> bool {
+        let Some(raw) = entity.metadata.get(meta_keys::CALL_PATHS) else {
+            return false;
+        };
+        for target in raw.split(',') {
+            let target = target
+                .trim()
+                .trim_start_matches(['&', '*'])
+                .trim()
+                .trim_end_matches([';', '.'])
+                .trim();
+            if target.is_empty()
+                || target == "self"
+                || target.starts_with("self.")
+                || target.starts_with("self::")
+            {
+                continue;
+            }
+            return true;
+        }
+        if let Some(raw) = entity.metadata.get(meta_keys::RESOLVED_CALLS) {
+            if !raw.trim().is_empty() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether variable relation metadata marks a derived or associated value.
+    fn entity_has_variable_relation(entity: &GroupedEntity) -> bool {
+        VARIABLE_TYPE_METADATA_KEYS.iter().any(|k| {
+            entity
+                .metadata
+                .get(*k)
+                .is_some_and(|v| !v.trim().is_empty())
+        })
+    }
+
+    /// Whether a function-like entity carries an implementation body.
+    ///
+    /// Non-function kinds never carry an initializer fallback, so they
+    /// satisfy the gate's fifth condition outright. Function-like entities
+    /// are kept whenever a body cannot be disproven: multiline spans always
+    /// carry one, and single-line spans keep theirs unless the entity's own
+    /// source slice proves a bare prototype (`;` without a body opener).
+    /// Missing spans or sources stay conservative and keep the vector block.
+    fn entity_has_impl_body(
+        entity: &GroupedEntity,
+        group: &EntityGroup,
+        source: Option<&str>,
+    ) -> bool {
+        if !entity.kind.is_function_like() {
+            return false;
+        }
+        let Some(span) = group.entity_spans.get(&entity.id) else {
+            return true;
+        };
+        if span.end_position.row > span.start_position.row {
+            return true;
+        }
+        let Some(src) = source else {
+            return true;
+        };
+        let Some(slice) = src.get(span.start_byte..span.end_byte) else {
+            return true;
+        };
+        let trimmed = slice.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        if trimmed.contains('{') || trimmed.contains("=>") {
+            return true;
+        }
+        if trimmed.trim_end().ends_with(';') {
+            return false;
+        }
+        true
     }
 
     fn is_top_level_variable_group(group: &EntityGroup, header: &GroupedEntity) -> bool {
@@ -1397,6 +1663,8 @@ impl super::AstToNlConverter {
         groups: &[&EntityGroup],
         file_paths: &[&str],
         request: Option<&ConversionRequest>,
+        processing_result: Option<&ProcessingResult>,
+        source: Option<&str>,
     ) -> Vec<Vec<ConversionResult>> {
         // Compute header-only IDs to prevent duplicate member conversion.
         let batch_header_only_ids: HashSet<EntityId> = groups
@@ -1417,9 +1685,14 @@ impl super::AstToNlConverter {
             .enumerate()
             .map(|(i, (group, file_path))| match plugin_results[i].take() {
                 Some(conversions) => conversions,
-                None => {
-                    self.convert_entity_group(group, file_path, request, &batch_header_only_ids)
-                }
+                None => self.convert_entity_group(
+                    group,
+                    file_path,
+                    request,
+                    &batch_header_only_ids,
+                    processing_result,
+                    source,
+                ),
             })
             .collect()
     }
@@ -1550,5 +1823,142 @@ impl super::AstToNlConverter {
         }
 
         results
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::super::AstToNlConverter;
+    use super::*;
+    use crate::grouper::types::{EntityGroup, GroupType};
+    use cce_types::Span;
+    use std::collections::HashMap;
+
+    fn trivial_group(member: GroupedEntity, span: Span) -> (EntityGroup, ProcessingResult, String) {
+        let source = "int add(int a);\n";
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group.header = Some(member.clone());
+        group.header_id = Some(member.id);
+        group.members = smallvec::smallvec![member.clone()];
+        group.entity_spans.insert(member.id, span);
+        let processing_result = ProcessingResult {
+            groups: vec![group.clone()],
+            behavior: Default::default(),
+            control_flow: Default::default(),
+            stats: Default::default(),
+        };
+        (group, processing_result, source.to_string())
+    }
+
+    fn bare_macro() -> GroupedEntity {
+        GroupedEntity {
+            id: EntityId(1),
+            name: "_DASH_MPD_H_".to_string(),
+            kind: EntityKind::Macro,
+            signature: String::new(),
+            parameters: Default::default(),
+            return_type: None,
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: HashMap::new(),
+            subtype: None,
+            is_stdlib: false,
+            stdlib_category: None,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+        }
+    }
+
+    #[test]
+    fn test_trivial_macro_drops() {
+        let member = bare_macro();
+        let span = Span::new(0, 18, 0, 0, 0, 0);
+        let (group, pr, src) = trivial_group(member.clone(), span);
+        assert!(AstToNlConverter::vector_gate_drops(
+            &member,
+            &group,
+            Some(&pr),
+            Some(&src)
+        ));
+    }
+
+    #[test]
+    fn test_documented_macro_keeps() {
+        let mut member = bare_macro();
+        member.doc_comment = Some("Guard.".to_string());
+        let span = Span::new(0, 18, 0, 0, 0, 0);
+        let (group, pr, src) = trivial_group(member.clone(), span);
+        assert!(!AstToNlConverter::vector_gate_drops(
+            &member,
+            &group,
+            Some(&pr),
+            Some(&src)
+        ));
+    }
+
+    #[test]
+    fn test_call_target_keeps() {
+        let mut member = bare_macro();
+        member
+            .metadata
+            .insert(meta_keys::CALL_PATHS.to_string(), "foo".to_string());
+        let span = Span::new(0, 18, 0, 0, 0, 0);
+        let (group, pr, src) = trivial_group(member.clone(), span);
+        assert!(!AstToNlConverter::vector_gate_drops(
+            &member,
+            &group,
+            Some(&pr),
+            Some(&src)
+        ));
+    }
+
+    #[test]
+    fn test_impl_function_keeps_despite_trivial() {
+        let source = "int add(int a) { return a; }\n";
+        let mut member = bare_macro();
+        member.kind = EntityKind::Function;
+        member.name = "add".to_string();
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group.members = smallvec::smallvec![member.clone()];
+        group
+            .entity_spans
+            .insert(member.id, Span::new(0, source.len(), 0, 0, 0, 1));
+        let pr = ProcessingResult {
+            groups: vec![group.clone()],
+            behavior: Default::default(),
+            control_flow: Default::default(),
+            stats: Default::default(),
+        };
+        assert!(!AstToNlConverter::vector_gate_drops(
+            &member,
+            &group,
+            Some(&pr),
+            Some(source)
+        ));
+    }
+
+    #[test]
+    fn test_prototype_function_drops() {
+        let source = "int add(int a);\n";
+        let mut member = bare_macro();
+        member.kind = EntityKind::Function;
+        member.name = "add".to_string();
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group.members = smallvec::smallvec![member.clone()];
+        group
+            .entity_spans
+            .insert(member.id, Span::new(0, source.len(), 0, 0, 0, 0));
+        let pr = ProcessingResult {
+            groups: vec![group.clone()],
+            behavior: Default::default(),
+            control_flow: Default::default(),
+            stats: Default::default(),
+        };
+        assert!(AstToNlConverter::vector_gate_drops(
+            &member,
+            &group,
+            Some(&pr),
+            Some(source)
+        ));
     }
 }

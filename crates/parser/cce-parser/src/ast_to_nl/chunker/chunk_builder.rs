@@ -807,6 +807,7 @@ impl ChunkBuilder {
         let mut text = ctx.text.to_string();
         if ctx.path == ChunkPath::Embedding {
             Self::prepend_identity_if_needed(&mut text, ctx.group.name.as_str(), ctx.group.kind);
+            text = super::boundary::dedup_file_role_lines(&text);
         }
         let content_entity_ids = ctx.group.all_entity_ids();
         let (source_span, source_ranges, source_span_kind) =
@@ -1100,6 +1101,9 @@ impl ChunkBuilder {
                         None,
                     );
 
+                if path == ChunkPath::Embedding {
+                    segment_text = super::boundary::dedup_file_role_lines(&segment_text);
+                }
                 let word_count = cost(&segment_text, ChunkPath::Bm25);
                 let token_count = cost(&segment_text, path);
 
@@ -1234,6 +1238,7 @@ impl ChunkBuilder {
         if ctx.path == ChunkPath::Embedding {
             let identity = Self::chunk_identity_name(ctx.group, &content_entity_ids);
             Self::prepend_identity_if_needed(&mut ctx.text, &identity, ctx.group.kind);
+            ctx.text = super::boundary::dedup_file_role_lines(&ctx.text);
         }
         let (source_span, source_ranges, source_span_kind) =
             source_coverage::source_coverage_for_entity_ids(

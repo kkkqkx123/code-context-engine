@@ -18,10 +18,10 @@
 //! owns worthiness checks as data tables, the render module owns only the
 //! kind-to-sentence decision table, and the assembly owns budget and order.
 
-pub(super) mod assembly;
+pub(crate) mod assembly;
 mod code_text;
 mod guards;
 mod render;
 pub(super) mod vocab;
 
-pub(super) use assembly::render_propositions;
+pub(crate) use assembly::{data_reference_stats, render_propositions};
