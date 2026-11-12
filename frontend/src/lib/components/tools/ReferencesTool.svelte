@@ -160,7 +160,7 @@
 	}
 
 	.ref-group {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 	.ref-head {
@@ -170,7 +170,7 @@
 		gap: 1rem;
 		padding: 0.5rem 0.75rem;
 		background: var(--gray-50);
-		border-bottom: 1px solid var(--gray-200);
+		border-bottom: var(--border-muted);
 	}
 
 	.path {
@@ -183,13 +183,13 @@
 		padding: 0.35rem 0.75rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: 0.25rem;
 	}
 
 	.ref-item {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
+		gap: 0.5rem;
 		font-size: 0.75rem;
 	}
 

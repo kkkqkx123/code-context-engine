@@ -283,7 +283,7 @@ import Modal from '$lib/components/ui/Modal.svelte';
 
 	.spec-item {
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 
@@ -299,7 +299,7 @@ import Modal from '$lib/components/ui/Modal.svelte';
 	.disk-usage {
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		display: flex;
 		gap: 0.5rem;
 		font-size: 0.85rem;

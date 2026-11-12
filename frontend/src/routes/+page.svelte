@@ -7,6 +7,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import KpiCard from '$lib/components/ui/KpiCard.svelte';
 
 	const RECENT_KEY = 'cce.recentQueries';
 	const EXAMPLES = [
@@ -83,9 +84,10 @@
 
 	<div class="home-search">
 		<input
-			class="home-search-input"
+			class="search-hero"
 			type="text"
 			placeholder="Search the indexed codebase…"
+			aria-label="Search the indexed codebase"
 			bind:value={homeQuery}
 			onkeydown={(e) => {
 				if (e.key === 'Enter') runSearch(homeQuery);
@@ -128,29 +130,19 @@
 	<h2 class="section-heading">System status</h2>
 
 	<div class="kpi-grid">
-		<div class="kpi-card">
-			<span class="kpi-label">Projects</span>
-			<span class="kpi-value">{projectStore.projects.length}</span>
-			<span class="kpi-meta">indexed codebases</span>
-		</div>
-		<div class="kpi-card">
-			<span class="kpi-label">Vectors</span>
-			<span class="kpi-value">{vectorCount}</span>
-			<span class="kpi-meta">embeddings stored</span>
-		</div>
-		<div class="kpi-card">
-			<span class="kpi-label">BM25 Docs</span>
-			<span class="kpi-value">{bm25Count}</span>
-			<span class="kpi-meta">full-text index</span>
-		</div>
-		<div class="kpi-card">
-			<span class="kpi-label">Server</span>
+		<KpiCard
+			label="Projects"
+			value={String(projectStore.projects.length)}
+			meta="indexed codebases"
+		/>
+		<KpiCard label="Vectors" value={String(vectorCount)} meta="embeddings stored" />
+		<KpiCard label="BM25 Docs" value={String(bm25Count)} meta="full-text index" />
+		<KpiCard label="Server" meta={`updated ${lastUpdatedText}`}>
 			<Badge
 				label={serverOk ? 'OK' : 'DOWN'}
 				variant={serverOk ? 'success' : 'danger'}
 			/>
-			<span class="kpi-meta">updated {lastUpdatedText}</span>
-		</div>
+		</KpiCard>
 	</div>
 
 	<div class="quick-grid">
@@ -220,14 +212,6 @@
 		margin-bottom: 0.75rem;
 	}
 
-	.home-search-input {
-		width: 100%;
-		padding: 0.9rem 1rem;
-		border: 1px solid var(--black);
-		font-family: var(--font-sans);
-		font-size: 1rem;
-	}
-
 	.home-suggestions {
 		display: flex;
 		flex-wrap: wrap;
@@ -240,27 +224,5 @@
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
-	}
-
-	.suggest-chip {
-		background: transparent;
-		border: 1px solid var(--gray-300);
-		padding: 0.2rem 0.5rem;
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		cursor: pointer;
-	}
-
-	.suggest-chip:hover {
-		background: var(--gray-100);
-	}
-
-	.section-heading {
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		margin-bottom: 1rem;
 	}
 </style>

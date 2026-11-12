@@ -314,7 +314,7 @@
 		justify-content: flex-end;
 		margin-top: 1.5rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 	}
 
 	.result-summary {
@@ -326,7 +326,7 @@
 
 	.result-stat {
 		padding: 0.75rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -342,7 +342,7 @@
 	}
 
 	.summary-item {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		overflow: hidden;
 	}
 
@@ -369,7 +369,7 @@
 
 	.summary-body {
 		padding: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 	}
 
 	.summary-text {
@@ -407,7 +407,7 @@
 	.summary-entities li {
 		padding: 0.25rem 0.5rem;
 		background: var(--gray-50);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
 	}

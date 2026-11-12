@@ -7,6 +7,10 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
+import FieldCheck from '$lib/components/ui/FieldCheck.svelte';
+import DescriptionList, {
+	type DescriptionItem,
+} from '$lib/components/ui/DescriptionList.svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
 	import { projectApi, type Project } from '$lib/api/index';
 
@@ -160,6 +164,34 @@
 		detailProject = project;
 		projectStore.currentProjectId = Number(project.id);
 	}
+
+	let detailItems = $derived<DescriptionItem[]>(
+		detailProject
+			? [
+				{ term: 'Name', value: detailProject.name },
+				{ term: 'Path', value: detailProject.root_path, mono: true },
+				...(detailProject.extensions?.length
+					? [
+						{
+							term: 'Extensions',
+							value: detailProject.extensions.join(', '),
+						},
+					]
+					: []),
+				...(detailProject.exclude_dirs?.length
+					? [
+						{
+							term: 'Excluded Dirs',
+							value: detailProject.exclude_dirs.join(', '),
+						},
+					]
+					: []),
+				...(detailProject.last_indexed
+					? [{ term: 'Last Indexed', value: detailProject.last_indexed }]
+					: []),
+			]
+			: [],
+	);
 </script>
 
 <svelte:head>
@@ -199,8 +231,9 @@
 						{#each projectStore.projects as project (project.id)}
 							<button
 								type="button"
-								class="project-item"
+								class="selectable-row"
 								class:selected={detailProject?.id === project.id}
+								aria-pressed={detailProject?.id === project.id}
 								onclick={() => selectProject(project)}
 							>
 								<div class="project-info">
@@ -263,12 +296,7 @@
 								bind:value={formIgnorePatterns}
 								placeholder="*.log, *.tmp"
 							/>
-							<div class="checkbox-field">
-								<label class="checkbox-label">
-									<input type="checkbox" bind:checked={formRespectGitignore} />
-									Respect .gitignore
-								</label>
-							</div>
+							<FieldCheck label="Respect .gitignore" bind:checked={formRespectGitignore} />
 						</div>
 
 						<div class="tool-actions">
@@ -287,38 +315,7 @@
 				</Card>
 			{:else if detailProject}
 				<Card title={detailProject.name} subtitle="Project details and actions">
-					<div class="detail-grid">
-						<div class="detail-item">
-							<span class="form-label">Name</span>
-							<span class="detail-value">{detailProject.name}</span>
-						</div>
-						<div class="detail-item">
-							<span class="form-label">Path</span>
-							<span class="detail-value code">{detailProject.root_path}</span>
-						</div>
-						{#if detailProject.extensions && detailProject.extensions.length > 0}
-							<div class="detail-item">
-								<span class="form-label">Extensions</span>
-								<span class="detail-value"
-									>{detailProject.extensions.join(', ')}</span
-								>
-							</div>
-						{/if}
-						{#if detailProject.exclude_dirs && detailProject.exclude_dirs.length > 0}
-							<div class="detail-item">
-								<span class="form-label">Excluded Dirs</span>
-								<span class="detail-value"
-									>{detailProject.exclude_dirs.join(', ')}</span
-								>
-							</div>
-						{/if}
-						{#if detailProject.last_indexed}
-							<div class="detail-item">
-								<span class="form-label">Last Indexed</span>
-								<span class="detail-value">{detailProject.last_indexed}</span>
-							</div>
-						{/if}
-					</div>
+					<DescriptionList items={detailItems} label="Project details" />
 
 					<h3 class="section-title">Actions</h3>
 					<div class="tool-form-row">
@@ -390,32 +387,6 @@
 		gap: 0.5rem;
 	}
 
-	.project-item {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		width: 100%;
-		padding: 1rem;
-		border: 1px solid var(--gray-200);
-		background: none;
-		cursor: pointer;
-		text-align: left;
-		transition: all 0.2s;
-		font-family: inherit;
-	}
-
-	.project-item:hover {
-		background: var(--gray-100);
-		border-color: var(--black);
-	}
-
-	.project-item.selected {
-		border-color: var(--accent);
-		border-left: 4px solid var(--accent);
-		background: var(--gray-100);
-	}
-
 	.project-info {
 		display: flex;
 		flex-direction: column;
@@ -444,44 +415,6 @@
 		font-size: 0.65rem;
 		color: var(--gray-400);
 		flex-shrink: 0;
-	}
-
-	.checkbox-field {
-		margin-top: 0.5rem;
-	}
-
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		cursor: pointer;
-	}
-
-	.detail-grid {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		margin-bottom: 1.5rem;
-	}
-
-	.detail-item {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-		padding: 0.5rem 0;
-		border-bottom: 1px solid var(--gray-100);
-	}
-
-	.detail-value {
-		font-size: 1rem;
-	}
-
-	.detail-value.code {
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		word-break: break-all;
 	}
 
 </style>

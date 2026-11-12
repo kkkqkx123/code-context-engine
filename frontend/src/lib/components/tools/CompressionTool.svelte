@@ -105,7 +105,7 @@
 
 	.compression-info {
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		margin-bottom: 1.5rem;
 	}
 
@@ -151,7 +151,7 @@
 		flex: 1;
 		padding: 1rem;
 		background: var(--gray-50);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		font-family: var(--font-sans);
 		font-size: 1rem;
 		line-height: 1.6;

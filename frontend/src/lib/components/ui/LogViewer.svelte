@@ -86,7 +86,7 @@
 		padding: 1rem;
 		height: 400px;
 		overflow-y: auto;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 	}
 
 	.log-container::-webkit-scrollbar {

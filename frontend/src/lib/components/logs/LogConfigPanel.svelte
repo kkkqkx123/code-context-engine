@@ -133,9 +133,9 @@
 	.spec-item {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: 0.25rem;
 		padding: 0.75rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 

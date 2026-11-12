@@ -145,7 +145,7 @@
 <style>
 	.progress-section {
 		padding: 1.5rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		background: var(--gray-100);
 	}
 
@@ -165,7 +165,7 @@
 		margin-top: 1.5rem;
 		padding: 1rem;
 		background: var(--white);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 	.file-label {
@@ -226,9 +226,9 @@
 	.target-project {
 		display: flex;
 		flex-direction: column;
-		gap: 0.35rem;
+		gap: 0.5rem;
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		background: var(--gray-100);
 		min-width: 0;
 	}
@@ -268,7 +268,7 @@
 		flex-direction: column;
 		gap: 1rem;
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		background: var(--gray-100);
 	}
 

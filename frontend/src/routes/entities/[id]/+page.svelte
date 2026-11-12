@@ -371,7 +371,7 @@
 		align-items: end;
 		margin-bottom: 1.5rem;
 		padding: 0.75rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		background: var(--gray-50);
 	}
 

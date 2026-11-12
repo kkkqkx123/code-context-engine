@@ -6,6 +6,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
+import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import {
 		deadLetterApi,
@@ -211,31 +212,32 @@
 			>
 		{:else}
 			<Card>
-				<div class="toolbar">
-					<label class="select-all">
+				<Toolbar>
+					<label class="check-row">
 						<input
 							type="checkbox"
 							checked={selected.size === files.length}
 							onchange={toggleSelectAll}
 						/>
-						Select all ({files.length})
+						<span>Select all ({files.length})</span>
 					</label>
-					<span class="spacer"></span>
-					<Button
-						variant="primary"
-						disabled={busy || selected.size === 0}
-						onclick={() => runRetry([...selected])}
-					>
-						Retry Selected ({selected.size})
-					</Button>
-					<Button
-						variant="danger"
-						disabled={busy || selected.size === 0}
-						onclick={acknowledgeSelected}
-					>
-						Acknowledge Selected
-					</Button>
-				</div>
+					{#snippet actions()}
+						<Button
+							variant="primary"
+							disabled={busy || selected.size === 0}
+							onclick={() => runRetry([...selected])}
+						>
+							Retry Selected ({selected.size})
+						</Button>
+						<Button
+							variant="danger"
+							disabled={busy || selected.size === 0}
+							onclick={acknowledgeSelected}
+						>
+							Acknowledge Selected
+						</Button>
+					{/snippet}
+				</Toolbar>
 
 				<div class="table-wrap">
 					<table class="table">
@@ -264,7 +266,7 @@
 									<td>
 										<button
 											type="button"
-											class="file-link"
+											class="link-btn"
 											onclick={() => toggleExpand(file.file_path)}
 										>
 											{file.file_path}
@@ -350,31 +352,6 @@
 		text-align: center;
 		padding: 2rem 0;
 	}
-	.toolbar {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.75rem;
-	}
-	.toolbar .spacer {
-		flex: 1;
-	}
-	.select-all {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.85rem;
-	}
-	.file-link {
-		background: none;
-		border: none;
-		color: var(--ops-link);
-		cursor: pointer;
-		padding: 0;
-		font: inherit;
-		word-break: break-all;
-		text-decoration: underline;
-	}
 	.version {
 		margin-left: 0.4rem;
 		color: var(--ops-text-muted);
@@ -383,7 +360,7 @@
 	.modules {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.3rem;
+		gap: 0.25rem;
 		max-width: 220px;
 	}
 	.guidance {
@@ -392,7 +369,7 @@
 	}
 	.actions {
 		display: flex;
-		gap: 0.4rem;
+		gap: 0.5rem;
 		white-space: nowrap;
 	}
 	.detail-row td {

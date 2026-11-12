@@ -2,8 +2,10 @@
  * Style consistency check: guards the frontend-unification invariants.
  * Fails when a page reintroduces a local pattern that now has a shared
  * building block (Tabs, Notice, Modal, SelectChip, ToolFormRow/ToolActions,
- * table-wrap/table, search-hero) or bypasses the typography tokens
- * (--font-sans, --font-mono, tracking tokens, canonical sizes).
+ * table-wrap/table, search-hero, Pagination, StatusDot, KpiCard,
+ * DescriptionList, FieldCheck, Skeleton) or bypasses the design tokens
+ * (--font-sans, --font-mono, tracking tokens, canonical sizes, spacing
+ * scale, semantic borders).
  *
  * Runs in CI via `npm run check:style`. Scans only `src/`, never build output.
  */
@@ -81,8 +83,98 @@ const rules = [
 		allow: ['lib/components/ui/Modal.svelte'],
 	},
 	{
-		pattern: /--color-(surface|border|text-muted|link|warning)\b/,
-		message: 'ops dark --color-* tokens are retired; use --ops-* tokens.',
+		pattern: /class="[^"]*\bfile-link\b/,
+		message: 'file-link is retired; use the global .link-btn class.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bproject-item\b/,
+		message:
+			'project-item is retired; use the global .selectable-row class (rows) or .selectable-row.selectable-col (cards).',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bsearch-focus-btn\b/,
+		message:
+			'search-focus-btn is retired; use the Button component (variant="ghost", size="xs").',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bkind-select\b/,
+		message: 'kind-select is retired; use the global .select class.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bsearch-bar\b/,
+		message: 'search-bar is retired; use the global .tool-form-row class.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bfilter-check\b/,
+		message: 'filter-check is retired; use the FieldCheck component.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bhome-search-input\b/,
+		message: 'home-search-input is retired; use the global .search-hero class.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bhdot\b/,
+		message: 'hdot is retired; use the StatusDot component.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bstatus-dot\b/,
+		message: 'hand-written status-dot is retired; use the StatusDot component.',
+		allow: ['lib/components/ui/StatusDot.svelte'],
+	},
+	{
+		pattern: /class="[^"]*\bdetail-grid\b/,
+		message:
+			'detail-grid is retired; use DescriptionList (term/value data) or .card-grid (card collections).',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bdetail-(item|value)\b/,
+		message: 'detail-item/detail-value are retired; use the DescriptionList component.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\brelationship-(item|list)\b/,
+		message:
+			'relationship-item/list are retired; use .scroll-list with .selectable-row buttons.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bselect-all\b/,
+		message: 'select-all is retired; use the FieldCheck component.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bpage-label\b/,
+		message: 'page-label is retired; use the Pagination component.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bkv-(list|row|label|value)\b/,
+		message:
+			'kv-list/row/label/value are retired; use .desc-list/.desc-row/.desc-term/.desc-value.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bservice-grid\b/,
+		message: 'service-grid is retired; use the global .card-grid class.',
+		allow: [],
+	},
+	{
+		pattern: /class="[^"]*\bcommunity-btn\b/,
+		message: 'community-btn is retired; use the SelectChip component.',
+		allow: [],
+	},
+	{
+		pattern: /#[0-9a-fA-F]{3}\b|#[0-9a-fA-F]{6}\b/,
+		message: 'hard-coded hex color is retired; use a var(--*) token.',
 		allow: [],
 	},
 	{
@@ -121,6 +213,90 @@ const rules = [
 			'non-canonical size is retired; use the nearest canonical text scale step.',
 		allow: [],
 	},
+	{
+		pattern: /gap:\s*(0\.15rem|0\.3rem|0\.35rem|0\.4rem|0\.6rem)/,
+		message:
+			'outlier gap is retired; use the nearest spacing-scale step (0.125rem, 0.25rem, 0.5rem, 0.75rem, 1rem, 1.5rem, 2rem).',
+		allow: [],
+	},
+	{
+		pattern: /(padding|gap):[^;{}]*[0-9]px/,
+		message: 'px spacing is retired; use rem spacing-scale steps.',
+		allow: [],
+	},
+];
+
+/** Scoped redefinitions of promoted globals. Only the owning component
+ *  (listed in `owner`) may define the pattern; every other file reuses it. */
+const scopedRules = [
+	{
+		pattern: /\.selectable-row\s*\{/,
+		message:
+			'scoped .selectable-row redefinition; use the global class (add .selectable-col for vertical cards).',
+	},
+	{
+		pattern: /\.more-toggle\s*\{/,
+		message: 'scoped .more-toggle redefinition; use the global class.',
+	},
+	{
+		pattern: /\.link-btn\s*\{/,
+		message: 'scoped .link-btn redefinition; use the global class.',
+	},
+	{
+		pattern: /\.suggest-chip\s*\{/,
+		message: 'scoped .suggest-chip redefinition; use the global class.',
+	},
+	{
+		pattern: /\.section-heading\s*\{/,
+		message:
+			'scoped .section-heading redefinition; use the global class (card headings use .section-title, panel headings use .eyebrow-title).',
+	},
+	{
+		pattern: /\.desc-(list|item|term|value|value-mono|row)\b\s*\{/,
+		message:
+			'scoped .desc-* redefinition; use the global classes or the DescriptionList component.',
+	},
+	{
+		pattern: /\.card-grid\s*\{/,
+		message: 'scoped .card-grid redefinition; use the global class.',
+	},
+	{
+		pattern: /\.check-row\s*\{/,
+		message: 'scoped .check-row redefinition; use the FieldCheck component.',
+	},
+	{
+		pattern: /\.status-dot\s*\{/,
+		message: 'scoped .status-dot redefinition; use the StatusDot component.',
+		owner: 'lib/components/ui/StatusDot.svelte',
+	},
+	{
+		pattern: /\.skeleton(-line)?\s*\{/,
+		message: 'scoped .skeleton redefinition; use the Skeleton component.',
+	},
+	{
+		pattern: /\.select\s*\{/,
+		message: 'scoped .select redefinition; use the global class.',
+	},
+	{
+		pattern: /\.truncate\b\s*\{/,
+		message: 'scoped .truncate redefinition; use the global class.',
+	},
+	{
+		pattern: /\.scroll-list\s*\{/,
+		message: 'scoped .scroll-list redefinition; use the global class.',
+	},
+	{
+		pattern: /\.pagination\s*\{/,
+		message: 'scoped .pagination redefinition; use the Pagination component.',
+	},
+	{
+		pattern: /\.page-info\s*\{/,
+		message: 'scoped .page-info redefinition; use the Pagination component.',
+	},
+	{
+		pattern: /\bkbd\s*\{/,
+		message: 'scoped kbd redefinition; use the global kbd style.',
+	},
 ];
 
 const offenders = [];
@@ -131,6 +307,13 @@ for (const file of files) {
 	// Only inspect scoped styles + markup outside the components that own the pattern.
 	for (const rule of rules) {
 		if (rule.allow.some((a) => rel.endsWith(a))) continue;
+		if (rule.pattern.test(content)) {
+			offenders.push(`${rel}: ${rule.message}`);
+		}
+	}
+	// Scoped redefinition of promoted globals is never allowed outside the owner.
+	for (const rule of scopedRules) {
+		if (rule.owner && rel.endsWith(rule.owner)) continue;
 		if (rule.pattern.test(content)) {
 			offenders.push(`${rel}: ${rule.message}`);
 		}

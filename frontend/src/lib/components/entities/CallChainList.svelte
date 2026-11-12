@@ -73,7 +73,7 @@
 		gap: 1rem;
 		align-items: center;
 		padding: 1rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		cursor: pointer;
 		transition: background-color 0.2s;
 	}

@@ -171,7 +171,7 @@
 	}
 
 	.results-section {
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		padding-top: 2rem;
 	}
 
@@ -204,7 +204,7 @@
 	.file-info {
 		padding: 1rem;
 		background: var(--gray-100);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		margin-bottom: 2rem;
 	}
 
@@ -234,7 +234,7 @@
 
 	.entity-item {
 		padding: 1.25rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		margin-bottom: 1rem;
 		transition: all 0.2s;
 	}

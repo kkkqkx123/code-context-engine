@@ -11,6 +11,8 @@
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+import Pagination from '$lib/components/ui/Pagination.svelte';
+import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import SearchRunPanel from '$lib/components/search/SearchRunPanel.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -158,7 +160,7 @@
 		{/if}
 
 		{#if searchStore.isSearching}
-			<LoadingState message="Searching..." />
+			<Skeleton lines={4} label="Searching code index" />
 		{:else if searchStore.results.length > 0}
 			<Toolbar>
 				<h2 class="results-title">
@@ -215,21 +217,14 @@
 			</div>
 
 			{#if totalPages > 1 || hasMore}
-				<div class="pagination">
-					<Button
-						variant="secondary"
-						onclick={prevPage}
-						disabled={searchStore.pagination.page === 1}
-					>
-						Previous
-					</Button>
-					<span class="page-info">
-						Page {searchStore.pagination.page} of {hasMore ? '?' : totalPages}
-					</span>
-					<Button variant="secondary" onclick={nextPage} disabled={!hasMore}>
-						Next
-					</Button>
-				</div>
+				<Pagination
+					page={searchStore.pagination.page}
+					total={hasMore ? '?' : totalPages}
+					onPrev={prevPage}
+					onNext={nextPage}
+					prevDisabled={searchStore.pagination.page === 1}
+					nextDisabled={!hasMore}
+				/>
 			{/if}
 		{:else if searchStore.query && !searchStore.error}
 			<EmptyState
@@ -246,12 +241,6 @@
 		font-size: 0.7rem;
 		color: var(--gray-500);
 		margin: -0.75rem 0 1.5rem;
-	}
-
-	kbd {
-		border: 1px solid var(--gray-300);
-		padding: 0 0.3rem;
-		background: var(--gray-100);
 	}
 
 	.filter-toggle {
@@ -289,17 +278,4 @@
 		margin-top: 0.5rem;
 	}
 
-	.pagination {
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		gap: 2rem;
-		padding-top: 2rem;
-		border-top: 1px solid var(--gray-200);
-	}
-
-	.page-info {
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-	}
 </style>

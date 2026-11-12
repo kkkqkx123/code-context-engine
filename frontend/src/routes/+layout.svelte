@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
+import StatusDot from '$lib/components/ui/StatusDot.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ProjectSelector from '$lib/components/ui/ProjectSelector.svelte';
 	import { networkStore } from '$lib/stores/network.svelte';
@@ -139,6 +140,8 @@
 		metricsStore.lastUpdated != null && !metricsStore.error,
 	);
 
+	let storageStatus = $derived(metricsStore.storageStatus);
+
 	function toggleMobile() {
 		mobileOpen = !mobileOpen;
 		if (typeof document !== 'undefined') {
@@ -191,8 +194,10 @@
 
 		<div class="status-block">
 			<div class="status-row">
-				<span class="status-dot" class:ok={serverOk} class:bad={!serverOk}
-				></span>
+				<StatusDot
+					state={serverOk ? 'ok' : 'bad'}
+					title={serverOk ? 'Server Online' : 'Server Offline'}
+				/>
 				<span class="status-text"
 					>{serverOk ? 'Server Online' : 'Server Offline'}</span
 				>
@@ -273,26 +278,18 @@
 					<ProjectSelector />
 				</div>
 				<div class="health-dots" title="Storage component health">
-					{#if metricsStore.storageStatus}
-						{@const s = metricsStore.storageStatus}
-						<span
-							class="hdot"
-							class:ok={s.vector_storage.connected}
-							title="Vector DB"
-						></span>
-						<span class="hdot" class:ok={s.bm25_storage.connected} title="BM25"
-						></span>
-						<span
-							class="hdot"
-							class:ok={s.relation_storage.connected}
-							title="Relations"
-						></span>
-					{:else}
-						<span class="hdot idle"></span>
-						<span class="hdot idle"></span>
-						<span class="hdot idle"></span>
-						<span class="hdot idle"></span>
-					{/if}
+					<StatusDot
+						state={storageStatus ? (storageStatus.vector_storage.connected ? 'ok' : 'bad') : 'idle'}
+						title="Vector DB"
+					/>
+					<StatusDot
+						state={storageStatus ? (storageStatus.bm25_storage.connected ? 'ok' : 'bad') : 'idle'}
+						title="BM25"
+					/>
+					<StatusDot
+						state={storageStatus ? (storageStatus.relation_storage.connected ? 'ok' : 'bad') : 'idle'}
+						title="Relations"
+					/>
 				</div>
 				<span class="clock">{clock}</span>
 			</div>
@@ -358,23 +355,6 @@
 		gap: 0.5rem;
 	}
 
-	.status-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: var(--gray-500);
-	}
-
-	.status-dot.ok {
-		background: var(--success);
-		box-shadow: 0 0 0 3px rgba(27, 122, 61, 0.25);
-	}
-
-	.status-dot.bad {
-		background: var(--danger);
-		box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.25);
-	}
-
 	.status-text {
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
@@ -401,7 +381,7 @@
 	.nav-group {
 		display: flex;
 		flex-direction: column;
-		gap: 0.15rem;
+		gap: 0.125rem;
 	}
 
 	.nav-title {
@@ -468,7 +448,7 @@
 		gap: 1rem;
 		padding: 0 1.5rem;
 		background: var(--white);
-		border-bottom: 1px solid var(--black);
+		border-bottom: var(--border-strong);
 	}
 
 	.breadcrumb {
@@ -503,22 +483,7 @@
 
 	.health-dots {
 		display: flex;
-		gap: 0.35rem;
-	}
-
-	.hdot {
-		width: 9px;
-		height: 9px;
-		border-radius: 50%;
-		background: var(--danger);
-	}
-
-	.hdot.ok {
-		background: var(--success);
-	}
-
-	.hdot.idle {
-		background: var(--gray-300);
+		gap: 0.5rem;
 	}
 
 	.clock {
@@ -539,7 +504,7 @@
 		left: 0;
 		background: var(--accent);
 		color: var(--white);
-		padding: 8px 16px;
+		padding: 0.5rem 1rem;
 		z-index: 10000;
 		transition: top 0.3s;
 		font-family: var(--font-mono);
@@ -559,7 +524,7 @@
 		width: 40px;
 		height: 40px;
 		background: none;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		cursor: pointer;
 	}
 

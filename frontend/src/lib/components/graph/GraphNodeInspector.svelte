@@ -276,7 +276,7 @@
 
 <style>
 	.inspector {
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		padding: 1rem;
 		min-height: 200px;
 	}
@@ -313,9 +313,9 @@
 	.inspector-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.35rem;
+		gap: 0.5rem;
 		padding-bottom: 1rem;
-		border-bottom: 1px solid var(--gray-200);
+		border-bottom: var(--border-muted);
 		margin-bottom: 0.75rem;
 	}
 
@@ -324,7 +324,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 0.6rem;
+		gap: 0.5rem;
 		max-height: 420px;
 		overflow-y: auto;
 	}
@@ -337,7 +337,7 @@
 	.relation-head {
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
+		gap: 0.5rem;
 	}
 
 	.relation-domain {
@@ -421,7 +421,7 @@
 
 	.peer-actions {
 		display: flex;
-		gap: 0.35rem;
+		gap: 0.5rem;
 		margin-top: 0.3rem;
 	}
 

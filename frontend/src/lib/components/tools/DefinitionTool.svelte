@@ -103,7 +103,7 @@
 
 <style>
 	.def-card {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 0.75rem;
 		display: flex;
 		flex-direction: column;
@@ -113,7 +113,7 @@
 	.def-head {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
+		gap: 0.5rem;
 	}
 
 	.def-name {
@@ -125,7 +125,7 @@
 		margin: 0;
 		padding: 0.5rem;
 		background: var(--gray-50);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		overflow-x: auto;
 	}
 

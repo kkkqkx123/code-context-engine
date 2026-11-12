@@ -383,7 +383,7 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.75rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		background: var(--white);
 	}
 
@@ -398,7 +398,7 @@
 	.seed-mode,
 	.impact-mode {
 		display: flex;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		width: fit-content;
 	}
 
@@ -408,7 +408,7 @@
 	}
 
 	.adv-filter {
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		border-top: none;
 		margin: -0.25rem 0 1rem;
 		padding: 0.4rem 0.75rem;

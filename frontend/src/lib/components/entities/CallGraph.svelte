@@ -56,7 +56,7 @@
 
 <style>
 	.call-graph-container {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 1rem;
 	}
 
@@ -64,14 +64,14 @@
 		display: flex;
 		gap: 0;
 		margin-bottom: 1rem;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		width: fit-content;
 	}
 
 	.graph-legend {
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		display: flex;
 		gap: 2rem;
 	}

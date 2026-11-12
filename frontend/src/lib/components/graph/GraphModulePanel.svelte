@@ -136,7 +136,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 0.35rem;
+		gap: 0.5rem;
 		margin: 0;
 		padding: 0;
 		max-height: 260px;
@@ -147,7 +147,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		gap: 0.5rem;
 		margin: 0;
 		padding: 0;
 		max-height: 260px;
@@ -157,7 +157,7 @@
 	.module-edge-item {
 		display: flex;
 		flex-direction: column;
-		gap: 0.15rem;
+		gap: 0.125rem;
 		border-left: 2px solid var(--gray-200);
 		padding-left: 0.5rem;
 		word-break: break-all;

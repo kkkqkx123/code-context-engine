@@ -56,7 +56,7 @@
 	.code-block {
 		background: var(--black);
 		color: var(--white);
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		overflow: hidden;
 	}
 

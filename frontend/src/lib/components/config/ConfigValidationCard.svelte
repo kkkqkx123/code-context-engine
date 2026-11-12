@@ -113,20 +113,20 @@
 		padding: 0.75rem 1rem;
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		line-height: 1.5;
 	}
 
 	.issue-item.error {
 		border-color: var(--danger);
 		color: var(--danger);
-		background: var(--danger-bg, #fff5f5);
+		background: var(--danger-bg);
 	}
 
 	.issue-item.warning {
-		border-color: var(--warning, #e6a700);
-		color: var(--warning-text, #8a6d00);
-		background: var(--warning-bg, #fffbe6);
+		border-color: var(--warning);
+		color: var(--warning);
+		background: var(--warning-bg);
 	}
 
 </style>

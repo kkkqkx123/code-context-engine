@@ -224,7 +224,7 @@
 		color: var(--black);
 		padding: 1rem;
 		margin-bottom: 2rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		font-family: var(--font-mono);
 		font-size: 0.8rem;
 	}
@@ -246,7 +246,7 @@
 	.debounce-input {
 		width: 100%;
 		padding: 0.75rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		font-family: var(--font-mono);
 		font-size: 0.9rem;
 		background: var(--white);
@@ -267,7 +267,7 @@
 	}
 
 	.status-bar {
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		padding-top: 1.5rem;
 		display: flex;
 		justify-content: space-between;

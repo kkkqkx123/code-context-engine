@@ -3,6 +3,7 @@
 	import type { CallChainNode } from '$lib/api/search';
 	import CodeBlock from '../ui/CodeBlock.svelte';
 	import Badge from '../ui/Badge.svelte';
+	import DescriptionList from '../ui/DescriptionList.svelte';
 
 	interface Props {
 		func?: FunctionInfo | null;
@@ -24,13 +25,6 @@
 
 	let showAllCallers = $state(false);
 	let allCallees = $state(false);
-
-	function handleItemKeydown(event: KeyboardEvent, id: string) {
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			handleNavigate(id);
-		}
-	}
 </script>
 
 <div class="entity-detail">
@@ -42,16 +36,17 @@
 			</div>
 		</div>
 
-		<div class="entity-meta">
-			<div class="meta-item">
-				<span class="label">File:</span>
-				<span class="value">{func.file_path}</span>
-			</div>
-			<div class="meta-item">
-				<span class="label">Lines:</span>
-				<span class="value">{func.start_line}-{func.end_line}</span>
-			</div>
-		</div>
+		<DescriptionList
+			label="Entity location"
+			items={[
+				{ term: 'File', value: func.file_path, mono: true },
+				{
+					term: 'Lines',
+					value: `${func.start_line}-${func.end_line}`,
+					mono: true,
+				},
+			]}
+		/>
 
 		{#if func.signature}
 			<div class="signature-section">
@@ -71,20 +66,20 @@
 	{#if callers && callers.length > 0}
 		<div class="relationships-section">
 			<h3 class="eyebrow-title">Called By ({callers.length})</h3>
-			<div class="relationship-list">
+			<ul class="scroll-list">
 				{#each callers.slice(0, showAllCallers ? callers.length : 10) as caller (caller.function_id)}
-					<div
-						class="relationship-item"
-						onclick={() => handleNavigate(caller.function_id)}
-						onkeydown={(e) => handleItemKeydown(e, caller.function_id)}
-						tabindex="0"
-						role="button"
-					>
-						<span class="item-name">{caller.function_name}</span>
-						<span class="item-location"
-							>{caller.file_path}:{caller.call_line ?? ''}</span
+					<li>
+						<button
+							type="button"
+							class="selectable-row"
+							onclick={() => handleNavigate(caller.function_id)}
 						>
-					</div>
+							<span class="item-name">{caller.function_name}</span>
+							<span class="item-location"
+								>{caller.file_path}:{caller.call_line ?? ''}</span
+							>
+						</button>
+					</li>
 				{/each}
 				{#if callers.length > 10}
 					<button
@@ -97,27 +92,27 @@
 							: `+${callers.length - 10} more — show all`}
 					</button>
 				{/if}
-			</div>
+			</ul>
 		</div>
 	{/if}
 
 	{#if calls && calls.length > 0}
 		<div class="relationships-section">
 			<h3 class="eyebrow-title">Calls ({calls.length})</h3>
-			<div class="relationship-list">
+			<ul class="scroll-list">
 				{#each calls.slice(0, allCallees ? calls.length : 10) as call (call.function_id)}
-					<div
-						class="relationship-item"
-						onclick={() => handleNavigate(call.function_id)}
-						onkeydown={(e) => handleItemKeydown(e, call.function_id)}
-						tabindex="0"
-						role="button"
-					>
-						<span class="item-name">{call.function_name}</span>
-						<span class="item-location"
-							>{call.file_path}:{call.call_line ?? ''}</span
+					<li>
+						<button
+							type="button"
+							class="selectable-row"
+							onclick={() => handleNavigate(call.function_id)}
 						>
-					</div>
+							<span class="item-name">{call.function_name}</span>
+							<span class="item-location"
+								>{call.file_path}:{call.call_line ?? ''}</span
+							>
+						</button>
+					</li>
 				{/each}
 				{#if calls.length > 10}
 					<button
@@ -130,7 +125,7 @@
 							: `+${calls.length - 10} more — show all`}
 					</button>
 				{/if}
-			</div>
+			</ul>
 		</div>
 	{/if}
 </div>
@@ -147,7 +142,7 @@
 		gap: 1rem;
 		align-items: start;
 		padding-bottom: 1.5rem;
-		border-bottom: 1px solid var(--gray-200);
+		border-bottom: var(--border-muted);
 	}
 
 	.entity-name {
@@ -164,36 +159,10 @@
 		gap: 0.5rem;
 	}
 
-	.entity-meta {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		gap: 1rem;
-	}
-
-	.meta-item {
-		display: grid;
-		gap: 0.25rem;
-	}
-
-	.label {
-		font-family: var(--font-mono);
-		text-transform: uppercase;
-		font-size: 0.65rem;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-	}
-
-	.value {
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		word-break: break-all;
-	}
-
-
 	.signature-section,
 	.description-section,
 	.relationships-section {
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		padding-top: 1.5rem;
 	}
 
@@ -202,30 +171,6 @@
 		font-size: 1rem;
 		line-height: 1.6;
 		color: var(--gray-600);
-	}
-
-	.relationship-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: grid;
-		gap: 0.5rem;
-	}
-
-	/* Clickable relationship item: black border (per border convention) */
-	.relationship-item {
-		padding: 0.75rem;
-		border: 1px solid var(--black);
-		cursor: pointer;
-		transition: background-color 0.2s;
-		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: 1rem;
-		align-items: center;
-	}
-
-	.relationship-item:hover {
-		background-color: var(--gray-100);
 	}
 
 	.item-name {
@@ -239,18 +184,4 @@
 		color: var(--gray-400);
 	}
 
-	.more-toggle {
-		width: 100%;
-		padding: 0.75rem;
-		background: transparent;
-		border: 1px dashed var(--gray-300);
-		cursor: pointer;
-		font-family: var(--font-mono);
-		font-size: 0.75rem;
-		color: var(--gray-600);
-	}
-
-	.more-toggle:hover {
-		background: var(--gray-100);
-	}
 </style>

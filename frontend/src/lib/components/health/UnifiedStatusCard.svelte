@@ -17,7 +17,7 @@
 	subtitle="Aggregated health across all external services"
 >
 	{#if healthStore.unified}
-		<div class="service-grid">
+		<div class="card-grid">
 			<div class="service-item">
 				<div class="service-label">Overall</div>
 				<Badge
@@ -81,15 +81,9 @@
 </Card>
 
 <style>
-	.service-grid {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 1.5rem;
-	}
-
 	.service-item {
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 	.service-label {
@@ -111,7 +105,7 @@
 	.updated-row {
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		display: flex;
 		gap: 0.5rem;
 		align-items: baseline;
@@ -131,15 +125,4 @@
 		color: var(--gray-600);
 	}
 
-	@media (max-width: 1024px) {
-		.service-grid {
-			grid-template-columns: repeat(2, 1fr);
-		}
-	}
-
-	@media (max-width: 768px) {
-		.service-grid {
-			grid-template-columns: 1fr;
-		}
-	}
 </style>

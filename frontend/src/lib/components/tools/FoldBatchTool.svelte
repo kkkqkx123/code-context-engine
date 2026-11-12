@@ -194,11 +194,11 @@
 
 <style>
 	.item {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 0.75rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.6rem;
+		gap: 0.5rem;
 	}
 
 	.item-head {
@@ -213,11 +213,11 @@
 	}
 
 	.hit {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 0.6rem 0.75rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.35rem;
+		gap: 0.5rem;
 	}
 
 	.hit-head {

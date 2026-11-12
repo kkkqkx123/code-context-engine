@@ -171,7 +171,7 @@
 	.run-body {
 		margin-top: 0.75rem;
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		background: var(--gray-50);
 	}
 
@@ -194,7 +194,7 @@
 		padding: 0;
 		margin: 0;
 		display: grid;
-		gap: 0.35rem;
+		gap: 0.5rem;
 	}
 
 	li,
@@ -222,12 +222,12 @@
 		gap: 0.75rem;
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 	}
 
 	.diff {
 		display: grid;
-		gap: 0.35rem;
+		gap: 0.5rem;
 	}
 
 	.diff h3 {

@@ -392,7 +392,7 @@
 
 <style>
 	.filter-panel {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 1.5rem;
 		margin-bottom: 1.5rem;
 		display: grid;
@@ -409,7 +409,7 @@
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
 		gap: 0.5rem;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		padding: 0.35rem;
 		width: fit-content;
 		max-width: 100%;
@@ -418,7 +418,7 @@
 	.agg-section {
 		padding: 1rem;
 		background: var(--gray-100);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 	.sub-query-row {

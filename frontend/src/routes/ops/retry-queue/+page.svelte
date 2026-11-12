@@ -197,7 +197,7 @@
 	.filter-row {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
+		gap: 0.5rem;
 		margin-bottom: 1rem;
 	}
 	.filter-row label {
@@ -216,7 +216,7 @@
 	.stat {
 		display: flex;
 		align-items: baseline;
-		gap: 0.6rem;
+		gap: 0.5rem;
 	}
 	.stat-label {
 		color: var(--ops-text-muted);

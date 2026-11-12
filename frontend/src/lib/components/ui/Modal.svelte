@@ -55,7 +55,7 @@
 
 	.modal {
 		background: var(--white);
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		padding: 1.25rem 1.5rem;
 		max-width: 460px;
 		width: 90%;

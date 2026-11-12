@@ -54,7 +54,7 @@
 		gap: 1.5rem;
 		padding-bottom: 1.25rem;
 		margin-bottom: 1.75rem;
-		border-bottom: 1px solid var(--black);
+		border-bottom: var(--border-strong);
 	}
 
 	.page-header-text {

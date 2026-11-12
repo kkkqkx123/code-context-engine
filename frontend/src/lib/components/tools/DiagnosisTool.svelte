@@ -179,7 +179,7 @@
 
 	.issue-card {
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		border-left: 3px solid var(--black);
 	}
 

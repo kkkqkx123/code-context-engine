@@ -45,7 +45,7 @@
 		display: flex;
 		gap: 0;
 		margin-bottom: 1rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		background: var(--white);
 	}
 </style>

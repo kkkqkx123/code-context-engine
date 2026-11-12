@@ -36,7 +36,7 @@
 		width: 100%;
 		padding: 0.4rem 0.5rem;
 		background: var(--white);
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		cursor: pointer;
 		text-align: left;
 		font-family: var(--font-mono);

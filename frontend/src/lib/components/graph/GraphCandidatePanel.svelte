@@ -40,7 +40,7 @@
 	.candidate-panel {
 		padding: 0.6rem 0.75rem;
 		margin-bottom: 1rem;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 	}
 
 	.candidate-context {
@@ -62,7 +62,7 @@
 		list-style: none;
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-		gap: 0.4rem;
+		gap: 0.5rem;
 		margin: 0;
 		padding: 0;
 	}
@@ -70,7 +70,7 @@
 	.candidate-text {
 		display: flex;
 		flex-direction: column;
-		gap: 0.15rem;
+		gap: 0.125rem;
 	}
 
 	.candidate-name {

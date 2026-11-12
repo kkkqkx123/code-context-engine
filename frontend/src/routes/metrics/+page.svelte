@@ -8,6 +8,7 @@
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
+	import FieldCheck from '$lib/components/ui/FieldCheck.svelte';
 	import { onMount } from 'svelte';
 	import { metricsApi, type AggregatedMetric } from '$lib/api/metrics';
 	import { projectStore, onProjectChange } from '$lib/stores/project.svelte';
@@ -168,10 +169,7 @@
 						placeholder="e.g. index_duration"
 					/>
 				</label>
-				<label class="filter-check">
-					<input type="checkbox" bind:checked={scopeProject} />
-					<span>Current project only</span>
-				</label>
+				<FieldCheck label="Current project only" bind:checked={scopeProject} />
 				<Button
 					variant="secondary"
 					onclick={loadHistory}
@@ -264,10 +262,7 @@
 				unaffected.
 			</p>
 			<div class="tool-form-row">
-				<label class="filter-check">
-					<input type="checkbox" bind:checked={cleanupAll} />
-					<span>Delete all records</span>
-				</label>
+				<FieldCheck label="Delete all records" bind:checked={cleanupAll} />
 				<label class="form-field">
 					<span class="form-label">Delete records before</span>
 					<input
@@ -317,15 +312,6 @@
 
 
 
-	.filter-check {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.85rem;
-		color: var(--gray-600);
-		padding-bottom: 0.45rem;
-	}
-
 
 	table {
 		width: 100%;
@@ -341,7 +327,7 @@
 		color: var(--gray-600);
 		text-align: left;
 		padding: 0.6rem 0.75rem;
-		border-bottom: 1px solid var(--gray-200);
+		border-bottom: var(--border-muted);
 		background: var(--gray-50);
 		white-space: nowrap;
 	}

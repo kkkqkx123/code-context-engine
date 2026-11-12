@@ -83,18 +83,18 @@
 
 <style>
 	.entity-graph-view {
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 	}
 
 	.entity-graph-view :global(.graph-toolbar) {
 		border: none;
-		border-bottom: 1px solid var(--gray-200);
+		border-bottom: var(--border-muted);
 	}
 
 	.canvas-hint {
 		margin: 0;
 		padding: 0.4rem 0.75rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		color: var(--gray-500);

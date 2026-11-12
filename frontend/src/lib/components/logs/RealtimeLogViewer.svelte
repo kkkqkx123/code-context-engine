@@ -149,12 +149,12 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		padding-bottom: 1rem;
-		border-bottom: 1px solid var(--black);
+		border-bottom: var(--border-strong);
 	}
 
 	.level-filters {
 		display: flex;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		width: fit-content;
 	}
 
@@ -167,7 +167,7 @@
 		padding: 1rem;
 		height: 480px;
 		overflow-y: auto;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
@@ -176,7 +176,7 @@
 	.log-line {
 		display: flex;
 		align-items: baseline;
-		gap: 0.6rem;
+		gap: 0.5rem;
 		padding: 0.2rem 0;
 		border-bottom: 1px solid var(--gray-800);
 		min-width: 0;

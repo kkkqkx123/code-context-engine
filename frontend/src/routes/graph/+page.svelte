@@ -684,7 +684,7 @@
 
 	.canvas-column {
 		min-width: 0;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 	}
 
 	.canvas-column :global(.graph-canvas) {
@@ -694,7 +694,7 @@
 	.canvas-hint {
 		margin: 0;
 		padding: 0.4rem 0.75rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 		font-family: var(--font-mono);
 		font-size: 0.6rem;
 		color: var(--gray-500);
@@ -703,7 +703,7 @@
 	.impact-dependents {
 		margin-bottom: 1rem;
 		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		background: var(--gray-50);
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
@@ -725,14 +725,14 @@
 		list-style: none;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.35rem;
+		gap: 0.5rem;
 		margin: 0.4rem 0 0;
 		padding: 0;
 	}
 
 	.canvas-help {
 		margin: 0.5rem 0 0;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		padding: 0.35rem 0.6rem;
 		font-family: var(--font-mono);
 		font-size: 0.65rem;
@@ -754,13 +754,13 @@
 
 	.canvas-legend {
 		margin-top: 0.75rem;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		padding: 0.5rem;
 	}
 
 	.result-section {
 		margin-top: 1rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 	}
 
 	.result-section-summary {

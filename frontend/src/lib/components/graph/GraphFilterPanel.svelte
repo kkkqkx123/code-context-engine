@@ -13,6 +13,7 @@
 	} from '$lib/utils/graph-domains';
 	import SelectChip from '$lib/components/ui/SelectChip.svelte';
 	import Toggle from '$lib/components/ui/Toggle.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	interface Props {
 		domains?: RelationDomain[];
@@ -64,14 +65,14 @@
 				<span class="search-count"
 					>{searchMatchCount} match{searchMatchCount === 1 ? '' : 'es'}</span
 				>
-				<button
-					type="button"
-					class="search-focus-btn"
+				<Button
+					variant="ghost"
+					size="xs"
 					onclick={() => onFocusMatches?.()}
 					disabled={searchMatchCount === 0}
 				>
 					Focus matches
-				</button>
+				</Button>
 			</div>
 		{/if}
 	</div>
@@ -146,7 +147,7 @@
 		flex-direction: column;
 		gap: 1.25rem;
 		padding: 1rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		background: var(--white);
 		min-width: 210px;
 	}
@@ -177,23 +178,6 @@
 
 	.search-count {
 		color: var(--gray-500);
-	}
-
-	.search-focus-btn {
-		height: 24px;
-		padding: 0 0.5rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		cursor: pointer;
-		font-family: var(--font-mono);
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-wide);
-	}
-
-	.search-focus-btn:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
 	}
 
 	.domain-list {

@@ -51,6 +51,52 @@
 	--status-modified: #fbbf24; /* amber on black */
 	--status-deleted: #f87171; /* light red on black */
 
+	/* Spacing scale — single source for gap and padding steps. Prefer these
+	   over ad-hoc rem values so density stays consistent across panels. */
+	--space-3xs: 0.125rem;
+	--space-2xs: 0.25rem;
+	--space-xs: 0.5rem;
+	--space-sm: 0.75rem;
+	--space-md: 1rem;
+	--space-lg: 1.5rem;
+	--space-xl: 2rem;
+	--space-2xl: 2.5rem;
+
+	/* Semantic borders — strong for interactive surfaces, muted for tables
+	   and structural dividers, soft for inner controls. */
+	--border-strong: 1px solid var(--black);
+	--border-muted: 1px solid var(--gray-200);
+	--border-soft: 1px solid var(--gray-300);
+	--border-accent: 1px solid var(--accent);
+	--border-selected: 4px solid var(--accent);
+
+	/* Shape — surfaces stay square by default; the small radius is reserved
+	   for node silhouettes and compact controls that genuinely need it. */
+	--radius-none: 0;
+	--radius-sm: 4px;
+	--radius-round: 50%;
+
+	/* Canonical breakpoints (reference only — plain CSS cannot read tokens
+	   inside @media): 480px sm, 768px md, 900px drawer, 1024px lg, 1200px xl. */
+	--break-sm: 480px;
+	--break-md: 768px;
+	--break-drawer: 900px;
+	--break-lg: 1024px;
+	--break-xl: 1200px;
+
+	/* Relation node palette — legend swatches share these with the canvas
+	   stylesheet so shapes never drift from the graph. */
+	--node-type-bg: #f5f3ff;
+	--node-type-border: #5b21b6;
+	--node-callable-bg: #eff6ff;
+	--node-callable-border: #1e40af;
+	--node-contract-bg: #ecfdf5;
+	--node-contract-border: #065f46;
+	--node-value-bg: #fffbeb;
+	--node-value-border: #92400e;
+	--node-container-bg: #f8fafc;
+	--node-container-border: #334155;
+
 	/* Typography tokens — single source for font family, scale, tracking, leading */
 	--font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
 	--font-mono: 'Space Mono', monospace;
@@ -186,15 +232,15 @@ pre code {
 
 /* Borders & Dividers */
 .border-top {
-	border-top: 1px solid var(--black);
+	border-top: var(--border-strong);
 }
 
 .border-bottom {
-	border-bottom: 1px solid var(--black);
+	border-bottom: var(--border-strong);
 }
 
 .divider {
-	border-bottom: 1px solid var(--gray-200);
+	border-bottom: var(--border-muted);
 }
 
 /* Component Patterns */
@@ -226,7 +272,7 @@ pre code {
 .btn-secondary {
 	background: var(--white);
 	color: var(--black);
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 }
 
 .btn-secondary:hover:not(:disabled) {
@@ -246,7 +292,7 @@ pre code {
 .btn-ghost {
 	background: var(--white);
 	color: var(--black);
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 }
 
 .btn-ghost:hover:not(:disabled) {
@@ -259,7 +305,7 @@ pre code {
 	height: 32px;
 	padding: 0 0.75rem;
 	border: none;
-	border-right: 1px solid var(--gray-300);
+	border-right: var(--border-soft);
 	background: var(--white);
 	color: var(--gray-600);
 	border-radius: 0;
@@ -304,7 +350,7 @@ pre code {
 /* Cards — hover behavior is scoped to .card-clickable in Card.svelte */
 .card {
 	background: var(--white);
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	padding: 2rem;
 	transition: background 0.3s;
 }
@@ -319,7 +365,7 @@ pre code {
 	font-size: 1rem;
 	color: var(--black);
 	background: var(--white);
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	outline: none;
 	transition: border-color 0.3s;
 }
@@ -339,7 +385,7 @@ pre code {
 .text-input {
 	width: 100%;
 	padding: 0.5rem 0.6rem;
-	border: 1px solid var(--gray-300);
+	border: var(--border-soft);
 	background: var(--white);
 	font-family: var(--font-mono);
 	font-size: 0.75rem;
@@ -371,7 +417,7 @@ pre code {
 	font-family: var(--font-sans);
 	font-size: 1.25rem;
 	padding: 1rem 1.5rem;
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	background: var(--white);
 	color: var(--black);
 	outline: none;
@@ -393,7 +439,7 @@ pre code {
 	flex: 1;
 	width: 100%;
 	padding: 1rem;
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	background: var(--black);
 	color: var(--white);
 	font-family: var(--font-mono);
@@ -417,7 +463,7 @@ pre code {
 .table td {
 	padding: 1rem;
 	text-align: left;
-	border-bottom: 1px solid var(--gray-200);
+	border-bottom: var(--border-muted);
 }
 
 .table th {
@@ -437,7 +483,7 @@ pre code {
 	font-size: 0.65rem;
 	text-transform: uppercase;
 	letter-spacing: var(--tracking-wide);
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 }
 
 .badge-active {
@@ -604,7 +650,7 @@ pre code {
 }
 
 .kpi-card {
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	padding: 1.25rem;
 	display: flex;
 	flex-direction: column;
@@ -637,7 +683,7 @@ pre code {
 .table-wrap {
 	width: 100%;
 	overflow-x: auto;
-	border: 1px solid var(--gray-200);
+	border: var(--border-muted);
 }
 
 .table-wrap .table {
@@ -654,7 +700,7 @@ pre code {
 .quick-tile {
 	display: block;
 	padding: 1.25rem;
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	text-decoration: none;
 	color: inherit;
 	transition: background 0.2s;
@@ -680,7 +726,7 @@ pre code {
 .graph-inline-field {
 	display: flex;
 	align-items: center;
-	gap: 0.35rem;
+	gap: 0.5rem;
 }
 
 .graph-inline-label {
@@ -708,7 +754,7 @@ pre code {
 	display: flex;
 	gap: 0;
 	margin-bottom: 1rem;
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 	background: var(--white);
 }
 
@@ -738,7 +784,7 @@ pre code {
 	width: 100%;
 	padding: 0.4rem 0.5rem;
 	background: var(--white);
-	border: 1px solid var(--gray-300);
+	border: var(--border-soft);
 	cursor: pointer;
 	text-align: left;
 	font-family: var(--font-mono);
@@ -885,7 +931,7 @@ pre code {
 .panel-section {
 	margin-top: 1rem;
 	padding: 1rem;
-	border: 1px solid var(--black);
+	border: var(--border-strong);
 }
 
 .panel-head {
@@ -939,7 +985,7 @@ pre code {
 	align-items: center;
 	gap: 0.75rem;
 	padding: 1rem;
-	border: 1px solid var(--gray-200);
+	border: var(--border-muted);
 	margin-top: 1rem;
 	flex-wrap: wrap;
 }
@@ -961,6 +1007,299 @@ pre code {
 	gap: 0.75rem;
 	margin-bottom: 1rem;
 	flex-wrap: wrap;
+}
+
+/* Selectable rows — single source for rich-content list options (project
+   items, relationship items, community buttons). Simple toggles keep using
+   the SelectChip component; rows with custom multi-part layouts use this. */
+.selectable-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-md);
+	width: 100%;
+	padding: var(--space-md);
+	background: var(--white);
+	border: var(--border-muted);
+	cursor: pointer;
+	text-align: left;
+	color: inherit;
+	font: inherit;
+	transition:
+		background 0.2s,
+		border-color 0.2s;
+}
+
+.selectable-row:hover {
+	background: var(--gray-100);
+	border-color: var(--black);
+}
+
+.selectable-row.selected {
+	border-color: var(--accent);
+	border-left: var(--border-selected);
+	background: var(--gray-100);
+}
+
+/* Column direction modifier for selectable-row: vertical cards with
+   trailing actions (ProjectList). Default remains a horizontal row. */
+.selectable-row.selectable-col {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+/* Card grid — single source for responsive card collections (health
+   diagnostics, service overviews). Auto-fit collapse replaces per-page
+   breakpoint overrides. */
+.card-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	gap: var(--space-lg);
+	margin-bottom: var(--space-lg);
+}
+
+/* Text-link button — single source for inline file and entity links
+   (replaces per-page file-link copies). */
+.link-btn {
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--ops-link);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	text-decoration: underline;
+	word-break: break-all;
+}
+
+.link-btn:hover {
+	color: var(--black);
+}
+
+/* Expand toggle — single source for show more / show fewer list toggles. */
+.more-toggle {
+	width: 100%;
+	padding: var(--space-sm);
+	background: transparent;
+	border: 1px dashed var(--gray-300);
+	cursor: pointer;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	color: var(--gray-600);
+}
+
+.more-toggle:hover {
+	background: var(--gray-100);
+}
+
+/* Suggestion chip — single source for inline search suggestions on the
+dashboard. Full-width list selection keeps using SelectChip. */
+.suggest-chip {
+	background: transparent;
+	border: var(--border-soft);
+	padding: 0.2rem 0.5rem;
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	cursor: pointer;
+	color: var(--black);
+}
+
+.suggest-chip:hover {
+	background: var(--gray-100);
+}
+
+/* Page section heading — mono uppercase page-level heading. Card-level
+   headings use .section-title, panel headings use .eyebrow-title. */
+.section-heading {
+	font-family: var(--font-mono);
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-widest);
+	color: var(--gray-600);
+	margin-bottom: var(--space-md);
+}
+
+/* Description list — single source for term/value detail blocks (project
+   details, entity meta). Prefer DescriptionList over hand-written grids. */
+.desc-list {
+	display: flex;
+	flex-direction: column;
+	margin: 0;
+}
+
+.desc-item {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2xs);
+	padding: var(--space-xs) 0;
+	border-bottom: 1px solid var(--gray-100);
+}
+
+.desc-term {
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-widest);
+	color: var(--gray-600);
+}
+
+.desc-value {
+	font-size: 1rem;
+	color: var(--black);
+}
+
+.desc-value-mono {
+	font-family: var(--font-mono);
+	font-size: 0.8rem;
+	word-break: break-all;
+}
+
+/* Row orientation for description items — term left, value right. Shares
+   term/value typography with .desc-item; use for rich values (Badge)
+   that the DescriptionList component cannot carry. */
+.desc-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-md);
+	padding: var(--space-xs) 0;
+	border-bottom: 1px solid var(--gray-100);
+}
+
+.desc-row:last-child {
+	border-bottom: none;
+}
+
+.desc-row > :last-child {
+	text-align: right;
+}
+
+/* Truncation and scrollable option lists. */
+.truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.scroll-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* Status dot — single source for online/offline and health indicators.
+   Prefer the StatusDot component over hand-written dots. */
+.status-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--gray-500);
+	flex-shrink: 0;
+}
+
+.status-dot.ok {
+	background: var(--success);
+	box-shadow: 0 0 0 3px rgba(27, 122, 61, 0.25);
+}
+
+.status-dot.bad {
+	background: var(--danger);
+	box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.25);
+}
+
+.status-dot.idle {
+	background: var(--gray-300);
+}
+
+/* Checkbox and radio rows — single source for inline option toggles.
+   Prefer the FieldCheck component over hand-written labels. */
+.check-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-xs);
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	color: var(--gray-600);
+	cursor: pointer;
+}
+
+.check-row input[type='checkbox'],
+.check-row input[type='radio'] {
+	width: 1rem;
+	height: 1rem;
+	accent-color: var(--black);
+}
+
+/* Native dropdown — single source for select controls (replaces per-page
+   kind-select copies). Dense filter rows use this, not the Input component. */
+.select {
+	padding: 0.55rem 0.6rem;
+	border: var(--border-soft);
+	background: var(--white);
+	font-family: var(--font-mono);
+	font-size: 0.8rem;
+	color: var(--black);
+}
+
+.select:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+
+/* Keyboard hint — single source for kbd elements. */
+.kbd,
+kbd {
+	border: var(--border-soft);
+	padding: 0 0.3rem;
+	background: var(--gray-100);
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+}
+
+/* Skeleton lines — single source for content placeholders. Prefer the
+   Skeleton component over hand-written shimmer blocks. */
+.skeleton {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	padding: var(--space-md) 0;
+}
+
+.skeleton-line {
+	height: 0.85rem;
+	background: linear-gradient(
+		90deg,
+		var(--gray-100) 25%,
+		var(--gray-200) 50%,
+		var(--gray-100) 75%
+	);
+	background-size: 200% 100%;
+	animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+	to {
+		background-position: -200% 0;
+	}
+}
+
+/* Pagination row — single source for prev/next page controls. Prefer the
+   Pagination component over hand-written page rows. */
+.pagination {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: var(--space-xl);
+	padding-top: var(--space-xl);
+	border-top: var(--border-muted);
+}
+
+.page-info {
+	font-family: var(--font-mono);
+	font-size: 0.85rem;
+	color: var(--black);
 }
 
 /* ─── Lightweight code tokens (no external highlighter dependency) ─── */

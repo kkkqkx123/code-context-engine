@@ -147,7 +147,7 @@
 	.fold-output {
 		flex: 1;
 		padding: 1rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		background: var(--black);
 		color: var(--white);
 		font-family: var(--font-mono);

@@ -198,8 +198,9 @@
 		<div class="project-list">
 			{#each projectStore.projects as project (project.id)}
 				<div
-					class="project-item"
+					class="selectable-row selectable-col"
 					class:selected={projectStore.currentProject?.id === project.id}
+					aria-pressed={projectStore.currentProject?.id === project.id}
 					onclick={() => selectProject(project)}
 					role="button"
 					tabindex="0"
@@ -260,7 +261,7 @@
 	.form-section {
 		margin-bottom: 2rem;
 		padding: 1.5rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		background: var(--gray-100);
 	}
 
@@ -289,24 +290,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
-	}
-
-	.project-item {
-		padding: 1.5rem;
-		border: 1px solid var(--gray-200);
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.project-item:hover {
-		background: var(--gray-100);
-		border-color: var(--black);
-	}
-
-	.project-item.selected {
-		border-color: var(--accent);
-		border-left: 4px solid var(--accent);
-		background: var(--gray-100);
 	}
 
 	.project-header {
@@ -353,6 +336,6 @@
 		gap: 0.5rem;
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 	}
 </style>

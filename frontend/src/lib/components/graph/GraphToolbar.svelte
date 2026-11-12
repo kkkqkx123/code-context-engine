@@ -136,7 +136,7 @@
 		gap: 1rem;
 		flex-wrap: wrap;
 		padding: 0.5rem 0.75rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		border-bottom: none;
 		background: var(--white);
 	}
@@ -144,7 +144,7 @@
 	.toolbar-group {
 		display: flex;
 		align-items: center;
-		gap: 0.35rem;
+		gap: 0.5rem;
 	}
 
 	.toolbar-spacer {
@@ -163,7 +163,7 @@
 		height: 28px;
 		padding: 0 0.4rem;
 		background: var(--white);
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--black);

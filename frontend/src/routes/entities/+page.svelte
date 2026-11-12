@@ -119,7 +119,7 @@
 		/>
 
 		<Card title="Search Entities" subtitle="FTS5 query over the entity index">
-			<div class="search-bar">
+			<div class="tool-form-row">
 				<input
 					class="text-input"
 					type="text"
@@ -131,7 +131,7 @@
 					}}
 				/>
 				<select
-					class="kind-select"
+					class="select"
 					bind:value={kindFilter}
 					aria-label="Kind filter"
 				>
@@ -141,7 +141,7 @@
 					{/each}
 				</select>
 				<select
-					class="kind-select"
+					class="select"
 					bind:value={limit}
 					aria-label="Result limit"
 				>
@@ -160,7 +160,7 @@
 				<p class="empty-hint">No entities matched the query.</p>
 			{:else if results.length > 0}
 				<div class="table-wrap">
-					<table>
+					<table class="table">
 						<thead>
 							<tr>
 								<th>Name</th>
@@ -223,13 +223,13 @@
 			title="Classification"
 			subtitle="External-call classification counts and category detail"
 		>
-			<div class="search-bar">
-				<label class="kind-select-label" for="classification-limit">
+			<div class="tool-form-row">
+				<label class="form-label" for="classification-limit">
 					Detail limit
 				</label>
 				<select
 					id="classification-limit"
-					class="kind-select"
+					class="select"
 					bind:value={classificationLimit}
 					aria-label="Classification detail limit"
 				>
@@ -248,7 +248,7 @@
 
 			{#if entityStore.classificationStats}
 				<div class="table-wrap">
-					<table>
+					<table class="table">
 						<thead>
 							<tr>
 								<th>Category</th>
@@ -292,59 +292,8 @@
 </div>
 
 <style>
-	.search-bar {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-		align-items: center;
-	}
-
-	.kind-select {
-		padding: 0.55rem 0.6rem;
-		border: 1px solid var(--gray-300);
-		background: var(--white);
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		color: var(--black);
-	}
-
-	.kind-select:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
 	.table-wrap {
-		overflow-x: auto;
-		border: 1px solid var(--gray-200);
 		margin-top: 1.25rem;
-	}
-
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.85rem;
-	}
-
-	th {
-		font-family: var(--font-mono);
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-widest);
-		color: var(--gray-600);
-		text-align: left;
-		padding: 0.6rem 0.75rem;
-		border-bottom: 1px solid var(--gray-200);
-		background: var(--gray-50);
-		white-space: nowrap;
-	}
-
-	td {
-		padding: 0.55rem 0.75rem;
-		border-bottom: 1px solid var(--gray-100);
-	}
-
-	tr:last-child td {
-		border-bottom: none;
 	}
 
 	.entity-link {

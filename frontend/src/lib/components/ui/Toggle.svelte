@@ -59,7 +59,7 @@
 		width: 48px;
 		height: 24px;
 		background: var(--gray-200);
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		transition: background 0.3s ease;
 	}
 
@@ -74,7 +74,7 @@
 		width: 18px;
 		height: 18px;
 		background: var(--white);
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.2, 1);
 	}
 

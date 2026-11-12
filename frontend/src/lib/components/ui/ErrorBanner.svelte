@@ -49,7 +49,7 @@
 		color: var(--white);
 		padding: 1rem;
 		margin-bottom: 1.5rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		font-family: var(--font-mono);
 		font-size: 0.85rem;
 	}

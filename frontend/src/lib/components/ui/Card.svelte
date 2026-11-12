@@ -48,7 +48,7 @@
 	.card-header {
 		margin-bottom: 1.5rem;
 		padding-bottom: 1rem;
-		border-bottom: 1px solid var(--gray-200);
+		border-bottom: var(--border-muted);
 	}
 
 	.card-title {

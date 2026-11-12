@@ -42,7 +42,7 @@
 		gap: 1.5rem;
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 	}
 
 	.legend-item {
@@ -80,27 +80,27 @@
 	}
 
 	.legend-node[data-shape='rectangle'] {
-		border-radius: 0;
-		background: #f5f3ff;
-		border-color: #5b21b6;
+		border-radius: var(--radius-none);
+		background: var(--node-type-bg);
+		border-color: var(--node-type-border);
 	}
 
 	.legend-node[data-shape='round-rectangle'] {
-		border-radius: 4px;
-		background: #eff6ff;
-		border-color: #1e40af;
+		border-radius: var(--radius-sm);
+		background: var(--node-callable-bg);
+		border-color: var(--node-callable-border);
 	}
 
 	.legend-node[data-shape='hexagon'] {
 		clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-		background: #ecfdf5;
-		border-color: #065f46;
+		background: var(--node-contract-bg);
+		border-color: var(--node-contract-border);
 	}
 
 	.legend-node[data-shape='ellipse'] {
-		border-radius: 50%;
-		background: #fffbeb;
-		border-color: #92400e;
+		border-radius: var(--radius-round);
+		background: var(--node-value-bg);
+		border-color: var(--node-value-border);
 	}
 
 	.legend-node[data-shape='octagon'] {
@@ -114,8 +114,8 @@
 			0 70%,
 			0 30%
 		);
-		background: #f8fafc;
-		border-color: #334155;
+		background: var(--node-container-bg);
+		border-color: var(--node-container-border);
 	}
 
 	.legend-node[data-shape='pentagon'] {

@@ -178,14 +178,14 @@
 
 <style>
 	.inheritance-tree {
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 1rem;
 	}
 
 	.view-toggle {
 		display: flex;
 		margin-bottom: 1rem;
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		width: fit-content;
 	}
 
@@ -207,7 +207,7 @@
 
 	.tree-item {
 		padding: 0.75rem 1rem;
-		border: 1px solid var(--black);
+		border: var(--border-strong);
 		cursor: pointer;
 		transition: all 0.2s;
 		display: grid;

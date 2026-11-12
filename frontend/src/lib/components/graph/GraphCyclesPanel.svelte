@@ -152,7 +152,7 @@
 	}
 
 	.cycle-item {
-		border: 1px solid var(--gray-300);
+		border: var(--border-soft);
 		padding: 0.4rem 0.5rem;
 	}
 

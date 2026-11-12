@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { logsApi, type LogEntry } from '$lib/api/logs';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Toolbar from '$lib/components/ui/Toolbar.svelte';
@@ -162,31 +163,24 @@
 			</table>
 		</div>
 	{/if}
-	<div class="pagination">
-		<Button
-			variant="secondary"
-			size="xs"
-			onclick={() => {
-				if (page > 1) {
-					page--;
-					search();
-				}
-			}}
-		>
-			Prev
-		</Button>
-		<span class="page-label">Page {page}</span>
-		<Button
-			variant="secondary"
-			size="xs"
-			onclick={() => {
-				page++;
+	<Pagination
+		page={page}
+		size="xs"
+		prevLabel="Prev"
+		nextLabel="Next"
+		onPrev={() => {
+			if (page > 1) {
+				page--;
 				search();
-			}}
-		>
-			Next
-		</Button>
-	</div>
+			}
+		}}
+		onNext={() => {
+			page++;
+			search();
+		}}
+		prevDisabled={page <= 1}
+		nextDisabled={entries.length < pageSize}
+	/>
 </Card>
 
 <style>
@@ -200,16 +194,4 @@
 	}
 
 
-	.pagination {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		margin-top: 1rem;
-	}
-
-	.page-label {
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		color: var(--gray-600);
-	}
 </style>

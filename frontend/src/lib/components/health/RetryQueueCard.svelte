@@ -95,7 +95,7 @@
 		gap: 0.75rem;
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
+		border-top: var(--border-muted);
 	}
 
 

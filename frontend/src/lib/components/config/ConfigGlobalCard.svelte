@@ -118,7 +118,7 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.75rem;
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 	}
 
 	.config-value {
@@ -133,7 +133,7 @@
 
 	.config-json {
 		background: var(--gray-50);
-		border: 1px solid var(--gray-200);
+		border: var(--border-muted);
 		padding: 1rem;
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
