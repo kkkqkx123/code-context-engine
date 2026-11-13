@@ -42,6 +42,7 @@
 		parseEntityIds,
 	} from '$lib/utils/graph-params';
 	import {
+		GRAPH_FIT_PADDING,
 		centerGraphOn,
 		exportGraphPng,
 		fitGraphViewport,
@@ -446,7 +447,7 @@
 			const el = cy.getElementById(node.id);
 			if (el.length > 0) eles.merge(el);
 		}
-		if (eles.length > 0) cy.fit(eles, 60);
+		if (eles.length > 0) cy.fit(eles, GRAPH_FIT_PADDING);
 	}
 </script>
 

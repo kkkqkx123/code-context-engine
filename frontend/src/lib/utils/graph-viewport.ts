@@ -3,15 +3,20 @@ import type { Core } from 'cytoscape';
 /**
  * Shared graph viewport zoom constants and helpers.
  *
- * Both graph pages (frontend and frontend-preview) use multiplicative
- * (geometric) button zoom so the perceived speed is uniform across the
- * whole zoom range, and share a single min/max range consistent with
- * wheel zooming.
+ * The canvas uses multiplicative (geometric) button zoom so the perceived
+ * speed is uniform across the whole zoom range, and one min/max range shared
+ * by wheel and button zooming.
  */
 
-/** Absolute zoom bounds shared by wheel and button zooming. */
-export const GRAPH_MIN_ZOOM = 0.05;
+/** Absolute zoom bounds shared by wheel and button zooming. The floor is low
+ *  enough that `fit` can honour the extent of a fully loaded graph (labels
+ *  included) instead of silently cropping it at the canvas border. */
+export const GRAPH_MIN_ZOOM = 0.02;
 export const GRAPH_MAX_ZOOM = 5;
+
+/** Padding every fit uses, so labels and arrowheads never touch the border.
+ *  Single source for the canvas, the page and the keyboard shortcuts. */
+export const GRAPH_FIT_PADDING = 40;
 
 /** Multiplicative step per button click: one click = x1.25 zoom in. */
 export const GRAPH_ZOOM_STEP = 1.25;
@@ -47,7 +52,7 @@ export function exportGraphPng(cy: Core | null): void {
 
 /** Fit the whole graph into the viewport with padding. */
 export function fitGraphViewport(cy: Core | null): void {
-	cy?.fit(undefined, 40);
+	cy?.fit(undefined, GRAPH_FIT_PADDING);
 }
 
 /** Zoom one stepped click around the viewport center. */

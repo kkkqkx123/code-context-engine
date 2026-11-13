@@ -82,7 +82,11 @@
 	 */
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM } from '$lib/utils/graph-viewport';
+	import {
+		GRAPH_MIN_ZOOM,
+		GRAPH_MAX_ZOOM,
+		GRAPH_FIT_PADDING,
+	} from '$lib/utils/graph-viewport';
 	import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape';
 	import { graphStylesheet } from '$lib/utils/graph-stylesheet';
 	import {
@@ -229,7 +233,9 @@
 		});
 	}
 
-	/** Apply the edge-label class so newly added edges pick it up too. */
+	/** Apply the edge-label class so newly added edges pick it up too. The class
+	 *  only toggles label opacity: the label text is mapped in both states, so the
+	 *  rendered extent — and therefore the fitted viewport — never changes. */
 	function applyEdgeLabels() {
 		if (!cy) return;
 		cy.batch(() => {
@@ -341,12 +347,15 @@
 			}
 		});
 
-		if (mutated) {
-			cy.layout(layoutOptions(effectiveLayoutName(layout))).run();
-		}
+		// Style passes run before the layout so the layout's internal fit measures
+		// the final label state rather than the previous one.
 		applyDomainFilter();
 		applyEdgeLabels();
 		applyDecorations();
+
+		if (mutated) {
+			cy.layout(layoutOptions(effectiveLayoutName(layout))).run();
+		}
 	});
 
 	// Re-run layout when the layout strategy changes. Selecting cose-bilkent
@@ -414,7 +423,7 @@
 			});
 		} else if (event.key === '0' || event.key === 'f' || event.key === 'F') {
 			event.preventDefault();
-			cy.fit(undefined, 40);
+			cy.fit(undefined, GRAPH_FIT_PADDING);
 		} else if (event.key === 'Enter' && selectedId) {
 			event.preventDefault();
 			onNodeActivate(selectedId);

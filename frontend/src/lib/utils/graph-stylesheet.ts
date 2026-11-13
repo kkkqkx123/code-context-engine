@@ -151,8 +151,14 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'font-family': 'Space Mono, monospace',
 			'font-size': 8,
 			color: '#475569',
+			// The label is always mapped and only its opacity is toggled. Cytoscape
+			// derives an edge's label bounds from the label text alone, so hiding by
+			// opacity keeps the rendered extent identical in both states and the
+			// fitted viewport stays valid when the user flips the switch.
+			label: 'data(relationLabel)',
+			'text-opacity': 0,
 			'text-background-color': '#ffffff',
-			'text-background-opacity': 0.85,
+			'text-background-opacity': 0,
 			'text-background-padding': '1px',
 			'text-rotation': 'autorotate',
 		},
@@ -160,7 +166,8 @@ export const graphStylesheet: StylesheetStyle[] = [
 	{
 		selector: 'edge.show-label',
 		style: {
-			label: 'data(relationLabel)',
+			'text-opacity': 1,
+			'text-background-opacity': 0.85,
 		},
 	},
 	{
