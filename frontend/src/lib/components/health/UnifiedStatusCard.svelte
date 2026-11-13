@@ -124,5 +124,4 @@
 		font-size: 0.8rem;
 		color: var(--gray-600);
 	}
-
 </style>

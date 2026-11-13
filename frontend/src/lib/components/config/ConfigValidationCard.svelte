@@ -93,9 +93,6 @@
 		margin-bottom: 1.5rem;
 	}
 
-
-
-
 	.issue-section {
 		margin-top: 1.5rem;
 	}
@@ -128,5 +125,4 @@
 		color: var(--warning);
 		background: var(--warning-bg);
 	}
-
 </style>

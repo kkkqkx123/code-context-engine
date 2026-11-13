@@ -5,6 +5,10 @@
 
 <svelte:head><title>Log Search</title></svelte:head>
 <div class="page">
-	<PageHeader title="Log Search" subtitle="Search historical logs" scope="global" />
+	<PageHeader
+		title="Log Search"
+		subtitle="Search historical logs"
+		scope="global"
+	/>
 	<LogSearchPanel />
 </div>

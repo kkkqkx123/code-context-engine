@@ -347,8 +347,7 @@
 		{/if}
 
 		<div class="reload-actions reload-actions--split">
-			<span class="form-label">Edits stay in memory until reload/restart</span
-			>
+			<span class="form-label">Edits stay in memory until reload/restart</span>
 			<Button onclick={onSave} disabled={saving || loading}>
 				{#if saving}Saving...{:else}Save Chat/Rerank Config{/if}
 			</Button>

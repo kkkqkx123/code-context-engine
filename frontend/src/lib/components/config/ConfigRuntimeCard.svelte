@@ -122,14 +122,6 @@
 </Card>
 
 <style>
-
-
-
-
-
-
-
-
 	.config-editor {
 		width: 100%;
 		min-height: 320px;

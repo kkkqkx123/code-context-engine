@@ -123,5 +123,4 @@
 		font-weight: 700;
 		color: var(--black);
 	}
-
 </style>

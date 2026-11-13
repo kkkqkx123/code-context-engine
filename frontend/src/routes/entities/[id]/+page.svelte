@@ -138,7 +138,6 @@
 		const depth = Number.isInteger(pathDepth) && pathDepth > 0 ? pathDepth : 10;
 		entityStore.loadCallPath(from, to, depth);
 	}
-
 </script>
 
 <svelte:head>
@@ -241,7 +240,8 @@
 				</Button>
 				{#if filterDirty}
 					<span class="apply-hint">
-						Filter changes are pending — click Apply to reload the relation views.
+						Filter changes are pending — click Apply to reload the relation
+						views.
 					</span>
 				{/if}
 			</div>
@@ -267,8 +267,7 @@
 			<!-- Tab Content -->
 			{#if currentTab === 'details'}
 				<LazyPanel
-					loader={() =>
-						import('$lib/components/entities/EntityDetail.svelte')}
+					loader={() => import('$lib/components/entities/EntityDetail.svelte')}
 					componentProps={{
 						func: entityStore.currentEntity,
 						calls: entityStore.calls?.callees ?? [],
@@ -289,8 +288,7 @@
 						</Button>
 					</div>
 					<LazyPanel
-						loader={() =>
-							import('$lib/components/entities/CallGraph.svelte')}
+						loader={() => import('$lib/components/entities/CallGraph.svelte')}
 						componentProps={{
 							nodes: entityStore.callChain,
 							focusId: String(entityId),

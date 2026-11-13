@@ -129,7 +129,6 @@
 </Card>
 
 <style>
-
 	.spec-item {
 		display: flex;
 		flex-direction: column;
@@ -137,7 +136,6 @@
 		padding: 0.75rem;
 		border: var(--border-muted);
 	}
-
 
 	.spec-value {
 		font-family: var(--font-mono);
@@ -153,11 +151,7 @@
 		font-size: 0.85rem;
 	}
 
-
-
-
 	.full-row {
 		margin-bottom: 1rem;
 	}
-
 </style>

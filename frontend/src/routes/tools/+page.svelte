@@ -29,7 +29,10 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Developer Tools" subtitle="Code analysis utilities and helpers" />
+		<PageHeader
+			title="Developer Tools"
+			subtitle="Code analysis utilities and helpers"
+		/>
 
 		<Tabs
 			variant="underline"
@@ -124,7 +127,8 @@
 				subtitle="Compress multiple files in one request"
 			>
 				<LazyPanel
-					loader={() => import('$lib/components/tools/BatchCompressTool.svelte')}
+					loader={() =>
+						import('$lib/components/tools/BatchCompressTool.svelte')}
 					loadingMessage="Loading batch compress tool..."
 				/>
 			</Card>

@@ -27,7 +27,8 @@
 				{#if healthStore.qdrant.diagnostic?.version}
 					<div class="desc-row">
 						<span class="desc-term">Version</span>
-						<span class="desc-value">{healthStore.qdrant.diagnostic.version}</span
+						<span class="desc-value"
+							>{healthStore.qdrant.diagnostic.version}</span
 						>
 					</div>
 				{/if}
@@ -117,7 +118,9 @@
 				{#if healthStore.bm25.index_path}
 					<div class="desc-row">
 						<span class="desc-term">Index path</span>
-						<span class="desc-value font-mono">{healthStore.bm25.index_path}</span>
+						<span class="desc-value font-mono"
+							>{healthStore.bm25.index_path}</span
+						>
 					</div>
 				{/if}
 			</div>

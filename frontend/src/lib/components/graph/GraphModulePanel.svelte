@@ -50,14 +50,16 @@
 			<p class="empty-hint empty-hint--compact">Refreshing module relations…</p>
 		{/if}
 		<p class="panel-hint">
-			File <span class="font-mono">{data.file}</span> — exports, caller files and outgoing
-			module edges.
+			File <span class="font-mono">{data.file}</span> — exports, caller files and
+			outgoing module edges.
 		</p>
 		<div class="module-groups">
 			<div class="module-group">
 				<h5 class="eyebrow-title">Exports ({data.exports.length})</h5>
 				{#if data.exports.length === 0}
-					<p class="empty-hint empty-hint--compact">No exported symbols for this file.</p>
+					<p class="empty-hint empty-hint--compact">
+						No exported symbols for this file.
+					</p>
 				{:else}
 					<ul class="chip-list">
 						{#each data.exports as symbol (symbol)}
@@ -78,7 +80,9 @@
 					Caller files ({data.caller_files.length})
 				</h5>
 				{#if data.caller_files.length === 0}
-					<p class="empty-hint empty-hint--compact">No caller files target this file.</p>
+					<p class="empty-hint empty-hint--compact">
+						No caller files target this file.
+					</p>
 				{:else}
 					<ul class="chip-list">
 						{#each data.caller_files as file (file)}
@@ -97,7 +101,9 @@
 			<div class="module-group">
 				<h5 class="eyebrow-title">Module edges ({data.imports.length})</h5>
 				{#if data.imports.length === 0}
-					<p class="empty-hint empty-hint--compact">No outgoing module edges.</p>
+					<p class="empty-hint empty-hint--compact">
+						No outgoing module edges.
+					</p>
 				{:else}
 					<ul class="module-edge-list">
 						{#each data.imports as edge, index (index)}
@@ -120,12 +126,6 @@
 </section>
 
 <style>
-
-
-
-
-
-
 	.module-groups {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -168,5 +168,4 @@
 		font-size: 0.6rem;
 		color: var(--gray-500);
 	}
-
 </style>

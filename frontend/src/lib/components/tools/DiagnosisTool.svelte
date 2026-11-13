@@ -163,7 +163,6 @@
 </ToolShell>
 
 <style>
-
 	.no-issues {
 		text-align: center;
 		padding: 3rem;

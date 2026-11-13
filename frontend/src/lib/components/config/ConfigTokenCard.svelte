@@ -70,8 +70,4 @@
 </Card>
 
 <style>
-
-
-
-
 </style>

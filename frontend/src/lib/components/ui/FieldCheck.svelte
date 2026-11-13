@@ -10,11 +10,7 @@
 		disabled?: boolean;
 	}
 
-	let {
-		label,
-		checked = $bindable(false),
-		disabled = false,
-	}: Props = $props();
+	let { label, checked = $bindable(false), disabled = false }: Props = $props();
 </script>
 
 <label class="check-row">

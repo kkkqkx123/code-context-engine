@@ -5,6 +5,10 @@
 
 <svelte:head><title>Realtime Logs</title></svelte:head>
 <div class="page">
-	<PageHeader title="Realtime Logs" subtitle="Live application log stream" scope="global" />
+	<PageHeader
+		title="Realtime Logs"
+		subtitle="Live application log stream"
+		scope="global"
+	/>
 	<RealtimeLogViewer />
 </div>

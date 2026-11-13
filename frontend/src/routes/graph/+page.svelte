@@ -671,15 +671,13 @@
 				/>
 			{:else if resultTab === 'cycles'}
 				<LazyPanel
-					loader={() =>
-						import('$lib/components/graph/GraphCyclesPanel.svelte')}
+					loader={() => import('$lib/components/graph/GraphCyclesPanel.svelte')}
 					componentProps={{ onLoadSubgraph: openAsSubgraph }}
 					loadingMessage="Loading cycle detection…"
 				/>
 			{:else}
 				<LazyPanel
-					loader={() =>
-						import('$lib/components/graph/GraphModulePanel.svelte')}
+					loader={() => import('$lib/components/graph/GraphModulePanel.svelte')}
 					componentProps={{
 						data: moduleQuery.data,
 						loading: moduleQuery.loading,

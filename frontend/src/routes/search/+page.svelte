@@ -181,8 +181,7 @@
 
 			{#if filterPanelVisible}
 				<LazyPanel
-					loader={() =>
-						import('$lib/components/search/FilterPanel.svelte')}
+					loader={() => import('$lib/components/search/FilterPanel.svelte')}
 					loadingMessage="Loading filters..."
 				/>
 			{/if}
@@ -240,8 +239,7 @@
 						{#if searchStore.relationEpoch !== null}
 							<span>(epoch {searchStore.relationEpoch})</span>
 						{/if}
-						— results may be outdated. Re-run the search after indexing catches
-						up.
+						— results may be outdated. Re-run the search after indexing catches up.
 					</Notice>
 				{:else if searchStore.relationEpoch !== null}
 					<div class="relation-meta">

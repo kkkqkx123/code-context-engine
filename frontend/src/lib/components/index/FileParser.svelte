@@ -191,7 +191,6 @@
 		margin-bottom: 2rem;
 	}
 
-
 	.info-value {
 		font-family: var(--font-mono);
 		font-size: 0.85rem;

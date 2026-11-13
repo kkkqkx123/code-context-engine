@@ -193,7 +193,6 @@
 		font-size: 0.75rem;
 	}
 
-
 	.ref-caller {
 		color: var(--gray-500);
 		font-size: 0.75rem;

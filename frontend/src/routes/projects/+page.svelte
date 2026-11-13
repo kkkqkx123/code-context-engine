@@ -264,7 +264,11 @@
 							<Button type="submit" disabled={loading}>
 								{editingProject ? 'Update' : 'Create'}
 							</Button>
-							<Button variant="secondary" onclick={resetForm} disabled={loading}>
+							<Button
+								variant="secondary"
+								onclick={resetForm}
+								disabled={loading}
+							>
 								Cancel
 							</Button>
 						</div>
@@ -364,23 +368,16 @@
 </div>
 
 {#if deleteTarget}
-	<Modal
-		title="Delete project?"
-		onClose={() => (deleteTarget = null)}
-	>
+	<Modal title="Delete project?" onClose={() => (deleteTarget = null)}>
 		<p>
-			Delete project <strong>{deleteTarget.name}</strong> and forget its index
-			configuration? This cannot be undone.
+			Delete project <strong>{deleteTarget.name}</strong> and forget its index configuration?
+			This cannot be undone.
 		</p>
 		{#snippet actions()}
 			<Button variant="secondary" onclick={() => (deleteTarget = null)}>
 				Cancel
 			</Button>
-			<Button
-				variant="danger"
-				onclick={confirmDelete}
-				disabled={loading}
-			>
+			<Button variant="danger" onclick={confirmDelete} disabled={loading}>
 				{loading ? 'Deleting...' : 'Delete Project'}
 			</Button>
 		{/snippet}

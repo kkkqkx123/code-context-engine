@@ -59,8 +59,7 @@ export function toAppError(
 	error: unknown,
 	fallback = 'Request failed',
 ): AppError {
-	const candidates =
-		error instanceof ApiError ? error.symbolCandidates() : [];
+	const candidates = error instanceof ApiError ? error.symbolCandidates() : [];
 	return {
 		code: errorCodeOf(error),
 		message: errorMessage(error) || fallback,

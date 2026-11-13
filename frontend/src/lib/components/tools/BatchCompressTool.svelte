@@ -150,5 +150,4 @@
 	.path {
 		word-break: break-all;
 	}
-
 </style>

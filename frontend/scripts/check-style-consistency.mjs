@@ -137,7 +137,8 @@ const rules = [
 	},
 	{
 		pattern: /class="[^"]*\bdetail-(item|value)\b/,
-		message: 'detail-item/detail-value are retired; use the DescriptionList component.',
+		message:
+			'detail-item/detail-value are retired; use the DescriptionList component.',
 		allow: [],
 	},
 	{
@@ -202,8 +203,7 @@ const rules = [
 	},
 	{
 		pattern: /letter-spacing:\s*(0\.15em|0\.16em|-0\.04em|-0\.02em)/,
-		message:
-			'outlier tracking is retired; use the canonical tracking tokens.',
+		message: 'outlier tracking is retired; use the canonical tracking tokens.',
 		allow: [],
 	},
 	{

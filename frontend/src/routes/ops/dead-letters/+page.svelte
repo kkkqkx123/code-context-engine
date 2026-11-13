@@ -6,7 +6,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
-import Toolbar from '$lib/components/ui/Toolbar.svelte';
+	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import {
 		deadLetterApi,
@@ -195,9 +195,7 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 				</p></Card
 			>
 		{:else}
-			<Card
-				subtitle="Full table, no paging — select rows for bulk actions"
-			>
+			<Card subtitle="Full table, no paging — select rows for bulk actions">
 				<Toolbar>
 					<label class="check-row">
 						<input

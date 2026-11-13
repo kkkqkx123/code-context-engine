@@ -164,7 +164,7 @@
 		</div>
 	{/if}
 	<Pagination
-		page={page}
+		{page}
 		total={Math.max(1, Math.ceil(total / pageSize))}
 		size="xs"
 		prevLabel="Prev"
@@ -185,14 +185,9 @@
 </Card>
 
 <style>
-
-
-
 	.total {
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
-
-
 </style>

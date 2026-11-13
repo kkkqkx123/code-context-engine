@@ -119,8 +119,7 @@
 {#if deleteTarget}
 	<Modal title="Delete log file?" onClose={() => (deleteTarget = null)}>
 		<p>
-			Log file <span class="font-mono">{deleteTarget}</span> will be permanently
-			removed.
+			Log file <span class="font-mono">{deleteTarget}</span> will be permanently removed.
 		</p>
 		{#snippet actions()}
 			<Button variant="secondary" onclick={() => (deleteTarget = null)}>
@@ -137,7 +136,6 @@
 		font-size: 0.7rem;
 		color: var(--gray-600);
 	}
-
 
 	.row-actions {
 		display: flex;

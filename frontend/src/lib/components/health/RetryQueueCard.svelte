@@ -64,7 +64,9 @@
 			write will not be retried.
 		</p>
 		{#snippet actions()}
-			<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}>Cancel</Button>
+			<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}
+				>Cancel</Button
+			>
 			<Button
 				variant="danger"
 				onclick={() => runAction(() => healthStore.clearRetryQueue())}
@@ -97,9 +99,4 @@
 		padding-top: 1rem;
 		border-top: var(--border-muted);
 	}
-
-
-
-
-
 </style>

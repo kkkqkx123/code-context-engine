@@ -129,7 +129,6 @@
 </ToolShell>
 
 <style>
-
 	.fold-meta {
 		display: flex;
 		flex-wrap: wrap;

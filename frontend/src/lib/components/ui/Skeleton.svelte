@@ -11,17 +11,10 @@
 
 	let { lines = 3, label = 'Loading content' }: Props = $props();
 
-	let rows = $derived(
-		Array.from({ length: Math.max(1, lines) }, (_, i) => i),
-	);
+	let rows = $derived(Array.from({ length: Math.max(1, lines) }, (_, i) => i));
 </script>
 
-<div
-	class="skeleton"
-	role="status"
-	aria-label={label}
-	aria-busy="true"
->
+<div class="skeleton" role="status" aria-label={label} aria-busy="true">
 	{#each rows as row (row)}
 		<div
 			class="skeleton-line"

@@ -7,7 +7,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
-import Modal from '$lib/components/ui/Modal.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import { storageStore } from '$lib/stores/storage.svelte';
 	import { qdrantApi, type QdrantProcessStatus } from '$lib/api/qdrant';
 
@@ -286,7 +286,6 @@ import Modal from '$lib/components/ui/Modal.svelte';
 		border: var(--border-muted);
 	}
 
-
 	.spec-value {
 		margin-bottom: 0.5rem;
 	}
@@ -335,14 +334,12 @@ import Modal from '$lib/components/ui/Modal.svelte';
 		border-bottom: none;
 	}
 
-
 	.process-error {
 		color: var(--danger);
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		margin-top: 0.5rem;
 	}
-
 
 	.version {
 		font-size: 0.75rem;
@@ -354,5 +351,4 @@ import Modal from '$lib/components/ui/Modal.svelte';
 		margin-bottom: 1.5rem;
 		line-height: 1.6;
 	}
-
 </style>

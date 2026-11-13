@@ -102,14 +102,6 @@
 </Card>
 
 <style>
-
-
-
-
-
-
-
-
 	.toggle-row {
 		margin: 0.5rem 0 1rem;
 	}

@@ -47,5 +47,4 @@
 		align-items: center;
 		width: auto;
 	}
-
 </style>

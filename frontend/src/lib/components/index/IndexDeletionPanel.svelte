@@ -231,8 +231,7 @@
 		<Button
 			variant="danger"
 			onclick={requestBatchDelete}
-			disabled={busy ||
-				(!batchFilesText.trim() && !batchEntitiesText.trim())}
+			disabled={busy || (!batchFilesText.trim() && !batchEntitiesText.trim())}
 		>
 			Batch Delete
 		</Button>

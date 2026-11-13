@@ -127,8 +127,16 @@
 			value={String(projectStore.projects.length)}
 			meta="indexed codebases"
 		/>
-		<KpiCard label="Vectors" value={String(vectorCount)} meta="embeddings stored" />
-		<KpiCard label="BM25 Docs" value={String(bm25Count)} meta="full-text index" />
+		<KpiCard
+			label="Vectors"
+			value={String(vectorCount)}
+			meta="embeddings stored"
+		/>
+		<KpiCard
+			label="BM25 Docs"
+			value={String(bm25Count)}
+			meta="full-text index"
+		/>
 		<KpiCard label="Server" meta={`updated ${lastUpdatedText}`}>
 			<Badge
 				label={serverOk ? 'OK' : 'DOWN'}

@@ -297,7 +297,6 @@
 		gap: 1rem;
 	}
 
-
 	.field-hint {
 		font-family: var(--font-mono);
 		font-size: 0.65rem;
@@ -333,8 +332,6 @@
 		align-items: center;
 		gap: 0.25rem;
 	}
-
-
 
 	.summary-list {
 		display: flex;

@@ -42,21 +42,11 @@
 
 <div class="pagination-group">
 	<div class="pagination" role="navigation" aria-label={label}>
-		<Button
-			variant="secondary"
-			{size}
-			onclick={onPrev}
-			disabled={prevDisabled}
-		>
+		<Button variant="secondary" {size} onclick={onPrev} disabled={prevDisabled}>
 			{prevLabel}
 		</Button>
 		<span class="page-info">{info}</span>
-		<Button
-			variant="secondary"
-			{size}
-			onclick={onNext}
-			disabled={nextDisabled}
-		>
+		<Button variant="secondary" {size} onclick={onNext} disabled={nextDisabled}>
 			{nextLabel}
 		</Button>
 	</div>

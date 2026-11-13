@@ -155,5 +155,4 @@
 		color: var(--gray-400);
 		font-style: italic;
 	}
-
 </style>

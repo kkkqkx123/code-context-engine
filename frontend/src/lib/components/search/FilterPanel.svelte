@@ -232,9 +232,7 @@
 	</div>
 
 	<div class="filter-section">
-		<label class="form-label" for="min-score-range"
-			>Min Score Threshold</label
-		>
+		<label class="form-label" for="min-score-range">Min Score Threshold</label>
 		<div class="range-row">
 			<input
 				id="min-score-range"
@@ -374,9 +372,7 @@
 			</select>
 		</div>
 		<div class="filter-section">
-			<label class="form-label" for="expand-select"
-				>Call-graph Expansion</label
-			>
+			<label class="form-label" for="expand-select">Call-graph Expansion</label>
 			<select
 				class="text-input"
 				id="expand-select"
@@ -413,7 +409,6 @@
 		display: grid;
 		gap: 0.75rem;
 	}
-
 
 	.mode-tabs {
 		display: grid;
@@ -458,7 +453,6 @@
 		width: 5.5rem;
 		flex-shrink: 0;
 	}
-
 
 	@media (max-width: 768px) {
 		.mode-tabs,

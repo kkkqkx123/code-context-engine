@@ -113,8 +113,6 @@
 		gap: 0.5rem;
 	}
 
-
-
 	.stats-meta {
 		margin: 0.75rem 0 0;
 	}
@@ -130,7 +128,6 @@
 		color: var(--gray-400);
 		font-style: italic;
 	}
-
 
 	@media (max-width: 1024px) {
 		.stats-grid {

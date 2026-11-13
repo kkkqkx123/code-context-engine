@@ -102,7 +102,6 @@
 </ToolShell>
 
 <style>
-
 	.compression-info {
 		padding: 1rem;
 		border: var(--border-muted);
@@ -119,7 +118,6 @@
 	.info-row:last-child {
 		border-bottom: none;
 	}
-
 
 	.info-value {
 		font-family: var(--font-mono);

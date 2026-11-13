@@ -387,7 +387,6 @@
 		background: var(--white);
 	}
 
-
 	.seed-section-body {
 		display: flex;
 		align-items: center;

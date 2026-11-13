@@ -183,5 +183,4 @@
 		font-size: 0.75rem;
 		color: var(--gray-400);
 	}
-
 </style>

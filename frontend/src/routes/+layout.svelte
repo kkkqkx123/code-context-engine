@@ -5,7 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
-import StatusDot from '$lib/components/ui/StatusDot.svelte';
+	import StatusDot from '$lib/components/ui/StatusDot.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import ProjectSelector from '$lib/components/ui/ProjectSelector.svelte';
 	import { networkStore } from '$lib/stores/network.svelte';
@@ -282,15 +282,27 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 				</div>
 				<div class="health-dots" title="Storage component health">
 					<StatusDot
-						state={storageStatus ? (storageStatus.vector_storage.connected ? 'ok' : 'bad') : 'idle'}
+						state={storageStatus
+							? storageStatus.vector_storage.connected
+								? 'ok'
+								: 'bad'
+							: 'idle'}
 						title="Vector DB"
 					/>
 					<StatusDot
-						state={storageStatus ? (storageStatus.bm25_storage.connected ? 'ok' : 'bad') : 'idle'}
+						state={storageStatus
+							? storageStatus.bm25_storage.connected
+								? 'ok'
+								: 'bad'
+							: 'idle'}
 						title="BM25"
 					/>
 					<StatusDot
-						state={storageStatus ? (storageStatus.relation_storage.connected ? 'ok' : 'bad') : 'idle'}
+						state={storageStatus
+							? storageStatus.relation_storage.connected
+								? 'ok'
+								: 'bad'
+							: 'idle'}
 						title="Relations"
 					/>
 				</div>

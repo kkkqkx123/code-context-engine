@@ -292,14 +292,19 @@
 </div>
 
 {#if cleanupConfirmOpen}
-	<Modal title="Confirm Metrics Cleanup" onClose={() => (cleanupConfirmOpen = false)}>
+	<Modal
+		title="Confirm Metrics Cleanup"
+		onClose={() => (cleanupConfirmOpen = false)}
+	>
 		<p>
 			{cleanupAll
 				? 'All historical metric records will be permanently deleted.'
 				: `All metric records before ${cleanupBefore} will be permanently deleted.`}
 		</p>
 		{#snippet actions()}
-			<Button variant="secondary" onclick={() => (cleanupConfirmOpen = false)}>Cancel</Button>
+			<Button variant="secondary" onclick={() => (cleanupConfirmOpen = false)}
+				>Cancel</Button
+			>
 			<Button variant="danger" onclick={runCleanup} disabled={cleanupBusy}>
 				{cleanupBusy ? 'Cleaning...' : 'Confirm Cleanup'}
 			</Button>
@@ -308,12 +313,6 @@
 {/if}
 
 <style>
-
-
-
-
-
-
 	table {
 		width: 100%;
 		border-collapse: collapse;
@@ -343,15 +342,12 @@
 		border-bottom: none;
 	}
 
-
-
 	.result-count {
 		margin-top: 0.75rem;
 		font-family: var(--font-mono);
 		font-size: 0.7rem;
 		color: var(--gray-500);
 	}
-
 
 	.prom-output {
 		background: var(--gray-900);
@@ -370,7 +366,6 @@
 		line-height: 1.6;
 	}
 
-
 	.inline-success {
 		margin-top: 1rem;
 		padding: 0.6rem 0.75rem;
@@ -379,9 +374,4 @@
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
-
-
-
-
-
 </style>

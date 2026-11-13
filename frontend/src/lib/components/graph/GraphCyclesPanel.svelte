@@ -124,14 +124,13 @@
 			</ul>
 		{/if}
 	{:else}
-		<p class="empty-hint empty-hint--compact">Not checked yet — pick a level and run detection.</p>
+		<p class="empty-hint empty-hint--compact">
+			Not checked yet — pick a level and run detection.
+		</p>
 	{/if}
 </section>
 
 <style>
-
-
-
 	.panel-controls {
 		display: flex;
 		align-items: center;
@@ -139,8 +138,6 @@
 		flex-wrap: wrap;
 		margin: 0.5rem 0 0.75rem;
 	}
-
-
 
 	.cycle-list {
 		list-style: none;
@@ -183,5 +180,4 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-
 </style>

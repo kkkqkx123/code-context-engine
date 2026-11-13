@@ -264,7 +264,9 @@
 				</ul>
 			{/if}
 		{:else}
-			<p class="empty-hint empty-hint--compact">Pick a relation family and run the query.</p>
+			<p class="empty-hint empty-hint--compact">
+				Pick a relation family and run the query.
+			</p>
 		{/if}
 	{:else}
 		<EmptyState
@@ -309,7 +311,6 @@
 		word-break: break-all;
 	}
 
-
 	.inspector-actions {
 		display: flex;
 		flex-wrap: wrap;
@@ -318,7 +319,6 @@
 		border-bottom: var(--border-muted);
 		margin-bottom: 0.75rem;
 	}
-
 
 	.relation-list {
 		list-style: none;
@@ -424,7 +424,6 @@
 		gap: 0.5rem;
 		margin-top: 0.3rem;
 	}
-
 
 	@media (max-width: 1200px) {
 		.inspector {

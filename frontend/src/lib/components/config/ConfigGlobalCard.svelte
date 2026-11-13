@@ -143,5 +143,4 @@
 		max-height: 480px;
 		overflow-y: auto;
 	}
-
 </style>
