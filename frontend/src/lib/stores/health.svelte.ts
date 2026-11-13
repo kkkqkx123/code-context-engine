@@ -27,6 +27,8 @@ export interface HealthState {
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 class HealthStore {
+	/** Extra page-level refreshes that reuse the single health beat. */
+	#refreshListeners = new Set<() => void>();
 	unified = $state<HealthStatus | null>(null);
 	qdrant = $state<QdrantHealthStatus | null>(null);
 	embedding = $state<EmbeddingHealthStatus | null>(null);
@@ -113,25 +115,28 @@ class HealthStore {
 		}
 	}
 
-	/** Start auto-refresh (15 second interval) */
-	startAutoRefresh(intervalMs: number = 15000) {
-		if (refreshInterval) {
-			clearInterval(refreshInterval);
-		}
-
-		this.loadAll();
-
-		refreshInterval = setInterval(() => {
-			this.loadAll();
-		}, intervalMs);
+	/**
+	 * Register a page-level refresh that rides the shared health beat instead of
+	 * starting its own timer. Returns the unsubscribe function; pages call it
+	 * from their unmount cleanup.
+	 */
+	onRefresh(listener: () => void): () => void {
+		this.#refreshListeners.add(listener);
+		return () => {
+			this.#refreshListeners.delete(listener);
+		};
 	}
 
-	/** Stop auto-refresh */
-	stopAutoRefresh() {
-		if (refreshInterval) {
-			clearInterval(refreshInterval);
-			refreshInterval = null;
-		}
+	/** Start the single health polling source; repeated calls are no-ops. */
+	startAutoRefresh(intervalMs: number = 15000) {
+		if (refreshInterval) return;
+
+		void this.loadAll();
+
+		refreshInterval = setInterval(() => {
+			void this.loadAll();
+			for (const listener of this.#refreshListeners) listener();
+		}, intervalMs);
 	}
 }
 

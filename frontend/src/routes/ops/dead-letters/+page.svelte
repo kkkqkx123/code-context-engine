@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -14,20 +14,18 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	} from '$lib/api/dead-letters';
 	import { deadLetterGuidance } from '$lib/dead-letter-actions';
 	import { toastStore } from '$lib/stores/toast.svelte';
-	import { ApiError } from '$lib/api/client';
+	import { healthStore } from '$lib/stores/health.svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
-
-	const REFRESH_MS = 30_000;
+	import { errorMessage, toAppError, type AppError } from '$lib/utils/errors';
 
 	let projectId = $state<number | null>(null);
 	let files = $state<DeadLetterFileEntry[]>([]);
 	let loading = $state(false);
-	let error = $state<string | null>(null);
+	let error = $state<AppError | null>(null);
 	let busy = $state(false);
 	let selected = new SvelteSet<string>();
 	let ackTarget = $state<DeadLetterFileEntry | null>(null);
 	let expanded = new SvelteSet<string>();
-	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	// Follow the global project selection (sidebar/topbar ProjectSelector).
 	let lastLoadedProject: number | null = null;
@@ -58,21 +56,9 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 				if (!paths.has(p)) selected.delete(p);
 			}
 		} catch (e) {
-			error = e instanceof ApiError ? e.message : String(e);
+			error = toAppError(e, 'Failed to load dead letters');
 		} finally {
 			loading = false;
-		}
-	}
-
-	function startPolling() {
-		stopPolling();
-		pollTimer = setInterval(load, REFRESH_MS);
-	}
-
-	function stopPolling() {
-		if (pollTimer !== null) {
-			clearInterval(pollTimer);
-			pollTimer = null;
 		}
 	}
 
@@ -103,7 +89,7 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 			toastStore.show(res.message, 'success');
 			await load();
 		} catch (e) {
-			toastStore.show(e instanceof ApiError ? e.message : String(e), 'error');
+			toastStore.show(errorMessage(e), 'error');
 		} finally {
 			busy = false;
 		}
@@ -117,7 +103,7 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 			toastStore.show(res.message, 'success');
 			await load();
 		} catch (e) {
-			toastStore.show(e instanceof ApiError ? e.message : String(e), 'error');
+			toastStore.show(errorMessage(e), 'error');
 		} finally {
 			busy = false;
 			ackTarget = null;
@@ -132,9 +118,7 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 			try {
 				await deadLetterApi.acknowledge(projectId, path);
 			} catch (e) {
-				failures.push(
-					`${path}: ${e instanceof ApiError ? e.message : String(e)}`,
-				);
+				failures.push(`${path}: ${errorMessage(e)}`);
 			}
 		}
 		busy = false;
@@ -160,10 +144,10 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	}
 
 	onMount(() => {
-		load();
-		startPolling();
+		// The project effect performs the initial load; this only rides the
+		// shared health beat and unsubscribes on unmount.
+		return healthStore.onRefresh(load);
 	});
-	onDestroy(stopPolling);
 </script>
 
 <svelte:head>
@@ -193,7 +177,7 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 		</PageHeader>
 
 		{#if error}
-			<ErrorBanner message={error} />
+			<ErrorBanner message={error.message} code={error.code} />
 		{/if}
 
 		{#if projectId === null}
@@ -211,7 +195,9 @@ import Toolbar from '$lib/components/ui/Toolbar.svelte';
 				</p></Card
 			>
 		{:else}
-			<Card>
+			<Card
+				subtitle="Full table, no paging — select rows for bulk actions"
+			>
 				<Toolbar>
 					<label class="check-row">
 						<input

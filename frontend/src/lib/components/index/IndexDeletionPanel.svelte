@@ -4,6 +4,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 	import { indexApi, type DeleteFileResponse } from '$lib/api/index';
 	import { projectStore } from '$lib/stores/project.svelte';
 
@@ -14,130 +15,130 @@
 
 	let { onDeleted }: Props = $props();
 
+	type PendingDelete =
+		| { kind: 'file'; path: string }
+		| { kind: 'entity'; id: number }
+		| { kind: 'batch'; files: string[]; ids: number[] };
+
+	let pendingDelete = $state<PendingDelete | null>(null);
+	let busy = $state(false);
+
 	// ─── Delete file ─────────────────────────────────────────────
 	let deleteFilePath = $state('');
-	let deleteFileArmed = $state(false);
-	let deleteFileBusy = $state(false);
 	let deleteFileResult = $state<DeleteFileResponse | null>(null);
 	let deleteFileError = $state('');
 
-	async function runDeleteFile() {
+	function requestDeleteFile() {
 		const path = deleteFilePath.trim();
 		if (!path) return;
-		if (!deleteFileArmed) {
-			deleteFileArmed = true;
-			return;
-		}
-		deleteFileBusy = true;
 		deleteFileError = '';
-		try {
-			deleteFileResult = await indexApi.deleteFile(
-				path,
-				projectStore.currentProjectId,
-			);
-			deleteFileArmed = false;
-			deleteFilePath = '';
-			await onDeleted?.();
-		} catch (e) {
-			deleteFileError = errorMessage(e) ?? 'Failed to delete file';
-		} finally {
-			deleteFileBusy = false;
-		}
+		pendingDelete = { kind: 'file', path };
 	}
 
 	// ─── Delete entity ───────────────────────────────────────────
 	let deleteEntityId = $state('');
-	let deleteEntityArmed = $state(false);
-	let deleteEntityBusy = $state(false);
 	let deleteEntityMessage = $state('');
 	let deleteEntityError = $state('');
 
-	async function runDeleteEntity() {
+	function requestDeleteEntity() {
 		const id = Number(deleteEntityId.trim());
 		if (!Number.isFinite(id) || id <= 0) {
 			deleteEntityError = 'Enter a numeric entity id';
 			return;
 		}
-		if (!deleteEntityArmed) {
-			deleteEntityArmed = true;
-			return;
-		}
-		deleteEntityBusy = true;
 		deleteEntityError = '';
-		try {
-			const response = await indexApi.deleteEntity(
-				id,
-				projectStore.currentProjectId,
-			);
-			deleteEntityMessage = response.message || `Entity ${id} deleted`;
-			deleteEntityArmed = false;
-			deleteEntityId = '';
-			await onDeleted?.();
-		} catch (e) {
-			deleteEntityError = errorMessage(e) ?? 'Failed to delete entity';
-		} finally {
-			deleteEntityBusy = false;
-		}
+		pendingDelete = { kind: 'entity', id };
 	}
 
 	// ─── Batch delete ────────────────────────────────────────────
 	let batchFilesText = $state('');
 	let batchEntitiesText = $state('');
-	let batchArmed = $state(false);
-	let batchBusy = $state(false);
 	let batchResult = $state<{
 		files_deleted: number;
 		entities_deleted: number;
 	} | null>(null);
 	let batchError = $state('');
 
-	async function runBatchDelete() {
-		const filePaths = batchFilesText
+	function requestBatchDelete() {
+		const files = batchFilesText
 			.split('\n')
-			.map((l) => l.trim())
-			.filter((l) => l.length > 0);
-		const entityIds = batchEntitiesText
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0);
+		const ids = batchEntitiesText
 			.split(/[\s,]+/)
-			.map((t) => Number(t.trim()))
-			.filter((n) => Number.isFinite(n) && n > 0);
-		if (filePaths.length === 0 && entityIds.length === 0) {
+			.map((token) => Number(token.trim()))
+			.filter((id) => Number.isFinite(id) && id > 0);
+		if (files.length === 0 && ids.length === 0) {
 			batchError = 'Provide at least one file path or entity id';
 			return;
 		}
-		if (!batchArmed) {
-			batchArmed = true;
-			return;
-		}
-		batchBusy = true;
 		batchError = '';
+		pendingDelete = { kind: 'batch', files, ids };
+	}
+
+	async function confirmDelete() {
+		const target = pendingDelete;
+		if (!target) return;
+		busy = true;
 		try {
-			const response = await indexApi.batchDelete(
-				projectStore.currentProjectId,
-				{
-					file_paths: filePaths.length > 0 ? filePaths : undefined,
-					entity_ids: entityIds.length > 0 ? entityIds : undefined,
-				},
-			);
-			batchResult = {
-				files_deleted: response.files_deleted,
-				entities_deleted: response.entities_deleted,
-			};
-			batchArmed = false;
-			batchFilesText = '';
-			batchEntitiesText = '';
+			if (target.kind === 'file') {
+				deleteFileError = '';
+				deleteFileResult = await indexApi.deleteFile(
+					target.path,
+					projectStore.currentProjectId,
+				);
+				deleteFilePath = '';
+			} else if (target.kind === 'entity') {
+				deleteEntityError = '';
+				const response = await indexApi.deleteEntity(
+					target.id,
+					projectStore.currentProjectId,
+				);
+				deleteEntityMessage = response.message || `Entity ${target.id} deleted`;
+				deleteEntityId = '';
+			} else {
+				batchError = '';
+				const response = await indexApi.batchDelete(
+					projectStore.currentProjectId,
+					{
+						file_paths: target.files.length > 0 ? target.files : undefined,
+						entity_ids: target.ids.length > 0 ? target.ids : undefined,
+					},
+				);
+				batchResult = {
+					files_deleted: response.files_deleted,
+					entities_deleted: response.entities_deleted,
+				};
+				batchFilesText = '';
+				batchEntitiesText = '';
+			}
 			await onDeleted?.();
 		} catch (e) {
-			batchError = errorMessage(e) ?? 'Batch delete failed';
+			const message = errorMessage(e) ?? 'Delete failed';
+			if (target.kind === 'file') deleteFileError = message;
+			else if (target.kind === 'entity') deleteEntityError = message;
+			else batchError = message;
 		} finally {
-			batchBusy = false;
+			busy = false;
+			pendingDelete = null;
 		}
+	}
+
+	function confirmMessage(target: PendingDelete): string {
+		if (target.kind === 'file') {
+			return `Permanently delete ${target.path} and all derived index data.`;
+		}
+		if (target.kind === 'entity') {
+			return `Permanently delete entity ${target.id}.`;
+		}
+		return `Permanently delete ${target.files.length} file(s) and ${target.ids.length} entity id(s).`;
 	}
 </script>
 
 <!--
-	Destructive maintenance operations for the index page: single file
-	delete, single entity delete and batch delete. Each action requires a
-	second confirmation click before it runs.
+	Destructive maintenance operations for the project workbench: single file
+	delete, single entity delete and batch delete. Every action confirms in a
+	modal before it runs.
 -->
 <Card
 	title="Delete File"
@@ -152,19 +153,13 @@
 			aria-label="File path to delete"
 		/>
 		<Button
-			variant={deleteFileArmed ? 'danger' : 'secondary'}
-			onclick={runDeleteFile}
-			disabled={deleteFileBusy || !deleteFilePath.trim()}
+			variant="danger"
+			onclick={requestDeleteFile}
+			disabled={busy || !deleteFilePath.trim()}
 		>
-			{#if deleteFileBusy}Deleting...{:else if deleteFileArmed}Confirm Delete{:else}Delete
-				File{/if}
+			Delete File
 		</Button>
 	</div>
-	{#if deleteFileArmed}
-		<p class="arm-warning">
-			Click again to permanently delete this file's index data.
-		</p>
-	{/if}
 	{#if deleteFileError}
 		<InlineError message={deleteFileError} />
 	{/if}
@@ -193,17 +188,13 @@
 			aria-label="Entity id to delete"
 		/>
 		<Button
-			variant={deleteEntityArmed ? 'danger' : 'secondary'}
-			onclick={runDeleteEntity}
-			disabled={deleteEntityBusy || !deleteEntityId.trim()}
+			variant="danger"
+			onclick={requestDeleteEntity}
+			disabled={busy || !deleteEntityId.trim()}
 		>
-			{#if deleteEntityBusy}Deleting...{:else if deleteEntityArmed}Confirm
-				Delete{:else}Delete Entity{/if}
+			Delete Entity
 		</Button>
 	</div>
-	{#if deleteEntityArmed}
-		<p class="arm-warning">Click again to permanently delete this entity.</p>
-	{/if}
 	{#if deleteEntityError}
 		<InlineError message={deleteEntityError} />
 	{/if}
@@ -238,20 +229,14 @@
 	</label>
 	<div class="action-row">
 		<Button
-			variant={batchArmed ? 'danger' : 'secondary'}
-			onclick={runBatchDelete}
-			disabled={batchBusy ||
+			variant="danger"
+			onclick={requestBatchDelete}
+			disabled={busy ||
 				(!batchFilesText.trim() && !batchEntitiesText.trim())}
 		>
-			{#if batchBusy}Deleting...{:else if batchArmed}Confirm Batch Delete{:else}Batch
-				Delete{/if}
+			Batch Delete
 		</Button>
 	</div>
-	{#if batchArmed}
-		<p class="arm-warning">
-			Click again to permanently delete the listed items.
-		</p>
-	{/if}
 	{#if batchError}
 		<InlineError message={batchError} />
 	{/if}
@@ -265,6 +250,29 @@
 		</div>
 	{/if}
 </Card>
+
+{#if pendingDelete}
+	<Modal
+		title="Confirm delete?"
+		onClose={() => {
+			if (!busy) pendingDelete = null;
+		}}
+	>
+		<p>{confirmMessage(pendingDelete)}</p>
+		{#snippet actions()}
+			<Button
+				variant="secondary"
+				onclick={() => (pendingDelete = null)}
+				disabled={busy}
+			>
+				Cancel
+			</Button>
+			<Button variant="danger" onclick={confirmDelete} disabled={busy}>
+				{busy ? 'Deleting...' : 'Confirm Delete'}
+			</Button>
+		{/snippet}
+	</Modal>
+{/if}
 
 <style>
 	.action-row {
@@ -281,14 +289,6 @@
 		margin-bottom: 0.75rem;
 	}
 
-
-	.arm-warning {
-		margin: 0.5rem 0 0;
-		color: var(--warning);
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-	}
-
 	.result-row {
 		margin-top: 0.75rem;
 		display: flex;
@@ -296,5 +296,4 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 	}
-
 </style>

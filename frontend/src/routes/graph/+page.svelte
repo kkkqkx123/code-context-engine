@@ -14,16 +14,17 @@
 	 * All imperative viewport operations (zoom/fit/relayout/export) go
 	 * through the free functions in `$lib/utils/graph-viewport`.
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import type { Core } from 'cytoscape';
-	import { page } from '$app/state';
-	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteMap, SvelteURLSearchParams } from 'svelte/reactivity';
 	import { watchStore } from '$lib/stores/watch.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
+	import LazyPanel from '$lib/components/ui/LazyPanel.svelte';
+	import SymbolCandidatePanel from '$lib/components/ui/SymbolCandidatePanel.svelte';
 	import GraphCanvas, {
 		layoutOptions,
 		type GraphLayoutName,
@@ -64,76 +65,79 @@
 	type GraphLegendC = ComponentOf<
 		typeof import('$lib/components/graph/GraphLegend.svelte')
 	>;
-	type GraphCandidatePanelC = ComponentOf<
-		typeof import('$lib/components/graph/GraphCandidatePanel.svelte')
-	>;
 	type GraphNodeInspectorC = ComponentOf<
 		typeof import('$lib/components/graph/GraphNodeInspector.svelte')
-	>;
-	type GraphCommunitiesPanelC = ComponentOf<
-		typeof import('$lib/components/graph/GraphCommunitiesPanel.svelte')
-	>;
-	type GraphCyclesPanelC = ComponentOf<
-		typeof import('$lib/components/graph/GraphCyclesPanel.svelte')
-	>;
-	type GraphModulePanelC = ComponentOf<
-		typeof import('$lib/components/graph/GraphModulePanel.svelte')
 	>;
 
 	let GraphSeedBar: GraphSeedBarC | null = $state(null);
 	let GraphFilterPanel: GraphFilterPanelC | null = $state(null);
 	let GraphLegend: GraphLegendC | null = $state(null);
-	let GraphCandidatePanel: GraphCandidatePanelC | null = $state(null);
 	let GraphNodeInspector: GraphNodeInspectorC | null = $state(null);
-	let GraphCommunitiesPanel: GraphCommunitiesPanelC | null = $state(null);
-	let GraphCyclesPanel: GraphCyclesPanelC | null = $state(null);
-	let GraphModulePanel: GraphModulePanelC | null = $state(null);
 	let activePanelsLoaded = $state(false);
 
-	/** Load the always-visible panels plus the default result tab. */
+	/** Load the always-visible chrome panels once. */
 	async function loadActivePanels() {
 		if (activePanelsLoaded) return;
 		activePanelsLoaded = true;
-		const [seed, filter, legend, inspector, communities, candidatePanel] =
-			await Promise.all([
-				import('$lib/components/graph/GraphSeedBar.svelte'),
-				import('$lib/components/graph/GraphFilterPanel.svelte'),
-				import('$lib/components/graph/GraphLegend.svelte'),
-				import('$lib/components/graph/GraphNodeInspector.svelte'),
-				import('$lib/components/graph/GraphCommunitiesPanel.svelte'),
-				import('$lib/components/graph/GraphCandidatePanel.svelte'),
-			]);
+		const [seed, filter, legend, inspector] = await Promise.all([
+			import('$lib/components/graph/GraphSeedBar.svelte'),
+			import('$lib/components/graph/GraphFilterPanel.svelte'),
+			import('$lib/components/graph/GraphLegend.svelte'),
+			import('$lib/components/graph/GraphNodeInspector.svelte'),
+		]);
 		GraphSeedBar = seed.default;
 		GraphFilterPanel = filter.default;
 		GraphLegend = legend.default;
 		GraphNodeInspector = inspector.default;
-		GraphCommunitiesPanel = communities.default;
-		GraphCandidatePanel = candidatePanel.default;
 	}
 
-	/** Load a result-tab panel the first time its tab becomes active. */
-	async function loadResultTab(tab: 'communities' | 'cycles' | 'module') {
-		resultTab = tab;
-		if (tab === 'communities') {
-			if (!GraphCommunitiesPanel)
-				GraphCommunitiesPanel = (
-					await import('$lib/components/graph/GraphCommunitiesPanel.svelte')
-				).default;
-		} else if (tab === 'cycles') {
-			if (!GraphCyclesPanel)
-				GraphCyclesPanel = (
-					await import('$lib/components/graph/GraphCyclesPanel.svelte')
-				).default;
-		} else if (!GraphModulePanel) {
-			GraphModulePanel = (
-				await import('$lib/components/graph/GraphModulePanel.svelte')
-			).default;
-		}
+	const SEED_MODES = ['focus', 'overview', 'path', 'subgraph'] as const;
+	type SeedMode = (typeof SEED_MODES)[number];
+
+	function positiveFromUrl(raw: string | null, fallback: number): number {
+		const value = Number(raw);
+		return Number.isInteger(value) && value > 0 ? value : fallback;
 	}
-	let seedMode: 'focus' | 'overview' | 'path' | 'subgraph' = $state('focus');
-	let seedId = $state('');
+
+	/** Seed state restored from the address bar; share links use the same keys. */
+	function seedFromUrl() {
+		if (typeof window === 'undefined') {
+			return {
+				mode: 'overview' as SeedMode,
+				seedId: '',
+				pathStart: '',
+				pathEnd: '',
+				pathDepth: 10,
+				subgraphIds: '',
+				overviewLimit: 400,
+				impactFile: '',
+			};
+		}
+		const params = new SvelteURLSearchParams(window.location.search);
+		const requested = params.get('mode');
+		const mode: SeedMode | null = (SEED_MODES as readonly string[]).includes(
+			requested ?? '',
+		)
+			? (requested as SeedMode)
+			: null;
+		const legacyEntity = params.get('entity') ?? '';
+		return {
+			mode: mode ?? (legacyEntity ? 'focus' : 'overview'),
+			seedId: params.get('seed') ?? legacyEntity,
+			pathStart: params.get('path_start') ?? '',
+			pathEnd: params.get('path_end') ?? '',
+			pathDepth: positiveFromUrl(params.get('path_depth'), 10),
+			subgraphIds: params.get('ids') ?? '',
+			overviewLimit: positiveFromUrl(params.get('limit'), 400),
+			impactFile: params.get('file') ?? '',
+		};
+	}
+
+	const initialSeed = seedFromUrl();
+	let seedMode = $state<SeedMode>(initialSeed.mode);
+	let seedId = $state(initialSeed.seedId);
 	let selectedId: string | null = $state(null);
-	let impactFile = $state('');
+	let impactFile = $state(initialSeed.impactFile);
 	let impactMode = $state<'file' | 'entity'>('file');
 	let impactEntity = $state('');
 	let impactScope = $state<'entity' | 'file'>('entity');
@@ -141,10 +145,10 @@
 	let impactBusy = $state(false);
 	let impactMessage = $state<string | null>(null);
 
-	let pathStart = $state('');
-	let pathEnd = $state('');
-	let pathDepth = $state(10);
-	let subgraphIds = $state('');
+	let pathStart = $state(initialSeed.pathStart);
+	let pathEnd = $state(initialSeed.pathEnd);
+	let pathDepth = $state(initialSeed.pathDepth);
+	let subgraphIds = $state(initialSeed.subgraphIds);
 	let egoDepth = $state(2);
 	let egoDirection = $state<GraphDirection>('both');
 	let showEdgeLabels = $state(false);
@@ -154,12 +158,7 @@
 	// the working set so incremental expansion keeps its full context.
 	let serverRelationTypes = $state('');
 	let serverIncludeExternal = $state<'default' | 'on' | 'off'>('default');
-	let overviewLimit = $state(400);
-
-	// The query string may carry an entity to focus on, which is how the entity
-	// detail page hands off to the explorer.
-	let queryEntity = $derived(page.url.searchParams.get('entity') ?? '');
-	let queryFile = $derived(page.url.searchParams.get('file') ?? '');
+	let overviewLimit = $state(initialSeed.overviewLimit);
 
 	let store = $derived(graphStore);
 	let nodes = $derived(store.nodes);
@@ -187,23 +186,12 @@
 				),
 	);
 
-	/** Seed the canvas from the URL the way a fresh visit does. */
+	/** Seed the canvas from the state restored from the URL. */
 	async function loadInitialGraph() {
-		if (queryEntity) {
-			seedMode = 'focus';
-			seedId = queryEntity;
-			selectedId = queryEntity;
-		} else {
-			// Nothing seeded from the URL: show the whole project graph and keep
-			// the seed mode in sync so a project switch re-loads the same view.
-			seedMode = 'overview';
-		}
-		if (queryFile) {
-			impactFile = queryFile;
-		}
+		selectedId = seedMode === 'focus' && seedId ? seedId : null;
 		await runSeed();
-		if (queryFile) {
-			await graphStore.loadImpact(queryFile);
+		if (impactFile.trim()) {
+			await graphStore.loadImpact(impactFile.trim());
 		}
 	}
 
@@ -211,11 +199,6 @@
 		void loadActivePanels();
 		await loadInitialGraph();
 		await watchStore.loadStatus();
-		watchStore.startVersionPoll();
-	});
-
-	onDestroy(() => {
-		watchStore.stopVersionPoll();
 	});
 
 	// The canvas only ever holds one project's nodes: clear the previous working
@@ -231,17 +214,43 @@
 		return buildServerFilter(serverRelationTypes, serverIncludeExternal);
 	}
 
+	/** Keep the shareable seed state in the address bar; expansion stays out. */
+	function syncSeedUrl() {
+		if (typeof window === 'undefined') return;
+		const params = new SvelteURLSearchParams();
+		params.set('mode', seedMode);
+		if (seedMode === 'focus' && seedId.trim()) {
+			params.set('entity', seedId.trim());
+		} else if (seedMode === 'path') {
+			if (pathStart.trim()) params.set('path_start', pathStart.trim());
+			if (pathEnd.trim()) params.set('path_end', pathEnd.trim());
+			params.set('path_depth', String(clampPositive(pathDepth, 10, 100)));
+		} else if (seedMode === 'subgraph' && subgraphIds.trim()) {
+			params.set('ids', subgraphIds.trim());
+		} else if (seedMode === 'overview') {
+			params.set('limit', String(clampOverviewLimit(overviewLimit)));
+		}
+		if (impactFile.trim()) params.set('file', impactFile.trim());
+		window.history.replaceState(
+			null,
+			'',
+			`${window.location.pathname}?${params}`,
+		);
+	}
+
 	async function runSeed() {
 		const id = seedId.trim();
 		const filter = serverFilter();
 		if (seedMode === 'focus') {
 			if (!id) return;
 			selectedId = id;
+			syncSeedUrl();
 			await graphStore.loadEgo(id, egoDepth, egoDirection, undefined, filter);
 		} else if (seedMode === 'path') {
 			const start = pathStart.trim();
 			const end = pathEnd.trim();
 			if (!start || !end) return;
+			syncSeedUrl();
 			await graphStore.loadPath(
 				start,
 				end,
@@ -252,8 +261,10 @@
 		} else if (seedMode === 'subgraph') {
 			const ids = parseEntityIds(subgraphIds);
 			if (ids.length === 0) return;
+			syncSeedUrl();
 			await graphStore.loadSubgraph(ids, undefined, filter);
 		} else {
+			syncSeedUrl();
 			await graphStore.loadOverview(
 				clampOverviewLimit(overviewLimit),
 				undefined,
@@ -356,6 +367,7 @@
 		impactEntity = '';
 		impactMessage = null;
 		graphStore.clearImpact();
+		syncSeedUrl();
 	}
 
 	let communities = $derived.by(() => {
@@ -391,6 +403,7 @@
 		seedMode = 'focus';
 		seedId = entityId;
 		selectedId = entityId;
+		syncSeedUrl();
 		await graphStore.loadEgo(
 			entityId,
 			egoDepth,
@@ -530,9 +543,9 @@
 		{/if}
 
 		{#if store.error}
-			<ErrorBanner message={store.error.message} />
-			{#if candidates.length > 0 && GraphCandidatePanel}
-				<GraphCandidatePanel {candidates} onPick={useCandidate} />
+			<ErrorBanner message={store.error.message} code={store.error.code} />
+			{#if candidates.length > 0}
+				<SymbolCandidatePanel {candidates} onPick={useCandidate} />
 			{/if}
 		{/if}
 
@@ -548,7 +561,8 @@
 
 		{#if store.truncated}
 			<Notice variant="warning">
-				Node limit reached. Expand is disabled until you reload a smaller seed.
+				Node limit reached. This view grows cumulatively: expansion adds to the
+				working set, so load a smaller seed instead of paging.
 			</Notice>
 		{/if}
 
@@ -602,7 +616,8 @@
 				/>
 				<p class="canvas-hint">
 					Drag to pan · Ctrl/Cmd + wheel to zoom · Double click a node to expand
-					its neighborhood
+					its neighborhood. Graph growth is cumulative: expansion widens the
+					working set, while a new seed replaces it (no paging).
 				</p>
 				<details class="canvas-help">
 					<summary>Navigation help</summary>
@@ -643,22 +658,37 @@
 					{ id: 'cycles', label: 'Cycles' },
 					{ id: 'module', label: 'Module' },
 				]}
-				onSelect={(id) => loadResultTab(id as typeof resultTab)}
+				onSelect={(id) => (resultTab = id as typeof resultTab)}
 			/>
 
-			{#if resultTab === 'communities' && GraphCommunitiesPanel}
-				<GraphCommunitiesPanel {communities} onLoad={openAsSubgraph} />
-			{:else if resultTab === 'cycles' && GraphCyclesPanel}
-				<GraphCyclesPanel onLoadSubgraph={openAsSubgraph} />
-			{:else if resultTab === 'module' && GraphModulePanel}
-				<GraphModulePanel
-					data={moduleQuery.data}
-					loading={moduleQuery.loading}
-					error={moduleQuery.error}
-					stale={moduleQuery.stale}
-					{watchEpoch}
-					onFocusEntity={focusPeer}
-					onImpactFile={impactCallerFile}
+			{#if resultTab === 'communities'}
+				<LazyPanel
+					loader={() =>
+						import('$lib/components/graph/GraphCommunitiesPanel.svelte')}
+					componentProps={{ communities, onLoad: openAsSubgraph }}
+					loadingMessage="Loading communities…"
+				/>
+			{:else if resultTab === 'cycles'}
+				<LazyPanel
+					loader={() =>
+						import('$lib/components/graph/GraphCyclesPanel.svelte')}
+					componentProps={{ onLoadSubgraph: openAsSubgraph }}
+					loadingMessage="Loading cycle detection…"
+				/>
+			{:else}
+				<LazyPanel
+					loader={() =>
+						import('$lib/components/graph/GraphModulePanel.svelte')}
+					componentProps={{
+						data: moduleQuery.data,
+						loading: moduleQuery.loading,
+						error: moduleQuery.error,
+						stale: moduleQuery.stale,
+						watchEpoch,
+						onFocusEntity: focusPeer,
+						onImpactFile: impactCallerFile,
+					}}
+					loadingMessage="Loading module relations…"
 				/>
 			{/if}
 		</details>

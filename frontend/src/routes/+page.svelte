@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { metricsStore } from '$lib/stores/metrics.svelte';
@@ -47,14 +47,6 @@
 		}
 		goto(resolve(`/search?q=${encodeURIComponent(trimmed)}`));
 	}
-
-	onMount(() => {
-		metricsStore.startAutoRefresh(30000);
-	});
-
-	onDestroy(() => {
-		metricsStore.stopAutoRefresh();
-	});
 
 	let vectorCount = $derived(
 		metricsStore.storageStatus?.vector_storage.item_count ?? 0,
@@ -148,14 +140,14 @@
 	<div class="quick-grid">
 		<a
 			class="quick-tile"
-			href={resolve('/index')}
+			href={resolve('/projects')}
 			onclick={(e) => {
 				e.preventDefault();
-				goto(resolve('/index'));
+				goto(resolve('/projects'));
 			}}
 		>
-			<h3>Manage Index</h3>
-			<p>Create projects, trigger indexing, monitor progress</p>
+			<h3>Project Workbench</h3>
+			<p>Create projects, trigger indexing, maintain the index</p>
 		</a>
 		<a
 			class="quick-tile"
@@ -170,10 +162,10 @@
 		</a>
 		<a
 			class="quick-tile"
-			href={resolve('/entities')}
+			href={resolve('/search?view=entities')}
 			onclick={(e) => {
 				e.preventDefault();
-				goto(resolve('/entities'));
+				goto(resolve('/search?view=entities'));
 			}}
 		>
 			<h3>Explore Entities</h3>

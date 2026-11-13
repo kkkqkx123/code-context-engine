@@ -6,10 +6,12 @@
 	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
 
 	let files = $state<LogFileInfo[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+	let deleteTarget = $state<string | null>(null);
 
 	async function refresh() {
 		loading = true;
@@ -32,10 +34,16 @@
 		}
 	}
 
-	async function remove(name: string) {
-		if (!confirm(`Delete ${name}?`)) return;
+	function askDelete(name: string) {
+		deleteTarget = name;
+	}
+
+	async function confirmDelete() {
+		const name = deleteTarget;
+		if (!name) return;
 		try {
 			await logsApi.deleteFile(name);
+			deleteTarget = null;
 			await refresh();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -94,7 +102,7 @@
 									<Button
 										variant="danger"
 										size="xs"
-										onclick={() => remove(f.name)}
+										onclick={() => askDelete(f.name)}
 									>
 										Delete
 									</Button>
@@ -107,6 +115,21 @@
 		</div>
 	{/if}
 </Card>
+
+{#if deleteTarget}
+	<Modal title="Delete log file?" onClose={() => (deleteTarget = null)}>
+		<p>
+			Log file <span class="font-mono">{deleteTarget}</span> will be permanently
+			removed.
+		</p>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={() => (deleteTarget = null)}>
+				Cancel
+			</Button>
+			<Button variant="danger" onclick={confirmDelete}>Delete</Button>
+		{/snippet}
+	</Modal>
+{/if}
 
 <style>
 	.count {

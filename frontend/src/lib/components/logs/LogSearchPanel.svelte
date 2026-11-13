@@ -165,6 +165,7 @@
 	{/if}
 	<Pagination
 		page={page}
+		total={Math.max(1, Math.ceil(total / pageSize))}
 		size="xs"
 		prevLabel="Prev"
 		nextLabel="Next"

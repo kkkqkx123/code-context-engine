@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
-	 * Disambiguation candidates shown when a symbol-name seed matches
-	 * multiple entities (backend AMBIGUOUS_SYMBOL). Picking one lets the
-	 * page retry with its stable id.
+	 * Disambiguation candidates shared by every surface that may receive an
+	 * AMBIGUOUS_SYMBOL error. Picking one hands the stable id back to the
+	 * caller, which decides whether to retry, navigate or re-query.
 	 */
 	import type { SymbolCandidate } from '$lib/api/client';
 	import SelectChip from '$lib/components/ui/SelectChip.svelte';
@@ -18,7 +18,7 @@
 <div class="candidate-panel" aria-label="Symbol candidates">
 	<p class="candidate-hint">Multiple symbols match this name — pick one:</p>
 	<p class="candidate-context">
-		The current graph stays loaded until a candidate is chosen.
+		The current view stays loaded until a candidate is chosen.
 	</p>
 	<ul class="candidate-list">
 		{#each candidates as candidate (candidate.stable_id)}
@@ -38,7 +38,7 @@
 
 <style>
 	.candidate-panel {
-		padding: 0.6rem 0.75rem;
+		padding: 0.75rem;
 		margin-bottom: 1rem;
 		border: var(--border-soft);
 	}
@@ -83,5 +83,4 @@
 		color: var(--gray-500);
 		word-break: break-all;
 	}
-
 </style>

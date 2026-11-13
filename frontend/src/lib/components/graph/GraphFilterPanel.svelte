@@ -51,7 +51,7 @@
 
 <aside class="filter-panel" aria-label="Graph filters">
 	<div class="panel-section">
-		<h4 class="panel-title">Find</h4>
+		<h4 class="panel-title">Find — current view only</h4>
 		<input
 			class="text-input"
 			type="search"
@@ -78,7 +78,11 @@
 	</div>
 
 	<div class="panel-section">
-		<h4 class="panel-title">Relation domains</h4>
+		<h4 class="panel-title">Relation domains — current view only</h4>
+		<p class="hint">
+			Domain toggles affect the current view only; hidden edges stay in the
+			working set for later expansion.
+		</p>
 		<ul class="domain-list">
 			{#each RELATION_DOMAIN_ORDER as domain (domain)}
 				{@const meta = RELATION_DOMAINS[domain]}

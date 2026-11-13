@@ -12,7 +12,7 @@
  * `buildCommonFilterFields`/`buildAggregatedRequest` stay at module level.
  */
 
-import { errorMessage } from '$lib/utils/errors';
+import { toAppError, type AppError } from '$lib/utils/errors';
 import {
 	searchApi,
 	type SearchRequest,
@@ -83,7 +83,7 @@ export interface SearchState {
 	/** True when the serving relation snapshot reported itself stale. */
 	relationStale: boolean;
 	isSearching: boolean;
-	error: string | null;
+	error: AppError | null;
 	/** True when filters/mode changed after the last search */
 	stale: boolean;
 	filters: SearchFilters;
@@ -202,7 +202,7 @@ class SearchStore {
 	/** True when the serving relation snapshot reported itself stale. */
 	relationStale = $state(false);
 	isSearching = $state(false);
-	error = $state<string | null>(null);
+	error = $state<AppError | null>(null);
 	/** True when filters/mode changed after the last search */
 	stale = $state(false);
 	filters = $state<SearchFilters>(filtersFromUrl());
@@ -307,9 +307,8 @@ class SearchStore {
 			this.#syncUrl(query);
 		} catch (error) {
 			if (seq !== requestSeq) return;
-			const message = errorMessage(error) ?? 'Search failed';
 			this.isSearching = false;
-			this.error = message;
+			this.error = toAppError(error, 'Search failed');
 		}
 	}
 
@@ -322,14 +321,6 @@ class SearchStore {
 		const start = (this.pagination.page - 1) * this.pagination.pageSize;
 		const end = start + this.pagination.pageSize;
 		return this.results.slice(start, end);
-	}
-
-	/** Total number of client-side pages given the fetched result set. */
-	totalPages(): number {
-		return Math.max(
-			1,
-			Math.ceil(this.results.length / this.pagination.pageSize),
-		);
 	}
 
 	#syncUrl(currentQuery: string) {
@@ -359,6 +350,13 @@ class SearchStore {
 			params.set('intent', this.filters.query_intent);
 		if (this.filters.expand !== null)
 			params.set('expand', this.filters.expand ? 'on' : 'off');
+		// Workbench params belonging to the other views live in the same query
+		// string; a semantic search must not drop them.
+		const existing = new SvelteURLSearchParams(window.location.search);
+		for (const key of ['view', 'kind', 'limit']) {
+			const value = existing.get(key);
+			if (value) params.set(key, value);
+		}
 		window.history.replaceState(
 			null,
 			'',

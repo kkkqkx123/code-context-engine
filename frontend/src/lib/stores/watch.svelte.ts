@@ -76,18 +76,12 @@ class WatchStore {
 		}
 	}
 
+	/** Start the single version-epoch polling source; repeated calls are no-ops. */
 	startVersionPoll() {
 		if (versionPollTimer !== null) return;
 		versionPollTimer = setInterval(() => {
 			void this.loadStatus();
 		}, VERSION_POLL_MS);
-	}
-
-	stopVersionPoll() {
-		if (versionPollTimer !== null) {
-			clearInterval(versionPollTimer);
-			versionPollTimer = null;
-		}
 	}
 }
 

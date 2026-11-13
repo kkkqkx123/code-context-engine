@@ -1,7 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -13,12 +13,7 @@
 	let debounceMs = $state(1000);
 
 	onMount(() => {
-		watchStore.loadStatus();
-		watchStore.startVersionPoll();
-	});
-
-	onDestroy(() => {
-		watchStore.stopVersionPoll();
+		void watchStore.loadStatus();
 	});
 
 	async function handleStartWatch() {

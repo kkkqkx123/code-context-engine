@@ -4,6 +4,8 @@
 
 	interface Props {
 		message?: string;
+		/** Stable backend/transport error code shown alongside the message. */
+		code?: string | null;
 		dismissable?: boolean;
 		onDismiss?: () => void;
 		children?: Snippet;
@@ -11,6 +13,7 @@
 
 	let {
 		message = '',
+		code = null,
 		dismissable = false,
 		onDismiss,
 		children,
@@ -21,6 +24,9 @@
 
 <div class="error-banner">
 	<div class="error-banner-content">
+		{#if code}
+			<span class="error-banner-code">{code}</span>
+		{/if}
 		{#if message}
 			<span>{message}</span>
 		{:else}
@@ -72,5 +78,18 @@
 	.error-banner-content {
 		min-width: 0;
 		flex: 1;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.error-banner-code {
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: var(--tracking-wider);
+		border: 1px solid var(--white);
+		padding: 0 0.25rem;
 	}
 </style>

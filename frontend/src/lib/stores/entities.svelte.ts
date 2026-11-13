@@ -14,6 +14,7 @@ import {
 	type RelationFilter,
 } from '../api/entities';
 import { type CallChainNode } from '../api/search';
+import { toAppError, type AppError } from '../utils/errors';
 import { projectStore } from './project.svelte';
 
 export interface EntityState {
@@ -33,7 +34,10 @@ export interface EntityState {
 	classificationRelations: unknown[];
 	classificationCategory: string;
 	isLoading: boolean;
-	error: string | null;
+	/** Page-level failure for the entity itself (structured). */
+	error: AppError | null;
+	/** Failure of the two-point call-path query, kept separate from the entity. */
+	callPathError: string | null;
 }
 
 class EntityStore {
@@ -50,7 +54,8 @@ class EntityStore {
 	classificationRelations = $state<unknown[]>([]);
 	classificationCategory = $state('');
 	isLoading = $state(false);
-	error = $state<string | null>(null);
+	error = $state<AppError | null>(null);
+	callPathError = $state<string | null>(null);
 
 	async loadFunction(id: string, filter?: RelationFilter) {
 		this.isLoading = true;
@@ -72,7 +77,7 @@ class EntityStore {
 		} catch (error) {
 			console.error('Failed to load function:', error);
 			this.isLoading = false;
-			this.error = 'Failed to load function details';
+			this.error = toAppError(error, 'Failed to load function details');
 		}
 	}
 
@@ -95,7 +100,7 @@ class EntityStore {
 		} catch (error) {
 			console.error('Failed to load class:', error);
 			this.isLoading = false;
-			this.error = 'Failed to load class details';
+			this.error = toAppError(error, 'Failed to load class details');
 		}
 	}
 
@@ -127,6 +132,7 @@ class EntityStore {
 	async loadCallPath(fromId: string, toId: string, maxDepth = 10) {
 		this.isLoading = true;
 		this.error = null;
+		this.callPathError = null;
 		this.callPath = [];
 		this.callPathFound = false;
 		this.callPathLength = 0;
@@ -144,14 +150,14 @@ class EntityStore {
 			this.callPath = response.path ?? [];
 			this.callPathLength = response.path_length ?? 0;
 			this.isLoading = false;
-			this.error = response.path_found
+			this.callPathError = response.path_found
 				? null
 				: 'No call path found between the given functions';
 			return response;
 		} catch (error) {
 			console.error('Failed to load call path:', error);
 			this.isLoading = false;
-			this.error = 'Failed to load call path';
+			this.callPathError = 'Failed to load call path';
 			return null;
 		}
 	}
@@ -170,6 +176,7 @@ class EntityStore {
 		this.classificationRelations = [];
 		this.classificationCategory = '';
 		this.error = null;
+		this.callPathError = null;
 	}
 
 	/** Project-level external-call classification counts. */
@@ -185,7 +192,7 @@ class EntityStore {
 		} catch (error) {
 			console.error('Failed to load classification stats:', error);
 			this.isLoading = false;
-			this.error = 'Failed to load classification stats';
+			this.error = toAppError(error, 'Failed to load classification stats');
 			return null;
 		}
 	}
@@ -208,7 +215,7 @@ class EntityStore {
 		} catch (error) {
 			console.error('Failed to load classification relations:', error);
 			this.isLoading = false;
-			this.error = 'Failed to load classification relations';
+			this.error = toAppError(error, 'Failed to load classification relations');
 			return null;
 		}
 	}

@@ -48,7 +48,7 @@ npm run dev
 npm run build
 
 # Preview production build
-npm run preview
+npm run build:preview
 
 # Type checking
 npm run check
@@ -68,10 +68,3 @@ set `CCE_DEV_API_TARGET` before starting the dev server:
 CCE_DEV_API_TARGET=http://10.0.0.5:9000 npm run dev
 ```
 
-## Migration Notes
-
-If you previously had `node_modules/` in the root directory, it has been moved to `frontend/`. This ensures:
-
-- Cleaner project structure
-- No dependency conflicts between Rust and Node.js ecosystems
-- Proper separation of concerns

@@ -5,6 +5,6 @@
 
 <svelte:head><title>Log Files</title></svelte:head>
 <div class="page">
-	<PageHeader title="Log Files" subtitle="Manage log files" />
+	<PageHeader title="Log Files" subtitle="Manage log files" scope="global" />
 	<LogFileManager />
 </div>

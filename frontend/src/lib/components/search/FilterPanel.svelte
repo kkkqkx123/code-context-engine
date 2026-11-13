@@ -136,6 +136,7 @@
 </script>
 
 <div class="filter-panel">
+	<p class="filter-title">Search filters — applies immediately</p>
 	<div class="filter-section">
 		<span class="form-label" id="query-mode-label">Query Mode</span>
 		<div class="mode-tabs" role="group" aria-labelledby="query-mode-label">
@@ -391,6 +392,15 @@
 </div>
 
 <style>
+	.filter-title {
+		margin: 0;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: var(--tracking-wider);
+		color: var(--gray-600);
+	}
+
 	.filter-panel {
 		border: var(--border-muted);
 		padding: 1.5rem;

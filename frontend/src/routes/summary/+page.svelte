@@ -95,6 +95,7 @@
 		<PageHeader
 			title="Summary Generator"
 			subtitle="Generate natural language summaries of code files"
+			scope="global"
 		/>
 
 		{#if error}

@@ -5,6 +5,6 @@
 
 <svelte:head><title>Log Config</title></svelte:head>
 <div class="page">
-	<PageHeader title="Log Config" subtitle="Configure logging" />
+	<PageHeader title="Log Config" subtitle="Configure logging" scope="global" />
 	<LogConfigPanel />
 </div>

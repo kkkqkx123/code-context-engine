@@ -6,6 +6,7 @@
 	import Input from '../ui/Input.svelte';
 	import CodeBlock from '../ui/CodeBlock.svelte';
 	import Badge from '../ui/Badge.svelte';
+	import InlineError from '../ui/InlineError.svelte';
 
 	let filePath = $state('');
 	let isLoading = $state(false);
@@ -14,7 +15,7 @@
 
 	async function handleParse() {
 		if (!filePath) {
-			alert('File path is required');
+			error = 'File path is required';
 			return;
 		}
 
@@ -74,10 +75,7 @@
 	</div>
 
 	{#if error}
-		<div class="error-display">
-			<Badge variant="active">Error</Badge>
-			<p>{error}</p>
-		</div>
+		<InlineError message={error} />
 	{/if}
 
 	{#if parseResult}
@@ -153,21 +151,6 @@
 	.form-actions {
 		display: flex;
 		gap: 1rem;
-	}
-
-	.error-display {
-		padding: 1.5rem;
-		border: 1px solid var(--danger);
-		border-left: 4px solid var(--danger);
-		background: var(--danger-bg);
-		margin-bottom: 2rem;
-	}
-
-	.error-display p {
-		margin-top: 0.75rem;
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		color: var(--danger);
 	}
 
 	.results-section {

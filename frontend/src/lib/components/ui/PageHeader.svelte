@@ -4,16 +4,19 @@
 	/**
 	 * Consistent page header: title + one-line description on the left,
 	 * optional action slot on the right. Replaces the legacy giant hero.
-	 * The globally selected project is echoed underneath so every page states
-	 * which project its data belongs to.
+	 * Project pages echo the globally selected project so every page states
+	 * which project its data belongs to; global pages show a global marker
+	 * and never reference the project store selection.
 	 */
 	let {
 		title,
 		subtitle = '',
+		scope = 'project',
 		children,
 	}: {
 		title: string;
 		subtitle?: string;
+		scope?: 'project' | 'global';
 		children?: Snippet;
 	} = $props();
 </script>
@@ -24,7 +27,15 @@
 		{#if subtitle}
 			<p class="page-header-subtitle">{subtitle}</p>
 		{/if}
-		{#if projectStore.currentProject}
+		{#if scope === 'global'}
+			<p class="page-header-project">
+				<span class="page-header-project-name">Global scope</span>
+				<span class="page-header-project-sep">·</span>
+				<span class="page-header-project-path"
+					>Not bound to a single project</span
+				>
+			</p>
+		{:else if projectStore.currentProject}
 			<p
 				class="page-header-project"
 				title={projectStore.currentProject.root_path}

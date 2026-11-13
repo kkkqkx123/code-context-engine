@@ -47,8 +47,8 @@ describe('state-layer passthrough', () => {
 		}
 	});
 
-	it('entity list page pairs classification panel with request funcs', () => {
-		const text = read('src/routes/entities/+page.svelte');
+	it('entity search view pairs classification panel with request funcs', () => {
+		const text = read('src/lib/components/entities/EntitySearchView.svelte');
 		assert.ok(text.includes('runClassificationStats'));
 		assert.ok(text.includes('runClassificationDetail'));
 		assert.ok(text.includes('loadClassificationStats'));

@@ -27,9 +27,11 @@ export function clampPositive(
 
 /**
  * Build the server-side traversal filter from the advanced filter controls.
- * Returns undefined when every control is at its default so the request
- * layer omits the parameters entirely. Domains are never included here —
- * domain visibility stays purely client-side.
+ * The result is consumed only when a seed load runs, so these controls
+ * change the next load rather than the current view. Returns undefined when
+ * every control is at its default so the request layer omits the parameters
+ * entirely. Domains are never included here — domain visibility stays purely
+ * client-side and affects the current view only.
  */
 export function buildServerFilter(
 	relationTypes: string,

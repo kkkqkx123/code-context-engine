@@ -11,18 +11,17 @@
 		type RetryQueueDeadEntry,
 	} from '$lib/api/dead-letters';
 	import { toastStore } from '$lib/stores/toast.svelte';
-	import { ApiError } from '$lib/api/client';
+	import { healthStore } from '$lib/stores/health.svelte';
 	import { onMount } from 'svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
-
-	const REFRESH_MS = 30_000;
+	import { errorMessage, toAppError, type AppError } from '$lib/utils/errors';
 
 	let status = $state<RetryQueueStatus | null>(null);
 	let deadEntries = $state<RetryQueueDeadEntry[]>([]);
 	let loading = $state(false);
 	let busy = $state(false);
 	let clearConfirmOpen = $state(false);
-	let error = $state<string | null>(null);
+	let error = $state<AppError | null>(null);
 	let selectedProjectId = $state<number | null>(null);
 
 	async function load() {
@@ -33,7 +32,7 @@
 			const dead = await retryQueueApi.getDead(selectedProjectId);
 			deadEntries = dead.entries;
 		} catch (e) {
-			error = e instanceof ApiError ? e.message : String(e);
+			error = toAppError(e, 'Failed to load the retry queue');
 		} finally {
 			loading = false;
 		}
@@ -47,7 +46,7 @@
 			clearConfirmOpen = false;
 			await load();
 		} catch (e) {
-			toastStore.show(e instanceof ApiError ? e.message : String(e), 'error');
+			toastStore.show(errorMessage(e), 'error');
 		} finally {
 			busy = false;
 		}
@@ -62,10 +61,8 @@
 	}
 
 	onMount(() => {
-		projectStore.loadProjects();
-		load();
-		const timer = setInterval(load, REFRESH_MS);
-		return () => clearInterval(timer);
+		void load();
+		return healthStore.onRefresh(load);
 	});
 </script>
 
@@ -78,6 +75,7 @@
 		<PageHeader
 			title="Query Retry Queue"
 			subtitle="Queued query replays and dead-lettered queries across all projects"
+			scope="global"
 		>
 			<Button variant="secondary" onclick={load} disabled={loading}
 				>Refresh</Button
@@ -85,7 +83,7 @@
 		</PageHeader>
 
 		{#if error}
-			<ErrorBanner message={error} />
+			<ErrorBanner message={error.message} code={error.code} />
 		{/if}
 
 		<div class="filter-row">

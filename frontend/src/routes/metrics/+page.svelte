@@ -137,6 +137,7 @@
 		<PageHeader
 			title="Metrics"
 			subtitle="Historical aggregates, Prometheus export and retention"
+			scope="global"
 		/>
 
 		<Card

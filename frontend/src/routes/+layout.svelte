@@ -11,15 +11,14 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 	import { networkStore } from '$lib/stores/network.svelte';
 	import { healthStore } from '$lib/stores/health.svelte';
 	import { metricsStore } from '$lib/stores/metrics.svelte';
+	import { watchStore } from '$lib/stores/watch.svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
 
 	type NavHref =
 		| '/'
 		| '/projects'
-		| '/index'
 		| '/watch'
 		| '/search'
-		| '/entities'
 		| '/graph'
 		| '/summary'
 		| '/storage'
@@ -55,10 +54,9 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 			groups: [
 				{ title: 'Overview', items: [{ href: '/', label: 'Dashboard' }] },
 				{
-					title: 'Search & Analysis',
+					title: 'Query & Analysis',
 					items: [
-						{ href: '/search', label: 'Search' },
-						{ href: '/entities', label: 'Entities' },
+						{ href: '/search', label: 'Query Workbench' },
 						{ href: '/graph', label: 'Graph' },
 						{ href: '/summary', label: 'Summary' },
 					],
@@ -71,8 +69,7 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 				{
 					title: 'Data',
 					items: [
-						{ href: '/projects', label: 'Projects' },
-						{ href: '/index', label: 'Index' },
+						{ href: '/projects', label: 'Project Workbench' },
 						{ href: '/watch', label: 'Watch' },
 					],
 				},
@@ -105,6 +102,9 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 	const navGroups: NavGroup[] = navDomains.flatMap((domain) => domain.groups);
 
 	function resolveCrumb(pathname: string): { group: string; label: string } {
+		if (pathname.startsWith('/entities/')) {
+			return { group: 'Query & Analysis', label: 'Entity Details' };
+		}
 		for (const group of navGroups) {
 			for (const item of group.items) {
 				if (item.href === pathname) {
@@ -158,8 +158,11 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 
 	onMount(() => {
 		projectStore.loadProjects();
-		healthStore.startAutoRefresh(15000);
-		metricsStore.startAutoRefresh(30000);
+		// The three singleton stores own their own polling beats; pages only
+		// subscribe to their state.
+		healthStore.startAutoRefresh();
+		metricsStore.startAutoRefresh();
+		watchStore.startVersionPoll();
 		clock = new Date().toLocaleTimeString();
 		clockTimer = setInterval(() => {
 			clock = new Date().toLocaleTimeString();
@@ -167,8 +170,6 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 	});
 
 	onDestroy(() => {
-		healthStore.stopAutoRefresh();
-		metricsStore.stopAutoRefresh();
 		if (clockTimer) {
 			clearInterval(clockTimer);
 		}
@@ -218,7 +219,9 @@ import StatusDot from '$lib/components/ui/StatusDot.svelte';
 									class="nav-item"
 									class:active={item.href === '/'
 										? currentPage === '/'
-										: currentPage.startsWith(item.href)}
+										: currentPage.startsWith(item.href) ||
+											(item.href === '/search' &&
+												currentPage.startsWith('/entities'))}
 									onclick={(e) => {
 										e.preventDefault();
 										goto(resolve(item.href));

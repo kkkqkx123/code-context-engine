@@ -1,12 +1,10 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import type { Component } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
+	import LazyPanel from '$lib/components/ui/LazyPanel.svelte';
 
-	// Tab state
-	let activeTab = $state<
+	type ToolTab =
 		| 'compress'
 		| 'diagnose'
 		| 'fold'
@@ -14,119 +12,15 @@
 		| 'symbols'
 		| 'references'
 		| 'definition'
-		| 'keyword'
-		| 'batch'
-	>('compress');
+		| 'batch';
 
-	// Lazy loaded components
-	let CompressionTool: Component | null = $state(null);
-	let DiagnosisTool: Component | null = $state(null);
-	let FoldTool: Component | null = $state(null);
-	let FoldBatchTool: Component | null = $state(null);
-	let SymbolLookupTool: Component | null = $state(null);
-	let ReferencesTool: Component | null = $state(null);
-	let DefinitionTool: Component | null = $state(null);
-	let KeywordSearchTool: Component | null = $state(null);
-	let BatchCompressTool: Component | null = $state(null);
+	let activeTab = $state<ToolTab>('compress');
 
-	// Component props
+	// Tool props retained across tab switches.
 	let diagnoseLanguage = $state('typescript');
 	let foldLanguage = $state('rust');
 	let symbolFilePath = $state('');
 	let symbolLanguage = $state('typescript');
-
-	// Load components on-demand
-	async function loadCompressionTool() {
-		if (!CompressionTool) {
-			const module =
-				await import('$lib/components/tools/CompressionTool.svelte');
-			CompressionTool = module.default;
-		}
-	}
-
-	async function loadDiagnosisTool() {
-		if (!DiagnosisTool) {
-			const module = await import('$lib/components/tools/DiagnosisTool.svelte');
-			DiagnosisTool = module.default;
-		}
-	}
-
-	async function loadFoldTool() {
-		if (!FoldTool) {
-			const module = await import('$lib/components/tools/FoldTool.svelte');
-			FoldTool = module.default;
-		}
-	}
-
-	async function loadFoldBatchTool() {
-		if (!FoldBatchTool) {
-			const module = await import('$lib/components/tools/FoldBatchTool.svelte');
-			FoldBatchTool = module.default;
-		}
-	}
-
-	async function loadSymbolLookupTool() {
-		if (!SymbolLookupTool) {
-			const module =
-				await import('$lib/components/tools/SymbolLookupTool.svelte');
-			SymbolLookupTool = module.default;
-		}
-	}
-
-	async function loadReferencesTool() {
-		if (!ReferencesTool) {
-			const module =
-				await import('$lib/components/tools/ReferencesTool.svelte');
-			ReferencesTool = module.default;
-		}
-	}
-
-	async function loadDefinitionTool() {
-		if (!DefinitionTool) {
-			const module =
-				await import('$lib/components/tools/DefinitionTool.svelte');
-			DefinitionTool = module.default;
-		}
-	}
-
-	async function loadKeywordSearchTool() {
-		if (!KeywordSearchTool) {
-			const module =
-				await import('$lib/components/tools/KeywordSearchTool.svelte');
-			KeywordSearchTool = module.default;
-		}
-	}
-
-	async function loadBatchCompressTool() {
-		if (!BatchCompressTool) {
-			const module =
-				await import('$lib/components/tools/BatchCompressTool.svelte');
-			BatchCompressTool = module.default;
-		}
-	}
-
-	// Watch for tab changes and load components
-	$effect(() => {
-		if (activeTab === 'compress') {
-			loadCompressionTool();
-		} else if (activeTab === 'diagnose') {
-			loadDiagnosisTool();
-		} else if (activeTab === 'fold') {
-			loadFoldTool();
-		} else if (activeTab === 'fold-batch') {
-			loadFoldBatchTool();
-		} else if (activeTab === 'symbols') {
-			loadSymbolLookupTool();
-		} else if (activeTab === 'references') {
-			loadReferencesTool();
-		} else if (activeTab === 'definition') {
-			loadDefinitionTool();
-		} else if (activeTab === 'keyword') {
-			loadKeywordSearchTool();
-		} else if (activeTab === 'batch') {
-			loadBatchCompressTool();
-		}
-	});
 </script>
 
 <svelte:head>
@@ -135,10 +29,7 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader
-			title="Developer Tools"
-			subtitle="Code analysis utilities and helpers"
-		/>
+		<PageHeader title="Developer Tools" subtitle="Code analysis utilities and helpers" />
 
 		<Tabs
 			variant="underline"
@@ -152,136 +43,91 @@
 				{ id: 'symbols', label: 'Symbol Lookup' },
 				{ id: 'references', label: 'References' },
 				{ id: 'definition', label: 'Definition' },
-				{ id: 'keyword', label: 'Keyword Search' },
 				{ id: 'batch', label: 'Batch Compress' },
 			]}
-			onSelect={(id) => (activeTab = id as typeof activeTab)}
+			onSelect={(id) => (activeTab = id as ToolTab)}
 		/>
 
-		<!-- Code Compression Tool -->
 		{#if activeTab === 'compress'}
 			<Card
 				title="Code Compression"
 				subtitle="Reduce token count for LLM efficiency"
 			>
-				{#if CompressionTool}
-					<CompressionTool />
-				{:else}
-					<LoadingState message="Loading compression tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/CompressionTool.svelte')}
+					loadingMessage="Loading compression tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- Code Diagnosis Tool -->
-		{#if activeTab === 'diagnose'}
+		{:else if activeTab === 'diagnose'}
 			<Card title="Code Diagnosis" subtitle="Analyze code for potential issues">
-				{#if DiagnosisTool}
-					<DiagnosisTool language={diagnoseLanguage} />
-				{:else}
-					<LoadingState message="Loading diagnosis tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/DiagnosisTool.svelte')}
+					componentProps={{ language: diagnoseLanguage }}
+					loadingMessage="Loading diagnosis tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- File Fold Tool -->
-		{#if activeTab === 'fold'}
+		{:else if activeTab === 'fold'}
 			<Card
 				title="File Fold"
 				subtitle="Extract a symbol skeleton from raw text"
 			>
-				{#if FoldTool}
-					<FoldTool language={foldLanguage} />
-				{:else}
-					<LoadingState message="Loading fold tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/FoldTool.svelte')}
+					componentProps={{ language: foldLanguage }}
+					loadingMessage="Loading fold tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- Batch Fold Tool -->
-		{#if activeTab === 'fold-batch'}
+		{:else if activeTab === 'fold-batch'}
 			<Card
 				title="Batch Fold"
 				subtitle="Fold multiple raw texts in one request"
 			>
-				{#if FoldBatchTool}
-					<FoldBatchTool />
-				{:else}
-					<LoadingState message="Loading batch fold tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/FoldBatchTool.svelte')}
+					loadingMessage="Loading batch fold tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- Symbol Lookup Tool -->
-		{#if activeTab === 'symbols'}
+		{:else if activeTab === 'symbols'}
 			<Card title="Symbol Lookup" subtitle="Extract and analyze code symbols">
-				{#if SymbolLookupTool}
-					<SymbolLookupTool
-						filePath={symbolFilePath}
-						language={symbolLanguage}
-					/>
-				{:else}
-					<LoadingState message="Loading symbol lookup tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/SymbolLookupTool.svelte')}
+					componentProps={{
+						filePath: symbolFilePath,
+						language: symbolLanguage,
+					}}
+					loadingMessage="Loading symbol lookup tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- References Tool -->
-		{#if activeTab === 'references'}
+		{:else if activeTab === 'references'}
 			<Card
 				title="Find References"
 				subtitle="Position-based reference lookup across the project"
 			>
-				{#if ReferencesTool}
-					<ReferencesTool />
-				{:else}
-					<LoadingState message="Loading references tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/ReferencesTool.svelte')}
+					loadingMessage="Loading references tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- Definition Tool -->
-		{#if activeTab === 'definition'}
+		{:else if activeTab === 'definition'}
 			<Card
 				title="Goto Definition"
 				subtitle="Resolve the symbol under a position"
 			>
-				{#if DefinitionTool}
-					<DefinitionTool />
-				{:else}
-					<LoadingState message="Loading definition tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/DefinitionTool.svelte')}
+					loadingMessage="Loading definition tool..."
+				/>
 			</Card>
-		{/if}
-
-		<!-- Keyword Search Tool -->
-		{#if activeTab === 'keyword'}
-			<Card
-				title="Keyword Search"
-				subtitle="BM25 keyword search over indexed chunks"
-			>
-				{#if KeywordSearchTool}
-					<KeywordSearchTool />
-				{:else}
-					<LoadingState message="Loading keyword search tool..." />
-				{/if}
-			</Card>
-		{/if}
-
-		<!-- Batch Compress Tool -->
-		{#if activeTab === 'batch'}
+		{:else}
 			<Card
 				title="Batch Compress"
 				subtitle="Compress multiple files in one request"
 			>
-				{#if BatchCompressTool}
-					<BatchCompressTool />
-				{:else}
-					<LoadingState message="Loading batch compress tool..." />
-				{/if}
+				<LazyPanel
+					loader={() => import('$lib/components/tools/BatchCompressTool.svelte')}
+					loadingMessage="Loading batch compress tool..."
+				/>
 			</Card>
 		{/if}
 	</div>
 </div>
-
-<style>
-</style>

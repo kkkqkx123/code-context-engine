@@ -339,7 +339,7 @@
 </div>
 
 <details class="adv-filter" aria-label="Server-side filters">
-	<summary>Advanced server filters</summary>
+	<summary>Advanced server filters — applies on next load only</summary>
 	<div class="adv-filter-body">
 		<label class="graph-inline-field">
 			<span class="graph-inline-label">Relation types</span>
@@ -364,8 +364,8 @@
 			</select>
 		</label>
 		<span class="adv-filter-hint">
-			Applies on the next Load and replaces the working set. Domain toggles stay
-			client-side only.
+			Server filters apply only when a seed loads and replace the working set.
+			Domain toggles stay client-side only and affect the current view.
 		</span>
 	</div>
 </details>

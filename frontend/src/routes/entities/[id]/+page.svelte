@@ -1,6 +1,5 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import type { Component } from 'svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { entityStore } from '$lib/stores/entities.svelte';
@@ -14,18 +13,11 @@
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import LazyPanel from '$lib/components/ui/LazyPanel.svelte';
+	import SymbolCandidatePanel from '$lib/components/ui/SymbolCandidatePanel.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import CallChainList from '$lib/components/entities/CallChainList.svelte';
-
-	// Lazy load all heavy components
-	let EntityDetail: Component | null = $state(null);
-	let CallGraph: Component | null = $state(null);
-	let InheritanceTree: Component | null = $state(null);
-
-	let entityDetailLoaded = $state(false);
-	let callGraphLoaded = $state(false);
-	let inheritanceTreeLoaded = $state(false);
 
 	let entityId = $derived(page.params.id);
 	let currentTab = $state('details');
@@ -39,18 +31,63 @@
 	let filterDomains = $state('');
 	let filterIncludeExternal = $state<'default' | 'on' | 'off'>('default');
 
-	function relationFilter() {
+	interface AppliedFilter {
+		maxDepth: number | null;
+		limit: number | null;
+		excludeTests: boolean;
+		directoryPrefix: string;
+		domains: string;
+		includeExternal: 'default' | 'on' | 'off';
+	}
+
+	const DEFAULT_FILTER: AppliedFilter = {
+		maxDepth: null,
+		limit: null,
+		excludeTests: false,
+		directoryPrefix: '',
+		domains: '',
+		includeExternal: 'default',
+	};
+
+	let applied = $state<AppliedFilter>({ ...DEFAULT_FILTER });
+
+	function toRequestFilter(state: AppliedFilter) {
 		return {
-			maxDepth: filterMaxDepth ?? undefined,
-			limit: filterLimit ?? undefined,
-			excludeTests: filterExcludeTests || undefined,
-			directoryPrefix: filterDirectoryPrefix.trim() || undefined,
-			domains: filterDomains.trim() || undefined,
+			maxDepth: state.maxDepth ?? undefined,
+			limit: state.limit ?? undefined,
+			excludeTests: state.excludeTests || undefined,
+			directoryPrefix: state.directoryPrefix.trim() || undefined,
+			domains: state.domains.trim() || undefined,
 			includeExternal:
-				filterIncludeExternal === 'default'
+				state.includeExternal === 'default'
 					? undefined
-					: filterIncludeExternal === 'on',
+					: state.includeExternal === 'on',
 		};
+	}
+
+	/** Request filter built from the last applied controls, not the draft. */
+	function relationFilter() {
+		return toRequestFilter(applied);
+	}
+
+	function draftFilter(): AppliedFilter {
+		return {
+			maxDepth: filterMaxDepth,
+			limit: filterLimit,
+			excludeTests: filterExcludeTests,
+			directoryPrefix: filterDirectoryPrefix,
+			domains: filterDomains,
+			includeExternal: filterIncludeExternal,
+		};
+	}
+
+	let filterDirty = $derived(
+		JSON.stringify(draftFilter()) !== JSON.stringify(applied),
+	);
+
+	function applyFilters() {
+		applied = draftFilter();
+		void loadEntity();
 	}
 
 	async function loadEntity() {
@@ -63,7 +100,6 @@
 
 	onMount(() => {
 		void loadEntity();
-		void loadEntityDetailComponent();
 	});
 
 	// Entity ids resolve inside one project; after a switch nothing from the
@@ -74,15 +110,6 @@
 			void loadEntity();
 		}),
 	);
-
-	async function loadEntityDetailComponent() {
-		if (!entityDetailLoaded) {
-			const module =
-				await import('$lib/components/entities/EntityDetail.svelte');
-			EntityDetail = module.default;
-			entityDetailLoaded = true;
-		}
-	}
 
 	function handleNavigate(id: string) {
 		goto(resolve(`/entities/${id}`));
@@ -112,22 +139,6 @@
 		entityStore.loadCallPath(from, to, depth);
 	}
 
-	async function loadCallGraphComponent() {
-		if (!callGraphLoaded) {
-			const module = await import('$lib/components/entities/CallGraph.svelte');
-			CallGraph = module.default;
-			callGraphLoaded = true;
-		}
-	}
-
-	async function loadInheritanceTreeComponent() {
-		if (!inheritanceTreeLoaded) {
-			const module =
-				await import('$lib/components/entities/InheritanceTree.svelte');
-			InheritanceTree = module.default;
-			inheritanceTreeLoaded = true;
-		}
-	}
 </script>
 
 <svelte:head>
@@ -139,7 +150,17 @@
 		{#if entityStore.isLoading}
 			<LoadingState message="Loading entity..." />
 		{:else if entityStore.error}
-			<ErrorBanner message={entityStore.error} />
+			<ErrorBanner
+				message={entityStore.error.message}
+				code={entityStore.error.code}
+			/>
+			{#if entityStore.error.candidates.length > 0}
+				<SymbolCandidatePanel
+					candidates={entityStore.error.candidates}
+					onPick={(candidate) =>
+						goto(resolve(`/entities/${candidate.stable_id}`))}
+				/>
+			{/if}
 		{:else if entityStore.currentEntity}
 			<PageHeader
 				title="Entity Details"
@@ -215,9 +236,14 @@
 						<option value="off">Exclude</option>
 					</select>
 				</label>
-				<Button variant="primary" size="xs" onclick={() => void loadEntity()}>
+				<Button variant="primary" size="xs" onclick={applyFilters}>
 					Apply
 				</Button>
+				{#if filterDirty}
+					<span class="apply-hint">
+						Filter changes are pending — click Apply to reload the relation views.
+					</span>
+				{/if}
 			</div>
 
 			<Tabs
@@ -233,28 +259,24 @@
 				]}
 				onSelect={(id) => {
 					currentTab = id;
-					if (id === 'details') loadEntityDetailComponent();
-					if (id === 'call-graph') {
-						loadCallGraphComponent();
-						loadCallChain('down');
-					}
-					if (id === 'inheritance') loadInheritanceTreeComponent();
+					if (id === 'call-graph') loadCallChain('down');
 					if (id === 'call-chain') loadCallChain('down');
 				}}
 			/>
 
 			<!-- Tab Content -->
 			{#if currentTab === 'details'}
-				{#if entityDetailLoaded && EntityDetail}
-					<EntityDetail
-						func={entityStore.currentEntity}
-						calls={entityStore.calls?.callees ?? []}
-						callers={entityStore.callers?.callers ?? []}
-						onNavigate={handleNavigate}
-					/>
-				{:else}
-					<LoadingState message="Loading entity details..." />
-				{/if}
+				<LazyPanel
+					loader={() =>
+						import('$lib/components/entities/EntityDetail.svelte')}
+					componentProps={{
+						func: entityStore.currentEntity,
+						calls: entityStore.calls?.callees ?? [],
+						callers: entityStore.callers?.callers ?? [],
+						onNavigate: handleNavigate,
+					}}
+					loadingMessage="Loading entity details..."
+				/>
 			{:else if currentTab === 'call-graph'}
 				<Card title="Call Graph" subtitle="Visual relationship map">
 					<div class="graph-actions">
@@ -266,29 +288,31 @@
 							Open in Graph Explorer
 						</Button>
 					</div>
-					{#if CallGraph}
-						<CallGraph
-							nodes={entityStore.callChain}
-							focusId={String(entityId)}
-							onNavigate={handleNavigate}
-						/>
-					{:else}
-						<LoadingState message="Loading graph..." />
-					{/if}
+					<LazyPanel
+						loader={() =>
+							import('$lib/components/entities/CallGraph.svelte')}
+						componentProps={{
+							nodes: entityStore.callChain,
+							focusId: String(entityId),
+							onNavigate: handleNavigate,
+						}}
+						loadingMessage="Loading graph..."
+					/>
 				</Card>
 			{:else if currentTab === 'inheritance'}
 				<Card title="Inheritance Tree" subtitle="Class hierarchy">
-					{#if InheritanceTree}
-						<InheritanceTree
-							inheritance={entityStore.inheritance}
-							implementations={entityStore.implementations}
-							focusId={String(entityId)}
-							fallbackName={entityStore.currentEntity?.name ?? null}
-							onNavigate={handleNavigate}
-						/>
-					{:else}
-						<LoadingState message="Loading tree..." />
-					{/if}
+					<LazyPanel
+						loader={() =>
+							import('$lib/components/entities/InheritanceTree.svelte')}
+						componentProps={{
+							inheritance: entityStore.inheritance,
+							implementations: entityStore.implementations,
+							focusId: String(entityId),
+							fallbackName: entityStore.currentEntity?.name ?? null,
+							onNavigate: handleNavigate,
+						}}
+						loadingMessage="Loading tree..."
+					/>
 				</Card>
 			{:else if currentTab === 'call-chain'}
 				<Card title="Call Chain" subtitle="Linear execution path">
@@ -339,8 +363,8 @@
 						</Button>
 					</div>
 
-					{#if entityStore.error}
-						<InlineError message={entityStore.error} />
+					{#if entityStore.callPathError}
+						<InlineError message={entityStore.callPathError} />
 					{/if}
 
 					{#if entityStore.callPath.length > 0}
@@ -363,6 +387,12 @@
 </div>
 
 <style>
+	.apply-hint {
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
+		color: var(--gray-500);
+	}
+
 	.relation-filter {
 		display: flex;
 		flex-wrap: wrap;

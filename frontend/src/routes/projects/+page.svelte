@@ -1,23 +1,34 @@
 <script lang="ts">
+	/**
+	 * Project workbench: project lifecycle on the left, index execution and
+	 * maintenance for the selected project on the right. Indexing has exactly
+	 * one entry point here (IndexControl), so the project list no longer
+	 * duplicates the execution action.
+	 */
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
-	import { onMount } from 'svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
-import FieldCheck from '$lib/components/ui/FieldCheck.svelte';
-import DescriptionList, {
-	type DescriptionItem,
-} from '$lib/components/ui/DescriptionList.svelte';
+	import FieldCheck from '$lib/components/ui/FieldCheck.svelte';
+	import DescriptionList, {
+		type DescriptionItem,
+	} from '$lib/components/ui/DescriptionList.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import LazyPanel from '$lib/components/ui/LazyPanel.svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
 	import { projectApi, type Project } from '$lib/api/index';
+	import { toastStore } from '$lib/stores/toast.svelte';
+	import { errorMessage, toAppError, type AppError } from '$lib/utils/errors';
 
 	let loading = $state(false);
-	let error = $state<string | null>(null);
+	let pageError = $state<AppError | null>(null);
+	let formError = $state<string | null>(null);
+	let deleteTarget = $state<Project | null>(null);
 
-	// Create / Edit form
+	// Create / edit form
 	let showForm = $state(false);
 	let editingProject = $state<Project | null>(null);
 	let formName = $state('');
@@ -27,12 +38,7 @@ import DescriptionList, {
 	let formRespectGitignore = $state(true);
 	let formIgnorePatterns = $state('');
 
-	// Detail view
-	let detailProject = $state<Project | null>(null);
-
-	onMount(() => {
-		projectStore.loadProjects();
-	});
+	let currentProject = $derived(projectStore.currentProject);
 
 	function resetForm() {
 		showForm = false;
@@ -43,7 +49,7 @@ import DescriptionList, {
 		formExcludeDirs = '';
 		formRespectGitignore = true;
 		formIgnorePatterns = '';
-		error = null;
+		formError = null;
 	}
 
 	function openCreateForm() {
@@ -59,17 +65,18 @@ import DescriptionList, {
 		formExcludeDirs = project.exclude_dirs?.join(', ') || '';
 		formRespectGitignore = project.respect_gitignore ?? true;
 		formIgnorePatterns = project.ignore_patterns?.join(', ') || '';
+		formError = null;
 		showForm = true;
 	}
 
 	async function handleSubmit() {
 		if (!formName || !formPath) {
-			error = 'Project name and path are required';
+			formError = 'Project name and path are required';
 			return;
 		}
 
 		loading = true;
-		error = null;
+		formError = null;
 
 		try {
 			const data = {
@@ -105,7 +112,7 @@ import DescriptionList, {
 			resetForm();
 			await projectStore.loadProjects();
 		} catch (e) {
-			error =
+			formError =
 				errorMessage(e) ||
 				`Failed to ${editingProject ? 'update' : 'create'} project`;
 		} finally {
@@ -113,35 +120,22 @@ import DescriptionList, {
 		}
 	}
 
-	async function handleDelete(project: Project) {
-		if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) {
-			return;
-		}
+	function askDelete(project: Project) {
+		deleteTarget = project;
+	}
 
+	async function confirmDelete() {
+		const project = deleteTarget;
+		if (!project) return;
 		loading = true;
-		error = null;
+		pageError = null;
 
 		try {
 			await projectApi.deleteProject(project.id);
-			if (detailProject?.id === project.id) {
-				detailProject = null;
-			}
+			deleteTarget = null;
 			await projectStore.loadProjects();
 		} catch (e) {
-			error = errorMessage(e) || 'Failed to delete project';
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function handleIndex(project: Project) {
-		loading = true;
-		error = null;
-
-		try {
-			await projectApi.indexProject(project.id);
-		} catch (e) {
-			error = errorMessage(e) || 'Failed to start indexing';
+			pageError = toAppError(e, 'Failed to delete project');
 		} finally {
 			loading = false;
 		}
@@ -149,114 +143,74 @@ import DescriptionList, {
 
 	async function handleReload(project: Project) {
 		loading = true;
-		error = null;
+		pageError = null;
 
 		try {
-			await projectApi.reloadProject(project.id);
+			const response = await projectApi.reloadProject(project.id);
+			toastStore.success(response.message);
+			await projectStore.loadProjects();
 		} catch (e) {
-			error = errorMessage(e) || 'Failed to reload project';
+			toastStore.error(errorMessage(e));
 		} finally {
 			loading = false;
 		}
 	}
 
 	function selectProject(project: Project) {
-		detailProject = project;
 		projectStore.currentProjectId = Number(project.id);
+		resetForm();
 	}
 
 	let detailItems = $derived<DescriptionItem[]>(
-		detailProject
+		currentProject
 			? [
-				{ term: 'Name', value: detailProject.name },
-				{ term: 'Path', value: detailProject.root_path, mono: true },
-				...(detailProject.extensions?.length
-					? [
-						{
-							term: 'Extensions',
-							value: detailProject.extensions.join(', '),
-						},
-					]
-					: []),
-				...(detailProject.exclude_dirs?.length
-					? [
-						{
-							term: 'Excluded Dirs',
-							value: detailProject.exclude_dirs.join(', '),
-						},
-					]
-					: []),
-				...(detailProject.last_indexed
-					? [{ term: 'Last Indexed', value: detailProject.last_indexed }]
-					: []),
-			]
+					{ term: 'Name', value: currentProject.name },
+					{ term: 'Path', value: currentProject.root_path, mono: true },
+					...(currentProject.extensions?.length
+						? [
+								{
+									term: 'Extensions',
+									value: currentProject.extensions.join(', '),
+								},
+							]
+						: []),
+					...(currentProject.exclude_dirs?.length
+						? [
+								{
+									term: 'Excluded Dirs',
+									value: currentProject.exclude_dirs.join(', '),
+								},
+							]
+						: []),
+					...(currentProject.last_indexed
+						? [{ term: 'Last Indexed', value: currentProject.last_indexed }]
+						: []),
+				]
 			: [],
 	);
 </script>
 
 <svelte:head>
-	<title>Projects - Code Context Engine</title>
+	<title>Project Workbench - Code Context Engine</title>
 </svelte:head>
 
 <div class="page">
 	<PageHeader
-		title="Projects"
-		subtitle="Create, manage, and index your code projects"
+		title="Project Workbench"
+		subtitle="Create and manage projects, then run indexing, parsing and index maintenance"
 	/>
 
-	{#if error}
-		<ErrorBanner message={error} onDismiss={() => (error = null)} />
+	{#if pageError}
+		<ErrorBanner message={pageError.message} code={pageError.code} />
 	{/if}
 
-	<div class="layout">
-		<!-- Project List -->
+	<div class="workbench">
 		<div class="list-column">
 			<Card
-				title="All Projects"
+				title="Projects"
 				subtitle={`${projectStore.projects.length} project(s)`}
 			>
-				<div class="header-actions">
-					<Button onclick={openCreateForm} disabled={showForm}>
-						+ New Project
-					</Button>
-				</div>
-
-				{#if projectStore.projects.length === 0}
-					<EmptyState
-						padded
-						message="No projects found. Create your first project to get started."
-					/>
-				{:else}
-					<div class="project-list">
-						{#each projectStore.projects as project (project.id)}
-							<button
-								type="button"
-								class="selectable-row"
-								class:selected={detailProject?.id === project.id}
-								aria-pressed={detailProject?.id === project.id}
-								onclick={() => selectProject(project)}
-							>
-								<div class="project-info">
-									<strong>{project.name}</strong>
-									<span class="project-path">{project.root_path}</span>
-								</div>
-								{#if project.last_indexed}
-									<span class="project-indexed">{project.last_indexed}</span>
-								{/if}
-							</button>
-						{/each}
-					</div>
-				{/if}
-			</Card>
-		</div>
-
-		<!-- Detail / Form Column -->
-		<div class="detail-column">
-			{#if showForm}
-				<Card
-					title={editingProject ? 'Edit Project' : 'Create Project'}
-					subtitle="Configure project settings"
-				>
+				{#if showForm}
 					<form
 						onsubmit={(e) => {
 							e.preventDefault();
@@ -296,66 +250,112 @@ import DescriptionList, {
 								bind:value={formIgnorePatterns}
 								placeholder="*.log, *.tmp"
 							/>
-							<FieldCheck label="Respect .gitignore" bind:checked={formRespectGitignore} />
+							<FieldCheck
+								label="Respect .gitignore"
+								bind:checked={formRespectGitignore}
+							/>
 						</div>
+
+						{#if formError}
+							<InlineError message={formError} />
+						{/if}
 
 						<div class="tool-actions">
 							<Button type="submit" disabled={loading}>
 								{editingProject ? 'Update' : 'Create'}
 							</Button>
-							<Button
-								variant="secondary"
-								onclick={resetForm}
-								disabled={loading}
-							>
+							<Button variant="secondary" onclick={resetForm} disabled={loading}>
 								Cancel
 							</Button>
 						</div>
 					</form>
-				</Card>
-			{:else if detailProject}
-				<Card title={detailProject.name} subtitle="Project details and actions">
+				{:else}
+					<div class="header-actions">
+						<Button onclick={openCreateForm}>+ New Project</Button>
+					</div>
+
+					{#if projectStore.projects.length === 0}
+						<EmptyState
+							padded
+							message="No projects found. Create your first project to get started."
+						/>
+					{:else}
+						<div class="project-list">
+							{#each projectStore.projects as project (project.id)}
+								<button
+									type="button"
+									class="selectable-row"
+									class:selected={currentProject?.id === project.id}
+									aria-pressed={currentProject?.id === project.id}
+									onclick={() => selectProject(project)}
+								>
+									<div class="project-info">
+										<strong>{project.name}</strong>
+										<span class="project-path">{project.root_path}</span>
+									</div>
+									{#if project.last_indexed}
+										<span class="project-indexed">{project.last_indexed}</span>
+									{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				{/if}
+			</Card>
+
+			{#if currentProject && !showForm}
+				<Card title={currentProject.name} subtitle="Project lifecycle actions">
 					<DescriptionList items={detailItems} label="Project details" />
 
-					<h3 class="section-title">Actions</h3>
 					<div class="tool-form-row">
 						<Button
-							onclick={() => handleIndex(detailProject!)}
-							disabled={loading}
-						>
-							Run Index
-						</Button>
-						<Button
 							variant="secondary"
-							onclick={() => handleReload(detailProject!)}
+							onclick={() => handleReload(currentProject!)}
 							disabled={loading}
 						>
 							Reload Config
 						</Button>
 						<Button
 							variant="secondary"
-							onclick={() => openEditForm(detailProject!)}
+							onclick={() => openEditForm(currentProject!)}
 							disabled={loading}
 						>
 							Edit
 						</Button>
 						<Button
 							variant="danger"
-							onclick={() => handleDelete(detailProject!)}
+							onclick={() => askDelete(currentProject!)}
 							disabled={loading}
 						>
 							Delete
 						</Button>
 					</div>
 				</Card>
+			{/if}
+		</div>
+
+		<div class="index-column">
+			{#if currentProject}
+				<LazyPanel
+					loader={() => import('$lib/components/index/IndexControl.svelte')}
+					loadingMessage="Loading index control..."
+				/>
+				<LazyPanel
+					loader={() => import('$lib/components/index/FileParser.svelte')}
+					loadingMessage="Loading file parser..."
+				/>
+				<LazyPanel
+					loader={() => import('$lib/components/index/IndexMaintenance.svelte')}
+					loadingMessage="Loading index maintenance..."
+				/>
 			{:else}
 				<Card
 					title="Select a Project"
-					subtitle="Choose a project from the list to view details"
+					subtitle="Choose a project from the list to manage its index"
 				>
 					<p class="empty-hint">
-						Select a project on the left to view its details and available
-						actions.
+						Select a project on the left to control indexing, parse files and
+						maintain its index data.
 					</p>
 				</Card>
 			{/if}
@@ -363,18 +363,44 @@ import DescriptionList, {
 	</div>
 </div>
 
+{#if deleteTarget}
+	<Modal
+		title="Delete project?"
+		onClose={() => (deleteTarget = null)}
+	>
+		<p>
+			Delete project <strong>{deleteTarget.name}</strong> and forget its index
+			configuration? This cannot be undone.
+		</p>
+		{#snippet actions()}
+			<Button variant="secondary" onclick={() => (deleteTarget = null)}>
+				Cancel
+			</Button>
+			<Button
+				variant="danger"
+				onclick={confirmDelete}
+				disabled={loading}
+			>
+				{loading ? 'Deleting...' : 'Delete Project'}
+			</Button>
+		{/snippet}
+	</Modal>
+{/if}
+
 <style>
-	.layout {
+	.workbench {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
 		gap: 2rem;
 		align-items: start;
 	}
 
-	@media (max-width: 1024px) {
-		.layout {
-			grid-template-columns: 1fr;
-		}
+	.list-column,
+	.index-column {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+		min-width: 0;
 	}
 
 	.header-actions {
@@ -417,4 +443,9 @@ import DescriptionList, {
 		flex-shrink: 0;
 	}
 
+	@media (max-width: 1024px) {
+		.workbench {
+			grid-template-columns: 1fr;
+		}
+	}
 </style>

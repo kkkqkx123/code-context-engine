@@ -9,12 +9,12 @@
 	import { healthStore } from '$lib/stores/health.svelte';
 
 	onMount(() => {
-		// loadAll is refreshed globally by the layout; also fetch per-service
-		// diagnostics so the page shows details beyond the unified summary.
-		healthStore.loadAll();
-		healthStore.loadQdrantHealth();
-		healthStore.loadEmbeddingHealth();
-		healthStore.loadBm25Health();
+		// The layout owns the shared health beat. Only fetch the summary when the
+		// store has not received it yet, then top up the per-service diagnostics.
+		if (!healthStore.unified) void healthStore.loadAll();
+		void healthStore.loadQdrantHealth();
+		void healthStore.loadEmbeddingHealth();
+		void healthStore.loadBm25Health();
 	});
 </script>
 

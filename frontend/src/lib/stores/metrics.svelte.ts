@@ -45,23 +45,15 @@ class MetricsStore {
 		}
 	}
 
+	/** Start the single metrics polling source; repeated calls are no-ops. */
 	startAutoRefresh(intervalMs: number = 30000) {
-		if (refreshInterval) {
-			clearInterval(refreshInterval);
-		}
+		if (refreshInterval) return;
 
-		this.loadMetrics();
+		void this.loadMetrics();
 
 		refreshInterval = setInterval(() => {
-			this.loadMetrics();
+			void this.loadMetrics();
 		}, intervalMs);
-	}
-
-	stopAutoRefresh() {
-		if (refreshInterval) {
-			clearInterval(refreshInterval);
-			refreshInterval = null;
-		}
 	}
 }
 

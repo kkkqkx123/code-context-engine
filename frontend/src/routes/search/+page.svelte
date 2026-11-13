@@ -1,46 +1,63 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import type { Component } from 'svelte';
 	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import { onMount } from 'svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { searchStore, AGGREGATED_TYPE } from '$lib/stores/search.svelte';
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import SymbolCandidatePanel from '$lib/components/ui/SymbolCandidatePanel.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
-	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-import Pagination from '$lib/components/ui/Pagination.svelte';
-import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
+	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
+	import LazyPanel from '$lib/components/ui/LazyPanel.svelte';
 	import SearchRunPanel from '$lib/components/search/SearchRunPanel.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { splitTerms } from '$lib/utils/code';
 
-	// Lazy load FilterPanel component
-	let FilterPanel: Component | null = $state(null);
-	let filterPanelLoaded = $state(false);
+	type QueryView = 'semantic' | 'entities' | 'keyword';
+
+	function viewFromUrl(): QueryView {
+		if (typeof window === 'undefined') return 'semantic';
+		const value = new SvelteURLSearchParams(window.location.search).get('view');
+		return value === 'entities' || value === 'keyword' ? value : 'semantic';
+	}
+
+	let view = $state<QueryView>(viewFromUrl());
 	let filterPanelVisible = $state(false);
 	let compact = $state(false);
 
-	onMount(async () => {
+	onMount(() => {
 		// A shared/reloaded URL carries the query in `q`; replay it once so
 		// results are visible without retyping (see stores/search.svelte.ts).
-		if (searchStore.query.trim()) void searchStore.executeSearch(1);
-		// Load FilterPanel after initial render
-		const module = await import('$lib/components/search/FilterPanel.svelte');
-		FilterPanel = module.default;
-		filterPanelLoaded = true;
+		if (view === 'semantic' && searchStore.query.trim()) {
+			void searchStore.executeSearch(1);
+		}
 	});
+
+	function setView(next: QueryView) {
+		view = next;
+		const url = new URL(window.location.href);
+		url.searchParams.set('view', next);
+		window.history.replaceState(null, '', url);
+		if (
+			next === 'semantic' &&
+			searchStore.query.trim() &&
+			searchStore.results.length === 0 &&
+			!searchStore.isSearching
+		) {
+			void searchStore.executeSearch(1);
+		}
+	}
 
 	function handleSearch() {
 		selectedIndex = -1;
 		void searchStore.executeSearch(1);
-	}
-
-	function toggleFilterPanel() {
-		filterPanelVisible = !filterPanelVisible;
 	}
 
 	function handleNavigate(entityId: string) {
@@ -58,9 +75,13 @@ import Skeleton from '$lib/components/ui/Skeleton.svelte';
 		void searchStore.executeSearch(searchStore.pagination.page + 1);
 	}
 
+	function pickCandidate(stableId: string) {
+		searchStore.setQuery(stableId);
+		void searchStore.executeSearch(1);
+	}
+
 	// Get paginated results for display
 	let paginatedResults = $derived(searchStore.getPaginatedResults());
-	let totalPages = $derived(searchStore.totalPages());
 	// Backend has no offset: page N needs a cumulative fetch of N*pageSize
 	// rows (see executeSearch in stores/search.svelte.ts). Whether another
 	// page exists is decided by the reported total, not by the rows already
@@ -109,127 +130,164 @@ import Skeleton from '$lib/components/ui/Skeleton.svelte';
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
-	<title>Search - Code Context Engine</title>
+	<title>Query Workbench - Code Context Engine</title>
 </svelte:head>
 
 <div class="page">
 	<div class="container">
 		<PageHeader
-			title="Code Search"
-			subtitle="Semantic and keyword-based code search across indexed projects"
+			title="Query Workbench"
+			subtitle="Semantic, entity and keyword search over the current project"
 		/>
 
-		<SearchInput onSearch={handleSearch} />
+		<Tabs
+			variant="segmented"
+			label="Query workbench views"
+			active={view}
+			tabs={[
+				{ id: 'semantic', label: 'Semantic Search' },
+				{ id: 'entities', label: 'Entity Search' },
+				{ id: 'keyword', label: 'Keyword Search' },
+			]}
+			onSelect={(id) => setView(id as QueryView)}
+		/>
 
-		<div class="shortcut-hint">
-			Shortcuts: <kbd>/</kbd> focus search · <kbd>j</kbd>/<kbd>k</kbd> select
-			result · <kbd>Enter</kbd> open entity
-		</div>
+		{#if view === 'semantic'}
+			<SearchInput onSearch={handleSearch} />
 
-		<div class="filter-toggle">
-			<Button
-				variant="secondary"
-				size="xs"
-				active={filterPanelVisible}
-				onclick={toggleFilterPanel}
-			>
-				{filterPanelVisible ? 'Hide Filters' : 'Show Filters'}
-			</Button>
-			<Button
-				variant="secondary"
-				size="xs"
-				active={compact}
-				onclick={() => (compact = !compact)}
-			>
-				{compact ? 'Comfortable' : 'Compact'}
-			</Button>
-		</div>
-
-		{#if filterPanelVisible}
-			{#if filterPanelLoaded && FilterPanel}
-				<FilterPanel />
-			{:else}
-				<LoadingState message="Loading filters..." />
-			{/if}
-		{/if}
-
-		<SearchRunPanel />
-
-		{#if searchStore.error}
-			<ErrorBanner message={`Search failed: ${searchStore.error}`} />
-		{/if}
-
-		{#if searchStore.isSearching}
-			<Skeleton lines={4} label="Searching code index" />
-		{:else if searchStore.results.length > 0}
-			<Toolbar>
-				<h2 class="results-title">
-					Results ({searchStore.total} total)
-					{#if searchStore.elapsedMs !== null}
-						<span class="elapsed">· {searchStore.elapsedMs}ms</span>
-					{/if}
-					{#if searchStore.mode === AGGREGATED_TYPE && searchStore.sourcesUsed.length > 0}
-						<span class="elapsed"
-							>· sources: {searchStore.sourcesUsed.join(', ')}</span
-						>
-					{/if}
-				</h2>
-			</Toolbar>
-
-			{#if searchStore.failedSubQueries.length > 0}
-				<Notice variant="warning">
-					Sub-queries failed (partial results): {searchStore.failedSubQueries.join(
-						', ',
-					)}
-				</Notice>
-			{/if}
-
-			{#if searchStore.stale}
-				<Notice variant="warning">
-					Filters or query mode changed — results may be outdated. Re-run the
-					search to apply.
-				</Notice>
-			{/if}
-
-			{#if searchStore.relationStale}
-				<Notice variant="warning">
-					Relation snapshot is stale
-					{#if searchStore.relationEpoch !== null}
-						<span>(epoch {searchStore.relationEpoch})</span>
-					{/if}
-					— results may be outdated. Re-run the search after indexing catches up.
-				</Notice>
-			{:else if searchStore.relationEpoch !== null}
-				<div class="relation-meta">
-					Relation epoch: {searchStore.relationEpoch}
-				</div>
-			{/if}
-
-			<div class="results-list" class:compact>
-				{#each paginatedResults as result, i ((result.entity_ids ?? []).join(',') + '-' + i)}
-					<ResultCard
-						{result}
-						onNavigate={handleNavigate}
-						selected={i === selectedIndex}
-						{queryTerms}
-					/>
-				{/each}
+			<div class="shortcut-hint">
+				Shortcuts: <kbd>/</kbd> focus search · <kbd>j</kbd>/<kbd>k</kbd> select
+				result · <kbd>Enter</kbd> open entity
 			</div>
 
-			{#if totalPages > 1 || hasMore}
-				<Pagination
-					page={searchStore.pagination.page}
-					total={hasMore ? '?' : totalPages}
-					onPrev={prevPage}
-					onNext={nextPage}
-					prevDisabled={searchStore.pagination.page === 1}
-					nextDisabled={!hasMore}
+			<div class="filter-toggle">
+				<Button
+					variant="secondary"
+					size="xs"
+					active={filterPanelVisible}
+					onclick={() => (filterPanelVisible = !filterPanelVisible)}
+				>
+					{filterPanelVisible ? 'Hide Filters' : 'Show Filters'}
+				</Button>
+				<Button
+					variant="secondary"
+					size="xs"
+					active={compact}
+					onclick={() => (compact = !compact)}
+				>
+					{compact ? 'Comfortable' : 'Compact'}
+				</Button>
+			</div>
+
+			{#if filterPanelVisible}
+				<LazyPanel
+					loader={() =>
+						import('$lib/components/search/FilterPanel.svelte')}
+					loadingMessage="Loading filters..."
 				/>
 			{/if}
-		{:else if searchStore.query && !searchStore.error}
-			<EmptyState
-				message={`No results found for "${searchStore.query}"`}
-				hint="Try adjusting your filters or search terms"
+
+			<SearchRunPanel />
+
+			{#if searchStore.error}
+				<ErrorBanner
+					message={`Search failed: ${searchStore.error.message}`}
+					code={searchStore.error.code}
+				/>
+				{#if searchStore.error.candidates.length > 0}
+					<SymbolCandidatePanel
+						candidates={searchStore.error.candidates}
+						onPick={(candidate) => pickCandidate(candidate.stable_id)}
+					/>
+				{/if}
+			{/if}
+
+			{#if searchStore.isSearching}
+				<Skeleton lines={4} label="Searching code index" />
+			{:else if searchStore.results.length > 0}
+				<Toolbar>
+					<h2 class="results-title">
+						Results ({searchStore.total} total)
+						{#if searchStore.elapsedMs !== null}
+							<span class="elapsed">· {searchStore.elapsedMs}ms</span>
+						{/if}
+						{#if searchStore.mode === AGGREGATED_TYPE && searchStore.sourcesUsed.length > 0}
+							<span class="elapsed"
+								>· sources: {searchStore.sourcesUsed.join(', ')}</span
+							>
+						{/if}
+					</h2>
+				</Toolbar>
+
+				{#if searchStore.failedSubQueries.length > 0}
+					<Notice variant="warning">
+						Sub-queries failed (partial results): {searchStore.failedSubQueries.join(
+							', ',
+						)}
+					</Notice>
+				{/if}
+
+				{#if searchStore.stale}
+					<Notice variant="warning">
+						Filters changed — updated results are loading (filters apply
+						immediately).
+					</Notice>
+				{/if}
+
+				{#if searchStore.relationStale}
+					<Notice variant="warning">
+						Relation snapshot is stale
+						{#if searchStore.relationEpoch !== null}
+							<span>(epoch {searchStore.relationEpoch})</span>
+						{/if}
+						— results may be outdated. Re-run the search after indexing catches
+						up.
+					</Notice>
+				{:else if searchStore.relationEpoch !== null}
+					<div class="relation-meta">
+						Relation epoch: {searchStore.relationEpoch}
+					</div>
+				{/if}
+
+				<div class="results-list" class:compact>
+					{#each paginatedResults as result, i ((result.entity_ids ?? []).join(',') + '-' + i)}
+						<ResultCard
+							{result}
+							onNavigate={handleNavigate}
+							selected={i === selectedIndex}
+							{queryTerms}
+						/>
+					{/each}
+				</div>
+
+				{#if hasMore || searchStore.pagination.page > 1}
+					<Pagination
+						page={searchStore.pagination.page}
+						total={null}
+						nextLabel="Load more"
+						onPrev={prevPage}
+						onNext={nextPage}
+						prevDisabled={searchStore.pagination.page === 1}
+						nextDisabled={!hasMore}
+						hint="Results are cumulative: Load more expands the query range and keeps already loaded pages; it does not jump to a precomputed page."
+					/>
+				{/if}
+			{:else if searchStore.query && !searchStore.error}
+				<EmptyState
+					message={`No results found for "${searchStore.query}"`}
+					hint="Try adjusting your filters or search terms"
+				/>
+			{/if}
+		{:else if view === 'entities'}
+			<LazyPanel
+				loader={() =>
+					import('$lib/components/entities/EntitySearchView.svelte')}
+				loadingMessage="Loading entity search..."
+			/>
+		{:else}
+			<LazyPanel
+				loader={() => import('$lib/components/tools/KeywordSearchTool.svelte')}
+				loadingMessage="Loading keyword search..."
 			/>
 		{/if}
 	</div>
@@ -277,5 +335,4 @@ import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	.results-list.compact :global(.code-preview) {
 		margin-top: 0.5rem;
 	}
-
 </style>

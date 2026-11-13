@@ -7,6 +7,8 @@
  * `errorCodeOf` for the code and `errorMessage` for the text.
  */
 
+import { ApiError, type SymbolCandidate } from '#api/client';
+
 /** Minimal structural view of a backend failure, without importing the client. */
 interface FailureShape {
 	message?: unknown;
@@ -41,6 +43,29 @@ export function errorCodeOf(error: unknown): string {
 	const status = failure?.status;
 	if (typeof status === 'number') return statusToErrorCode(status);
 	return 'UNKNOWN';
+}
+
+/** Structured failure surfaced to the UI: stable code, readable text and
+ *  optional disambiguation candidates. Every page-level error uses this shape
+ *  so codes and candidates are never flattened back into a plain string. */
+export interface AppError {
+	code: string;
+	message: string;
+	candidates: SymbolCandidate[];
+}
+
+/** Grade any thrown value into the shared structured error shape. */
+export function toAppError(
+	error: unknown,
+	fallback = 'Request failed',
+): AppError {
+	const candidates =
+		error instanceof ApiError ? error.symbolCandidates() : [];
+	return {
+		code: errorCodeOf(error),
+		message: errorMessage(error) || fallback,
+		candidates,
+	};
 }
 
 /** Extract a readable message from an unknown thrown value. */
