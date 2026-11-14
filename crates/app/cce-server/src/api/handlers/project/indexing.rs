@@ -11,7 +11,7 @@ use cce_api::models::{
     DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest, ErrorResponse,
     ProjectIndexResponse,
 };
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::ProjectUpdateRecord;
 
 /// Handle project indexing request
@@ -30,7 +30,7 @@ pub async fn handle_project_index(
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectIndexResponse> {
     // Check if metadata store is available
-    let relation_store = match state.engine.relation_store() {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -41,7 +41,7 @@ pub async fn handle_project_index(
     };
 
     // Get project record
-    let record = match relation_store.project_record(id).await {
+    let record = match metadata_store.project_record(id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -82,7 +82,7 @@ pub async fn handle_project_index(
     let now = chrono::Utc::now().to_rfc3339();
     // Use update method instead of delete-insert
     let updates = ProjectUpdateRecord::default().with_last_indexed(now);
-    if let Err(e) = relation_store.project_update(id, &updates).await {
+    if let Err(e) = metadata_store.project_update(id, &updates).await {
         tracing::warn!("Failed to update last_indexed: {}", e);
     }
 

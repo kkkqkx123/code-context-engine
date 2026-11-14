@@ -6,8 +6,8 @@ use super::project_cache::ProjectCache;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
 use cce_orchestrator::index::VectorStore;
-use cce_orchestrator::index::{FulltextStore, RelationStore};
-use cce_storage_common::RelationStorage;
+use cce_orchestrator::index::{FulltextStore, MetadataStore};
+use cce_storage_common::MetadataStorage;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
 use tokio::sync::Mutex;
@@ -75,8 +75,8 @@ impl super::CodeContextEngine {
     /// The backend is stored as a neutral handle so callers cannot assume
     /// the SQLite branch. Remote backends remain explicitly unsupported in
     /// the engine write path and report that through their own methods.
-    pub fn relation_store(&self) -> Option<RelationStore> {
-        Some(self.relation_store.clone())
+    pub fn metadata_store(&self) -> Option<MetadataStore> {
+        Some(self.metadata_store.clone())
     }
 
     /// Reload project configuration and recreate components
@@ -376,7 +376,7 @@ impl super::CodeContextEngine {
     /// `OperationQueue::cleanup_stale_operations`), which only clears the
     /// active flag so a crashed run can be recovered by checkpoint.
     pub fn start_checkpoint_cleanup_task(&self, interval_secs: u64, default_ttl_seconds: u64) {
-        let relation_store = self.relation_store.clone();
+        let metadata_store = self.metadata_store.clone();
         let project_registry = self.project_registry.clone();
         let operation_coordinator_cache = self.operation_coordinator_cache.clone();
 
@@ -388,7 +388,7 @@ impl super::CodeContextEngine {
             loop {
                 interval.tick().await;
 
-                let store = relation_store.clone();
+                let store = metadata_store.clone();
 
                 let project_ids: Vec<i64> = match store.projects_all().await {
                     Ok(records) => records.into_iter().map(|r| r.id).collect(),
@@ -704,9 +704,9 @@ impl super::CodeContextEngine {
     ) {
         use crate::runtime::GenerationGcWorker;
 
-        let relation_store = self.relation_store.clone();
+        let metadata_store = self.metadata_store.clone();
         tokio::spawn(async move {
-            let store = relation_store.clone();
+            let store = metadata_store.clone();
             let config = crate::runtime::GenerationGcWorkerConfig {
                 scan_interval_secs: interval_secs,
                 keep_active_generations,

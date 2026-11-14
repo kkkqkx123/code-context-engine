@@ -1,7 +1,7 @@
 //! T-4 — metadb batch-write amplification benchmark (covers P-3).
 //!
 //! Compares the current per-row `tx.execute` hot path (exposed through the
-//! `RelationStorage` `*_upsert` methods) against the batch prepared-statement
+//! `MetadataStorage` `*_upsert` methods) against the batch prepared-statement
 //! path (`*Repository::insert_batch`, which reuses one prepared statement),
 //! at the 100k-entity scale. Also compares checkpoint write amplification:
 //! one transaction per work unit versus one merged transaction for the whole
@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use cce_storage_common::metadb::{
-    CheckpointRecord, CheckpointStatus, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
+    CheckpointRecord, CheckpointStatus, MetadataStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 use cce_storage_metadb_sqlite::repo::{
     CheckpointRepository, ChunkRepository, EntityRepository, FileRepository,
@@ -121,13 +121,13 @@ fn rt() -> &'static tokio::runtime::Runtime {
 }
 
 async fn write_row_by_row(client: &SqliteClient, d: &Dataset) -> usize {
-    RelationStorage::files_upsert(client, PROJECT_ID, EPOCH, &d.files)
+    MetadataStorage::files_upsert(client, PROJECT_ID, EPOCH, &d.files)
         .await
         .expect("files");
-    RelationStorage::entities_upsert(client, &d.entities)
+    MetadataStorage::entities_upsert(client, &d.entities)
         .await
         .expect("entities");
-    RelationStorage::chunks_upsert(client, &d.chunks)
+    MetadataStorage::chunks_upsert(client, &d.chunks)
         .await
         .expect("chunks");
     N * 3

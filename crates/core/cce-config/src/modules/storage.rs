@@ -66,14 +66,14 @@ impl VectorBackend {
     }
 }
 
-/// Relation storage backend selection.
+/// Metadata storage backend selection.
 ///
 /// `Local` is the default embedded SQLite branch; `Remote` selects the
 /// PostgreSQL branch. Switching backends requires a full reindex; old data
 /// is never migrated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum RelationBackend {
+pub enum MetadataBackend {
     /// Embedded SQLite repositories (current behavior).
     #[default]
     Local,
@@ -82,7 +82,7 @@ pub enum RelationBackend {
     Remote,
 }
 
-impl RelationBackend {
+impl MetadataBackend {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Local => "local",
@@ -131,14 +131,14 @@ impl FulltextBackend {
     }
 }
 
-/// Remote parameters for the relation branch (PostgreSQL).
+/// Remote parameters for the metadata branch (PostgreSQL).
 ///
 /// Local parameters and remote parameters are isolated: SQLite tuning stays
 /// in [`SqliteConfig`], pool and timeout tuning lives here. Secrets stay
 /// overridable via environment variables.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct RelationRemoteConfig {
+pub struct MetadataRemoteConfig {
     /// PostgreSQL connection URL (e.g. `postgres://host:5432/cce`).
     /// Individual credential fields below take precedence over the
     /// credentials embedded in the URL.
@@ -157,7 +157,7 @@ pub struct RelationRemoteConfig {
     pub statement_timeout_ms: u64,
 }
 
-impl Default for RelationRemoteConfig {
+impl Default for MetadataRemoteConfig {
     fn default() -> Self {
         Self {
             url: None,
@@ -171,7 +171,7 @@ impl Default for RelationRemoteConfig {
     }
 }
 
-impl Validate for RelationRemoteConfig {
+impl Validate for MetadataRemoteConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
         if self.pool_size == 0 || self.pool_size > 128 {
@@ -202,7 +202,7 @@ impl Validate for RelationRemoteConfig {
     }
 }
 
-impl RelationRemoteConfig {
+impl MetadataRemoteConfig {
     /// Effective database user: the explicit username, empty means no
     /// authentication.
     pub fn effective_username(&self) -> Option<&str> {

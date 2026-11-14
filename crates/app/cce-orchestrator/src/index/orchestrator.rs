@@ -270,8 +270,8 @@ impl IndexOrchestrator {
         self
     }
 
-    /// Set metadata store through the relation backend enum.
-    pub fn with_metadata_store(mut self, store: crate::index::vector_store::RelationStore) -> Self {
+    /// Set metadata store for the orchestrated pipeline.
+    pub fn with_metadata_store(mut self, store: crate::index::vector_store::MetadataStore) -> Self {
         self.storage = self.storage.with_metadata_store(store);
         self
     }
@@ -279,12 +279,6 @@ impl IndexOrchestrator {
     /// Set the fulltext backend through the backend enum.
     pub fn with_fulltext_store(mut self, store: crate::index::vector_store::FulltextStore) -> Self {
         self.storage = self.storage.with_fulltext_store(store);
-        self
-    }
-
-    /// Set the relation backend through the backend enum.
-    pub fn with_relation_store(mut self, store: crate::index::vector_store::RelationStore) -> Self {
-        self.storage = self.storage.with_relation_store(store);
         self
     }
 

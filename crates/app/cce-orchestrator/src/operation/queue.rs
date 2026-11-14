@@ -12,10 +12,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, trace, warn};
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::{OperationKind, StorageError};
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
 
 /// Maximum number of pending (queued, not active) operations.
 ///
@@ -99,7 +99,7 @@ pub struct OperationQueue {
     /// Pending operations waiting for execution, ordered by priority
     pending: Arc<Mutex<VecDeque<PendingOperation>>>,
     /// Relation backend for persistence
-    db: RelationStore,
+    db: MetadataStore,
 }
 
 impl OperationQueue {
@@ -107,7 +107,7 @@ impl OperationQueue {
     ///
     /// Loads any persisted active operation from the database.
     /// project_id must be > 0 (no global/default projects allowed)
-    pub fn new_for_project(project_id: i64, db: RelationStore) -> Self {
+    pub fn new_for_project(project_id: i64, db: MetadataStore) -> Self {
         assert!(
             project_id > 0,
             "project_id must be > 0 for explicit project"
@@ -503,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_priority_ordering() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         // Enqueue in reverse priority order
@@ -566,7 +566,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduplication() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         // Enqueue same operation twice
@@ -597,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_active_prevents_dequeue() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         queue
@@ -646,7 +646,7 @@ mod tests {
     /// dropped when the queue exceeds its capacity.
     #[tokio::test]
     async fn test_pending_queue_bounded_drops_lowest_priority() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         // Distinct root dirs avoid deduplication across enqueues.
@@ -689,7 +689,7 @@ mod tests {
     /// two operations at once.
     #[tokio::test]
     async fn test_dequeue_reservation_blocks_concurrent_dequeue() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let queue = Arc::new(OperationQueue::new_for_project(1, db));
 
         queue

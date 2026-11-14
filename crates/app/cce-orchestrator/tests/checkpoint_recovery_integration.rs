@@ -10,18 +10,18 @@
 use cce_orchestrator::hot_update::progress::{
     MODULE_BM25, MODULE_EMBEDDING, persist_module_progress, read_module_progress,
 };
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
 use cce_orchestrator::operation::OperationType;
 use cce_orchestrator::operation::checkpoint::{CheckpointManager, CreateCheckpointParams};
 use cce_storage_common::metadb::{
     CheckpointStatus, FileCheckpointRecord, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
-use cce_storage_metadb::RelationStore;
 use cce_types::OperationKind;
 use std::sync::Arc;
 
 /// Helper to create a checkpoint manager for testing.
-fn create_cm() -> (CheckpointManager, RelationStore) {
-    let db = RelationStore::in_memory().expect("in-memory store");
+fn create_cm() -> (CheckpointManager, MetadataStore) {
+    let db = in_memory_metadata_store().expect("in-memory store");
     let cm = CheckpointManager::new_for_project(1, db.clone());
     (cm, db)
 }

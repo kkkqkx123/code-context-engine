@@ -8,7 +8,7 @@ use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_common::metadb::{
     ChunkRecord, EntityDetailMapping, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
-use cce_storage_common::{Payload, RelationStorage, VectorPoint};
+use cce_storage_common::{MetadataStorage, Payload, VectorPoint};
 use cce_types::PointKind;
 use cce_types::TestSource;
 use cce_types::ast_to_nl::FileCategory;

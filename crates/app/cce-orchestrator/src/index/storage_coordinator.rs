@@ -29,11 +29,11 @@ use crate::CheckpointManager;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_vector_qdrant::QdrantClient;
 
 use super::super::error::OrchestratorError;
-use super::vector_store::{FulltextStore, RelationStore, VectorStore};
+use super::vector_store::{FulltextStore, MetadataStore, VectorStore};
 
 pub(crate) mod bm25;
 pub(crate) mod candidate;
@@ -51,7 +51,7 @@ pub struct StorageCoordinator {
     vector: Option<VectorStore>,
     fulltext: Option<FulltextStore>,
     embedder: Option<Arc<OpenAICompatibleProvider>>,
-    metadata_store: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
     project_group_id: String,
     project_id: i64,
     /// Current epoch for version-aware storage
@@ -161,22 +161,15 @@ impl StorageCoordinator {
 
     /// Set metadata store through the backend enum.
     ///
-    /// All metadata reads and writes go through the relation contract, so
-    /// both branches share one path and branch selection stays inside the
-    /// enum.
-    pub fn with_metadata_store(mut self, store: RelationStore) -> Self {
+    /// All metadata reads and writes go through the metadata contract, so
+    /// callers never touch a concrete connection or transaction.
+    pub fn with_metadata_store(mut self, store: MetadataStore) -> Self {
         self.metadata_store = Some(store);
         self
     }
 
-    /// Set relation backend via enum dispatch.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.metadata_store = Some(store);
-        self
-    }
-
-    /// Relation backend name for logging.
-    pub fn relation_backend_name(&self) -> &'static str {
+    /// Metadata backend name for logging.
+    pub fn metadata_backend_name(&self) -> &'static str {
         match &self.metadata_store {
             Some(_) => "local",
             None => "none",
@@ -343,13 +336,8 @@ impl StorageCoordinator {
     }
 
     /// Get the configured metadata store, if any.
-    pub fn metadata_store(&self) -> Option<&RelationStore> {
+    pub fn metadata_store(&self) -> Option<&MetadataStore> {
         self.metadata_store.as_ref()
-    }
-
-    /// Get the relation backend enum wrapping the configured store.
-    pub fn relation_store(&self) -> Option<RelationStore> {
-        self.metadata_store.clone()
     }
 
     /// Get the configured fulltext backend, if any.

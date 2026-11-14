@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::types::SearchResult;
@@ -18,14 +18,14 @@ use cce_storage_common::source::{SourceFileCache, read_source_lines_cached};
 use cce_utils::token_estimation::estimate_tokens;
 
 /// Fetch chunk records by chunk IDs through the backend-neutral
-/// [`RelationStorage`] contract, resolving the full epoch view.
+/// [`MetadataStorage`] contract, resolving the full epoch view.
 ///
 /// Same two-stage resolution as [`get_chunk_records`] ("own first,
 /// miss → parent", dropping parent hits of overridden files); the epoch
 /// filtering runs inside the branch implementation while the
 /// excluded-file decision stays with the caller view.
 pub async fn get_chunk_records_from_store(
-    store: &RelationStore,
+    store: &MetadataStore,
     chunk_ids: &[String],
     project_id: i64,
     query_filter: &QueryFilter,
@@ -64,7 +64,7 @@ pub fn downgrade_empty_bodies(results: &mut Vec<SearchResult>) {
 /// to the project root, so the root is recovered from the project registry.
 /// Returns `None` when the project row or its root path is unavailable.
 pub async fn resolve_project_root_from_store(
-    store: &RelationStore,
+    store: &MetadataStore,
     project_id: i64,
 ) -> Option<PathBuf> {
     cce_tools::store::resolve_project_root(store, project_id).await
@@ -381,8 +381,8 @@ fn choose_entity_name(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
     use cce_types::EntityId;
 
     fn chunk_record(entity_ids: &[i64]) -> ChunkRecord {
@@ -401,8 +401,8 @@ mod tests {
     /// - `chunk_parent` exists only in the parent epoch (4)
     /// - `chunk_excluded` exists only in the parent epoch but belongs to an
     ///   overridden file, so it must never surface
-    async fn seed_two_generations() -> RelationStore {
-        let store = RelationStore::in_memory().expect("in-memory store");
+    async fn seed_two_generations() -> MetadataStore {
+        let store = in_memory_metadata_store().expect("in-memory store");
         store
             .ensure_project(1, "/tmp/test")
             .await

@@ -1,4 +1,4 @@
-//! Relation storage contract (backend-neutral).
+//! Metadata storage contract (backend-neutral).
 //!
 //! Groups the business-data operations that the embedded SQLite branch
 //! and the remote PostgreSQL branch serve: project directory, generation
@@ -46,19 +46,12 @@ pub use generation::{
 pub use project::{NewProjectRecord, ProjectRecord, ProjectUpdateRecord};
 pub use projection::IndexStateProjection;
 
-/// Backend-neutral record aliases shared by the local and remote branches.
-pub type RelationFile = FileRecord;
-/// Backend-neutral record aliases shared by the local and remote branches.
-pub type RelationEntity = EntityRecord;
-/// Backend-neutral record aliases shared by the local and remote branches.
-pub type RelationChunk = ChunkRecord;
-
-/// Relation storage contract implemented by the local SQLite branch and the
+/// Metadata storage contract implemented by the local SQLite branch and the
 /// remote PostgreSQL branch.
 ///
-/// Callers hold the backend enum and call through this contract; no caller
+/// Callers hold concrete handles and call through this contract; no caller
 /// touches a concrete connection or transaction.
-pub trait RelationStorage: Clone + Send + Sync + 'static {
+pub trait MetadataStorage: Clone + Send + Sync + 'static {
     // -- Project directory --
 
     /// Ensure the project registry row exists (idempotent).
@@ -930,7 +923,7 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<RelationSnapshotManifest>, StorageError>> + Send;
 
     /// Persist one delta onto a building epoch allocated by
-    /// [`RelationStorage::snapshot_allocate`].
+    /// [`MetadataStorage::snapshot_allocate`].
     fn snapshot_write_delta(
         &self,
         project_id: i64,
@@ -1201,4 +1194,4 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
 }
 
 /// Compile-time assertion that a type implements the contract.
-pub fn assert_relation_storage<T: RelationStorage>() {}
+pub fn assert_metadata_storage<T: MetadataStorage>() {}

@@ -24,7 +24,7 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::VectorStore;
-use crate::index::vector_store::{FulltextStore, RelationStore};
+use crate::index::vector_store::{FulltextStore, MetadataStore};
 use crate::query::CachedEmbedder;
 use crate::query::cache::{CacheKey, QueryCache};
 use crate::query::error::QueryError;
@@ -49,7 +49,7 @@ pub struct Searcher {
     pub(crate) embedder: Arc<CachedEmbedder<OpenAICompatibleProvider>>,
     pub(crate) fulltext: FulltextStore,
     /// Relation backend for the epoch view and chunk content lookup (optional)
-    pub(crate) relation: Option<RelationStore>,
+    pub(crate) metadata_store: Option<MetadataStore>,
     /// Immutable project scope binding project_id and project_group_id.
     pub(crate) scope: ProjectScope,
     /// Reranker for LLM-based reranking
@@ -105,8 +105,8 @@ impl Searcher {
     }
 
     /// Relation backend enum backing this searcher.
-    pub fn relation_store(&self) -> Option<RelationStore> {
-        self.relation.clone()
+    pub fn metadata_store(&self) -> Option<MetadataStore> {
+        self.metadata_store.clone()
     }
 
     /// Shared handle to the result cache backing this searcher.
@@ -476,7 +476,7 @@ impl Searcher {
         if results.is_empty() {
             return;
         }
-        let Some(store) = &self.relation else {
+        let Some(store) = &self.metadata_store else {
             crate::query::retrieval::primitives::downgrade_empty_bodies(results);
             return;
         };

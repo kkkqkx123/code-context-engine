@@ -7,22 +7,22 @@ use std::sync::Arc;
 use cce_codegraph::index::{LayeredSnapshotIndex, SnapshotFileQueryOps};
 use cce_types::Entity;
 
-use cce_storage_metadb::RelationStore;
+use cce_storage_metadb_sqlite::SqliteClient;
 
 pub use crate::store::{
     get_chunk_records, read_snippets_batch, resolve_project_root as resolve_store_root,
 };
 use crate::symbol_lookup_types::SymbolLookupError;
 
-/// Resolve the project root directory for a tool's optional relation handle.
+/// Resolve the project root directory for a tool's optional metadata handle.
 ///
-/// Returns `None` when the relation handle is missing or the project row
+/// Returns `None` when the metadata handle is missing or the project row
 /// carries no root path.
 pub(crate) async fn resolve_project_root(
-    relation: &Option<RelationStore>,
+    metadata_store: &Option<Arc<SqliteClient>>,
     project_id: i64,
 ) -> Option<std::path::PathBuf> {
-    resolve_store_root(relation.as_ref()?, project_id).await
+    resolve_store_root(metadata_store.as_ref()?, project_id).await
 }
 
 /// Get entities by file path from the snapshot index.

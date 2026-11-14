@@ -5,7 +5,7 @@
 
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_storage_common::FulltextStorage;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::VectorStorage;
 use cce_types::path::normalize_project_path;
 

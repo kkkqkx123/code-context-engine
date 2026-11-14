@@ -208,10 +208,10 @@ pub async fn keyword_search(
     spec: KeywordSpec,
 ) -> Result<KeywordSearchResponse, ToolsServiceError> {
     let mut tool = KeywordSearchTool::new(state.engine.fulltext_clone());
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(store) = store.for_project(spec.project_id)
     {
-        tool = tool.with_relation_store(store);
+        tool = tool.with_metadata_store(store);
     }
     tool.search(KeywordSearchRequest {
         query: spec.query,
@@ -402,10 +402,10 @@ pub async fn find_references(
         }
     };
     let mut tool = FindReferencesTool::new(snapshot.index.clone(), project_id);
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(project) = store.for_project(project_id)
     {
-        tool = tool.with_relation_store(project);
+        tool = tool.with_metadata_store(project);
     }
     ToolAnswer {
         result: tool
@@ -454,10 +454,10 @@ pub async fn goto_definition(
         }
     };
     let mut tool = GotoDefinitionTool::new(snapshot.index.clone(), project_id);
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(project) = store.for_project(project_id)
     {
-        tool = tool.with_relation_store(project);
+        tool = tool.with_metadata_store(project);
     }
     ToolAnswer {
         result: tool

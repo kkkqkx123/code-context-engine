@@ -5,8 +5,9 @@
 //! [`EpochView`] carries this complete view so every tool resolves the same
 //! versioned data without depending on the orchestration layer.
 
-use cce_storage_common::RelationStorage;
-use cce_storage_metadb::RelationStore;
+use cce_storage_common::MetadataStorage;
+use cce_storage_metadb_sqlite::SqliteClient;
+use std::sync::Arc;
 
 use crate::SymbolLookupError;
 
@@ -91,7 +92,7 @@ impl EpochView {
 /// full-generation view; a missing row is the legitimate default 0, while an
 /// unparseable stored value is propagated instead of silently downgrading.
 pub async fn load_epoch_view(
-    store: &RelationStore,
+    store: &Arc<SqliteClient>,
     project_id: i64,
 ) -> Result<EpochView, SymbolLookupError> {
     if let Some(manifest) = store.manifest_active(project_id).await.map_err(|error| {
@@ -112,14 +113,14 @@ pub async fn load_epoch_view(
             excluded_files,
         );
     }
-    let epoch = store
-        .project_meta_get_int_optional(project_id, "active_epoch")
-        .await
-        .map_err(|error| {
-            SymbolLookupError::Internal(format!(
-                "Failed to read active_epoch for project {project_id}: {error}"
-            ))
-        })?
-        .unwrap_or(0);
+    let epoch =
+        MetadataStorage::project_meta_get_int_optional(store.as_ref(), project_id, "active_epoch")
+            .await
+            .map_err(|error| {
+                SymbolLookupError::Internal(format!(
+                    "Failed to read active_epoch for project {project_id}: {error}"
+                ))
+            })?
+            .unwrap_or(0);
     EpochView::new(epoch)
 }

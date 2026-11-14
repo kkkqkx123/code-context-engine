@@ -10,8 +10,8 @@
 
 use cce_storage_common::metadb::{
     CheckpointRecord, CheckpointStatus, ChunkRecord, EntityDetailMapping, EntityRecord,
-    FileCheckpointRecord, FileRecord, GenerationOverride, OverrideDisposition,
-    ProjectIndexManifestState, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
+    FileCheckpointRecord, FileRecord, GenerationOverride, MetadataStorage, OverrideDisposition,
+    ProjectIndexManifestState, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 use cce_types::CanonicalRelationSnapshot;
 
@@ -84,7 +84,7 @@ fn chunk(project_id: i64, epoch: i64, chunk_id: &str, file_path: &str) -> ChunkR
 }
 
 /// Shared contract suite: identical assertions for every backend.
-async fn run_contract_suite(store: &impl RelationStorage, tag: &str, project: i64, other: i64) {
+async fn run_contract_suite(store: &impl MetadataStorage, tag: &str, project: i64, other: i64) {
     // Project directory: ensure is idempotent, missing reads empty.
     store
         .ensure_project(project, &format!("/repo/{tag}"))
@@ -409,7 +409,7 @@ async fn local_backend_contract() {
     // exposes through the contract (see the capability inventory). Resolve
     // them with direct reads and cover the entity/mapping roundtrip here on
     // a fresh epoch so earlier deletes cannot interfere.
-    RelationStorage::files_upsert(&client, 7, 9, &[file(7, "a.rs")])
+    MetadataStorage::files_upsert(&client, 7, 9, &[file(7, "a.rs")])
         .await
         .expect("upsert files");
     let file_id: i64 = {
@@ -424,13 +424,13 @@ async fn local_backend_contract() {
     let mut named = entity(7, 9, "alpha");
     named.file_id = file_id;
     assert_eq!(
-        RelationStorage::entities_upsert(&client, &[named])
+        MetadataStorage::entities_upsert(&client, &[named])
             .await
             .expect("upsert entities"),
         1
     );
     assert_eq!(
-        RelationStorage::entities_count(&client, 7, 9)
+        MetadataStorage::entities_count(&client, 7, 9)
             .await
             .expect("count entities"),
         1
@@ -445,7 +445,7 @@ async fn local_backend_contract() {
         .expect("resolve entity id")
     };
     assert_eq!(
-        RelationStorage::mappings_upsert(
+        MetadataStorage::mappings_upsert(
             &client,
             &[EntityDetailMapping {
                 id: 0,
@@ -464,7 +464,7 @@ async fn local_backend_contract() {
         1
     );
     assert_eq!(
-        RelationStorage::mappings_delete_by_project_epoch(&client, 7, 9)
+        MetadataStorage::mappings_delete_by_project_epoch(&client, 7, 9)
             .await
             .expect("delete mappings"),
         1
@@ -498,7 +498,7 @@ async fn local_backend_contract() {
             .map(|_| ())
         })
         .expect("insert batch checkpoint");
-    RelationStorage::file_checkpoint_upsert(
+    MetadataStorage::file_checkpoint_upsert(
         &client,
         7,
         &FileCheckpointRecord {
@@ -525,29 +525,29 @@ async fn local_backend_contract() {
     .await
     .expect("upsert file checkpoint");
     assert!(
-        RelationStorage::file_checkpoint_get(&client, 7, "local-op-1", "a.rs")
+        MetadataStorage::file_checkpoint_get(&client, 7, "local-op-1", "a.rs")
             .await
             .expect("get file checkpoint")
             .is_some()
     );
     assert_eq!(
-        RelationStorage::checkpoint_files_delete_by_operation(&client, 7, "local-op-1")
+        MetadataStorage::checkpoint_files_delete_by_operation(&client, 7, "local-op-1")
             .await
             .expect("delete operation files"),
         1
     );
     assert_eq!(
-        RelationStorage::entities_delete_by_project_epoch(&client, 7, 9)
+        MetadataStorage::entities_delete_by_project_epoch(&client, 7, 9)
             .await
             .expect("delete entities"),
         1
     );
 
     // Full cleanup removes every row of the project.
-    RelationStorage::snapshot_delete_project(&client, 7)
+    MetadataStorage::snapshot_delete_project(&client, 7)
         .await
         .expect("delete snapshots");
-    RelationStorage::delete_project_db(&client, 7)
+    MetadataStorage::delete_project_db(&client, 7)
         .await
         .expect("delete project db");
 }
@@ -561,28 +561,28 @@ async fn remote_backend_contract() {
         eprintln!("skipping remote relation contract: CCE_TEST_PG_URL is not set");
         return;
     };
-    use cce_config::modules::RelationRemoteConfig;
+    use cce_config::modules::MetadataRemoteConfig;
     use cce_storage_metadb_pg::{PostgresClient, PostgresConfig};
     let project = 700_001 + (std::process::id() as i64 % 1000);
     let other = project + 1;
-    let remote = RelationRemoteConfig {
+    let remote = MetadataRemoteConfig {
         url: Some(url),
-        ..RelationRemoteConfig::default()
+        ..MetadataRemoteConfig::default()
     };
     let config = PostgresConfig::from_remote(&remote).expect("remote config");
     let client = PostgresClient::new(config).expect("remote client must build");
     client.ensure_migrated().await.expect("migrate schema");
     run_contract_suite(&client, "remote", project, other).await;
-    RelationStorage::snapshot_delete_project(&client, project)
+    MetadataStorage::snapshot_delete_project(&client, project)
         .await
         .expect("delete snapshots");
-    RelationStorage::snapshot_delete_project(&client, other)
+    MetadataStorage::snapshot_delete_project(&client, other)
         .await
         .expect("delete other snapshots");
-    RelationStorage::delete_project_db(&client, project)
+    MetadataStorage::delete_project_db(&client, project)
         .await
         .expect("delete project db");
-    RelationStorage::delete_project_db(&client, other)
+    MetadataStorage::delete_project_db(&client, other)
         .await
         .expect("delete other project db");
 }

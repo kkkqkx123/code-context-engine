@@ -1,7 +1,7 @@
 //! Relation-store file and entity persistence.
 
 use cce_scanner::FileEntry;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::{EntityRecord, FileEnsureEntry};
 
 use crate::error::OrchestratorError;
@@ -232,8 +232,8 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::super::StorageCoordinator;
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
     use cce_types::entity::{Entity, EntityId, EntityKind, ParsedFile};
     use cce_types::{Language, Span};
 
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn stores_parsed_entities_in_the_target_epoch_with_parent_links() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
 
         let mut parsed = ParsedFile::new(Language::Rust, "src/lib.rs".to_string(), "");

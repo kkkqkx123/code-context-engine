@@ -7,7 +7,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use cce_api::models::{ErrorResponse, error_codes};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use cce_server_shared::context::SharedContext;
 
@@ -16,7 +16,7 @@ pub(crate) async fn project_root(
     state: &SharedContext,
     project_id: i64,
 ) -> Result<PathBuf, ErrorResponse> {
-    let store = state.engine.relation_store().ok_or_else(|| {
+    let store = state.engine.metadata_store().ok_or_else(|| {
         ErrorResponse::new(error_codes::STORAGE_ERROR, "Metadata store not initialized")
     })?;
     let record = store

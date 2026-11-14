@@ -21,12 +21,11 @@ pub mod utils;
 
 pub use cce_storage_common::metadb::{
     AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, EntityDetailMapping,
-    EntityRecord, FileCheckpointRecord, FileRecord, GenerationOverride, OverrideDisposition,
-    ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord, RelationChunk, RelationEntity,
-    RelationFile, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
-    assert_relation_storage,
+    EntityRecord, FileCheckpointRecord, FileRecord, GenerationOverride, MetadataStorage,
+    OverrideDisposition, ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord,
+    WorkUnitCheckpointRecord, WorkUnitStatus, assert_metadata_storage,
 };
-pub use client::SqliteClient;
+pub use client::{MetadataDiagnostics, SqliteClient};
 pub use config::SqliteConfig;
 pub use contract::FileHashCachePort;
 pub use metrics::SqliteMetrics;

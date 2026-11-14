@@ -9,7 +9,7 @@
 //! exclusively in generation GC; when the inheritance chain would grow past
 //! depth 2, the active generation is compacted (materialized) first.
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::error::OrchestratorError;
 
@@ -41,15 +41,15 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
     use std::path::Path;
 
     use super::super::StorageCoordinator;
 
     #[tokio::test]
     async fn changed_and_deleted_files_register_generation_overrides() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         database
             .ensure_project(1, "/tmp/test")
             .await
@@ -94,7 +94,7 @@ mod tests {
             .register_deleted_files(&[Path::new("src/batch_a.rs"), Path::new("src/batch_b.rs")])
             .await
             .expect("batch deletion should register deleted");
-        let standalone = RelationStore::in_memory().expect("in-memory store");
+        let standalone = in_memory_metadata_store().expect("in-memory store");
         let without_candidate = StorageCoordinator::new(1)
             .expect("valid project ID")
             .with_metadata_store(standalone)

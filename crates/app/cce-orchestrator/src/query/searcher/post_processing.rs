@@ -255,13 +255,13 @@ impl Searcher {
     /// Derive the epoch view of the active publication.
     ///
     /// Reads the active manifest (own epoch + inheritance link) and its
-    /// generation overrides through the relation contract; recomputed per
+    /// generation overrides through the metadata contract; recomputed per
     /// request by design.
     pub(crate) async fn load_query_filter(&self, project_id: i64) -> Result<QueryFilter> {
         let store = self
-            .relation
+            .metadata_store
             .as_ref()
-            .ok_or_else(|| QueryError::config("relation store not available for query filter"))?;
+            .ok_or_else(|| QueryError::config("metadata store not available for query filter"))?;
         crate::query::filter::load_active_query_filter_from_store(store, project_id).await
     }
 }

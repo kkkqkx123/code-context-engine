@@ -188,10 +188,10 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 
 #[test]
 fn test_legacy_active_epoch_missing_row_defaults_to_zero() {
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
-    let store = RelationStore::in_memory().expect("in-memory store");
+    let store = in_memory_metadata_store().expect("in-memory store");
     block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
     let view = block_on(crate::query::filter::load_active_query_filter_from_store(
         &store, 7,
@@ -202,10 +202,10 @@ fn test_legacy_active_epoch_missing_row_defaults_to_zero() {
 
 #[test]
 fn test_legacy_active_epoch_reads_stored_value() {
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
-    let store = RelationStore::in_memory().expect("in-memory store");
+    let store = in_memory_metadata_store().expect("in-memory store");
     block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
     block_on(store.project_meta_set_int(7, "active_epoch", 5)).expect("write active_epoch");
     let view = block_on(crate::query::filter::load_active_query_filter_from_store(
@@ -217,10 +217,10 @@ fn test_legacy_active_epoch_reads_stored_value() {
 
 #[test]
 fn test_legacy_active_epoch_unparseable_value_is_error() {
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
-    let store = RelationStore::in_memory().expect("in-memory store");
+    let store = in_memory_metadata_store().expect("in-memory store");
     block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
     block_on(store.project_meta_set_string(7, "active_epoch", "abc")).expect("write active_epoch");
     let err = block_on(crate::query::filter::load_active_query_filter_from_store(
@@ -233,10 +233,10 @@ fn test_legacy_active_epoch_unparseable_value_is_error() {
 
 #[test]
 fn test_legacy_active_epoch_ignores_other_projects() {
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
-    let store = RelationStore::in_memory().expect("in-memory store");
+    let store = in_memory_metadata_store().expect("in-memory store");
     block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
     block_on(store.project_meta_set_int(7, "active_epoch", 9)).expect("write active_epoch");
     let view = block_on(crate::query::filter::load_active_query_filter_from_store(

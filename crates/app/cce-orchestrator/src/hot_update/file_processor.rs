@@ -7,9 +7,9 @@ use super::change::compute::compute_entity_changes;
 use super::change::{EntityChange, EntityChangeType, FileChangeType, ParseResultWithChanges};
 use super::error::{HotUpdateError, Result};
 use super::watcher::{FileEvent, FileEventType};
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use cce_parser::parser::ParseCoordinator;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::Span;
 use cce_types::entity::{Entity, EntityId, EntityKind};
 use cce_types::{LanguageInfo, ParsedFile};
@@ -78,7 +78,7 @@ impl FileProcessor {
     pub async fn process_file_from_event(
         &mut self,
         event: &FileEvent,
-        metadata_store: &Option<RelationStore>,
+        metadata_store: &Option<MetadataStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         let change_type = match event.event_type {
@@ -99,7 +99,7 @@ impl FileProcessor {
         &mut self,
         path: &Path,
         change_type: FileChangeType,
-        metadata_store: &Option<RelationStore>,
+        metadata_store: &Option<MetadataStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         self.process_file_change_at(
@@ -128,7 +128,7 @@ impl FileProcessor {
         read_path: &Path,
         parse_path: &str,
         change_type: FileChangeType,
-        metadata_store: &Option<RelationStore>,
+        metadata_store: &Option<MetadataStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         // Event-driven read: no scan-phase hash baseline exists here, so the
@@ -165,7 +165,7 @@ impl FileProcessor {
         parse_path: &str,
         content: &str,
         change_type: FileChangeType,
-        metadata_store: &Option<RelationStore>,
+        metadata_store: &Option<MetadataStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         // Route like the full-index path: documentation/config/text files
@@ -211,7 +211,7 @@ impl FileProcessor {
         &mut self,
         payload: &cce_scanner::FileContentPayload,
         change_type: FileChangeType,
-        metadata_store: &Option<RelationStore>,
+        metadata_store: &Option<MetadataStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         let parse_path = payload.identity_key();
@@ -368,7 +368,7 @@ impl Default for FileProcessor {
 pub(crate) async fn populate_entity_changes(
     result: &mut ParseResultWithChanges,
     parsed_file: &cce_types::entity::ParsedFile,
-    metadata_store: &Option<RelationStore>,
+    metadata_store: &Option<MetadataStore>,
     lookup_path: &str,
     project_id: i64,
     change_type: FileChangeType,

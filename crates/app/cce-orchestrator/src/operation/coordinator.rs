@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use tracing::{debug, info, trace, warn};
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
 use cce_types::error::common::NotFoundError;
 use cce_types::{OperationKind, StorageError};
 
@@ -55,7 +55,7 @@ impl OperationCoordinator {
     /// project_id must be > 0 (no global/default projects allowed)
     pub fn new_for_project(
         project_id: i64,
-        db: RelationStore,
+        db: MetadataStore,
     ) -> Result<Self, cce_types::error::ConfigError> {
         if project_id <= 0 {
             return Err(cce_types::error::ConfigError::invalid_project_id(
@@ -80,7 +80,7 @@ impl OperationCoordinator {
     /// project_id must be > 0 (no global/default projects allowed)
     pub fn with_recovery_for_project(
         project_id: i64,
-        db: RelationStore,
+        db: MetadataStore,
         file_indexer: Arc<FileIndexer>,
     ) -> Result<Self, cce_types::error::ConfigError> {
         if project_id <= 0 {
@@ -736,7 +736,7 @@ impl OperationCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_common::RelationStorage;
+    use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::{CheckpointRecord, CheckpointStatus};
 
     fn make_checkpoint(
@@ -767,7 +767,7 @@ mod tests {
         }
     }
 
-    async fn insert_checkpoint(db: &RelationStore, record: &CheckpointRecord) {
+    async fn insert_checkpoint(db: &MetadataStore, record: &CheckpointRecord) {
         db.checkpoint_create(record.project_id, record)
             .await
             .expect("Failed to insert checkpoint");
@@ -775,7 +775,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recover_unfinished_operations_filters_stale() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let coordinator = OperationCoordinator::new_for_project(1, db.clone())
             .expect("Failed to create coordinator")
             .with_recovery_freshness(3600);
@@ -828,7 +828,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recover_unfinished_operations_replays_all_without_window() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         // No freshness window configured: legacy behavior replays everything.
         let coordinator = OperationCoordinator::new_for_project(1, db.clone())
             .expect("Failed to create coordinator");
@@ -864,7 +864,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recover_unfinished_operations_rejects_unparseable_timestamp() {
-        let db = RelationStore::in_memory().expect("Failed to create memory store");
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
         let coordinator = OperationCoordinator::new_for_project(1, db.clone())
             .expect("Failed to create coordinator")
             .with_recovery_freshness(3600);

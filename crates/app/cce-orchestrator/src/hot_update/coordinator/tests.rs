@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 
 use crate::hot_update::FileChangeType;
+use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
 use cce_config::HotUpdateConfig;
-use cce_storage_common::RelationStorage;
-use cce_storage_metadb::RelationStore;
+use cce_storage_common::MetadataStorage;
 
 use super::coordinator_core::HotUpdateCoordinator;
 use crate::hot_update::coordinator::change_merger::coalesce_pending_changes;
@@ -51,8 +51,8 @@ async fn test_change_detection_stats_and_debounce_info() {
 
 /// A coordinator whose metadata store is an in-memory backend
 /// with the project row present (foreign keys on manifests/chunks).
-async fn coordinator_with_store(project_id: i64) -> (HotUpdateCoordinator, RelationStore) {
-    let store = RelationStore::in_memory().expect("in-memory store");
+async fn coordinator_with_store(project_id: i64) -> (HotUpdateCoordinator, MetadataStore) {
+    let store = in_memory_metadata_store().expect("in-memory store");
     store
         .ensure_project(project_id, "/")
         .await
@@ -63,7 +63,7 @@ async fn coordinator_with_store(project_id: i64) -> (HotUpdateCoordinator, Relat
     (coordinator, store)
 }
 
-async fn insert_chunk_row(store: &RelationStore, project_id: i64, epoch: i64, ids: &[i64]) {
+async fn insert_chunk_row(store: &MetadataStore, project_id: i64, epoch: i64, ids: &[i64]) {
     use cce_storage_common::metadb::ChunkRecord;
 
     let chunk = ChunkRecord::new(
@@ -83,7 +83,7 @@ async fn insert_chunk_row(store: &RelationStore, project_id: i64, epoch: i64, id
 }
 
 /// Insert an active manifest at the given data epoch.
-async fn insert_active_manifest(store: &RelationStore, project_id: i64, epoch: i64) {
+async fn insert_active_manifest(store: &MetadataStore, project_id: i64, epoch: i64) {
     store
         .manifest_begin_building(project_id, epoch, "op-active", None)
         .await
@@ -95,7 +95,7 @@ async fn insert_active_manifest(store: &RelationStore, project_id: i64, epoch: i
 }
 
 /// Insert a building (candidate) manifest at the given data epoch.
-async fn insert_building_manifest(store: &RelationStore, project_id: i64, epoch: i64) {
+async fn insert_building_manifest(store: &MetadataStore, project_id: i64, epoch: i64) {
     store
         .manifest_begin_building(project_id, epoch, "op-building", None)
         .await
@@ -356,7 +356,7 @@ async fn test_commit_file_hashes_publishes_and_deletes() {
     std::fs::write(&deleted, "pub fn gone() {}").expect("write deleted file");
 
     // An isolated in-memory store so the change-detector view survives.
-    let store = RelationStore::in_memory().expect("in-memory store");
+    let store = in_memory_metadata_store().expect("in-memory store");
 
     let config = HotUpdateConfig::default();
 

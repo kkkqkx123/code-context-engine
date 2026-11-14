@@ -14,8 +14,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{Level, debug, error, info, span};
 
-use cce_storage_common::RelationStorage;
-use cce_storage_metadb::RelationStore;
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
+use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 
 use cce_orchestrator::index::StorageCoordinator;
@@ -43,13 +43,13 @@ impl Default for GenerationGcWorkerConfig {
 
 /// Background worker that periodically garbage-collects stale generations.
 pub struct GenerationGcWorker {
-    store: RelationStore,
+    store: MetadataStore,
     config: GenerationGcWorkerConfig,
     running: Arc<AtomicBool>,
 }
 
 impl GenerationGcWorker {
-    pub fn new(store: RelationStore, config: GenerationGcWorkerConfig) -> Self {
+    pub fn new(store: MetadataStore, config: GenerationGcWorkerConfig) -> Self {
         Self {
             store,
             config,
@@ -153,8 +153,8 @@ mod tests {
     use super::*;
     use cce_storage_common::metadb::{FileEnsureEntry, NewProjectRecord};
 
-    async fn setup_test_db() -> RelationStore {
-        let store = RelationStore::in_memory().expect("Failed to create store");
+    async fn setup_test_db() -> MetadataStore {
+        let store = in_memory_metadata_store().expect("Failed to create store");
         store
             .project_insert(&NewProjectRecord::new(
                 "test".to_string(),
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_gc_worker_creation() {
-        let store = RelationStore::in_memory().expect("Failed to create store");
+        let store = in_memory_metadata_store().expect("Failed to create store");
         let config = GenerationGcWorkerConfig::default();
         let worker = Arc::new(GenerationGcWorker::new(store, config));
         assert!(!worker.running.load(Ordering::SeqCst));
@@ -205,7 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gc_worker_stops_cleanly() {
-        let store = RelationStore::in_memory().expect("Failed to create store");
+        let store = in_memory_metadata_store().expect("Failed to create store");
         let config = GenerationGcWorkerConfig {
             scan_interval_secs: 1,
             ..Default::default()

@@ -120,7 +120,7 @@ pub async fn reload_project(state: &SharedContext, project_id: i64) -> Result<()
             Some(state.engine.fulltext_clone()),
             state
                 .engine
-                .relation_store()
+                .metadata_store()
                 .and_then(|store| store.for_project(project_id).ok()),
             Some(state.engine.embedder_clone()),
             Some(project_group_id),

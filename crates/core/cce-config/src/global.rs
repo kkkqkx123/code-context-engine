@@ -36,7 +36,7 @@ use crate::modules::{
 use crate::modules::{Bm25Config, LocalVectorConfig, QdrantConfig, VectorBackend};
 use crate::modules::{ChatModelConfig, EmbeddingModelConfig, RerankModelConfig};
 use crate::modules::{
-    FulltextBackend, FulltextRemoteConfig, RelationBackend, RelationRemoteConfig,
+    FulltextBackend, FulltextRemoteConfig, MetadataBackend, MetadataRemoteConfig,
 };
 use crate::validation::{ConfigWarning, Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
@@ -55,10 +55,10 @@ pub struct DatabaseConfig {
     pub sqlite: SqliteConfig,
     /// BM25 index configuration
     pub bm25: Bm25Config,
-    /// Relation storage backend selection (phase 1: local only).
-    pub relation_backend: RelationBackend,
+    /// Metadata storage backend selection (phase 1: local only).
+    pub metadata_backend: MetadataBackend,
     /// Reserved remote parameters for the relation branch (phase 3).
-    pub relation_remote: RelationRemoteConfig,
+    pub metadata_remote: MetadataRemoteConfig,
     /// Fulltext storage backend selection (phase 1: local only).
     pub fulltext_backend: FulltextBackend,
     /// Reserved remote parameters for the fulltext branch (phase 3).
@@ -78,8 +78,8 @@ impl Default for DatabaseConfig {
             qdrant: QdrantConfig::default(),
             sqlite: SqliteConfig::default(),
             bm25: Bm25Config::default(),
-            relation_backend: RelationBackend::Local,
-            relation_remote: RelationRemoteConfig::default(),
+            metadata_backend: MetadataBackend::Local,
+            metadata_remote: MetadataRemoteConfig::default(),
             fulltext_backend: FulltextBackend::Local,
             fulltext_remote: FulltextRemoteConfig::default(),
             allow_nonstandard_backends: false,
@@ -94,8 +94,8 @@ impl DatabaseConfig {
     }
 
     /// Whether the local relation backend is active.
-    pub fn is_local_relation(&self) -> bool {
-        self.relation_backend.is_local()
+    pub fn is_local_metadata(&self) -> bool {
+        self.metadata_backend.is_local()
     }
 
     /// Whether the local fulltext backend is active.
@@ -121,11 +121,11 @@ impl DatabaseConfig {
     /// their own parameters when selected.
     pub fn validate_backend_combination(&self) -> ValidationResult {
         use crate::modules::VectorBackend as VB;
-        if !self.relation_backend.is_local()
-            && let Err(e) = self.relation_remote.validate_structured()
+        if !self.metadata_backend.is_local()
+            && let Err(e) = self.metadata_remote.validate_structured()
         {
             return Err(ConfigValidationError::invalid_field(
-                "database.relation_remote",
+                "database.metadata_remote",
                 format!("remote relation parameters are invalid: {e}"),
             ));
         }
@@ -137,9 +137,9 @@ impl DatabaseConfig {
                 format!("remote fulltext parameters are invalid: {e}"),
             ));
         }
-        if !self.relation_backend.is_local() && self.relation_remote.url.is_none() {
+        if !self.metadata_backend.is_local() && self.metadata_remote.url.is_none() {
             return Err(ConfigValidationError::missing_field(
-                "database.relation_remote.url",
+                "database.metadata_remote.url",
             ));
         }
         if !self.fulltext_backend.is_local() && self.fulltext_remote.url.is_none() {
@@ -158,23 +158,23 @@ impl DatabaseConfig {
         // during configuration validation instead of halfway through startup.
         // The remote fulltext branch is wired (Elasticsearch), so it is
         // allowed and validated above.
-        if !self.relation_backend.is_local() {
+        if !self.metadata_backend.is_local() {
             return Err(ConfigValidationError::invalid_field(
-                "database.relation_backend",
-                "remote relation backend is not wired yet: supported matrices are local/local/local and qdrant/local/local; set relation_backend = \"local\"",
+                "database.metadata_backend",
+                "remote metadata backend is not wired yet: supported matrices are local/local/local and qdrant/local/local; set metadata_backend = \"local\"",
             ));
         }
 
         let official = matches!(
             (
                 &self.vector_backend,
-                &self.relation_backend,
+                &self.metadata_backend,
                 &self.fulltext_backend
             ),
-            (VB::Local, RelationBackend::Local, FulltextBackend::Local)
-                | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Local)
-                | (VB::Local, RelationBackend::Local, FulltextBackend::Remote)
-                | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Remote)
+            (VB::Local, MetadataBackend::Local, FulltextBackend::Local)
+                | (VB::Qdrant, MetadataBackend::Local, FulltextBackend::Local)
+                | (VB::Local, MetadataBackend::Local, FulltextBackend::Remote)
+                | (VB::Qdrant, MetadataBackend::Local, FulltextBackend::Remote)
         );
         if official || self.allow_nonstandard_backends {
             Ok(())
@@ -538,7 +538,7 @@ impl AppConfig {
             qdrant_enabled: self.database.qdrant.enabled,
             bm25_enabled: self.database.bm25.enabled,
             vector_backend: self.database.vector_backend,
-            relation_backend: self.database.relation_backend,
+            metadata_backend: self.database.metadata_backend,
             fulltext_backend: self.database.fulltext_backend,
             allow_nonstandard_backends: self.database.allow_nonstandard_backends,
             relation_index_enabled: self.relation.index.enabled,

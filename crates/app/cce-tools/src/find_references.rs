@@ -9,7 +9,7 @@ use std::sync::Arc;
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
 use cce_codegraph::query::QueryCache;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::{Entity, EntityId};
 
 use crate::epoch_view::load_epoch_view;
@@ -19,7 +19,7 @@ use crate::symbol_lookup_types::{
     CallerEntityInfo, FindReferencesRequest, FindReferencesResponse, GroupedReferences,
     ReferenceLocation, SymbolKind, SymbolLookupError,
 };
-use cce_storage_metadb::RelationStore;
+use cce_storage_metadb_sqlite::SqliteClient;
 
 /// Configuration for find references tool
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ pub struct FindReferencesTool {
     /// Configuration
     config: FindReferencesConfig,
     /// Relation backend for snippet lookup (local branch only)
-    relation: Option<RelationStore>,
+    metadata_store: Option<Arc<SqliteClient>>,
     /// Project ID for relation queries
     project_id: i64,
     /// Query result cache (LRU) for repeated lookups
@@ -59,7 +59,7 @@ impl FindReferencesTool {
         Self {
             index,
             config: FindReferencesConfig::default(),
-            relation: None,
+            metadata_store: None,
             project_id,
             cache: Arc::new(RwLock::new(QueryCache::new(128))),
         }
@@ -75,8 +75,8 @@ impl FindReferencesTool {
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.relation = Some(store);
+    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+        self.metadata_store = Some(store);
         self
     }
 
@@ -131,7 +131,7 @@ impl FindReferencesTool {
         &self,
         symbol_name: &str,
         project_id: i64,
-        store: &RelationStore,
+        store: &Arc<SqliteClient>,
     ) -> Result<EntityId, SymbolLookupError> {
         // Unified path: try snapshot name index first (O(1) without DB).
         let ids = self.index.get_function_ids_by_name(symbol_name);
@@ -328,7 +328,8 @@ impl FindReferencesTool {
     /// Read file content from disk (chunk rows no longer persist raw code)
     async fn get_file_content_from_chunks(&self, path: &str) -> Option<String> {
         let project_id = self.project_id;
-        let project_root = crate::common::resolve_project_root(&self.relation, project_id).await?;
+        let project_root =
+            crate::common::resolve_project_root(&self.metadata_store, project_id).await?;
         let content = cce_storage_common::source::read_source_lines(
             Some(project_root.as_path()),
             path,

@@ -16,7 +16,7 @@ use cce_api::models::{
 use cce_server_shared::services::project::{
     project_config_from_record, reload_project_after_profile_change,
 };
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::ProjectUpdateRecord;
 
 /// Handle create project request
@@ -35,7 +35,7 @@ pub async fn handle_create_project(
     Json(request): Json<CreateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
-    let metadata_store = match state.engine.relation_store() {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -143,7 +143,7 @@ pub async fn handle_update_project(
     Json(request): Json<UpdateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
-    let relation_store = match state.engine.relation_store() {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -164,7 +164,7 @@ pub async fn handle_update_project(
         }
     };
 
-    match relation_store.project_record(id).await {
+    match metadata_store.project_record(id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -192,7 +192,7 @@ pub async fn handle_update_project(
         || request.ignore_patterns.is_some()
     {
         let patched = async {
-            let record = relation_store.project_record(id).await?.ok_or_else(|| {
+            let record = metadata_store.project_record(id).await?.ok_or_else(|| {
                 cce_types::StorageError::not_found(format!("Project {id} not found"))
             })?;
             let mut profile = cce_config::ProjectAppConfig::from_json_str(&record.profile_json)
@@ -249,7 +249,7 @@ pub async fn handle_update_project(
     // If needed, add root_path field to UpdateProjectRequest
 
     // Use update method instead of delete-insert
-    if let Err(e) = relation_store.project_update(id, &updates).await {
+    if let Err(e) = metadata_store.project_update(id, &updates).await {
         return ApiResult::Error(ErrorResponse::new(
             error_codes::STORAGE_ERROR,
             format!("Failed to update project: {}", e),
@@ -266,7 +266,7 @@ pub async fn handle_update_project(
         if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
             || normalized == cce_api::models::SUPPLY_MODE_LOCAL
         {
-            if let Err(e) = relation_store
+            if let Err(e) = metadata_store
                 .project_meta_set_string(id, cce_api::models::SUPPLY_MODE_KEY, &normalized)
                 .await
             {
@@ -280,7 +280,7 @@ pub async fn handle_update_project(
     }
 
     // Get updated project
-    let record = match relation_store.project_record(id).await {
+    let record = match metadata_store.project_record(id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -332,7 +332,7 @@ pub async fn handle_delete_project(
         state.engine.clone(),
         Some(state.engine.vector_clone()),
         Some(state.engine.fulltext_clone()),
-        state.engine.relation_store(),
+        state.engine.metadata_store(),
     );
 
     let m_result = maintenance.delete_project(id).await;

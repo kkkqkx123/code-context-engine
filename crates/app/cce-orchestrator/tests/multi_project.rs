@@ -3,12 +3,12 @@
 //! Verifies that query cache is properly isolated per project,
 //! preventing cross-project cache pollution.
 
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
 use cce_orchestrator::query::{
     CacheConfig, CacheKey, QueryCache, QueryConfigBuilder, QueryOptions, QueryResult,
 };
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::ChunkRecord;
-use cce_storage_metadb::RelationStore;
 use cce_storage_vector_qdrant::generate_project_group_id;
 
 // ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ fn test_same_root_has_distinct_vector_namespaces() {
 
 #[tokio::test]
 async fn test_same_chunk_id_is_isolated_across_project_lifecycle() {
-    let store = RelationStore::in_memory().expect("Failed to create metadata store");
+    let store = in_memory_metadata_store().expect("Failed to create metadata store");
     store
         .ensure_project(1, "/project-a")
         .await

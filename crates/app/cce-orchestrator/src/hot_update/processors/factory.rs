@@ -9,14 +9,14 @@ use std::sync::Arc;
 use crate::NlDocumentUpdateProcessor;
 use crate::index::RelationSnapshotPublisher;
 use crate::index::StorageCoordinator;
-use crate::index::{FulltextStore, RelationStore, VectorStore};
+use crate::index::{FulltextStore, MetadataStore, VectorStore, in_memory_metadata_store};
 use cce_config::{NestProcessorConfig, RelationConfig};
 use cce_export::ExportConfig;
 use cce_export::NlDocumentExporter;
 use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::error::ConfigError;
 
 use super::{
@@ -199,7 +199,7 @@ impl ProcessorFactory {
         &self,
         vector: Option<VectorStore>,
         fulltext: Option<FulltextStore>,
-        relation: Option<RelationStore>,
+        metadata_store: Option<MetadataStore>,
         embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
         project_group_id: Option<String>,
         project_id: i64,
@@ -219,7 +219,7 @@ impl ProcessorFactory {
         self.create_all_processors(
             vector,
             fulltext,
-            relation,
+            metadata_store,
             embedder,
             project_group_id,
             project_id,
@@ -259,7 +259,7 @@ impl ProcessorFactory {
         &self,
         vector: Option<VectorStore>,
         fulltext: Option<FulltextStore>,
-        metadata_store: Option<RelationStore>,
+        metadata_store: Option<MetadataStore>,
         embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
         project_group_id: Option<String>,
         project_id: i64,
@@ -299,7 +299,7 @@ impl ProcessorFactory {
                      store and will NOT persist across restarts"
                 );
                 // Create a temporary in-memory store for processors that need it
-                RelationStore::in_memory().map_err(|error| {
+                in_memory_metadata_store().map_err(|error| {
                     ConfigError::Other(format!(
                         "Failed to create in-memory metadata store: {error}"
                     ))
@@ -401,11 +401,8 @@ impl ProcessorFactory {
 
         // Add relation processor if enabled
         if config.enable_relation {
-            let mut relation_processor = if metadata_store.is_local() {
-                RelationUpdateProcessor::with_persistence(metadata_store.clone())
-            } else {
-                RelationUpdateProcessor::new()
-            };
+            let mut relation_processor =
+                RelationUpdateProcessor::with_persistence(metadata_store.clone());
             relation_processor.set_project_id(project_id);
             relation_processor.set_relation_config(relation_config);
             relation_processor.set_license_config(license_config);
@@ -449,7 +446,7 @@ impl ProcessorFactory {
                 export_processor = export_processor.with_checkpoint_manager(cm.clone());
             }
             export_processor =
-                export_processor.with_relation_context(Some(metadata_store.clone()), project_id);
+                export_processor.with_metadata_context(Some(metadata_store.clone()), project_id);
             processors.push(Box::new(export_processor));
         }
 

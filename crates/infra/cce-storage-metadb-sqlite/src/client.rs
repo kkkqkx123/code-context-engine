@@ -21,6 +21,14 @@ pub struct ClientStats {
     pub item_count: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct MetadataDiagnostics {
+    pub reachable: bool,
+    pub version: Option<String>,
+    pub size_bytes: u64,
+    pub error: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct SqliteClient {
     write_conn: Arc<Mutex<Connection>>,
@@ -287,7 +295,7 @@ impl SqliteClient {
         Ok(self.write_conn.lock())
     }
 
-    pub fn db_size(&self) -> Result<u64, StorageError> {
+    pub fn db_size_sync(&self) -> Result<u64, StorageError> {
         let path = Path::new(&self.config.path);
 
         let main_size = file_size_or_zero(path)?;
@@ -301,19 +309,23 @@ impl SqliteClient {
 
         for client in self.project_clients.lock().values() {
             total = total
-                .checked_add(client.db_size()?)
+                .checked_add(client.db_size_sync()?)
                 .ok_or_else(|| StorageError::Query("SQLite database size overflow".to_string()))?;
         }
         Ok(total)
     }
 
-    pub fn project_meta_get_int(&self, project_id: i64, key: &str) -> Result<i64, StorageError> {
+    pub fn project_meta_get_int_sync(
+        &self,
+        project_id: i64,
+        key: &str,
+    ) -> Result<i64, StorageError> {
         let project = self.for_project(project_id)?;
         let conn = project.read_connection()?;
         ProjectRepository::meta_get_int(&conn, project_id, key)
     }
 
-    pub fn project_meta_get_int_optional(
+    pub fn project_meta_get_int_optional_sync(
         &self,
         project_id: i64,
         key: &str,
@@ -323,7 +335,7 @@ impl SqliteClient {
         ProjectRepository::meta_get_int_optional(&conn, project_id, key)
     }
 
-    pub fn project_meta_set_int(
+    pub fn project_meta_set_int_sync(
         &self,
         project_id: i64,
         key: &str,
@@ -334,7 +346,7 @@ impl SqliteClient {
         ProjectRepository::meta_set_int(&conn, project_id, key, value)
     }
 
-    pub fn project_meta_get_string_optional(
+    pub fn project_meta_get_string_optional_sync(
         &self,
         project_id: i64,
         key: &str,
@@ -344,7 +356,7 @@ impl SqliteClient {
         ProjectRepository::meta_get_string_optional(&conn, project_id, key)
     }
 
-    pub fn project_meta_set_string(
+    pub fn project_meta_set_string_sync(
         &self,
         project_id: i64,
         key: &str,
@@ -356,7 +368,7 @@ impl SqliteClient {
     }
 
     pub fn get_stats(&self) -> Result<ClientStats, StorageError> {
-        let total_size_bytes = usize::try_from(self.db_size()?)
+        let total_size_bytes = usize::try_from(self.db_size_sync()?)
             .map_err(|_| StorageError::Query("SQLite database is too large".to_string()))?;
         let conn = self.read_connection()?;
         let item_count: i64 = conn
@@ -388,7 +400,28 @@ impl SqliteClient {
         })
     }
 
-    pub fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError> {
+    pub fn backend_name(&self) -> &'static str {
+        "local"
+    }
+
+    pub async fn diagnose_summary(&self) -> MetadataDiagnostics {
+        match self.db_size_sync() {
+            Ok(size) => MetadataDiagnostics {
+                reachable: true,
+                version: None,
+                size_bytes: size,
+                error: None,
+            },
+            Err(e) => MetadataDiagnostics {
+                reachable: false,
+                version: None,
+                size_bytes: 0,
+                error: Some(format!("Diagnostic failed: {e}")),
+            },
+        }
+    }
+
+    pub fn delete_project_db_sync(&self, project_id: i64) -> Result<usize, StorageError> {
         self.project_clients.lock().remove(&project_id);
 
         let path = project_db_path(&self.config.path, project_id)?;
@@ -696,13 +729,13 @@ mod tests {
             .expect("insert project");
 
         client
-            .project_meta_set_int(p1, "active_epoch", 7)
+            .project_meta_set_int_sync(p1, "active_epoch", 7)
             .expect("write project meta");
 
         let project = client.for_project(p1).expect("open project db");
         assert_eq!(
             project
-                .project_meta_get_int(p1, "active_epoch")
+                .project_meta_get_int_sync(p1, "active_epoch")
                 .expect("read project meta"),
             7
         );
@@ -828,7 +861,7 @@ mod tests {
         assert!(std::path::Path::new(&project_path).exists());
 
         let removed = client
-            .delete_project_db(p1)
+            .delete_project_db_sync(p1)
             .expect("delete project database");
         assert!(removed >= 1);
         assert!(

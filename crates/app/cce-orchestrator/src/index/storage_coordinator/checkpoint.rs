@@ -1,6 +1,6 @@
 //! Checkpoint queries.
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::error::OrchestratorError;
 

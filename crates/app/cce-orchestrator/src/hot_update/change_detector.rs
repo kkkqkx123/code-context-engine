@@ -13,10 +13,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use cce_scanner::{FSScanner, FileEntry, ScanOptions};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::FileHashEntry;
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 
 use super::error::HotUpdateError;
 use super::exclude_rules::ExcludeRules;
@@ -78,7 +78,7 @@ impl CacheUpdateResult {
 #[derive(Debug)]
 pub struct ChangeDetector {
     /// Relation backend holding the content hashes
-    store: RelationStore,
+    store: MetadataStore,
     /// Scan options for file discovery
     scan_options: ScanOptions,
     /// Exclude rules for filtering files
@@ -91,7 +91,7 @@ pub struct ChangeDetector {
 
 impl ChangeDetector {
     /// Create a new change detector
-    pub fn new(store: RelationStore, scan_options: ScanOptions) -> Self {
+    pub fn new(store: MetadataStore, scan_options: ScanOptions) -> Self {
         Self {
             store,
             scan_options,
@@ -472,10 +472,10 @@ impl ChangeDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
-    async fn seed_hashes(store: &RelationStore, root: &str, epoch: i64, hashes: &[(&str, &str)]) {
+    async fn seed_hashes(store: &MetadataStore, root: &str, epoch: i64, hashes: &[(&str, &str)]) {
         store
             .ensure_project(1, root)
             .await
@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_change_detector_creation() {
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let _detector = ChangeDetector::new(db, ScanOptions::default());
     }
 
@@ -503,7 +503,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(
             db.clone(),
             ScanOptions {
@@ -526,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_by_path_removes_hash_record() {
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         seed_hashes(&db, "/tmp", 0, &[("deleted.rs", "hash1")]).await;
 
         // Verify the record exists.
@@ -558,7 +558,7 @@ mod tests {
         // Create a file that the scanner will find.
         std::fs::write(tmp.join("main.rs"), "fn main() {}").unwrap();
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(
             db.clone(),
             ScanOptions {
@@ -585,7 +585,7 @@ mod tests {
         let file_path = tmp.join("main.rs");
         std::fs::write(&file_path, "fn main() {}").unwrap();
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(
             db.clone(),
             ScanOptions {
@@ -641,7 +641,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
 
@@ -700,7 +700,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
         detector.initialize().await.unwrap();
@@ -737,7 +737,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
         detector.initialize().await.unwrap();
@@ -774,7 +774,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
 
@@ -833,7 +833,7 @@ mod tests {
     /// Seed an inherited publication: generation 1 is full, generation 2
     /// inherits from it and owns only `src/changed.rs`, with `src/gone.rs`
     /// registered as deleted.
-    async fn seed_inherited_view(db: &RelationStore) {
+    async fn seed_inherited_view(db: &MetadataStore) {
         use cce_storage_common::metadb::OverrideDisposition;
 
         db.ensure_project(1, "/tmp").await.unwrap();
@@ -876,7 +876,7 @@ mod tests {
     async fn stored_hashes_merge_parent_chain_and_honor_overrides() {
         use std::path::Path;
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         seed_inherited_view(&db).await;
         let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
         detector.set_project_id(1);
@@ -902,7 +902,7 @@ mod tests {
     async fn stored_hash_resolves_own_generation_before_ancestors() {
         use std::path::Path;
 
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         seed_inherited_view(&db).await;
         let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
         detector.set_project_id(1);
@@ -929,7 +929,7 @@ mod tests {
 
     #[tokio::test]
     async fn removed_detection_covers_parent_resident_files() {
-        let db = RelationStore::in_memory().unwrap();
+        let db = in_memory_metadata_store().unwrap();
         seed_inherited_view(&db).await;
         let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
         detector.set_project_id(1);

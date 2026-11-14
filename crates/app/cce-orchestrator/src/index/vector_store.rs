@@ -4,9 +4,11 @@
 //! instance for indexing and retrieval. No trait objects are used.
 
 mod fulltext;
-mod relation;
+mod metadata;
 mod vector;
 
 pub use fulltext::{FulltextDiagnostics, FulltextStore};
-pub use relation::{RelationDiagnostics, RelationStore};
+pub use metadata::{
+    MetadataDiagnostics, MetadataStore, in_memory_metadata_store, open_metadata_store,
+};
 pub use vector::{VectorBatchWriter, VectorDiagnostics, VectorStore};

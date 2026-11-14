@@ -30,9 +30,9 @@
 //! - Qdrant strategy: should/must_not combination in the payload filter
 //! - SQLite queries: two-stage "own first, miss → parent" resolution
 
-use cce_storage_common::{RelationStorage, SearchFilter};
+use cce_storage_common::{MetadataStorage, SearchFilter};
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use crate::query::error::{QueryError, Result};
 
 /// Error type for query filter operations
@@ -171,7 +171,7 @@ impl Default for QueryFilter {
 }
 
 /// Derive the [`QueryFilter`] of the active publication through the
-/// backend-neutral [`RelationStorage`] contract.
+/// backend-neutral [`MetadataStorage`] contract.
 ///
 /// Reads the active manifest together with its inheritance link and the
 /// generation overrides of its own epoch. Projects never published through a
@@ -184,7 +184,7 @@ impl Default for QueryFilter {
 /// manifest, and keeping no process-local cache guarantees an adoption or
 /// rollback becomes visible to the very next query.
 pub(crate) async fn load_active_query_filter_from_store(
-    store: &RelationStore,
+    store: &MetadataStore,
     project_id: i64,
 ) -> Result<QueryFilter> {
     if let Some(manifest) = store.manifest_active(project_id).await.map_err(|error| {

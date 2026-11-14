@@ -4,7 +4,7 @@
 //! target-generation rows so the vector-store flow can regenerate its detail
 //! mappings against fresh point ids.
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::error::OrchestratorError;
 
@@ -45,9 +45,9 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::RelationStorage;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::EntityRecord;
-    use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
 
@@ -59,7 +59,7 @@ mod tests {
             .block_on(future)
     }
 
-    async fn seed_sweep_source_file(store: &RelationStore) -> i64 {
+    async fn seed_sweep_source_file(store: &MetadataStore) -> i64 {
         store
             .ensure_project(1, "/tmp/test")
             .await
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn copy_file_rows_between_epochs_materializes_entities() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(seed_sweep_source_file(&database));
 
         let storage = StorageCoordinator::new(1)
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn copy_file_rows_is_a_noop_for_unknown_paths() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
 
         let storage = StorageCoordinator::new(1)

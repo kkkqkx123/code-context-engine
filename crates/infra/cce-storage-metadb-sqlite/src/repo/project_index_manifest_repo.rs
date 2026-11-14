@@ -650,7 +650,7 @@ mod tests {
         drop(conn);
         assert_eq!(
             client
-                .project_meta_get_int(1, "epoch")
+                .project_meta_get_int_sync(1, "epoch")
                 .expect("epoch metadata should be updated"),
             4
         );

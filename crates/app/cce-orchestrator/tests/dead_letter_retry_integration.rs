@@ -13,12 +13,12 @@ use cce_config::{AstToNlConfig, NestProcessorConfig};
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_orchestrator::hot_update::FileChangeType;
 use cce_orchestrator::index::IndexOrchestrator;
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
 use cce_orchestrator::index_state::{
     ModuleType, ModuleUpdateState, TOKEN_LIMIT_ERROR_CODE, TrackerFailure,
 };
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::EntityRecord;
-use cce_storage_metadb::RelationStore;
 
 /// Success-only stand-in for the OpenAI-compatible `/embeddings` endpoint.
 ///
@@ -224,7 +224,7 @@ async fn truncate_retry_repairs_dead_letter_embedding() {
         .parse("src/lib.rs", content)
         .expect("parse test source");
 
-    let database = RelationStore::in_memory().expect("in-memory store");
+    let database = in_memory_metadata_store().expect("in-memory store");
     database
         .ensure_project(1, &dir.path().display().to_string())
         .await

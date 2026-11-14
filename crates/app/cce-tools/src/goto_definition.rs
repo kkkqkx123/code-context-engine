@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::source::read_source_lines;
 use cce_types::{Entity, EntityId};
 
@@ -16,14 +16,14 @@ use crate::symbol_lookup_types::{
     DefinitionCode, DefinitionLocation, GotoDefinitionRequest, GotoDefinitionResponse,
     SymbolLookupError,
 };
-use cce_storage_metadb::RelationStore;
+use cce_storage_metadb_sqlite::SqliteClient;
 
 /// Goto definition tool
 pub struct GotoDefinitionTool {
     /// Published snapshot index (shared, read-only)
     index: Arc<LayeredSnapshotIndex>,
     /// Relation backend for chunk content lookup (local branch only)
-    relation: Option<RelationStore>,
+    metadata_store: Option<Arc<SqliteClient>>,
     /// Project ID for relation queries
     project_id: i64,
 }
@@ -33,7 +33,7 @@ impl GotoDefinitionTool {
     pub fn new(index: Arc<LayeredSnapshotIndex>, project_id: i64) -> Self {
         Self {
             index,
-            relation: None,
+            metadata_store: None,
             project_id,
         }
     }
@@ -42,8 +42,8 @@ impl GotoDefinitionTool {
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.relation = Some(store);
+    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+        self.metadata_store = Some(store);
         self
     }
 
@@ -176,7 +176,7 @@ impl GotoDefinitionTool {
     /// ("own first, miss → parent") so inherited generations stay readable.
     async fn get_body_from_chunks(&self, entity_id: EntityId) -> Option<String> {
         let project_id = self.project_id;
-        let store = self.relation.as_ref()?;
+        let store = self.metadata_store.as_ref()?;
 
         let view = load_epoch_view(store, project_id).await.ok()?;
 
@@ -221,7 +221,8 @@ impl GotoDefinitionTool {
         let (first, last) = (chunks.first()?, chunks.last()?);
         // The body is lazy-loaded from the source file; chunk rows no longer
         // persist raw code.
-        let project_root = crate::common::resolve_project_root(&self.relation, project_id).await?;
+        let project_root =
+            crate::common::resolve_project_root(&self.metadata_store, project_id).await?;
         Some(read_source_lines(
             Some(project_root.as_path()),
             &first.file_path,

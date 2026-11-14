@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_vector_qdrant::QdrantProcessHandle;
 
 use crate::engine::{CodeContextEngine, EngineError};
@@ -94,7 +94,7 @@ async fn recover_registered_projects(
     coordinator: &StartupCoordinator,
     engine: &CodeContextEngine,
 ) -> usize {
-    let Some(store) = engine.relation_store() else {
+    let Some(store) = engine.metadata_store() else {
         tracing::debug!("No relation store; skipping startup recovery");
         return 0;
     };

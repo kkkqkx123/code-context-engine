@@ -10,7 +10,7 @@ use cce_api::models::{
 
 use crate::api::response::ApiResult;
 use cce_server_shared::services::project;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 /// Unified response type for entity search handler
 pub type EntitySearchApiResponse = ApiResult<EntitySearchResponse>;
@@ -121,7 +121,7 @@ pub async fn handle_entity_search(
         .iter()
         .map(|record| record.file_id)
         .collect();
-    let file_paths: std::collections::HashMap<i64, String> = match state.engine.relation_store() {
+    let file_paths: std::collections::HashMap<i64, String> = match state.engine.metadata_store() {
         Some(store) => store
             .files_by_ids(project_id, &file_ids)
             .await

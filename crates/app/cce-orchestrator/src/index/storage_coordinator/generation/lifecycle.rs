@@ -7,7 +7,7 @@
 
 use std::sync::atomic::Ordering;
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::error::OrchestratorError;
 
@@ -220,8 +220,8 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
     use super::super::StorageCoordinator;
 
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn active_relation_epoch_missing_row_defaults_to_zero() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
 
         let storage = StorageCoordinator::new(1)
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn active_relation_epoch_unparseable_value_is_an_error() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
         block_on(database.project_meta_set_string(1, "active_relation_epoch", "corrupt"))
             .expect("meta should be written");
@@ -305,7 +305,7 @@ mod tests {
     }
 
     async fn consistency_check_fixture() -> StorageCoordinator {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         database
             .ensure_project(1, "/tmp/test")
             .await

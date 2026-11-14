@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use cce_config::Validate;
-use cce_config::modules::RelationRemoteConfig;
+use cce_config::modules::MetadataRemoteConfig;
 use cce_types::StorageError;
 use tokio_postgres::Config as PgConfig;
 
@@ -17,7 +17,7 @@ pub struct PostgresConfig {
 }
 
 impl PostgresConfig {
-    pub fn from_remote(remote: &RelationRemoteConfig) -> Result<Self, StorageError> {
+    pub fn from_remote(remote: &MetadataRemoteConfig) -> Result<Self, StorageError> {
         remote.validate_structured().map_err(|error| {
             StorageError::validation(format!("invalid relation remote config: {error}"))
         })?;
@@ -27,7 +27,7 @@ impl PostgresConfig {
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| {
                 StorageError::validation(
-                    "database.relation_remote.url must be set for the remote branch",
+                    "database.metadata_remote.url must be set for the remote branch",
                 )
             })?;
         Ok(Self {

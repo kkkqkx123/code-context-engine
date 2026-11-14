@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use cce_orchestrator::IndexOrchestrator;
-use cce_storage_common::RelationStorage;
-use cce_storage_metadb::RelationStore;
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
+use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -46,17 +46,17 @@ pub struct FileClassification {
 
 /// Low-level recovery operations over the relation contract.
 pub struct StartupRecoveryManager {
-    store: RelationStore,
+    store: MetadataStore,
 }
 
 impl StartupRecoveryManager {
     /// Create a new recovery manager
-    pub fn new(store: RelationStore) -> Self {
+    pub fn new(store: MetadataStore) -> Self {
         Self { store }
     }
 
     /// Get reference to the relation store
-    pub fn store(&self) -> &RelationStore {
+    pub fn store(&self) -> &MetadataStore {
         &self.store
     }
 
@@ -238,7 +238,7 @@ pub struct StartupRecoveryCoordinator {
 
 impl StartupRecoveryCoordinator {
     /// Create a new recovery coordinator
-    pub fn new(store: RelationStore) -> Self {
+    pub fn new(store: MetadataStore) -> Self {
         Self {
             manager: StartupRecoveryManager::new(store),
         }
@@ -611,7 +611,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery_coordinator_creation() -> Result<(), StorageError> {
-        let store = RelationStore::in_memory()?;
+        let store = in_memory_metadata_store()?;
         let _coordinator = StartupRecoveryCoordinator::new(store);
         Ok(())
     }

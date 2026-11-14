@@ -17,7 +17,7 @@ use super::staging::{
 };
 use crate::api::response::ApiResult;
 use cce_server_shared::context::SharedContext;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 /// Store pushed file contents under the project mirror without indexing.
 ///
@@ -64,7 +64,7 @@ pub async fn handle_ingest_batch(
             let raw_len = file.content_base64.len() as u64 * 3 / 4;
             batch_bytes = batch_bytes.saturating_add(raw_len);
         }
-        let used: u64 = match state.engine.relation_store() {
+        let used: u64 = match state.engine.metadata_store() {
             Some(store) => store
                 .admission_get(&context.fingerprint)
                 .await
@@ -74,7 +74,7 @@ pub async fn handle_ingest_batch(
         };
         if used.saturating_add(batch_bytes) > quota {
             metrics.record_quota_rejection();
-            if let Some(store) = state.engine.relation_store() {
+            if let Some(store) = state.engine.metadata_store() {
                 let _ = store
                     .admission_record_rejection(
                         &context.fingerprint,
@@ -202,7 +202,7 @@ pub async fn handle_ingest_batch(
     }
     if errors.is_empty()
         && let Some(context) = context.map(|Extension(c)| c)
-        && let Some(store) = state.engine.relation_store()
+        && let Some(store) = state.engine.metadata_store()
     {
         let batch_bytes: u64 = request
             .files

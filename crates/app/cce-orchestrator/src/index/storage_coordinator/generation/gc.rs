@@ -7,7 +7,7 @@
 use cce_storage_common::FulltextStorage;
 use std::collections::HashSet;
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::VectorStorage;
 
 use crate::error::OrchestratorError;

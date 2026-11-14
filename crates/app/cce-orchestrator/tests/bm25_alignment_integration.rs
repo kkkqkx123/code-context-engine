@@ -15,13 +15,13 @@ use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
 use cce_config::project_registry::ProjectScope;
 use cce_config::{AppConfig, AstToNlConfig, NestProcessorConfig};
 use cce_llm_client::OpenAICompatibleProvider;
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
 use cce_orchestrator::query::types::{QueryOptions, SearchConfig, SearchSources};
 use cce_orchestrator::{
     CheckpointManager, IndexOptions, IndexOrchestrator, QueryCoordinator, SearchResult,
 };
 use cce_storage_bm25::{Bm25Client, Bm25Config};
-use cce_storage_common::RelationStorage;
-use cce_storage_metadb::RelationStore;
+use cce_storage_common::MetadataStorage;
 use cce_storage_vector_qdrant::generate_group_id;
 use cce_storage_vector_qdrant::{QdrantClient, QdrantConfig};
 
@@ -68,7 +68,7 @@ The zephyrwind token is unique to this document and should never appear in code.
 struct AlignmentHarness {
     _fixture_dir: tempfile::TempDir,
     _bm25_dir: tempfile::TempDir,
-    sqlite: RelationStore,
+    sqlite: MetadataStore,
     coordinator: QueryCoordinator,
 }
 
@@ -83,7 +83,7 @@ impl AlignmentHarness {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
 
         // Shared in-memory metadata store for the index and query sides.
-        let sqlite_db = RelationStore::in_memory().expect("in-memory store");
+        let sqlite_db = in_memory_metadata_store().expect("in-memory store");
         let checkpoint_manager = Arc::new(CheckpointManager::new_for_project(1, sqlite_db.clone()));
 
         // Insert the project row so FK-scoped writes (files/entities/chunks)
@@ -153,7 +153,7 @@ impl AlignmentHarness {
             scope,
         )
         .with_capabilities(cce_orchestrator::query::IndexCapabilities::new().with_bm25(true))
-        .with_relation_store(sqlite_db.clone())
+        .with_metadata_store(sqlite_db.clone())
         .build();
 
         Self {

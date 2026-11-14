@@ -11,7 +11,7 @@ use cce_orchestrator::RelationSnapshotPublisher;
 use cce_orchestrator::hot_update::processors::RelationUpdateProcessor;
 use cce_orchestrator::index::StorageCoordinator;
 use cce_orchestrator::query::retry_queue::RetryQueue;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 impl super::CodeContextEngine {
     /// Get or create project-specific RelationRuntime
@@ -58,7 +58,7 @@ impl super::CodeContextEngine {
         project_id: i64,
     ) -> Result<Arc<dyn RelationSnapshotPublisher>, EngineError> {
         let store = self
-            .relation_store
+            .metadata_store
             .for_project(project_id)
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?;
         let runtime = self.get_relation_runtime(project_id).await?;
@@ -72,7 +72,7 @@ impl super::CodeContextEngine {
         project_id: i64,
         runtime: &Arc<RelationRuntime>,
     ) {
-        let store = match self.relation_store.for_project(project_id) {
+        let store = match self.metadata_store.for_project(project_id) {
             Ok(store) => store,
             Err(error) => {
                 tracing::warn!(
@@ -134,7 +134,7 @@ impl super::CodeContextEngine {
 
         runtime.set_updating().await;
         match cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            &store,
+            store.as_ref(),
             project_id,
             active_epoch,
         ) {
@@ -210,7 +210,7 @@ impl super::CodeContextEngine {
         project_id: i64,
     ) -> Result<(), EngineError> {
         let store = self
-            .relation_store
+            .metadata_store
             .for_project(project_id)
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?;
         let active_epoch =
@@ -234,7 +234,7 @@ impl super::CodeContextEngine {
             return Err(EngineError::Config(message.to_string()));
         }
         let index = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            &store,
+            store.as_ref(),
             project_id,
             active_epoch,
         )
@@ -287,7 +287,7 @@ impl super::CodeContextEngine {
             .await
             .map_err(|error| EngineError::Config(error.to_string()))?;
         let store = self
-            .relation_store
+            .metadata_store
             .for_project(project_id)
             .map_err(|error| {
                 EngineError::Config(format!("Failed to open project database: {error}"))
@@ -385,7 +385,7 @@ impl super::CodeContextEngine {
     ) -> Result<crate::runtime::RelationCapabilityInfo, EngineError> {
         let runtime = self.get_relation_runtime(project_id).await?;
         let mut info = runtime.get_capability_info().await;
-        let active_epoch = match self.relation_store.for_project(project_id) {
+        let active_epoch = match self.metadata_store.for_project(project_id) {
             Ok(store) => {
                 match store
                     .project_meta_get_int_optional(project_id, "active_relation_epoch")

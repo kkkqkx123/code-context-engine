@@ -30,7 +30,8 @@ mod types;
 use std::collections::HashMap;
 
 use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
-use cce_storage_metadb::RelationStore;
+use cce_storage_metadb_sqlite::SqliteClient;
+use std::sync::Arc;
 
 use crate::common::read_snippets_batch;
 use crate::epoch_view::{EpochView, load_epoch_view};
@@ -50,7 +51,7 @@ pub struct KeywordSearchTool<F> {
     /// Fulltext backend for keyword recall (called through the contract)
     fulltext: F,
     /// Relation backend for the epoch view and chunk content lookup
-    relation: Option<RelationStore>,
+    metadata_store: Option<Arc<SqliteClient>>,
 }
 
 impl<F> KeywordSearchTool<F>
@@ -65,7 +66,7 @@ where
     pub fn new(fulltext: F) -> Self {
         Self {
             fulltext,
-            relation: None,
+            metadata_store: None,
         }
     }
 
@@ -73,8 +74,8 @@ where
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.relation = Some(store);
+    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+        self.metadata_store = Some(store);
         self
     }
 
@@ -114,7 +115,7 @@ where
                 "top_n must be greater than 0".to_string(),
             ));
         }
-        if self.relation.is_none() {
+        if self.metadata_store.is_none() {
             return Err(KeywordSearchError::SqliteNotConfigured);
         }
 
@@ -122,7 +123,7 @@ where
         // explicit `request.epoch` pins a single full generation; otherwise
         // the active manifest view (own + parent + overridden files) applies.
         let store = self
-            .relation
+            .metadata_store
             .as_ref()
             .ok_or(KeywordSearchError::SqliteNotConfigured)?;
         let query_filter = match request.epoch {

@@ -71,7 +71,7 @@ impl super::CodeContextEngine {
         let operation_coordinator = self.get_operation_coordinator(project_id).await?;
 
         let metadata_store = self
-            .relation_store()
+            .metadata_store()
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
@@ -226,7 +226,7 @@ impl super::CodeContextEngine {
             &project_entry.metadata.root_path,
         );
         let metadata_store = self
-            .relation_store()
+            .metadata_store()
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
@@ -244,7 +244,7 @@ impl super::CodeContextEngine {
                 .with_vector(self.vector.clone())
                 .with_fulltext_store(self.fulltext_store())
                 .with_embedder(self.embedder.clone())
-                .with_relation_store(metadata_store)
+                .with_metadata_store(metadata_store)
                 .with_checkpoint_manager(operation_coordinator.checkpoint_manager())
                 .with_progress_tracker(project_progress_tracker)
                 // Apply project-specific grouper (pre-processor) and ast_to_nl configs
@@ -422,7 +422,7 @@ impl super::CodeContextEngine {
         tracing::info!(project_id, "Creating project-specific OperationCoordinator");
 
         let db = self
-            .relation_store()
+            .metadata_store()
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
@@ -542,12 +542,12 @@ impl super::CodeContextEngine {
         // Reads go through the relation contract, so no branch downcast is
         // needed here.
         if let Some(store) = self
-            .relation_store()
+            .metadata_store()
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
         {
-            builder = builder.with_relation_store(store);
+            builder = builder.with_metadata_store(store);
         }
 
         let mut coordinator = builder.build();
@@ -585,7 +585,7 @@ mod tests {
     use crate::engine::CodeContextEngine;
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-    use cce_storage_common::RelationStorage;
+    use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::NewProjectRecord;
     use std::collections::HashMap;
 
@@ -645,8 +645,8 @@ mod tests {
 
         // Insert a test project so get_or_load can find it
         let project_id = engine
-            .relation_store()
-            .expect("Engine should have relation_store")
+            .metadata_store()
+            .expect("Engine should have metadata_store")
             .project_insert(&NewProjectRecord::new(
                 "test_concurrent_project".to_string(),
                 "/tmp/cce_test_concurrent".to_string(),

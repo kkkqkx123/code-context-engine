@@ -6,7 +6,7 @@
 //! truth.
 
 use cce_storage_common::FulltextStorage;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use std::collections::HashMap;
 
 use cce_storage_common::FulltextDocument;
@@ -178,9 +178,9 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::RelationStorage;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::{ChunkRecord, FileRecord};
-    use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn load_bm25_clone_content_reconstructs_chunk_text() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
 
         block_on(database.files_upsert(

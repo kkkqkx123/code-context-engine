@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 
 use std::time::Duration;
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use cce_metrics::HotUpdateMetrics;
 use cce_types::OperationKind;
 
@@ -45,7 +45,7 @@ pub struct HotUpdateOperationRuntime {
     /// Change detector for scan-based change detection.
     change_detector: ChangeDetector,
     /// Metadata store for reading the previously indexed state.
-    metadata_store: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
     /// Checkpoint manager for hot-update checkpoint persistence.
     checkpoint_manager: Option<Arc<crate::operation::CheckpointManager>>,
     /// Storage coordinator shared with the update processors.
@@ -102,7 +102,7 @@ impl HotUpdateOperationRuntime {
     /// Create the runtime for a project.
     pub fn new(
         project_id: i64,
-        store: RelationStore,
+        store: MetadataStore,
         scan_options: cce_scanner::ScanOptions,
     ) -> Self {
         let mut change_detector = ChangeDetector::new(store, scan_options);
@@ -149,11 +149,11 @@ impl HotUpdateOperationRuntime {
         &mut self.change_detector
     }
 
-    pub fn metadata_store(&self) -> Option<&RelationStore> {
+    pub fn metadata_store(&self) -> Option<&MetadataStore> {
         self.metadata_store.as_ref()
     }
 
-    pub fn set_metadata_store(&mut self, store: RelationStore) {
+    pub fn set_metadata_store(&mut self, store: MetadataStore) {
         self.metadata_store = Some(store.clone());
         self.change_detector =
             ChangeDetector::new(store, self.change_detector.scan_options().clone());

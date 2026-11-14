@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::OutputMode;
 use cce_utils::token_estimation::{estimate_tokens, truncate_to_token_budget};
 

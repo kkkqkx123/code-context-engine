@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use crate::hot_update::error::{HotUpdateError, Result};
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use cce_codegraph::BuildConfigParser;
 use cce_codegraph::index::RelationIndexView;
 use cce_config::{RelationBuilderParams, RelationConfig};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use super::external_packages::{BuildConfigParserExt, ExternalPackageData};
 use super::relation_processor::RelationUpdateProcessor;
@@ -149,7 +149,7 @@ impl RelationUpdateProcessor {
             return Ok(Vec::new());
         }
 
-        let store = match self.relation_store.as_ref() {
+        let store = match self.metadata_store.as_ref() {
             Some(store) => store,
             None => {
                 tracing::warn!(
@@ -177,7 +177,10 @@ impl RelationUpdateProcessor {
         // Reuse the process-internal materialized base + delta chain instead
         // of reloading the full graph from SQLite; a config reload typically
         // happens right after a hot update that already populated the cache.
-        let view = match self.base_cache.get_or_load(store, project_id, active_epoch) {
+        let view = match self
+            .base_cache
+            .get_or_load(store.as_ref(), project_id, active_epoch)
+        {
             Ok(view) => view,
             Err(error) => {
                 return Err(HotUpdateError::relation(error.to_string()));
@@ -243,7 +246,7 @@ impl RelationUpdateProcessor {
             self.record_config_fine_grained_fallback();
             return Ok(extension_files);
         }
-        let store = match self.relation_store.as_ref() {
+        let store = match self.metadata_store.as_ref() {
             Some(s) => s,
             None => {
                 self.record_config_fine_grained_fallback();
@@ -261,7 +264,7 @@ impl RelationUpdateProcessor {
         }
         let view = self
             .base_cache
-            .get_or_load(store, project_id, active_epoch)
+            .get_or_load(store.as_ref(), project_id, active_epoch)
             .map_err(|e| HotUpdateError::relation(e.to_string()))?;
         let project_root = self.project_root(store).await?;
         // Build set of extension_files for quick lookup
@@ -379,7 +382,7 @@ impl RelationUpdateProcessor {
         Ok(config_parser.extract_external_packages())
     }
 
-    pub(crate) async fn project_root(&self, store: &RelationStore) -> Result<PathBuf> {
+    pub(crate) async fn project_root(&self, store: &MetadataStore) -> Result<PathBuf> {
         if let Ok(root) = self.project_root.try_lock()
             && let Some(path) = root.as_ref()
         {

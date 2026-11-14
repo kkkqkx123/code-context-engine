@@ -1,5 +1,5 @@
 use cce_storage_common::FulltextStorage;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::VectorStorage;
 use std::sync::atomic::Ordering;
 
@@ -393,10 +393,10 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::super::super::StorageCoordinator;
-    use cce_storage_common::RelationStorage;
-    use cce_storage_metadb::RelationStore;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
 
-    async fn seed_active_generation(store: &RelationStore, operation: &str, epoch: i64) {
+    async fn seed_active_generation(store: &MetadataStore, operation: &str, epoch: i64) {
         store
             .ensure_project(1, "/tmp/test")
             .await
@@ -413,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn hot_candidate_registers_inheritance_without_copying_data() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         seed_active_generation(&database, "initial", 1).await;
         database
             .files_record_hashes(1, 1, &[("src/lib.rs".to_string(), "hash".to_string())])
@@ -479,7 +479,7 @@ mod tests {
 
     #[tokio::test]
     async fn resume_adopts_ready_candidate_without_recloning() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         seed_active_generation(&database, "initial", 1).await;
         database
             .files_record_hashes(1, 1, &[("src/lib.rs".to_string(), "hash".to_string())])
@@ -518,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn resume_falls_back_to_fresh_candidate_when_not_ready() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         seed_active_generation(&database, "initial", 1).await;
         // A building manifest that was never marked ready (simulating a
         // crash before the inheritance registration committed).
@@ -552,7 +552,7 @@ mod tests {
 
     #[tokio::test]
     async fn is_candidate_adoptable_judgment_matrix() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         seed_active_generation(&database, "initial", 1).await;
         let storage = StorageCoordinator::new(1)
             .expect("valid project ID")
@@ -658,7 +658,7 @@ mod tests {
     async fn candidate_creation_compacts_an_inherited_active_generation() {
         use cce_storage_common::metadb::OverrideDisposition;
 
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         database
             .ensure_project(1, "/tmp/test")
             .await

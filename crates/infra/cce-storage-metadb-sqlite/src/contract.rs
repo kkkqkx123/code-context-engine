@@ -1,6 +1,6 @@
 //! Relation storage contract (backend-neutral).
 //!
-//! The `RelationStorage` trait is defined in `cce-storage-common` and shared
+//! The `MetadataStorage` trait is defined in `cce-storage-common` and shared
 //! by the embedded SQLite branch and the remote PostgreSQL branch.
 
 use cce_types::StorageError;
@@ -12,9 +12,9 @@ pub use cce_storage_common::metadb::{
     AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
     ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileCheckpointRecord,
     FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord, GenerationGcPlan,
-    GenerationOverride, IndexStateProjection, NewProjectRecord, OverrideDisposition,
-    ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord, RelationStorage,
-    WorkUnitCheckpointRecord, WorkUnitStatus, assert_relation_storage, validate_checkpoint,
+    GenerationOverride, IndexStateProjection, MetadataStorage, NewProjectRecord,
+    OverrideDisposition, ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord,
+    WorkUnitCheckpointRecord, WorkUnitStatus, assert_metadata_storage, validate_checkpoint,
 };
 
 pub use crate::repo::{
@@ -25,7 +25,7 @@ pub use crate::repo::{
 
 pub use crate::types::{DbId, ProjectUpdateRecord};
 
-impl RelationStorage for SqliteClient {
+impl MetadataStorage for SqliteClient {
     async fn ensure_project(&self, project_id: i64, root_path: &str) -> Result<(), StorageError> {
         self.with_transaction(|tx| ProjectRepository::ensure(tx, project_id, root_path))
     }
@@ -62,7 +62,7 @@ impl RelationStorage for SqliteClient {
     }
 
     async fn project_delete_db(&self, project_id: i64) -> Result<usize, StorageError> {
-        self.delete_project_db(project_id)
+        self.delete_project_db_sync(project_id)
     }
 
     async fn project_clear_index(&self, project_id: i64) -> Result<(), StorageError> {
@@ -89,7 +89,7 @@ impl RelationStorage for SqliteClient {
     }
 
     async fn project_meta_get_int(&self, project_id: i64, key: &str) -> Result<i64, StorageError> {
-        SqliteClient::project_meta_get_int(self, project_id, key)
+        SqliteClient::project_meta_get_int_sync(self, project_id, key)
     }
 
     async fn project_meta_set_int(
@@ -98,7 +98,7 @@ impl RelationStorage for SqliteClient {
         key: &str,
         value: i64,
     ) -> Result<(), StorageError> {
-        SqliteClient::project_meta_set_int(self, project_id, key, value)
+        SqliteClient::project_meta_set_int_sync(self, project_id, key, value)
     }
 
     async fn manifest_begin_building(
@@ -967,11 +967,11 @@ impl RelationStorage for SqliteClient {
     }
 
     async fn db_size(&self) -> Result<u64, StorageError> {
-        SqliteClient::db_size(self)
+        SqliteClient::db_size_sync(self)
     }
 
     async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError> {
-        SqliteClient::delete_project_db(self, project_id)
+        SqliteClient::delete_project_db_sync(self, project_id)
     }
 
     async fn project_meta_get_int_optional(
@@ -988,7 +988,7 @@ impl RelationStorage for SqliteClient {
         project_id: i64,
         key: &str,
     ) -> Result<Option<String>, StorageError> {
-        SqliteClient::project_meta_get_string_optional(self, project_id, key)
+        SqliteClient::project_meta_get_string_optional_sync(self, project_id, key)
     }
 
     async fn project_meta_set_string(
@@ -997,7 +997,7 @@ impl RelationStorage for SqliteClient {
         key: &str,
         value: &str,
     ) -> Result<(), StorageError> {
-        SqliteClient::project_meta_set_string(self, project_id, key, value)
+        SqliteClient::project_meta_set_string_sync(self, project_id, key, value)
     }
 
     async fn chunks_page_with_category(
@@ -2765,10 +2765,10 @@ mod tests {
 
     #[test]
     fn local_client_satisfies_relation_contract() {
-        assert_relation_storage::<SqliteClient>();
+        assert_metadata_storage::<SqliteClient>();
         let client = SqliteClient::in_memory().expect("in-memory client");
-        assert_eq!(RelationStorage::backend_name(&client), "local");
-        assert!(RelationStorage::is_per_project_db(&client));
+        assert_eq!(MetadataStorage::backend_name(&client), "local");
+        assert!(MetadataStorage::is_per_project_db(&client));
     }
 
     #[test]
@@ -2776,11 +2776,11 @@ mod tests {
         use cce_config::global::DatabaseConfig;
         let local = DatabaseConfig::default();
         assert!(local.validate_backend_combination().is_ok());
-        assert!(local.is_local_relation());
+        assert!(local.is_local_metadata());
         assert!(local.is_local_fulltext());
         // A remote relation branch without parameters is rejected.
         let remote = DatabaseConfig {
-            relation_backend: cce_config::modules::RelationBackend::Remote,
+            metadata_backend: cce_config::modules::MetadataBackend::Remote,
             ..DatabaseConfig::default()
         };
         assert!(remote.validate_backend_combination().is_err());
@@ -2789,9 +2789,9 @@ mod tests {
         // the advanced switch for its wired branches.
         let mut preset = DatabaseConfig {
             vector_backend: cce_config::modules::VectorBackend::Qdrant,
-            relation_backend: cce_config::modules::RelationBackend::Remote,
+            metadata_backend: cce_config::modules::MetadataBackend::Remote,
             fulltext_backend: cce_config::modules::FulltextBackend::Remote,
-            relation_remote: cce_config::modules::RelationRemoteConfig {
+            metadata_remote: cce_config::modules::MetadataRemoteConfig {
                 url: Some("postgres://localhost:5432/cce".to_string()),
                 ..Default::default()
             },
@@ -2825,44 +2825,44 @@ mod tests {
     #[tokio::test]
     async fn named_operations_round_trip_on_local_branch() {
         let client = SqliteClient::in_memory().expect("in-memory client");
-        RelationStorage::ensure_project(&client, 1, "/repo")
+        MetadataStorage::ensure_project(&client, 1, "/repo")
             .await
             .expect("ensure project");
         assert!(
-            RelationStorage::project_record(&client, 1)
+            MetadataStorage::project_record(&client, 1)
                 .await
                 .expect("read project")
                 .is_some()
         );
-        RelationStorage::project_meta_set_int(&client, 1, "active_epoch", 3)
+        MetadataStorage::project_meta_set_int(&client, 1, "active_epoch", 3)
             .await
             .expect("set meta");
         assert_eq!(
-            RelationStorage::project_meta_get_int(&client, 1, "active_epoch")
+            MetadataStorage::project_meta_get_int(&client, 1, "active_epoch")
                 .await
                 .expect("get meta"),
             3
         );
 
-        let manifest = RelationStorage::manifest_begin_building(&client, 1, 3, "op-1", None)
+        let manifest = MetadataStorage::manifest_begin_building(&client, 1, 3, "op-1", None)
             .await
             .expect("begin building");
         assert_eq!(manifest.data_epoch, 3);
-        RelationStorage::manifest_mark_candidate_ready(&client, 1, "op-1")
+        MetadataStorage::manifest_mark_candidate_ready(&client, 1, "op-1")
             .await
             .expect("mark ready");
-        let active = RelationStorage::manifest_activate(&client, 1, 3, 0, "op-1", None)
+        let active = MetadataStorage::manifest_activate(&client, 1, 3, 0, "op-1", None)
             .await
             .expect("activate");
         assert_eq!(active.state, ProjectIndexManifestState::Active);
         assert!(
-            RelationStorage::manifest_active(&client, 1)
+            MetadataStorage::manifest_active(&client, 1)
                 .await
                 .expect("active")
                 .is_some()
         );
 
-        RelationStorage::overrides_replace(
+        MetadataStorage::overrides_replace(
             &client,
             1,
             3,
@@ -2873,7 +2873,7 @@ mod tests {
         )
         .await
         .expect("replace overrides");
-        let overrides = RelationStorage::overrides_for_generation(&client, 1, 3)
+        let overrides = MetadataStorage::overrides_for_generation(&client, 1, 3)
             .await
             .expect("list overrides");
         assert_eq!(overrides.len(), 1);
@@ -2889,13 +2889,13 @@ mod tests {
             content_hash: Some("hash".to_string()),
         };
         assert_eq!(
-            RelationStorage::files_upsert(&client, 1, 3, &[file])
+            MetadataStorage::files_upsert(&client, 1, 3, &[file])
                 .await
                 .expect("upsert files"),
             1
         );
         assert_eq!(
-            RelationStorage::files_upsert(
+            MetadataStorage::files_upsert(
                 &client,
                 1,
                 3,
@@ -2939,39 +2939,39 @@ mod tests {
             truncated: 0,
         };
         assert_eq!(
-            RelationStorage::chunks_upsert(&client, &[chunk])
+            MetadataStorage::chunks_upsert(&client, &[chunk])
                 .await
                 .expect("upsert chunks"),
             1
         );
         assert_eq!(
-            RelationStorage::chunks_count(&client, 1, 3)
+            MetadataStorage::chunks_count(&client, 1, 3)
                 .await
                 .expect("count"),
             1
         );
-        let readback = RelationStorage::chunks_by_ids(&client, 1, &["c1".to_string()], &[3])
+        let readback = MetadataStorage::chunks_by_ids(&client, 1, &["c1".to_string()], &[3])
             .await
             .expect("readback");
         assert_eq!(readback.len(), 1);
         assert_eq!(readback[0].content, "fn a() {}");
 
-        RelationStorage::admission_record_admitted(&client, "fp", &[1], None, 10)
+        MetadataStorage::admission_record_admitted(&client, "fp", &[1], None, 10)
             .await
             .expect("admit");
         assert!(
-            RelationStorage::admission_get(&client, "fp")
+            MetadataStorage::admission_get(&client, "fp")
                 .await
                 .expect("get audit")
                 .is_some()
         );
 
-        let removed = RelationStorage::manifest_recycle_epoch(&client, 1, 3)
+        let removed = MetadataStorage::manifest_recycle_epoch(&client, 1, 3)
             .await
             .expect("recycle");
         assert!(removed > 0);
         assert_eq!(
-            RelationStorage::chunks_count(&client, 1, 3)
+            MetadataStorage::chunks_count(&client, 1, 3)
                 .await
                 .expect("count"),
             0
@@ -2987,25 +2987,25 @@ mod tests {
         use crate::repo::{EntityRepository, FileRepository};
 
         let client = SqliteClient::in_memory().expect("in-memory client");
-        RelationStorage::ensure_project(&client, 1, "/repo")
+        MetadataStorage::ensure_project(&client, 1, "/repo")
             .await
             .expect("ensure project");
 
         // Empty input: zero count, no rows, no error.
         assert_eq!(
-            RelationStorage::files_upsert(&client, 1, 3, &[])
+            MetadataStorage::files_upsert(&client, 1, 3, &[])
                 .await
                 .expect("empty files batch"),
             0
         );
         assert_eq!(
-            RelationStorage::entities_upsert(&client, &[])
+            MetadataStorage::entities_upsert(&client, &[])
                 .await
                 .expect("empty entities batch"),
             0
         );
         assert_eq!(
-            RelationStorage::chunks_upsert(&client, &[])
+            MetadataStorage::chunks_upsert(&client, &[])
                 .await
                 .expect("empty chunks batch"),
             0
@@ -3022,7 +3022,7 @@ mod tests {
             content_hash: Some("hash-1".to_string()),
         };
         assert_eq!(
-            RelationStorage::files_upsert(&client, 1, 3, std::slice::from_ref(&file_v1))
+            MetadataStorage::files_upsert(&client, 1, 3, std::slice::from_ref(&file_v1))
                 .await
                 .expect("insert file"),
             1
@@ -3034,7 +3034,7 @@ mod tests {
             ..file_v1.clone()
         };
         assert_eq!(
-            RelationStorage::files_upsert(&client, 1, 3, &[file_v2])
+            MetadataStorage::files_upsert(&client, 1, 3, &[file_v2])
                 .await
                 .expect("update file"),
             1
@@ -3079,7 +3079,7 @@ mod tests {
             rank: 0.0,
         };
         assert_eq!(
-            RelationStorage::entities_upsert(&client, std::slice::from_ref(&entity_v1))
+            MetadataStorage::entities_upsert(&client, std::slice::from_ref(&entity_v1))
                 .await
                 .expect("insert entity"),
             1
@@ -3091,13 +3091,13 @@ mod tests {
             ..entity_v1.clone()
         };
         assert_eq!(
-            RelationStorage::entities_upsert(&client, &[entity_v2])
+            MetadataStorage::entities_upsert(&client, &[entity_v2])
                 .await
                 .expect("update entity"),
             1
         );
         assert_eq!(
-            RelationStorage::entities_count(&client, 1, 3)
+            MetadataStorage::entities_count(&client, 1, 3)
                 .await
                 .expect("entity count"),
             1,
@@ -3139,7 +3139,7 @@ mod tests {
             truncated: 0,
         };
         assert_eq!(
-            RelationStorage::chunks_upsert(&client, std::slice::from_ref(&chunk_v1))
+            MetadataStorage::chunks_upsert(&client, std::slice::from_ref(&chunk_v1))
                 .await
                 .expect("insert chunk"),
             1
@@ -3149,19 +3149,19 @@ mod tests {
             ..chunk_v1.clone()
         };
         assert_eq!(
-            RelationStorage::chunks_upsert(&client, &[chunk_v2])
+            MetadataStorage::chunks_upsert(&client, &[chunk_v2])
                 .await
                 .expect("update chunk"),
             1
         );
         assert_eq!(
-            RelationStorage::chunks_count(&client, 1, 3)
+            MetadataStorage::chunks_count(&client, 1, 3)
                 .await
                 .expect("chunk count"),
             1,
             "a conflicting replay must not duplicate the row"
         );
-        let readback = RelationStorage::chunks_by_ids(&client, 1, &["c1".to_string()], &[3])
+        let readback = MetadataStorage::chunks_by_ids(&client, 1, &["c1".to_string()], &[3])
             .await
             .expect("readback");
         assert_eq!(readback.len(), 1);

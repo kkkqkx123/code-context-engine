@@ -8,7 +8,7 @@
 //! hatch: the Qdrant branch honors it, the local branch rejects queries that
 //! set it instead of silently ignoring it.
 //!
-//! It also holds the metadata storage contract (`RelationStorage`) shared by
+//! It also holds the metadata storage contract (`MetadataStorage`) shared by
 //! the embedded SQLite branch and the remote PostgreSQL branch, and the
 //! fulltext storage contract (`FulltextStorage`) shared by the embedded
 //! Tantivy branch and the remote search-service branch.
@@ -21,7 +21,7 @@
 //!             └── VectorStorage (operation contract)
 //!                     ├── Local branch (embedded simvec)
 //!                     └── Qdrant branch (remote service)
-//!     └── RelationStorage (operation contract)
+//!     └── MetadataStorage (operation contract)
 //!             ├── SQLite branch (embedded)
 //!             └── PostgreSQL branch (remote)
 //!     └── FulltextStorage (operation contract)
@@ -47,9 +47,7 @@ pub use fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
     TermOperator, assert_fulltext_storage,
 };
-pub use metadb::{
-    RelationChunk, RelationEntity, RelationFile, RelationStorage, assert_relation_storage,
-};
+pub use metadb::{MetadataStorage, assert_metadata_storage};
 pub use process::QdrantProcessStatus;
 
 /// Search filter options for vector retrieval.

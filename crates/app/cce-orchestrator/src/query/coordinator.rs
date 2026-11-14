@@ -35,7 +35,7 @@ use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
 use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
 use crate::index::vector_store::FulltextStore;
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use crate::index::vector_store::VectorStore;
 
 /// Query coordinator
@@ -77,7 +77,7 @@ pub struct QueryCoordinator {
     /// Index capabilities
     capabilities: IndexCapabilities,
     /// Relation backend for FTS5 entity search (optional, local branch only)
-    relation: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
     /// Monitoring metrics (optional)
     metrics: Option<Arc<QueryMetrics>>,
     /// Retry queue for preserving query progress during service outages
@@ -94,7 +94,7 @@ pub struct QueryCoordinatorBuilder {
     relation_searcher: Option<Arc<RelationSearcher>>,
     cache_config: Option<CacheConfig>,
     capabilities: Option<IndexCapabilities>,
-    relation: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
     metrics_registry: Option<Arc<MetricsRegistry>>,
     retry_queue: Option<Arc<RetryQueue>>,
     project_id: i64,
@@ -118,7 +118,7 @@ impl QueryCoordinatorBuilder {
             relation_searcher: Some(relation_searcher),
             cache_config: None,
             capabilities: None,
-            relation: None,
+            metadata_store: None,
             metrics_registry: None,
             retry_queue: None,
             project_id,
@@ -129,10 +129,10 @@ impl QueryCoordinatorBuilder {
     ///
     /// Reads go through the relation contract; the handle is also forwarded
     /// to the searcher through the backend enum.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.relation = Some(store.clone());
+    pub fn with_metadata_store(mut self, store: MetadataStore) -> Self {
+        self.metadata_store = Some(store.clone());
         if let Some(builder) = self.searcher_builder.take() {
-            self.searcher_builder = Some(builder.with_relation_store(store));
+            self.searcher_builder = Some(builder.with_metadata_store(store));
         }
         self
     }
@@ -221,7 +221,7 @@ impl QueryCoordinatorBuilder {
             relation_searcher,
             cache: QueryCache::new(self.cache_config.unwrap_or_default()),
             capabilities: self.capabilities.unwrap_or_default(),
-            relation: self.relation,
+            metadata_store: self.metadata_store,
             metrics: None,
             retry_queue: self
                 .retry_queue
@@ -278,8 +278,8 @@ impl QueryCoordinator {
     }
 
     /// Attach the relation backend for FTS5 entity search via enum dispatch.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.relation = Some(store);
+    pub fn with_metadata_store(mut self, store: MetadataStore) -> Self {
+        self.metadata_store = Some(store);
         self
     }
 
@@ -340,7 +340,7 @@ impl QueryCoordinator {
         limit: i64,
     ) -> Result<Vec<cce_storage_common::metadb::EntityRecord>> {
         let store = self
-            .relation
+            .metadata_store
             .as_ref()
             .ok_or_else(|| QueryError::Config("FTS5 entity search not configured".to_string()))?;
 
@@ -368,14 +368,14 @@ impl QueryCoordinator {
     /// Excluded-file filtering runs inside the branch so only the visible
     /// view is returned.
     async fn search_entities_at_view(
-        store: &RelationStore,
+        store: &MetadataStore,
         query: &str,
         project_id: i64,
         limit: i64,
         view: &crate::query::filter::QueryFilter,
     ) -> std::result::Result<Vec<cce_storage_common::metadb::EntityRecord>, cce_types::StorageError>
     {
-        use cce_storage_common::RelationStorage;
+        use cce_storage_common::MetadataStorage;
 
         let entities = store
             .entities_search_fts(project_id, query, limit, view.epoch_value(), &[])
@@ -396,7 +396,7 @@ impl QueryCoordinator {
 
     /// Check if entity search is available (relation store attached)
     pub fn has_fts5_search(&self) -> bool {
-        self.relation.is_some()
+        self.metadata_store.is_some()
     }
 
     // ========== Unified Search ==========
@@ -815,62 +815,22 @@ impl QueryCoordinator {
     /// Search files matching `query`, attaching size and line count.
     ///
     /// Shares the matcher and ordering with [`Self::search_file_paths`];
-    /// files unreadable at stat time are skipped. Size and line metadata is
-    /// present only on the local branch; remote hits carry paths alone.
-    /// Caller-supplied path filters apply to both branches.
+    /// files unreadable at stat time are skipped. The embedded store always
+    /// keeps live project files, so search walks the project directory.
     pub async fn search_files(
         &self,
         query: &str,
         limit: usize,
         options: &super::files::FileSearchOptions,
     ) -> Result<Vec<super::files::FileHit>> {
-        let store = self.relation.as_ref().ok_or_else(|| {
+        self.metadata_store.as_ref().ok_or_else(|| {
             QueryError::config("file search requires a relation store for project lookup")
         })?;
-        if store.is_local() {
-            let root = self.resolve_file_search_root().await?;
-            let query = query.to_string();
-            let options = options.clone();
-            return tokio::task::spawn_blocking(move || {
-                super::files::search_files(&root, &query, limit, &options)
-            })
-            .await
-            .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?;
-        }
-        self.search_files_from_index(store, query, limit, options)
-            .await
-    }
-
-    /// Index-based file search for branches without live project files.
-    ///
-    /// Ranks the indexed file rows of the active epoch view with the same
-    /// matcher and ordering as the live walk; excluded files of an inherited
-    /// generation never surface.
-    async fn search_files_from_index(
-        &self,
-        store: &RelationStore,
-        query: &str,
-        limit: usize,
-        options: &super::files::FileSearchOptions,
-    ) -> Result<Vec<super::files::FileHit>> {
-        use cce_storage_common::RelationStorage;
-
-        let view = self.searcher.load_query_filter(self.project_id).await?;
-        let rows = store
-            .files_list(self.project_id, &view.epochs())
-            .await
-            .map_err(|e| QueryError::storage(&format!("File search failed: {e}")))?;
-        let excluded: std::collections::HashSet<&str> =
-            view.excluded_files().iter().map(String::as_str).collect();
-        let paths: Vec<String> = rows
-            .into_iter()
-            .map(|row| row.path)
-            .filter(|path| !excluded.contains(path.as_str()))
-            .collect();
+        let root = self.resolve_file_search_root().await?;
         let query = query.to_string();
         let options = options.clone();
         tokio::task::spawn_blocking(move || {
-            super::files::rank_file_paths(&paths, &query, limit, &options)
+            super::files::search_files(&root, &query, limit, &options)
         })
         .await
         .map_err(|e| QueryError::storage(&format!("File search task failed: {e}")))?
@@ -878,8 +838,8 @@ impl QueryCoordinator {
 
     /// Resolve the project directory file search walks.
     async fn resolve_file_search_root(&self) -> Result<std::path::PathBuf> {
-        use cce_storage_common::RelationStorage;
-        let store = self.relation.as_ref().ok_or_else(|| {
+        use cce_storage_common::MetadataStorage;
+        let store = self.metadata_store.as_ref().ok_or_else(|| {
             QueryError::config("file search requires a relation store for project lookup")
         })?;
         let record = store

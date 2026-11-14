@@ -40,4 +40,6 @@ pub use relation_publisher::{RelationPublication, RelationSnapshotPublisher};
 pub use resolution_pipeline::ResolutionPipelineService;
 pub use result::IndexResult;
 pub use storage_coordinator::{StorageCoordinator, build_bm25_documents};
-pub use vector_store::{FulltextStore, RelationStore, VectorStore};
+pub use vector_store::{
+    FulltextStore, MetadataStore, VectorStore, in_memory_metadata_store, open_metadata_store,
+};

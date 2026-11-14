@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::IndexStateProjection;
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
 
 use crate::index_state::{FileUpdateState, StateTrackerError};
 
@@ -43,7 +43,7 @@ pub struct UpdateStateTracker {
     /// Operation ID for the current indexing operation
     current_operation_id: Arc<RwLock<Option<String>>>,
     /// Optional durable file-level state projection.
-    database: Arc<RwLock<Option<RelationStore>>>,
+    database: Arc<RwLock<Option<MetadataStore>>>,
 }
 
 #[async_trait::async_trait]
@@ -74,7 +74,7 @@ impl UpdateStateTracker {
     /// restart; a failure to acquire the write lock is reported so the caller
     /// can decide whether running with an in-memory-only projection is
     /// acceptable.
-    pub fn set_database(&self, database: RelationStore) -> Result<(), StateTrackerError> {
+    pub fn set_database(&self, database: MetadataStore) -> Result<(), StateTrackerError> {
         match self.database.try_write() {
             Ok(mut value) => {
                 *value = Some(database);
@@ -112,7 +112,7 @@ impl UpdateStateTracker {
     }
 
     async fn load_projection(
-        store: &RelationStore,
+        store: &MetadataStore,
         project_id: i64,
         operation_id: &str,
     ) -> (HashMap<String, FileUpdateState>, u64) {
@@ -208,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn durable_projection_restores_file_state_after_restart() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         let checkpoint_manager = CheckpointManager::new_for_project(1, database.clone());
         checkpoint_manager
             .create_checkpoint(CreateCheckpointParams {

@@ -3,7 +3,7 @@
 //! The row copying itself runs inside the storage branch as one atomic
 //! contract operation; this module keeps the scheduling-facing entry point.
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::error::OrchestratorError;
 
@@ -44,9 +44,9 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::RelationStorage;
+    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::ChunkRecord;
-    use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
 
@@ -64,7 +64,7 @@ mod tests {
     /// overridden files untouched.
     #[test]
     fn materialize_is_restartable_after_partial_copy() {
-        let database = RelationStore::in_memory().expect("in-memory store");
+        let database = in_memory_metadata_store().expect("in-memory store");
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
         // Source generation 1: two files.
         block_on(database.files_record_hashes(

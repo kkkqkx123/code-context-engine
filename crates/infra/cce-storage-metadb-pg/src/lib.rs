@@ -1,6 +1,6 @@
 //! PostgreSQL remote branch for relation storage.
 //!
-//! Implements the same [`RelationStorage`] contract as the embedded SQLite
+//! Implements the same [`MetadataStorage`] contract as the embedded SQLite
 //! branch over `tokio-postgres` plus a `deadpool-postgres` pool. No
 //! compile-time checked query framework is used: every statement is a plain
 //! string executed at runtime, so the build never needs a live database.
@@ -24,8 +24,8 @@ use cce_storage_common::metadb::{
     AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
     ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileCheckpointRecord,
     FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord, GenerationGcPlan,
-    GenerationOverride, IndexStateProjection, NewProjectRecord, OverrideDisposition,
-    ProjectIndexManifest, ProjectRecord, ProjectUpdateRecord, RelationStorage,
+    GenerationOverride, IndexStateProjection, MetadataStorage, NewProjectRecord,
+    OverrideDisposition, ProjectIndexManifest, ProjectRecord, ProjectUpdateRecord,
     WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 use cce_types::error::common::ErrorClassify;
@@ -77,7 +77,7 @@ impl PostgresClient {
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
-        let config = PostgresConfig::from_remote(&database.relation_remote)?;
+        let config = PostgresConfig::from_remote(&database.metadata_remote)?;
         Self::new(config)
     }
 
@@ -1109,7 +1109,7 @@ macro_rules! remote_unimplemented {
     };
 }
 
-impl RelationStorage for PostgresClient {
+impl MetadataStorage for PostgresClient {
     async fn ensure_project(&self, project_id: i64, root_path: &str) -> Result<(), StorageError> {
         self.ensure_project(project_id, root_path).await
     }
@@ -1584,7 +1584,7 @@ impl RelationStorage for PostgresClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_config::modules::RelationRemoteConfig;
+    use cce_config::modules::MetadataRemoteConfig;
     use cce_types::error::common::ErrorClassify;
 
     fn test_config() -> PostgresConfig {
@@ -1601,11 +1601,11 @@ mod tests {
 
     #[test]
     fn remote_config_requires_url() {
-        let remote = RelationRemoteConfig::default();
+        let remote = MetadataRemoteConfig::default();
         assert!(PostgresConfig::from_remote(&remote).is_err());
-        let remote = RelationRemoteConfig {
+        let remote = MetadataRemoteConfig {
             url: Some("postgres://localhost:5432/cce".to_string()),
-            ..RelationRemoteConfig::default()
+            ..MetadataRemoteConfig::default()
         };
         let config = PostgresConfig::from_remote(&remote).expect("url suffices");
         assert!(config.username.is_none());
@@ -1613,10 +1613,10 @@ mod tests {
 
     #[test]
     fn remote_config_rejects_bad_pool_size() {
-        let remote = RelationRemoteConfig {
+        let remote = MetadataRemoteConfig {
             url: Some("postgres://localhost:5432/cce".to_string()),
             pool_size: 0,
-            ..RelationRemoteConfig::default()
+            ..MetadataRemoteConfig::default()
         };
         assert!(PostgresConfig::from_remote(&remote).is_err());
     }
@@ -1662,7 +1662,7 @@ mod tests {
         let client = PostgresClient::new(test_config()).expect("pool builds without I/O");
         assert_eq!(client.backend_name(), "remote");
         assert!(client.is_enabled());
-        cce_storage_common::metadb::assert_relation_storage::<PostgresClient>();
+        cce_storage_common::metadb::assert_metadata_storage::<PostgresClient>();
     }
 
     #[test]

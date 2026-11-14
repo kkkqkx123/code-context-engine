@@ -5,7 +5,7 @@ use cce_api::models::{
     ErrorResponse, INGEST_CHUNK_BYTES, IngestManifestRequest, IngestManifestResponse, MissingChunk,
     error_codes,
 };
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use super::paths::storage_path;
 use super::staging::received_chunk_indices;
@@ -34,7 +34,7 @@ pub async fn handle_ingest_manifest(
     AxumPath(id): AxumPath<i64>,
     axum::Json(request): axum::Json<IngestManifestRequest>,
 ) -> ApiResult<IngestManifestResponse> {
-    let store = match state.engine.relation_store() {
+    let store = match state.engine.metadata_store() {
         Some(store) => store,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -103,7 +103,7 @@ pub async fn handle_ingest_manifest(
             .cmp(&right.relative_path)
             .then(left.chunk_index.cmp(&right.chunk_index))
     });
-    if let Some(store) = state.engine.relation_store() {
+    if let Some(store) = state.engine.metadata_store() {
         let _ = store
             .project_meta_set_string(
                 id,

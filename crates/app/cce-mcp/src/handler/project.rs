@@ -215,7 +215,7 @@ pub async fn health(
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({
             "project_id": args.project_id,
-            "metadata_store_configured": state.engine.relation_store().is_some(),
+            "metadata_store_configured": state.engine.metadata_store().is_some(),
             "bm25_enabled": bm25_enabled,
             "relation": relation,
         })

@@ -2,10 +2,10 @@
 
 use axum::extract::{Path as AxumPath, State};
 use cce_api::models::{ErrorResponse, IngestCommitResponse, error_codes};
-use cce_storage_common::RelationStorage;
+use cce_orchestrator::index::MetadataStore;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::VectorStorage;
 use cce_storage_common::metadb::{ProjectRecord, ProjectUpdateRecord};
-use cce_storage_metadb::RelationStore;
 
 use super::staging::{INGEST_STAGING_RETENTION, clear_project_staging, sweep_project_staging};
 use crate::api::response::ApiResult;
@@ -31,7 +31,7 @@ pub async fn handle_ingest_commit(
     State(state): State<SharedContext>,
     AxumPath(id): AxumPath<i64>,
 ) -> ApiResult<IngestCommitResponse> {
-    let store = match state.engine.relation_store() {
+    let store = match state.engine.metadata_store() {
         Some(store) => store,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -184,7 +184,7 @@ pub async fn handle_ingest_commit(
 /// Bootstrap path running the full index to establish the baseline.
 async fn run_full_commit(
     state: &SharedContext,
-    store: &RelationStore,
+    store: &MetadataStore,
     record: &ProjectRecord,
     index_options: cce_orchestrator::IndexOptions,
     id: i64,

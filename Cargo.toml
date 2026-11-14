@@ -23,7 +23,6 @@ members = [
     "crates/infra/cce-storage-bm25",
     "crates/infra/cce-storage-vector-qdrant",
     "crates/infra/cce-storage-vector-local",
-    "crates/infra/cce-storage-metadb",
     "crates/infra/cce-storage-metadb-sqlite",
     "crates/infra/cce-storage-metadb-pg",
     "crates/infra/cce-scanner",

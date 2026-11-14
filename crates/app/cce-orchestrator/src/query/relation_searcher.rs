@@ -159,7 +159,7 @@ impl RelationQueryOptions {
 /// path classification (`path_excluded_by_types`), identical to the main
 /// query path and the expansion path filter.
 #[derive(Debug, Default, Clone)]
-struct RelationFileFilter {
+struct FileRecordFilter {
     directory_prefix: Option<String>,
     excluded_types: Vec<ExcludableContentType>,
     excluded_files: HashSet<String>,
@@ -167,7 +167,7 @@ struct RelationFileFilter {
     include_external: bool,
 }
 
-impl RelationFileFilter {
+impl FileRecordFilter {
     /// Deterministic fingerprint for cache keys covering all filter state.
     fn fingerprint(options: &RelationQueryOptions) -> String {
         let mut domains: Vec<&str> = options
@@ -383,7 +383,7 @@ impl RelationSearcher {
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Vec<ResolvedRelation> {
-        let filter = RelationFileFilter::from_options(options);
+        let filter = FileRecordFilter::from_options(options);
         let callees = self.get_callees(entity_id);
         if filter.is_empty() {
             return callees;
@@ -437,7 +437,7 @@ impl RelationSearcher {
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Vec<ResolvedRelation> {
-        let filter = RelationFileFilter::from_options(options);
+        let filter = FileRecordFilter::from_options(options);
         self.get_callers(entity_id)
             .into_iter()
             .filter(|caller_id| {
@@ -476,8 +476,8 @@ impl RelationSearcher {
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Result<Vec<CallChainNode>> {
-        let filter = RelationFileFilter::from_options(options);
-        let fingerprint = RelationFileFilter::fingerprint(options);
+        let filter = FileRecordFilter::from_options(options);
+        let fingerprint = FileRecordFilter::fingerprint(options);
         let cache_key = (entity_id, options.max_depth, false, fingerprint);
         if let Some(cached) = self
             .cache
@@ -522,8 +522,8 @@ impl RelationSearcher {
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Result<Vec<CallChainNode>> {
-        let filter = RelationFileFilter::from_options(options);
-        let fingerprint = RelationFileFilter::fingerprint(options);
+        let filter = FileRecordFilter::from_options(options);
+        let fingerprint = FileRecordFilter::fingerprint(options);
         let cache_key = (entity_id, options.max_depth, true, fingerprint);
         if let Some(cached) = self
             .cache

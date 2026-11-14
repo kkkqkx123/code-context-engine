@@ -15,7 +15,7 @@ cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
 cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
-cce-storage-metadb = { version = "0.1.0", path = "../../infra/cce-storage-metadb" }
+cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

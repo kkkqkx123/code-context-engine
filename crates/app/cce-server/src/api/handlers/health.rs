@@ -15,7 +15,7 @@ use cce_api::models::{
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
 use cce_server_shared::context::SharedContext;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 // --- Handlers ---
 
@@ -225,7 +225,7 @@ pub async fn handle_retry_queue_process(
             }
         }
     } else {
-        let project_ids: Vec<i64> = match state.engine.relation_store() {
+        let project_ids: Vec<i64> = match state.engine.metadata_store() {
             Some(store) => store
                 .projects_all()
                 .await

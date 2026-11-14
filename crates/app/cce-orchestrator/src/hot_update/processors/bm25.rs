@@ -143,7 +143,7 @@ impl Bm25UpdateProcessor {
         use crate::hot_update::processors::rechunk::{
             FingerprintDrift, detect_fingerprint_drift, persist_fingerprint, resolve_project_root,
         };
-        use cce_storage_common::RelationStorage;
+        use cce_storage_common::MetadataStorage;
 
         let storage = &self.context.storage;
         let Some(store) = storage.metadata_store() else {

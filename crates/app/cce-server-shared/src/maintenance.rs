@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use tracing::info;
 
+use cce_orchestrator::index::MetadataStore;
 use cce_orchestrator::index::{FulltextStore, VectorStore};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::{FulltextStorage, VectorStorage};
-use cce_storage_metadb::RelationStore;
 
 use crate::engine::CodeContextEngine;
 
@@ -60,7 +60,7 @@ pub struct ProjectIndexMaintenanceService {
     engine: Arc<CodeContextEngine>,
     vector: Option<VectorStore>,
     fulltext: Option<FulltextStore>,
-    relation_store: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
 }
 
 impl ProjectIndexMaintenanceService {
@@ -68,18 +68,18 @@ impl ProjectIndexMaintenanceService {
         engine: Arc<CodeContextEngine>,
         vector: Option<VectorStore>,
         fulltext: Option<FulltextStore>,
-        relation_store: Option<RelationStore>,
+        metadata_store: Option<MetadataStore>,
     ) -> Self {
         Self {
             engine,
             vector,
             fulltext,
-            relation_store,
+            metadata_store,
         }
     }
 
-    fn relation_store(&self) -> Option<RelationStore> {
-        self.relation_store.clone()
+    fn metadata_store(&self) -> Option<MetadataStore> {
+        self.metadata_store.clone()
     }
 
     /// Clear a project's index data from all backends, leaving the project
@@ -141,7 +141,7 @@ impl ProjectIndexMaintenanceService {
         }
 
         // 3. Relation store: clean index artifacts in one storage-side call
-        if let Some(store) = self.relation_store() {
+        if let Some(store) = self.metadata_store() {
             let cleanup_result = async {
                 let project = store.for_project(project_id).map_err(|e| e.to_string())?;
                 project
@@ -228,7 +228,7 @@ impl ProjectIndexMaintenanceService {
         }
 
         // Step B: Delete SQLite project record and project database
-        if let Some(store) = self.relation_store() {
+        if let Some(store) = self.metadata_store() {
             let registry_result = store.project_delete_with_cascade(project_id).await;
             match registry_result {
                 Ok(()) => {

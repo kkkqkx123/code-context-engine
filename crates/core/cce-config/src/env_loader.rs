@@ -20,15 +20,15 @@
 //! - `CCE_DB_QDRANT_API_KEY` - Qdrant API key (optional, can use placeholder in config.toml)
 //! - `CCE_DB_VECTOR_BACKEND` - Vector backend (local|qdrant)
 //! - `CCE_DB_VECTOR_DATA_DIR` - Local vector data directory
-//! - `CCE_DB_RELATION_BACKEND` - Relation backend key (local|remote)
+//! - `CCE_DB_METADATA_BACKEND` - Metadata backend key (local|remote)
 //! - `CCE_DB_FULLTEXT_BACKEND` - Fulltext backend key (local|remote)
-//! - `CCE_DB_RELATION_URL` - PostgreSQL connection URL
-//! - `CCE_DB_RELATION_USERNAME` - PostgreSQL user name
-//! - `CCE_DB_RELATION_PASSWORD` - PostgreSQL password
-//! - `CCE_DB_RELATION_POOL_SIZE` - PostgreSQL pool size
-//! - `CCE_DB_RELATION_CONNECT_TIMEOUT_MS` - PostgreSQL connect timeout
-//! - `CCE_DB_RELATION_ACQUIRE_TIMEOUT_MS` - PostgreSQL pool acquire timeout
-//! - `CCE_DB_RELATION_STATEMENT_TIMEOUT_MS` - PostgreSQL statement timeout
+//! - `CCE_DB_METADATA_URL` - PostgreSQL connection URL
+//! - `CCE_DB_METADATA_USERNAME` - PostgreSQL user name
+//! - `CCE_DB_METADATA_PASSWORD` - PostgreSQL password
+//! - `CCE_DB_METADATA_POOL_SIZE` - PostgreSQL pool size
+//! - `CCE_DB_METADATA_CONNECT_TIMEOUT_MS` - PostgreSQL connect timeout
+//! - `CCE_DB_METADATA_ACQUIRE_TIMEOUT_MS` - PostgreSQL pool acquire timeout
+//! - `CCE_DB_METADATA_STATEMENT_TIMEOUT_MS` - PostgreSQL statement timeout
 //! - `CCE_DB_FULLTEXT_URL` - Elasticsearch base URL
 //! - `CCE_DB_FULLTEXT_API_KEY` - Elasticsearch API key
 //! - `CCE_DB_FULLTEXT_USERNAME` - Elasticsearch basic-auth user
@@ -226,13 +226,13 @@ fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     }
     // Relation/fulltext backend switches keep stable key names across
     // phases; remote selections are validated by the preset matrix.
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_BACKEND") {
-        config.database.relation_backend = match val.to_lowercase().as_str() {
-            "local" => crate::modules::RelationBackend::Local,
-            "remote" => crate::modules::RelationBackend::Remote,
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_BACKEND") {
+        config.database.metadata_backend = match val.to_lowercase().as_str() {
+            "local" => crate::modules::MetadataBackend::Local,
+            "remote" => crate::modules::MetadataBackend::Remote,
             _ => {
                 return Err(ConfigError::invalid_env_var(
-                    "CCE_DB_RELATION_BACKEND",
+                    "CCE_DB_METADATA_BACKEND",
                     format!("invalid backend: {val} (expected local|remote)"),
                 ));
             }
@@ -250,33 +250,33 @@ fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
             }
         };
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_URL") {
-        config.database.relation_remote.url = Some(val);
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_URL") {
+        config.database.metadata_remote.url = Some(val);
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_USERNAME") {
-        config.database.relation_remote.username = Some(val);
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_USERNAME") {
+        config.database.metadata_remote.username = Some(val);
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_PASSWORD") {
-        config.database.relation_remote.password = Some(val);
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_PASSWORD") {
+        config.database.metadata_remote.password = Some(val);
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_POOL_SIZE") {
-        config.database.relation_remote.pool_size = val.parse().map_err(|_| {
-            ConfigError::invalid_env_var("CCE_DB_RELATION_POOL_SIZE", "invalid value")
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_POOL_SIZE") {
+        config.database.metadata_remote.pool_size = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_METADATA_POOL_SIZE", "invalid value")
         })?;
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_CONNECT_TIMEOUT_MS") {
-        config.database.relation_remote.connect_timeout_ms = val.parse().map_err(|_| {
-            ConfigError::invalid_env_var("CCE_DB_RELATION_CONNECT_TIMEOUT_MS", "invalid value")
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_CONNECT_TIMEOUT_MS") {
+        config.database.metadata_remote.connect_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_METADATA_CONNECT_TIMEOUT_MS", "invalid value")
         })?;
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_ACQUIRE_TIMEOUT_MS") {
-        config.database.relation_remote.acquire_timeout_ms = val.parse().map_err(|_| {
-            ConfigError::invalid_env_var("CCE_DB_RELATION_ACQUIRE_TIMEOUT_MS", "invalid value")
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_ACQUIRE_TIMEOUT_MS") {
+        config.database.metadata_remote.acquire_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_METADATA_ACQUIRE_TIMEOUT_MS", "invalid value")
         })?;
     }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_STATEMENT_TIMEOUT_MS") {
-        config.database.relation_remote.statement_timeout_ms = val.parse().map_err(|_| {
-            ConfigError::invalid_env_var("CCE_DB_RELATION_STATEMENT_TIMEOUT_MS", "invalid value")
+    if let Ok(val) = std::env::var("CCE_DB_METADATA_STATEMENT_TIMEOUT_MS") {
+        config.database.metadata_remote.statement_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_METADATA_STATEMENT_TIMEOUT_MS", "invalid value")
         })?;
     }
     if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_URL") {
@@ -523,12 +523,12 @@ pub fn validate_required_env_vars(config: &AppConfig) -> Result<(), ConfigError>
     // Check remote relation/fulltext secrets for unresolved placeholders
     let remote_placeholders: Vec<(&str, &Option<String>)> = vec![
         (
-            "database.relation_remote.url",
-            &config.database.relation_remote.url,
+            "database.metadata_remote.url",
+            &config.database.metadata_remote.url,
         ),
         (
-            "database.relation_remote.password",
-            &config.database.relation_remote.password,
+            "database.metadata_remote.password",
+            &config.database.metadata_remote.password,
         ),
         (
             "database.fulltext_remote.url",
@@ -590,11 +590,11 @@ pub fn resolve_config_placeholders(config: &mut AppConfig) {
     }
 
     // Resolve remote relation/fulltext secrets and URLs
-    let relation_remote = &mut config.database.relation_remote;
-    if let Some(ref mut url) = relation_remote.url {
+    let metadata_remote = &mut config.database.metadata_remote;
+    if let Some(ref mut url) = metadata_remote.url {
         *url = resolve_env_placeholders(url);
     }
-    if let Some(ref mut password) = relation_remote.password {
+    if let Some(ref mut password) = metadata_remote.password {
         *password = resolve_env_placeholders(password);
     }
     let fulltext_remote = &mut config.database.fulltext_remote;

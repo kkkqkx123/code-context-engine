@@ -4,7 +4,7 @@ use axum::extract::{Extension, State};
 
 use cce_api::models::{AdmissionGlobalStats, AdmissionStatsResponse, TokenAuditEntry};
 use cce_server_shared::context::SharedContext;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 /// Render admission counters with per-token durable audit for rejection
 /// analysis. Usage and last-use time survive restarts through the metadata
@@ -29,7 +29,7 @@ pub async fn handle_admission_stats(
         quota_rejections: snapshot.quota_rejections,
     };
     let mut tokens = Vec::new();
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(records) = store.admission_list().await
     {
         for record in records {

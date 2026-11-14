@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::hot_update::watcher::{FileEvent, FileEventType, WatchConfig, WatchCoordinator};
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use cce_config::HotUpdateConfig;
 use cce_metrics::{HotUpdateMetrics, WatchMetrics};
 use cce_parser::parser::ParseCoordinator;
@@ -265,7 +265,7 @@ impl HotUpdateCoordinator {
     }
 
     /// Set metadata store
-    pub fn with_metadata_store(mut self, store: RelationStore) -> Self {
+    pub fn with_metadata_store(mut self, store: MetadataStore) -> Self {
         self.runtime_builder().set_metadata_store(store);
         self
     }

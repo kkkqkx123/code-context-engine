@@ -5,20 +5,20 @@
 
 use std::collections::HashSet;
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::relation::RelationSnapshotState;
 use cce_types::{
     CanonicalRelationSnapshot, CanonicalRelationTarget, StableSymbolKey, StorageError,
 };
 
-use super::vector_store::RelationStore;
+use super::vector_store::{MetadataStore, in_memory_metadata_store};
 
 pub struct ResolutionPipelineService {
-    store: RelationStore,
+    store: MetadataStore,
 }
 
 impl ResolutionPipelineService {
-    pub fn new(store: RelationStore) -> Self {
+    pub fn new(store: MetadataStore) -> Self {
         Self { store }
     }
 
@@ -212,7 +212,7 @@ mod tests {
             .block_on(future)
     }
 
-    fn insert_project(store: &RelationStore) {
+    fn insert_project(store: &MetadataStore) {
         block_on(store.ensure_project(1, "/tmp/test")).expect("test project should be inserted");
     }
 
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn failed_epoch_preserves_previous_active_epoch() {
-        let store = RelationStore::in_memory().expect("in-memory store should open");
+        let store = in_memory_metadata_store().expect("in-memory store should open");
         insert_project(&store);
         let snapshot = CanonicalRelationSnapshot::new("config".to_string());
         let writer = ResolutionPipelineService::new(store.clone());

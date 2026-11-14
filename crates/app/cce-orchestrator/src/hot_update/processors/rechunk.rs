@@ -4,10 +4,10 @@
 //! local parse pipeline from on-disk content under the new configuration, so
 //! unchanged source files never wait for an LLM round-trip to catch up.
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 
 /// Drift detection outcome for a persisted string fingerprint.
 pub(crate) enum FingerprintDrift {
@@ -22,7 +22,7 @@ pub(crate) enum FingerprintDrift {
 
 /// Compare `current` against the stored fingerprint under `key`.
 pub(crate) async fn detect_fingerprint_drift(
-    store: &RelationStore,
+    store: &MetadataStore,
     project_id: i64,
     key: &str,
     current: &str,
@@ -42,7 +42,7 @@ pub(crate) async fn detect_fingerprint_drift(
 
 /// Persist the fingerprint after a successful sweep.
 pub(crate) async fn persist_fingerprint(
-    store: &RelationStore,
+    store: &MetadataStore,
     project_id: i64,
     key: &str,
     value: &str,
@@ -52,7 +52,7 @@ pub(crate) async fn persist_fingerprint(
 
 /// Resolve the project root directory used to read swept files from disk.
 pub(crate) async fn resolve_project_root(
-    store: &RelationStore,
+    store: &MetadataStore,
     project_id: i64,
 ) -> Result<std::path::PathBuf, StorageError> {
     store

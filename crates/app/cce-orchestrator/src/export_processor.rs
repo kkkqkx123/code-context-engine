@@ -36,7 +36,7 @@ use tokio::sync::Mutex;
 use crate::hot_update::{
     BatchChangeResult, HotUpdateError, ParseResultWithChanges, Result, UpdateProcessor,
 };
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_config::{AstToNlConfig, NestProcessorConfig, Settings};
 use cce_parser::ast_to_nl::AstToNlConverter;
@@ -44,7 +44,7 @@ use cce_parser::ast_to_nl::chunker::GroupChunker;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::grouper::types::ProcessingResult;
 use cce_plugin::PluginRegistry;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::export::export_fingerprint::{current_relation_epoch, should_skip_export};
 use crate::export::export_staging::{self, ExportContext, ExportStaging, StagedWrite};
@@ -89,7 +89,7 @@ pub struct NlDocumentUpdateProcessor {
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     /// Relation backend used to load the published relation snapshot for
     /// relation enhancement during hot updates.
-    relation: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
     /// Project ID used for relation snapshot queries.
     project_id: i64,
     /// Per-operation staging state.
@@ -168,7 +168,7 @@ impl NlDocumentUpdateProcessor {
             grouper: PreprocessingPipeline::with_config(NestProcessorConfig::default()),
             enabled: true,
             checkpoint_manager: None,
-            relation: None,
+            metadata_store: None,
             project_id: 0,
             staging: Mutex::new(ExportStaging::default()),
             relation_epoch_cache: Mutex::new(None),
@@ -201,14 +201,14 @@ impl NlDocumentUpdateProcessor {
         self
     }
 
-    /// Wire the relation backend (for published relation snapshot queries) and
+    /// Wire the metadata handle (for published relation snapshot queries) and
     /// the owning project ID.
-    pub fn with_relation_context(
+    pub fn with_metadata_context(
         mut self,
-        relation: Option<RelationStore>,
+        metadata_store: Option<MetadataStore>,
         project_id: i64,
     ) -> Self {
-        self.relation = relation;
+        self.metadata_store = metadata_store;
         self.project_id = project_id;
         self
     }
@@ -260,7 +260,7 @@ impl NlDocumentUpdateProcessor {
     /// snapshot when the active relation epoch changes.
     async fn refresh_relation_enhancement(&self) -> Result<()> {
         let (Some(store), enable) = (
-            self.relation.clone(),
+            self.metadata_store.clone(),
             self.exporter().await.config().enable_relation_enhancement,
         ) else {
             return Ok(());
@@ -282,7 +282,7 @@ impl NlDocumentUpdateProcessor {
         if *cache == Some(epoch) {
             return Ok(());
         }
-        match RelationSnapshotLoader::load(&store, self.project_id, epoch) {
+        match RelationSnapshotLoader::load(store.as_ref(), self.project_id, epoch) {
             Ok(index) => {
                 let exporter = self.exporter().await;
                 let enhancer_config = cce_export::RelationEnhancerConfig::default();
@@ -324,7 +324,7 @@ impl NlDocumentUpdateProcessor {
             &export_config,
             &ast_to_nl_config,
             &self.grouper_fingerprint,
-            &self.relation,
+            &self.metadata_store,
             self.project_id,
         )
         .await
@@ -349,7 +349,7 @@ impl NlDocumentUpdateProcessor {
         let ast_converter = self.ast_converter.read().await.clone();
         let export_config = exporter.config().clone();
         let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
-        let epoch = current_relation_epoch(&self.relation, self.project_id).await;
+        let epoch = current_relation_epoch(&self.metadata_store, self.project_id).await;
 
         let ctx = ExportContext {
             exporter: &exporter,
@@ -383,7 +383,7 @@ impl NlDocumentUpdateProcessor {
         let exporter = self.exporter().await;
         let export_config = exporter.config().clone();
         let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
-        let epoch = current_relation_epoch(&self.relation, self.project_id).await;
+        let epoch = current_relation_epoch(&self.metadata_store, self.project_id).await;
 
         let ctx = ExportContext {
             exporter: &exporter,
@@ -752,7 +752,7 @@ mod tests {
             &export_config,
             &ast_to_nl_config,
             &processor.grouper_fingerprint,
-            current_relation_epoch(&processor.relation, processor.project_id).await,
+            current_relation_epoch(&processor.metadata_store, processor.project_id).await,
         )
         .await
     }

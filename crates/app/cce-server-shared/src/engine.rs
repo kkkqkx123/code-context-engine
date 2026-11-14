@@ -18,7 +18,7 @@ use cce_metrics::{
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::index::IndexOrchestrator;
-use cce_orchestrator::index::{FulltextStore, RelationStore, VectorStore};
+use cce_orchestrator::index::{FulltextStore, MetadataStore, VectorStore};
 use cce_orchestrator::query::cache::{CacheConfig, QueryCache};
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_plugin::PluginRegistry;
@@ -66,7 +66,7 @@ pub struct CodeContextEngine {
     ///
     /// Kept as the backend-neutral handle so callers cannot assume the
     /// SQLite branch when a remote backend is configured.
-    relation_store: RelationStore,
+    metadata_store: MetadataStore,
 
     /// Project-specific IndexOrchestrator cache (lazy-loaded per project)
     orchestrator_cache: ProjectCache<Mutex<IndexOrchestrator>>,
@@ -181,20 +181,15 @@ impl CodeContextEngine {
         // registry. Late calls are ignored by the installer.
         cce_llm_client::suite::init_gateway(&metrics_registry);
 
-        // Create SQLite client through the relation backend enum so the
-        // backend selection is validated once at assembly time. The
-        // PostgreSQL branch constructs at the enum level, but the engine
-        // write path still requires the local branch.
-        let relation_store = RelationStore::from_database_config(&config.database)
-            .map_err(|e| EngineError::Config(e.to_string()))?;
-        let relation_store_for_engine = relation_store.clone();
-        // Infra-owned components (project registry, metrics aggregation)
-        // still construct from the local branch handle; every engine read
-        // goes through the relation contract instead.
-        let sqlite_client = relation_store
-            .as_local()
-            .cloned()
-            .ok_or_else(|| EngineError::Config("relation store has no local branch".to_string()))?;
+        // Create the embedded metadata store directly. Remote selection is
+        // rejected by configuration validation, so assembly only opens the
+        // local database path here.
+        let sqlite_client = Arc::new(
+            SqliteClient::new(config.database.sqlite.clone())
+                .map_err(|e| EngineError::Config(e.to_string()))?,
+        );
+        let metadata_store: MetadataStore = sqlite_client.clone();
+        let metadata_store_for_engine = metadata_store.clone();
 
         // Create project registry
         let project_registry = Arc::new(ProjectRegistry::new(
@@ -288,7 +283,7 @@ impl CodeContextEngine {
             vector,
             fulltext: fulltext_store,
             embedder,
-            relation_store: relation_store_for_engine,
+            metadata_store: metadata_store_for_engine,
             orchestrator_cache: ProjectCache::new(),
             plugin_registry_cache: ProjectCache::new(),
             query_result_cache: ProjectCache::new(),

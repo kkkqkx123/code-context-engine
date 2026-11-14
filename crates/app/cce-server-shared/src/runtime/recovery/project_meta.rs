@@ -1,10 +1,10 @@
 //! Per-project metadata management over the relation contract.
 //!
-//! All reads go through [`RelationStorage`]; the storage branch owns the
+//! All reads go through [`MetadataStorage`]; the storage branch owns the
 //! transaction, callers only see typed keys.
 
-use cce_storage_common::RelationStorage;
-use cce_storage_metadb::RelationStore;
+use cce_orchestrator::index::MetadataStore;
+use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 
 const KEY_EPOCH: &str = "epoch";
@@ -28,8 +28,8 @@ impl ProjectMeta {
     ///
     /// Missing or unreadable keys fall back to 0, matching the legacy
     /// loader that treated absent rows as the initial generation.
-    pub async fn load(store: &RelationStore, project_id: i64) -> Result<Self, StorageError> {
-        async fn get(store: &RelationStore, project_id: i64, key: &str) -> i64 {
+    pub async fn load(store: &MetadataStore, project_id: i64) -> Result<Self, StorageError> {
+        async fn get(store: &MetadataStore, project_id: i64, key: &str) -> i64 {
             store
                 .project_meta_get_int_optional(project_id, key)
                 .await
@@ -50,7 +50,7 @@ impl ProjectMeta {
     /// Initialize metadata keys for a new project without overwriting
     /// existing rows.
     pub async fn init_for_project(
-        store: &RelationStore,
+        store: &MetadataStore,
         project_id: i64,
     ) -> Result<(), StorageError> {
         for key in [
@@ -73,7 +73,7 @@ impl ProjectMeta {
 
     /// Update epoch for project
     pub async fn update_epoch(
-        store: &RelationStore,
+        store: &MetadataStore,
         project_id: i64,
         epoch: i64,
     ) -> Result<(), StorageError> {
@@ -84,7 +84,7 @@ impl ProjectMeta {
 
     /// Update batch_id for project
     pub async fn update_batch_id(
-        store: &RelationStore,
+        store: &MetadataStore,
         project_id: i64,
         batch_id: i64,
     ) -> Result<(), StorageError> {
@@ -100,7 +100,7 @@ impl ProjectMeta {
     /// production writer (manifest activation) already serializes through
     /// the operation queue, so concurrent racing cannot regress the epoch.
     pub async fn update_active_epoch(
-        store: &RelationStore,
+        store: &MetadataStore,
         project_id: i64,
         active_epoch: i64,
     ) -> Result<(), StorageError> {

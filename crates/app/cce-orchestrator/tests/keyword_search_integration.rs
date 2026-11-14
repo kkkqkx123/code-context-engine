@@ -6,16 +6,16 @@
 
 use std::sync::Arc;
 
+use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
 use cce_orchestrator::{KeywordSearchError, KeywordSearchRequest, KeywordSearchTool};
 use cce_storage_bm25::{Bm25Client, Bm25Config};
 use cce_storage_common::FulltextDocument;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::ChunkRecord;
-use cce_storage_metadb::RelationStore;
 
 struct TestEnv {
     bm25: Arc<Bm25Client>,
-    sqlite: RelationStore,
+    sqlite: MetadataStore,
     project_id: i64,
     _tmpdir: tempfile::TempDir,
 }
@@ -39,7 +39,7 @@ async fn setup() -> TestEnv {
         .await
         .expect("Failed to connect to BM25 index");
 
-    let sqlite = RelationStore::in_memory().expect("Failed to create metadata store");
+    let sqlite = in_memory_metadata_store().expect("Failed to create metadata store");
     let project_id = 1;
     sqlite
         .ensure_project(project_id, &tmpdir.path().to_string_lossy())
@@ -83,7 +83,7 @@ fn tool(env: &TestEnv) -> KeywordSearchTool<cce_orchestrator::index::FulltextSto
     KeywordSearchTool::new(cce_orchestrator::index::FulltextStore::local(
         env.bm25.clone(),
     ))
-    .with_relation_store(env.sqlite.clone())
+    .with_metadata_store(env.sqlite.clone())
 }
 
 fn request(query: &str, top_n: usize, project_id: i64, epoch: Option<i64>) -> KeywordSearchRequest {

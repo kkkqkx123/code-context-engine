@@ -374,7 +374,7 @@ pub struct DependencyParams {
     pub qdrant_enabled: bool,
     pub bm25_enabled: bool,
     pub vector_backend: crate::modules::VectorBackend,
-    pub relation_backend: crate::modules::RelationBackend,
+    pub metadata_backend: crate::modules::MetadataBackend,
     pub fulltext_backend: crate::modules::FulltextBackend,
     pub allow_nonstandard_backends: bool,
     // Relation settings
@@ -393,31 +393,31 @@ pub struct DependencyParams {
 /// and point at the advanced switch.
 pub fn validate_backend_preset_dependencies(
     vector_backend: crate::modules::VectorBackend,
-    relation_backend: crate::modules::RelationBackend,
+    metadata_backend: crate::modules::MetadataBackend,
     fulltext_backend: crate::modules::FulltextBackend,
     allow_nonstandard_backends: bool,
 ) -> Vec<ConfigWarning> {
     use crate::modules::VectorBackend as VB;
     let mut warnings = Vec::new();
-    let remote_relation = !relation_backend.is_local();
+    let remote_relation = !metadata_backend.is_local();
     let remote_fulltext = !fulltext_backend.is_local();
     if remote_relation || remote_fulltext {
         warnings.push(ConfigWarning::new(
             WarningSeverity::Info,
-            "database.relation_backend/database.fulltext_backend",
+            "database.metadata_backend/database.fulltext_backend",
             "database.qdrant",
             "Remote relation/fulltext branches are forward scaffolding and not wired into indexing, search, or hot-update paths; the supported runtime is local-only, and a full reindex is required when switching backends.",
         ));
     }
     let official = matches!(
-        (&vector_backend, &relation_backend, &fulltext_backend),
+        (&vector_backend, &metadata_backend, &fulltext_backend),
         (
             VB::Local,
-            crate::modules::RelationBackend::Local,
+            crate::modules::MetadataBackend::Local,
             crate::modules::FulltextBackend::Local,
         ) | (
             VB::Qdrant,
-            crate::modules::RelationBackend::Local,
+            crate::modules::MetadataBackend::Local,
             crate::modules::FulltextBackend::Local,
         )
     );
@@ -446,7 +446,7 @@ pub fn validate_all_dependencies(params: &DependencyParams) -> Vec<ConfigWarning
     // warn, advanced switch acknowledges).
     warnings.extend(validate_backend_preset_dependencies(
         params.vector_backend,
-        params.relation_backend,
+        params.metadata_backend,
         params.fulltext_backend,
         params.allow_nonstandard_backends,
     ));

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
-use crate::index::vector_store::{FulltextStore, RelationStore, VectorStore};
+use crate::index::vector_store::{FulltextStore, MetadataStore, VectorStore};
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_llm_client::ProductionRerankHandler;
@@ -24,7 +24,7 @@ pub(crate) struct SearcherBuilder {
     vector: VectorStore,
     embedder: Arc<OpenAICompatibleProvider>,
     fulltext: FulltextStore,
-    relation: Option<RelationStore>,
+    metadata_store: Option<MetadataStore>,
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
     plugin_rerank_plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
     plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
@@ -45,7 +45,7 @@ impl SearcherBuilder {
             vector,
             embedder,
             fulltext,
-            relation: None,
+            metadata_store: None,
             rerank_handler: None,
             plugin_rerank_plugins: Vec::new(),
             plugin_registry: None,
@@ -59,8 +59,8 @@ impl SearcherBuilder {
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.relation = Some(store);
+    pub fn with_metadata_store(mut self, store: MetadataStore) -> Self {
+        self.metadata_store = Some(store);
         self
     }
 
@@ -126,7 +126,7 @@ impl SearcherBuilder {
             vector,
             embedder,
             fulltext: self.fulltext,
-            relation: self.relation,
+            metadata_store: self.metadata_store,
             reranker: Arc::new(LlmReranker::new(self.rerank_handler)),
             plugin_reranker: Arc::new(PluginReranker::new(self.plugin_rerank_plugins)),
             plugin_registry: self.plugin_registry,

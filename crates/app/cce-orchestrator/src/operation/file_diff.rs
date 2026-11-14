@@ -3,24 +3,24 @@
 //! This module provides functionality for detecting and tracking changes
 //! to file lists, which is critical for incremental update optimizations.
 
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 use chrono::Utc;
 use tracing::trace;
 
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 
 /// Manages file difference tracking for differential updates
 pub struct FileDiffManager {
     /// Project ID for multi-project support
     project_id: i64,
     /// Relation backend for checkpoint persistence
-    db: RelationStore,
+    db: MetadataStore,
 }
 
 impl FileDiffManager {
     /// Create a new file diff manager
-    pub fn new(project_id: i64, db: RelationStore) -> Self {
+    pub fn new(project_id: i64, db: MetadataStore) -> Self {
         Self { project_id, db }
     }
 

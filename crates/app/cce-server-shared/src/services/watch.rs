@@ -7,7 +7,7 @@ use cce_api::models::{
 };
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -58,7 +58,7 @@ pub async fn watch_status(
         }
         Err(_) => None,
     };
-    let data_epoch = match state.engine.relation_store() {
+    let data_epoch = match state.engine.metadata_store() {
         Some(store) => {
             // Prefer the durable manifest; a missing manifest with a missing
             // legacy meta row is the legitimate default 0 (never published).
@@ -102,7 +102,7 @@ pub async fn watch_start(
     if project_id <= 0 {
         return Err(WatchStartError::InvalidProjectId);
     }
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(mode) = store
             .project_meta_get_string_optional(project_id, SUPPLY_MODE_KEY)
             .await

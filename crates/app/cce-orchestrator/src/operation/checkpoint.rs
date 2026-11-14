@@ -6,8 +6,8 @@
 //! - Querying checkpoint states
 //! - Recovery support
 
-use crate::index::vector_store::RelationStore;
-use cce_storage_common::RelationStorage;
+use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::{
     BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, FileCheckpointRecord,
     WorkUnitCheckpointRecord, WorkUnitStatus, validate_checkpoint,
@@ -38,7 +38,7 @@ pub struct CheckpointManager {
     /// Project ID for multi-project support: 0 for global project, >0 for user projects
     project_id: i64,
     /// Relation backend for checkpoint persistence
-    db: RelationStore,
+    db: MetadataStore,
     /// Manager for file difference tracking
     file_diff_manager: Arc<FileDiffManager>,
 }
@@ -55,7 +55,7 @@ pub struct CreateCheckpointParams<'a> {
 
 impl CheckpointManager {
     /// Create a checkpoint manager for a specific project (project_id must be > 0)
-    pub fn new_for_project(project_id: i64, db: RelationStore) -> Self {
+    pub fn new_for_project(project_id: i64, db: MetadataStore) -> Self {
         assert!(
             project_id > 0,
             "project_id must be > 0 for explicit project"
@@ -84,7 +84,7 @@ impl CheckpointManager {
     /// File-level progress uses the same durable store so a recovered
     /// operation cannot observe a different state projection from its
     /// operation checkpoint.
-    pub fn database(&self) -> RelationStore {
+    pub fn database(&self) -> MetadataStore {
         self.db.clone()
     }
 
@@ -657,7 +657,7 @@ mod tests {
             ParsedCheckpointPayload, decode_parsed_checkpoint, encode_parsed_checkpoint,
         };
 
-        let db = RelationStore::in_memory().expect("in-memory store");
+        let db = in_memory_metadata_store().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db);
         let operation_id = "op-summary-attach";
 
@@ -733,7 +733,7 @@ mod tests {
     /// later `read_module_progress` return an empty map.
     #[tokio::test]
     async fn clear_module_progress_empties_reads() {
-        let db = RelationStore::in_memory().expect("in-memory store");
+        let db = in_memory_metadata_store().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db);
         let operation_id = "op-with-progress";
 
@@ -800,7 +800,7 @@ mod tests {
     /// Clearing module progress leaves unrelated operations untouched.
     #[tokio::test]
     async fn clear_module_progress_is_operation_scoped() {
-        let db = RelationStore::in_memory().expect("in-memory store");
+        let db = in_memory_metadata_store().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db.clone());
 
         for (operation_id, marker) in [("op-a", "fp-a"), ("op-b", "fp-b")] {
@@ -855,7 +855,7 @@ mod tests {
     /// unfinished checkpoint of a full-index operation or of another root.
     #[tokio::test]
     async fn validate_and_recover_checkpoint_filters_type_and_root() {
-        let db = RelationStore::in_memory().expect("in-memory store");
+        let db = in_memory_metadata_store().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db.clone());
 
         for checkpoint in [
@@ -916,7 +916,7 @@ mod tests {
     /// scoping, and the bulk Running-to-Committed transition.
     #[tokio::test]
     async fn work_unit_batch_interfaces_cover_empty_scoping_and_commit() {
-        let db = RelationStore::in_memory().expect("in-memory store");
+        let db = in_memory_metadata_store().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db);
         let operation_id = "op-work-unit-batch";
         let stage = "embedding_generation";

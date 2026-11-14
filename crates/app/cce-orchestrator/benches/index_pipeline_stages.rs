@@ -16,15 +16,17 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cce_bench_kit::{DEFAULT_LANG_DIST, ProjectSize, SyntheticProject};
-use cce_orchestrator::index::{IndexOptions, IndexOrchestrator, RelationStore};
-use cce_storage_common::RelationStorage;
+use cce_orchestrator::index::{
+    IndexOptions, IndexOrchestrator, MetadataStore, in_memory_metadata_store,
+};
+use cce_storage_common::MetadataStorage;
 
 /// Scale tier for the synthetic project.
 const SIZE: ProjectSize = ProjectSize::Small;
 
 /// Build an in-memory metadata store with one seeded project (id 1).
-fn make_metadata() -> RelationStore {
-    let store = RelationStore::in_memory().expect("in-memory store");
+fn make_metadata() -> MetadataStore {
+    let store = in_memory_metadata_store().expect("in-memory store");
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -44,7 +46,7 @@ fn materialize() -> PathBuf {
     root
 }
 
-async fn run_once(root: &std::path::Path, metadata: RelationStore) -> u64 {
+async fn run_once(root: &std::path::Path, metadata: MetadataStore) -> u64 {
     let mut orchestrator = IndexOrchestrator::new(1)
         .expect("orchestrator")
         .with_metadata_store(metadata);

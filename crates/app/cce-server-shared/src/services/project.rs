@@ -13,9 +13,9 @@ use cce_config::Settings;
 use cce_config::project_registry::RegistryError;
 use cce_config::validation::Validate;
 use cce_llm::LlmClient;
-use cce_storage_common::RelationStorage;
+use cce_orchestrator::index::MetadataStore;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::{NewProjectRecord, ProjectRecord};
-use cce_storage_metadb::RelationStore;
 use cce_storage_metadb_sqlite::generate_project_name;
 use std::path::PathBuf;
 
@@ -59,7 +59,7 @@ impl std::error::Error for ProjectCreateError {}
 
 /// Shared project creation logic.
 pub async fn create_project(
-    store: &RelationStore,
+    store: &MetadataStore,
     request: &CreateProjectRequest,
 ) -> Result<CreatedProject, ProjectCreateError> {
     let supply_is_gateway = request
@@ -223,7 +223,7 @@ pub async fn list_projects(
 ) -> Result<Vec<ProjectConfig>, ProjectServiceError> {
     let store = state
         .engine
-        .relation_store()
+        .metadata_store()
         .ok_or(ProjectServiceError::MetadataUnavailable)?;
     let records = store
         .projects_all()
@@ -239,7 +239,7 @@ pub async fn get_project(
 ) -> Result<ProjectConfig, ProjectServiceError> {
     let store = state
         .engine
-        .relation_store()
+        .metadata_store()
         .ok_or(ProjectServiceError::MetadataUnavailable)?;
     let record = store
         .project_record(project_id)

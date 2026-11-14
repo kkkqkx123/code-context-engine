@@ -20,7 +20,7 @@ use cce_api::models::{
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
 use cce_server_shared::maintenance::ProjectIndexMaintenanceService;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 use cce_storage_common::{FulltextStorage, VectorStorage};
 
 // ============================================================================
@@ -59,7 +59,7 @@ pub async fn handle_clear_index(
         state.engine.clone(),
         Some(state.engine.vector_clone()),
         Some(state.engine.fulltext_clone()),
-        state.engine.relation_store(),
+        state.engine.metadata_store(),
     );
 
     let m_result = maintenance.clear_project_index(request.project_id).await;
@@ -200,7 +200,7 @@ pub async fn handle_delete_file(
     }
 
     // Step 4: Remove entity detail mappings and file summary mappings
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(project) = store.for_project(project_id)
     {
         let file_id_opt = match project.file_by_path(project_id, &file_path).await {
@@ -334,7 +334,7 @@ pub async fn handle_delete_entity(
     }
 
     // Step 5: Remove entity detail mapping through the relation contract
-    if let Some(store) = state.engine.relation_store()
+    if let Some(store) = state.engine.metadata_store()
         && let Ok(project) = store.for_project(project_id)
     {
         let _ = project
@@ -562,7 +562,7 @@ pub async fn handle_index_stats(
     };
 
     // Get file count through the relation contract (project-scoped)
-    let file_count = if let Some(store) = state.engine.relation_store()
+    let file_count = if let Some(store) = state.engine.metadata_store()
         && let Ok(project) = store.for_project(project_id)
     {
         // `files_count` is epoch-scoped; the stats endpoint reports the
@@ -635,7 +635,7 @@ pub async fn handle_storage_status(
     };
 
     // Check relation through the backend-neutral diagnostics snapshot.
-    let relation_storage = match state.engine.relation_store() {
+    let relation_storage = match state.engine.metadata_store() {
         Some(store) => {
             let diag = store.diagnose_summary().await;
             StorageComponentStatus {

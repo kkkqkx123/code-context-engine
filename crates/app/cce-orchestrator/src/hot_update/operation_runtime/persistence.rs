@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use cce_scanner::FileEntry;
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::hot_update::change::{BatchChangeResult, FileChangeType};
 use crate::hot_update::error::{HotUpdateError, Result};

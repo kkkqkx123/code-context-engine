@@ -137,8 +137,8 @@ impl SharedContext {
     }
 
     /// Get the relation store selected at assembly time.
-    pub fn relation_store(&self) -> Option<cce_storage_metadb::RelationStore> {
-        self.engine.relation_store()
+    pub fn metadata_store(&self) -> Option<cce_orchestrator::index::MetadataStore> {
+        self.engine.metadata_store()
     }
 
     /// Get a clone of the project registry
@@ -155,7 +155,7 @@ mod tests {
     use crate::engine::CodeContextEngine;
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-    use cce_storage_common::RelationStorage;
+    use cce_storage_common::MetadataStorage;
     use std::collections::HashMap;
 
     /// Create a minimal test config with mock provider and model for engine construction
@@ -217,8 +217,8 @@ mod tests {
 
         // Verify engine has a relation store
         assert!(
-            engine.relation_store().is_some(),
-            "CodeContextEngine should have a relation_store after construction"
+            engine.metadata_store().is_some(),
+            "CodeContextEngine should have a metadata_store after construction"
         );
 
         // Create SharedContext - it delegates to engine for component access
@@ -226,11 +226,11 @@ mod tests {
 
         // Relation store is accessible through the engine
         let store = engine
-            .relation_store()
-            .expect("relation_store should be initialized");
+            .metadata_store()
+            .expect("metadata_store should be initialized");
         assert!(
             store.projects_all().await.is_ok(),
-            "relation_store should serve contract reads"
+            "metadata_store should serve contract reads"
         );
 
         // Clean up temp file

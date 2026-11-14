@@ -6,16 +6,16 @@
 
 use cce_export::ExportConfig;
 use cce_export::{config_fingerprint, render_fingerprint, summary_content_fingerprint};
-use cce_storage_common::RelationStorage;
+use cce_storage_common::MetadataStorage;
 
 use crate::hot_update::ParseResultWithChanges;
-use crate::index::vector_store::RelationStore;
+use crate::index::vector_store::MetadataStore;
 use cce_export::ExportSummaryView;
 use cce_export::NlDocumentExporter;
 
 /// Current published relation epoch used for enhancement, or 0 when
 /// relation enhancement is disabled or no snapshot is published.
-pub async fn current_relation_epoch(store: &Option<RelationStore>, project_id: i64) -> i64 {
+pub async fn current_relation_epoch(store: &Option<MetadataStore>, project_id: i64) -> i64 {
     match store.as_ref() {
         Some(store) => {
             match store
@@ -73,7 +73,7 @@ pub async fn should_skip_export(
     export_config: &ExportConfig,
     ast_to_nl_config: &cce_config::AstToNlConfig,
     grouper_fingerprint: &str,
-    store: &Option<RelationStore>,
+    store: &Option<MetadataStore>,
     project_id: i64,
 ) -> bool {
     if !parse_result.already_exported {

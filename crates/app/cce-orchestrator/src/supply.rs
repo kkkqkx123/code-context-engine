@@ -94,7 +94,7 @@ pub async fn verify_direct_batch(
 pub async fn process_gateway_queue(
     processor: &mut crate::hot_update::FileProcessor,
     payloads: &[FileContentPayload],
-    metadata_store: &Option<crate::index::vector_store::RelationStore>,
+    metadata_store: &Option<crate::index::vector_store::MetadataStore>,
     project_id: i64,
 ) -> Result<usize, String> {
     use crate::hot_update::FileChangeType;

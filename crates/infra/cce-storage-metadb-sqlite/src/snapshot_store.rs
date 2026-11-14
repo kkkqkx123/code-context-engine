@@ -57,6 +57,40 @@ impl RelationSnapshotStore for SqliteSnapshotStore {
     }
 }
 
+impl RelationSnapshotStore for SqliteClient {
+    fn get_manifest(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Option<RelationSnapshotManifest>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).get_manifest(project_id, epoch)
+    }
+
+    fn read_snapshot(
+        &self,
+        manifest: &RelationSnapshotManifest,
+    ) -> Result<CanonicalRelationSnapshot, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).read_snapshot(manifest)
+    }
+
+    fn find_base_epoch(
+        &self,
+        project_id: i64,
+        delta_epoch: i64,
+    ) -> Result<Option<i64>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).find_base_epoch(project_id, delta_epoch)
+    }
+
+    fn get_delta_chain(
+        &self,
+        project_id: i64,
+        after_epoch: i64,
+        up_to_epoch: i64,
+    ) -> Result<Vec<SnapshotDelta>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).get_delta_chain(project_id, after_epoch, up_to_epoch)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
