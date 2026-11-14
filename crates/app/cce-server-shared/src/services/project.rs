@@ -618,3 +618,80 @@ pub async fn probe_project_llm(
         }
     }
 }
+
+/// Resolve a project id from either an explicit id or a project root path.
+///
+/// Transports accept both forms on the wire; the registry behind the shared
+/// context is the single place that maps a path onto an id. Failure texts
+/// match the transport validation contract so mapped responses stay stable.
+pub async fn resolve_project_id(
+    project_id: Option<i64>,
+    project_path: Option<&str>,
+    state: &SharedContext,
+) -> Result<i64, ProjectServiceError> {
+    match (project_id, project_path) {
+        (Some(id), None) => {
+            if id <= 0 {
+                return Err(ProjectServiceError::Invalid(
+                    "Invalid project_id: must be positive".to_string(),
+                ));
+            }
+            Ok(id)
+        }
+        (None, Some(path)) => {
+            if path.is_empty() {
+                return Err(ProjectServiceError::Invalid(
+                    "Invalid project_path: path cannot be empty".to_string(),
+                ));
+            }
+            let normalized = match normalize_and_canonicalize_path(path) {
+                Ok(normalized) => normalized,
+                Err(error) => {
+                    return Err(ProjectServiceError::Invalid(format!(
+                        "Invalid project_path: {error}"
+                    )));
+                }
+            };
+            let registry = state.engine.project_registry();
+            match registry
+                .find_by_path(std::path::Path::new(&normalized))
+                .await
+            {
+                Ok(entry) => Ok(entry.metadata.id),
+                Err(error) => Err(ProjectServiceError::Invalid(format!(
+                    "Project not found: {normalized} (error: {error})"
+                ))),
+            }
+        }
+        (Some(_), Some(_)) => Err(ProjectServiceError::Invalid(
+            "Ambiguous project specification: cannot specify both project_id and project_path"
+                .to_string(),
+        )),
+        (None, None) => Err(ProjectServiceError::Invalid(
+            "Missing project specification: must provide either project_id or project_path"
+                .to_string(),
+        )),
+    }
+}
+
+/// Normalize a file path for registry lookup.
+///
+/// Canonicalization resolves symlinks and relative components; when the path
+/// does not exist yet it falls back to an absolute form so the lookup still
+/// runs against a stable representation.
+fn normalize_and_canonicalize_path(path: &str) -> Result<String, String> {
+    let path_buf = std::path::Path::new(path);
+    match path_buf.canonicalize() {
+        Ok(canonical) => Ok(canonical.to_string_lossy().to_string()),
+        Err(error) => {
+            if path_buf.is_absolute() {
+                Ok(path_buf.to_string_lossy().to_string())
+            } else {
+                match std::env::current_dir() {
+                    Ok(cwd) => Ok(cwd.join(path_buf).to_string_lossy().to_string()),
+                    Err(_) => Err(format!("Failed to resolve path '{path}': {error}")),
+                }
+            }
+        }
+    }
+}

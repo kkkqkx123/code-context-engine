@@ -9,6 +9,7 @@ use cce_api::models::{
 };
 
 use crate::api::response::ApiResult;
+use cce_server_shared::services::project;
 use cce_storage_common::RelationStorage;
 
 /// Unified response type for entity search handler
@@ -64,10 +65,10 @@ pub async fn handle_entity_search(
     }
 
     // Resolve project ID from either project_id or project_path
-    let project_id = match crate::api::validation::resolve_project_id(
+    let project_id = match project::resolve_project_id(
         request.project_id,
         request.project_path.as_deref(),
-        state.engine.project_registry(),
+        &state,
     )
     .await
     {

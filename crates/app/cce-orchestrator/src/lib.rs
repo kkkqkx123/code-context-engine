@@ -4,10 +4,14 @@
 //! - **index**: Full index orchestration
 //! - **query**: Search and retrieval orchestration
 //! - **hot_update**: File watching and incremental update
-//! - **tools**: AST diagnosis, compression, symbol lookup
 //! - **index_state**: File-level update state and its tracker
 //! - **operation**: Operation scheduling, checkpoints and recovery
-//! - **export**: Natural-language document export
+//! - **export**: Stateful export staging/transaction wiring
+//!   (pure rendering lives in `cce-export`)
+//!
+//! Transport-facing tool and document-rendering types are re-exported from
+//! the dedicated `cce-tools` and `cce-export` crates so HTTP and MCP
+//! handlers share one import site.
 
 pub mod export;
 pub mod export_processor;

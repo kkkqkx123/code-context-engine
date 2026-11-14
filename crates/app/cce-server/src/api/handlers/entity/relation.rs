@@ -15,7 +15,7 @@ use cce_server_shared::services::relation::{self, CallDirection, ChainNode};
 
 use crate::api::response::{ApiResult, relation_error};
 
-use super::calls::params_to_options;
+use super::calls::params_to_spec;
 
 fn chain_node(node: ChainNode) -> CallChainNode {
     CallChainNode {
@@ -51,18 +51,14 @@ pub async fn handle_call_chain(
             "direction must be one of down, forward, up, or backward".to_string(),
         ));
     };
-    let options = params_to_options(
-        RelationFilterParams {
-            exclude_tests: params.exclude_tests,
-            directory_prefix: params.directory_prefix,
-            excluded_files: params.excluded_files,
-            domains: params.domains,
-            include_external: params.include_external,
-        },
-        params.max_depth,
-        params.offset,
-        params.limit,
-    );
+    let options = params_to_spec(RelationFilterParams {
+        exclude_tests: params.exclude_tests,
+        directory_prefix: params.directory_prefix,
+        excluded_files: params.excluded_files,
+        domains: params.domains,
+        include_external: params.include_external,
+    })
+    .into_options(params.max_depth, params.offset.unwrap_or(0), params.limit);
     match relation::call_chain(&state, project_id, &id, direction, options).await {
         Ok(page) => ApiResult::Success(CallChainResponse {
             success: true,

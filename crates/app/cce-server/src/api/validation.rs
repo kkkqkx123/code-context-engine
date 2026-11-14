@@ -1,26 +1,11 @@
 //! API input validation utilities
 
-use std::path::Path;
 use thiserror::Error;
-
-use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
     #[error("Invalid project_id: {0}")]
     InvalidProjectId(String),
-
-    #[error("Invalid project_path: {0}")]
-    InvalidProjectPath(String),
-
-    #[error("Project not found: {0}")]
-    ProjectNotFound(String),
-
-    #[error("Ambiguous project specification: cannot specify both project_id and project_path")]
-    AmbiguousProject,
-
-    #[error("Missing project specification: must provide either project_id or project_path")]
-    MissingProject,
 
     #[error("Invalid limit: {0}. Must be between 1 and {1}")]
     InvalidLimit(usize, usize),
@@ -43,90 +28,6 @@ pub fn validate_project_id(project_id: i64) -> Result<(), ValidationError> {
         ));
     }
     Ok(())
-}
-
-/// Resolve project ID from either project_id or project_path
-///
-/// This function supports two modes:
-/// 1. Direct project_id (fast path)
-/// 2. Project path lookup (converts path to ID)
-///
-/// # Arguments
-/// * `project_id` - Optional project ID
-/// * `project_path` - Optional project root path
-/// * `registry` - Project registry for path lookup
-///
-/// # Returns
-/// Resolved project ID
-pub async fn resolve_project_id(
-    project_id: Option<i64>,
-    project_path: Option<&str>,
-    registry: &ProjectRegistry,
-) -> Result<i64, ValidationError> {
-    match (project_id, project_path) {
-        (Some(id), None) => {
-            // Direct ID mode
-            validate_project_id(id)?;
-            Ok(id)
-        }
-        (None, Some(path)) => {
-            // Path lookup mode
-            if path.is_empty() {
-                return Err(ValidationError::InvalidProjectPath(
-                    "path cannot be empty".to_string(),
-                ));
-            }
-
-            // Normalize and canonicalize the path
-            let normalized_path = match normalize_and_canonicalize_path(path) {
-                Ok(p) => p,
-                Err(e) => {
-                    return Err(ValidationError::InvalidProjectPath(e));
-                }
-            };
-
-            // Look up project by path
-            match registry.find_by_path(Path::new(&normalized_path)).await {
-                Ok(entry) => Ok(entry.metadata.id),
-                Err(e) => Err(ValidationError::ProjectNotFound(format!(
-                    "{} (error: {})",
-                    normalized_path, e
-                ))),
-            }
-        }
-        (Some(_), Some(_)) => Err(ValidationError::AmbiguousProject),
-        (None, None) => Err(ValidationError::MissingProject),
-    }
-}
-
-/// Normalize and canonicalize a file path
-///
-/// This function:
-/// 1. Converts to absolute path
-/// 2. Resolves symlinks and relative components (.., .)
-/// 3. Normalizes path separators
-fn normalize_and_canonicalize_path(path: &str) -> Result<String, String> {
-    let path_buf = Path::new(path);
-
-    // Try to canonicalize (resolves symlinks, .., etc.)
-    match path_buf.canonicalize() {
-        Ok(canonical) => Ok(canonical.to_string_lossy().to_string()),
-        Err(e) => {
-            // If canonicalization fails (e.g., path doesn't exist),
-            // try to at least make it absolute
-            if path_buf.is_absolute() {
-                Ok(path_buf.to_string_lossy().to_string())
-            } else {
-                match std::env::current_dir() {
-                    Ok(cwd) => {
-                        let absolute = cwd.join(path_buf);
-                        Ok(absolute.to_string_lossy().to_string())
-                    }
-                    Err(_) => Err(format!("Failed to resolve path '{}': {}", path, e)),
-                }
-            }
-        }
-    }
 }
 
 /// Validate result limit

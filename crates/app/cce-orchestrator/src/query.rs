@@ -18,7 +18,7 @@
 //!     │   │       (config.search.fusion.algorithm)
 //!     │   │
 //!     │   ├── Glob Filter + Score Normalization + Enrichment
-//!     │   │   └── path filtering, uniform score scale, SQLite chunk enrichment
+//!     │   │   └── path filtering, uniform score scale, metadata-contract chunk enrichment
 //!     │   │
 //!     │   └── Post-processing (ranking: rerank → sort → ResultFilter → threshold)
 //!     │       ├── LlmReranker / PluginReranker
@@ -32,27 +32,22 @@
 //! Optional post-processing: when `search.annotation.enable_annotation` is set,
 //! the final top-N results are annotated with structure-preserving file and
 //! relation markers after ranking (annotation/ module), leaving order untouched.
-//!
-//! Tools Module (code analysis tools, outside the query pipeline)
-//!     ├── SymbolLookup (symbol lookup: find references, goto definition)
-//!     ├── AstDiagnosis (AST diagnosis)
-//!     └── Compression (code compression)
 //! ```
 //!
 //! # Key Components
 //!
 //! - **QueryCoordinator**: unified entry point coordinating all query operations, with caching, capability checks and retry-queue fault tolerance
-//! - **Searcher**: core search engine executing the per-strategy pipeline (retrieval → fusion → filter → normalize → enrich → post-process)
+//! - **Searcher**: crate-internal search engine executing the per-strategy pipeline (retrieval → fusion → filter → normalize → enrich → post-process)
 //! - **Retrieval Strategies**: pluggable recall strategies (Dense / Bm25 / Summary) with static dispatch
 //! - **Boost / Ranking**: additive score aggregation and deterministic rerank/sort/threshold stages
 //!
 //! # Usage Example
 //!
 //! ```ignore
-//! use code_context_engine::orchestrator::query::QueryCoordinator;
+//! use cce_orchestrator::query::{QueryConfigBuilder, QueryCoordinator};
 //!
-//! // Assemble the coordinator directly from the project stores; the
-//! // searcher stays behind the builder and is never named.
+//! // Assemble the coordinator directly from the project stores.
+//! // The searcher stays behind the builder and is never named.
 //! let coordinator = QueryCoordinator::builder(
 //!     vector, embedder, fulltext, call_chain_query, scope,
 //! )
@@ -62,8 +57,7 @@
 //!     .build();
 //!
 //! // Run a search
-//! let options = QueryConfigBuilder::default()
-//!     .build()?;
+//! let options = QueryConfigBuilder::new(project_id).build(query);
 //! let result = coordinator.search(&options).await?;
 //! ```
 

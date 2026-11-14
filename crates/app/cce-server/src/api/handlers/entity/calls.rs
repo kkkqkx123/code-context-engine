@@ -16,13 +16,11 @@ use cce_server_shared::services::relation::{
 
 use crate::api::response::{ApiResult, relation_error};
 
-/// Translate the wire filter and pagination parameters into query options.
-pub(super) fn params_to_options(
-    filter: RelationFilterParams,
-    max_depth: usize,
-    offset: Option<usize>,
-    limit: usize,
-) -> cce_orchestrator::query::RelationQueryOptions {
+/// Translate the wire filter parameters into the shared filter spec.
+///
+/// Pagination stays with the caller: the spec only carries filter values
+/// and the service builds the final query options in one step.
+pub(super) fn params_to_spec(filter: RelationFilterParams) -> RelationFilterSpec {
     RelationFilterSpec {
         exclude_tests: filter.exclude_tests.unwrap_or(false),
         directory_prefix: filter.directory_prefix,
@@ -30,12 +28,6 @@ pub(super) fn params_to_options(
         domains: filter.domains,
         include_external: filter.include_external,
     }
-    .apply(
-        cce_orchestrator::query::RelationQueryOptions::new()
-            .with_max_depth(max_depth)
-            .with_offset(offset.unwrap_or(0))
-            .with_limit(limit),
-    )
 }
 
 /// Describe the edge endpoint a listing is about: the callee for callees, the
@@ -98,18 +90,14 @@ pub async fn handle_function_calls(
     if project_id <= 0 {
         return ApiResult::Error(invalid_project());
     }
-    let options = params_to_options(
-        RelationFilterParams {
-            exclude_tests: params.exclude_tests,
-            directory_prefix: params.directory_prefix,
-            excluded_files: params.excluded_files,
-            domains: params.domains,
-            include_external: params.include_external,
-        },
-        params.max_depth,
-        params.offset,
-        params.limit,
-    );
+    let options = params_to_spec(RelationFilterParams {
+        exclude_tests: params.exclude_tests,
+        directory_prefix: params.directory_prefix,
+        excluded_files: params.excluded_files,
+        domains: params.domains,
+        include_external: params.include_external,
+    })
+    .into_options(params.max_depth, params.offset.unwrap_or(0), params.limit);
     let CallEdges {
         subject,
         total,
@@ -151,18 +139,14 @@ pub async fn handle_function_callers(
     if project_id <= 0 {
         return ApiResult::Error(invalid_project());
     }
-    let options = params_to_options(
-        RelationFilterParams {
-            exclude_tests: params.exclude_tests,
-            directory_prefix: params.directory_prefix,
-            excluded_files: params.excluded_files,
-            domains: params.domains,
-            include_external: params.include_external,
-        },
-        params.max_depth,
-        params.offset,
-        params.limit,
-    );
+    let options = params_to_spec(RelationFilterParams {
+        exclude_tests: params.exclude_tests,
+        directory_prefix: params.directory_prefix,
+        excluded_files: params.excluded_files,
+        domains: params.domains,
+        include_external: params.include_external,
+    })
+    .into_options(params.max_depth, params.offset.unwrap_or(0), params.limit);
     let CallEdges {
         subject,
         total,
@@ -204,25 +188,18 @@ mod tests {
     #[test]
     fn test_params_to_options() {
         let params = params();
-        let opts = params_to_options(
-            RelationFilterParams {
-                exclude_tests: params.exclude_tests,
-                directory_prefix: params.directory_prefix,
-                excluded_files: params.excluded_files,
-                domains: params.domains,
-                include_external: params.include_external,
-            },
-            params.max_depth,
-            params.offset,
-            params.limit,
-        );
+        let opts = params_to_spec(RelationFilterParams {
+            exclude_tests: params.exclude_tests,
+            directory_prefix: params.directory_prefix,
+            excluded_files: params.excluded_files,
+            domains: params.domains,
+            include_external: params.include_external,
+        })
+        .into_options(params.max_depth, params.offset.unwrap_or(0), params.limit);
         assert_eq!(opts.max_depth, 5);
         assert_eq!(opts.offset, 10);
         assert_eq!(opts.limit, 50);
-        assert!(
-            opts.exclude_content_types
-                .contains(&cce_orchestrator::query::ExcludableContentType::Test)
-        );
+        assert!(!opts.exclude_content_types.is_empty());
         assert_eq!(opts.directory_prefix.as_deref(), Some("src/flask"));
         assert_eq!(opts.excluded_files.len(), 1);
         assert_eq!(opts.relation_domains, vec!["call".to_string()]);

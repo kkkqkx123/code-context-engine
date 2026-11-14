@@ -17,6 +17,7 @@ pub use index::build_index_options;
 pub use project::{
     CreatedProject, ProjectCreateError, ProjectServiceError, create_project, get_project,
     list_projects, project_config_from_record, reload_project_after_profile_change,
+    resolve_project_id,
 };
 pub use relation::{
     CallChainPage, CallDirection, CallEdge, CallEdges, CallPath, ChainNode, ClassHierarchy,

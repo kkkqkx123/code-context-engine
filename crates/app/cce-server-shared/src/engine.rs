@@ -281,11 +281,8 @@ impl CodeContextEngine {
         // Create system metrics collector
         let system_metrics = Arc::new(cce_metrics::SystemMetrics::new(&metrics_registry));
 
-        // Note: IndexOrchestrator and Searcher are now created per-project on demand
-        // They will be cached in orchestrator_cache and searcher_cache respectively
-        // Plugin loading is also deferred to get_orchestrator() for project-specific config
-        // OperationCoordinator is also created per-project on demand
-        // RelationRuntime is created per-project on demand
+        // Note: IndexOrchestrator and OperationCoordinator are created per-project on demand.
+        // Plugin loading stays deferred to get_orchestrator() for project-specific config.
 
         Ok(Self {
             vector,

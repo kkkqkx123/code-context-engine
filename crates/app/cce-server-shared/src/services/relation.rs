@@ -306,6 +306,24 @@ impl RelationFilterSpec {
         }
         options.with_include_external(self.include_external)
     }
+
+    /// Build relation query options from wire pagination and filter values.
+    ///
+    /// Transports pass decoded parameters straight through so neither
+    /// surface names the orchestration query type.
+    pub fn into_options(
+        self,
+        max_depth: usize,
+        offset: usize,
+        limit: usize,
+    ) -> RelationQueryOptions {
+        self.apply(
+            RelationQueryOptions::new()
+                .with_max_depth(max_depth)
+                .with_offset(offset)
+                .with_limit(limit),
+        )
+    }
 }
 
 /// Split a comma-separated parameter value into trimmed non-empty items.

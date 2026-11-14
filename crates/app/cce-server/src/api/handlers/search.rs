@@ -12,6 +12,7 @@
 use axum::{Json, extract::State};
 
 use crate::api::validation;
+use cce_server_shared::services::project;
 use cce_server_shared::services::search::{
     AggregatedQuerySpec, SearchService, SearchServiceError, SharedQueryFields, SingleQuerySpec,
     SubQuerySpec,
@@ -59,10 +60,10 @@ pub async fn handle_search(
     let start = std::time::Instant::now();
 
     // Resolve project ID from either project_id or project_path
-    let project_id = match validation::resolve_project_id(
+    let project_id = match project::resolve_project_id(
         request.project_id,
         request.project_path.as_deref(),
-        state.engine.project_registry(),
+        &state,
     )
     .await
     {
@@ -195,10 +196,10 @@ pub async fn handle_aggregated_search(
     let start = std::time::Instant::now();
 
     // Resolve project ID from either project_id or project_path
-    let project_id = match validation::resolve_project_id(
+    let project_id = match project::resolve_project_id(
         request.project_id,
         request.project_path.as_deref(),
-        state.engine.project_registry(),
+        &state,
     )
     .await
     {
