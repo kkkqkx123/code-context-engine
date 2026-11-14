@@ -1,8 +1,11 @@
-//! Single source of truth for HTTP route paths.
+//! Single source of truth for shared HTTP route paths.
 //!
 //! Server routers register these templates and `cce-client` expands them into
 //! concrete paths. Templates use the unified project placeholder so routers,
 //! clients and documentation never diverge.
+//!
+//! Console-only log endpoints live in `cce-server::api::log_paths` and are
+//! intentionally excluded: they have no wire models and no Rust consumer.
 
 /// Project identifier placeholder used by every project scoped template.
 pub const PROJECT_ID_PLACEHOLDER: &str = "{project_id}";
@@ -88,13 +91,6 @@ pub const TOOLS_COMPRESS_BATCH: &str = "/api/tools/compress/batch";
 pub const TOOLS_DIAGNOSE: &str = "/api/tools/diagnose";
 pub const TOOLS_FOLD: &str = "/api/tools/fold";
 
-pub const LOGS: &str = "/api/logs";
-pub const LOGS_FILES: &str = "/api/logs/files";
-pub const LOGS_FILE_TEMPLATE: &str = "/api/logs/files/{name}";
-pub const LOGS_FILE_DOWNLOAD_TEMPLATE: &str = "/api/logs/files/{name}/download";
-pub const LOGS_ROTATE: &str = "/api/logs/rotate";
-pub const LOGS_CONFIG: &str = "/api/logs/config";
-pub const LOGS_WS: &str = "/ws/logs";
 pub const TOOLS_FOLD_BATCH: &str = "/api/tools/fold/batch";
 pub const TOOLS_KEYWORD_SEARCH: &str = "/api/tools/keyword-search";
 pub const TOOLS_SYMBOLS: &str = "/api/tools/symbols";

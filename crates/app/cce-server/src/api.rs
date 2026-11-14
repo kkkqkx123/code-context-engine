@@ -6,6 +6,7 @@
 //! `cce_server_shared::services` and the engine facade.
 
 pub mod handlers;
+pub mod log_paths;
 pub mod middleware;
 pub mod openapi;
 pub mod response;

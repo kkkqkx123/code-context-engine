@@ -1,12 +1,17 @@
 //! Qdrant process management models
+//!
+//! The wire copy of the backend lifecycle state. The backend-owned domain
+//! type lives in `cce-storage-vector-qdrant`; `cce-server-shared` converts
+//! between them so infrastructure never depends on this contract. `utoipa`
+//! derives stay here because this crate is the single schema source for
+//! the server OpenAPI document and the generated TypeScript projection.
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Lifecycle status of the managed Qdrant subprocess.
+/// Wire copy of the managed Qdrant subprocess lifecycle state.
 ///
-/// This lives in the wire contract so every remote consumer sees the same
-/// shape the backend owns, without pulling in storage machinery.
+/// Mirrors the backend domain type without pulling in storage machinery.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(tag = "type", content = "message")]
 pub enum QdrantProcessStatus {

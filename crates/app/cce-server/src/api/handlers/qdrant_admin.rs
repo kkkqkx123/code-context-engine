@@ -6,6 +6,8 @@
 //!
 //! These endpoints are only available when Qdrant is configured with
 //! `auto_start = true` and the `QdrantProcessHandle` is present in SharedContext.
+//! Handlers only see wire types via `SharedContext` snapshots; the backend
+//! domain type never crosses this module.
 
 use axum::extract::State;
 
@@ -35,16 +37,11 @@ use cce_server_shared::context::SharedContext;
 pub async fn handle_qdrant_process_status(
     State(state): State<SharedContext>,
 ) -> ApiResult<QdrantProcessStatusResponse> {
-    let Some(handle) = state.qdrant_control.as_ref() else {
+    let Some((managed, status)) = state.qdrant_status_snapshot().await else {
         return ApiResult::Error(no_control_handle());
     };
 
-    let status = handle.current_status().await;
-
-    ApiResult::Success(QdrantProcessStatusResponse {
-        managed: handle.managed,
-        status,
-    })
+    ApiResult::Success(QdrantProcessStatusResponse { managed, status })
 }
 
 /// POST /api/qdrant/process/start
@@ -63,11 +60,9 @@ pub async fn handle_qdrant_process_status(
 pub async fn handle_qdrant_process_start(
     State(state): State<SharedContext>,
 ) -> ApiResult<QdrantActionResponse> {
-    let Some(handle) = state.qdrant_control.as_ref() else {
+    let Some((_, current)) = state.qdrant_status_snapshot().await else {
         return ApiResult::Error(no_control_handle());
     };
-
-    let current = handle.current_status().await;
     if current == QdrantProcessStatus::Running {
         return ApiResult::Success(QdrantActionResponse {
             success: true,
@@ -76,11 +71,15 @@ pub async fn handle_qdrant_process_start(
         });
     }
 
-    handle.start();
+    if !state.qdrant_start() {
+        return ApiResult::Error(no_control_handle());
+    }
 
     // Give the background task a moment to transition the status
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let status = handle.current_status().await;
+    let Some((_, status)) = state.qdrant_status_snapshot().await else {
+        return ApiResult::Error(no_control_handle());
+    };
 
     ApiResult::Success(QdrantActionResponse {
         success: true,
@@ -105,11 +104,9 @@ pub async fn handle_qdrant_process_start(
 pub async fn handle_qdrant_process_stop(
     State(state): State<SharedContext>,
 ) -> ApiResult<QdrantActionResponse> {
-    let Some(handle) = state.qdrant_control.as_ref() else {
+    let Some((_, current)) = state.qdrant_status_snapshot().await else {
         return ApiResult::Error(no_control_handle());
     };
-
-    let current = handle.current_status().await;
     if current != QdrantProcessStatus::Running && current != QdrantProcessStatus::Starting {
         return ApiResult::Success(QdrantActionResponse {
             success: true,
@@ -118,11 +115,15 @@ pub async fn handle_qdrant_process_stop(
         });
     }
 
-    handle.stop();
+    if !state.qdrant_stop() {
+        return ApiResult::Error(no_control_handle());
+    }
 
     // Give the background task a moment to transition the status
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let status = handle.current_status().await;
+    let Some((_, status)) = state.qdrant_status_snapshot().await else {
+        return ApiResult::Error(no_control_handle());
+    };
 
     ApiResult::Success(QdrantActionResponse {
         success: true,
@@ -147,15 +148,15 @@ pub async fn handle_qdrant_process_stop(
 pub async fn handle_qdrant_process_restart(
     State(state): State<SharedContext>,
 ) -> ApiResult<QdrantActionResponse> {
-    let Some(handle) = state.qdrant_control.as_ref() else {
+    if !state.qdrant_restart() {
         return ApiResult::Error(no_control_handle());
-    };
-
-    handle.restart();
+    }
 
     // Give the background task a moment to transition the status
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let status = handle.current_status().await;
+    let Some((_, status)) = state.qdrant_status_snapshot().await else {
+        return ApiResult::Error(no_control_handle());
+    };
 
     ApiResult::Success(QdrantActionResponse {
         success: true,

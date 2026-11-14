@@ -216,8 +216,12 @@ mod tests {
     }
 
     /// Dev-only documentation endpoint, not part of the contract.
+    /// Console-only log endpoints are also excluded: they live in
+    /// `log_paths` and intentionally have no OpenAPI annotation.
     fn is_ignored_path(path: &str) -> bool {
         path.starts_with("/api-docs")
+            || path.starts_with("/api/logs")
+            || path.starts_with("/ws/logs")
     }
 
     fn feature_enabled(name: &str) -> bool {
@@ -492,13 +496,31 @@ mod tests {
         let marker = s
             .find("cce_api::paths::")
             .map(|pos| pos + "cce_api::paths::".len())
-            .or_else(|| s.find("api_paths::").map(|pos| pos + "api_paths::".len()))?;
+            .or_else(|| s.find("api_paths::").map(|pos| pos + "api_paths::".len()))
+            .or_else(|| s.find("log_paths::").map(|pos| pos + "log_paths::".len()))?;
         let rest = &s[marker..];
         let end = rest
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
             .unwrap_or(rest.len());
         let ident = &rest[..end];
-        Some(api_paths_value(ident)?.to_string())
+        Some(
+            api_paths_value(ident)
+                .or_else(|| log_paths_value(ident))?
+                .to_string(),
+        )
+    }
+
+    fn log_paths_value(ident: &str) -> Option<&'static str> {
+        Some(match ident {
+            "LOGS" => crate::api::log_paths::LOGS,
+            "LOGS_FILES" => crate::api::log_paths::LOGS_FILES,
+            "LOGS_FILE_TEMPLATE" => crate::api::log_paths::LOGS_FILE_TEMPLATE,
+            "LOGS_FILE_DOWNLOAD_TEMPLATE" => crate::api::log_paths::LOGS_FILE_DOWNLOAD_TEMPLATE,
+            "LOGS_ROTATE" => crate::api::log_paths::LOGS_ROTATE,
+            "LOGS_CONFIG" => crate::api::log_paths::LOGS_CONFIG,
+            "LOGS_WS" => crate::api::log_paths::LOGS_WS,
+            _ => return None,
+        })
     }
 
     fn api_paths_value(ident: &str) -> Option<&'static str> {

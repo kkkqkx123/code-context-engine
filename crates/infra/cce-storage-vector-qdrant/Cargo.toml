@@ -8,7 +8,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-cce-api = { version = "0.1.0", path = "../../app/cce-api" }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
 cce-config = { version = "0.1.0", path = "../../core/cce-config" }
 cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }

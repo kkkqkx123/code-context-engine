@@ -9969,7 +9969,7 @@
             }
           }
         ],
-        "description": "Qdrant process status"
+        "description": "Wire copy of the managed Qdrant subprocess lifecycle state.\n\nMirrors the backend domain type without pulling in storage machinery."
       },
       "QdrantProcessStatusResponse": {
         "type": "object",

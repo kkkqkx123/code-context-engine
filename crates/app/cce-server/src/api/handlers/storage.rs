@@ -657,11 +657,12 @@ pub async fn handle_storage_status(
         },
     };
 
-    // Get vector process info if subprocess management is available
-    let process_status = if let Some(handle) = state.qdrant_control.as_ref() {
-        let status = handle.current_status().await;
+    // Get vector process info if subprocess management is available.
+    // The snapshot already carries wire types so this module never names
+    // the backend domain status.
+    let process_status = if let Some((managed, status)) = state.qdrant_status_snapshot().await {
         Some(QdrantProcessInfo {
-            managed: handle.managed,
+            managed,
             running: matches!(status, QdrantProcessStatus::Running),
             status,
         })

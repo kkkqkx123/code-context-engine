@@ -1,28 +1,13 @@
-//! Contract guard: every route constant in `cce-api::paths` is either called
-//! by the client or explicitly declared out of scope.
+//! Contract guard: every route constant in `cce-api::paths` is called by the client.
 //!
 //! The check reads sources instead of a hand-kept table, so adding a route
 //! constant without a client method fails here rather than waiting for a
-//! consumer to notice.
+//! consumer to notice. Console-only log endpoints live in
+//! `cce-server::api::log_paths` and never enter this contract.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// Route constants deliberately absent from the Rust client.
-///
-/// The log-file endpoints exist for the web console only: no Rust consumer
-/// calls them, and their payloads are not modeled in `cce-api`, so exposing
-/// them here would force contract models without a consumer.
-const OUT_OF_SCOPE: &[&str] = &[
-    "LOGS",
-    "LOGS_FILES",
-    "LOGS_FILE_TEMPLATE",
-    "LOGS_FILE_DOWNLOAD_TEMPLATE",
-    "LOGS_ROTATE",
-    "LOGS_CONFIG",
-    "LOGS_WS",
-];
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -79,7 +64,7 @@ fn client_sources() -> String {
 fn every_route_constant_has_a_client_call_site() {
     let constants = route_constants(&paths_source());
     assert!(
-        constants.len() > 60,
+        constants.len() > 50,
         "route constant parsing broke: {} found",
         constants.len()
     );
@@ -87,22 +72,10 @@ fn every_route_constant_has_a_client_call_site() {
     let missing: Vec<&str> = constants
         .iter()
         .map(String::as_str)
-        .filter(|name| !OUT_OF_SCOPE.contains(name))
         .filter(|name| !sources.contains(&format!("paths::{name}")))
         .collect();
     assert!(
         missing.is_empty(),
         "route constants without a client method: {missing:?}"
     );
-}
-
-#[test]
-fn out_of_scope_entries_are_live_constants() {
-    let constants = route_constants(&paths_source());
-    let stale: Vec<&str> = OUT_OF_SCOPE
-        .iter()
-        .copied()
-        .filter(|name| !constants.contains(*name))
-        .collect();
-    assert!(stale.is_empty(), "stale out-of-scope entries: {stale:?}");
 }

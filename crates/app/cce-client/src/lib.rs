@@ -11,7 +11,9 @@
 //!   health caching and scheduling belong to the caller.
 //! - Wire types come from `cce-api`; this crate defines no DTOs of its own, so
 //!   the Rust client, the OpenAPI snapshot and the TypeScript projection stay
-//!   projections of one contract.
+//!   projections of one contract. Schema derives intentionally stay in
+//!   `cce-api`: making this crate the codegen source would duplicate models
+//!   and force the server to depend on client transport for types.
 //! - Local (in-process) execution does not go through this crate.
 
 mod config;

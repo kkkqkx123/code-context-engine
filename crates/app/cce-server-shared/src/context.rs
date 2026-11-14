@@ -17,6 +17,39 @@ use cce_orchestrator::query::RelationSearcher;
 type RelationSearcherEntry = (i64, Arc<RelationSearcher>);
 type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;
 
+/// Convert the backend-owned Qdrant lifecycle state into its wire copy.
+///
+/// Lives in the assembly layer because it is the only crate depending on
+/// both the storage backend and the wire contract.
+#[allow(clippy::needless_pass_by_value)]
+pub fn to_wire_qdrant_status(
+    domain: cce_storage_vector_qdrant::QdrantProcessStatus,
+) -> cce_api::models::QdrantProcessStatus {
+    match domain {
+        cce_storage_vector_qdrant::QdrantProcessStatus::Idle => {
+            cce_api::models::QdrantProcessStatus::Idle
+        }
+        cce_storage_vector_qdrant::QdrantProcessStatus::Starting => {
+            cce_api::models::QdrantProcessStatus::Starting
+        }
+        cce_storage_vector_qdrant::QdrantProcessStatus::Running => {
+            cce_api::models::QdrantProcessStatus::Running
+        }
+        cce_storage_vector_qdrant::QdrantProcessStatus::Stopping => {
+            cce_api::models::QdrantProcessStatus::Stopping
+        }
+        cce_storage_vector_qdrant::QdrantProcessStatus::Crashed => {
+            cce_api::models::QdrantProcessStatus::Crashed
+        }
+        cce_storage_vector_qdrant::QdrantProcessStatus::Stopped => {
+            cce_api::models::QdrantProcessStatus::Stopped
+        }
+        cce_storage_vector_qdrant::QdrantProcessStatus::Failed(message) => {
+            cce_api::models::QdrantProcessStatus::Failed(message)
+        }
+    }
+}
+
 /// Shared application state for HTTP handlers
 #[derive(Clone)]
 pub struct SharedContext {
@@ -52,6 +85,52 @@ impl SharedContext {
             progress_tracker: engine.progress_tracker().clone(),
             qdrant_control: qdrant_handle,
             relation_searcher_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Snapshot the managed Qdrant subprocess as wire types.
+    ///
+    /// Returns the management flag plus the converted status so HTTP handlers
+    /// never name the backend domain type and the server crate needs no
+    /// direct storage dependency.
+    pub async fn qdrant_status_snapshot(
+        &self,
+    ) -> Option<(bool, cce_api::models::QdrantProcessStatus)> {
+        let handle = self.qdrant_control.as_ref()?;
+        let domain = handle.current_status().await;
+        Some((handle.managed, to_wire_qdrant_status(domain)))
+    }
+
+    /// Forward a start command to the managed Qdrant subprocess.
+    pub fn qdrant_start(&self) -> bool {
+        match self.qdrant_control.as_ref() {
+            Some(handle) => {
+                handle.start();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Forward a stop command to the managed Qdrant subprocess.
+    pub fn qdrant_stop(&self) -> bool {
+        match self.qdrant_control.as_ref() {
+            Some(handle) => {
+                handle.stop();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Forward a restart command to the managed Qdrant subprocess.
+    pub fn qdrant_restart(&self) -> bool {
+        match self.qdrant_control.as_ref() {
+            Some(handle) => {
+                handle.restart();
+                true
+            }
+            None => false,
         }
     }
 
