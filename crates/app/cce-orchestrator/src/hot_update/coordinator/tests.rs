@@ -3,11 +3,11 @@
 //! This module contains the main coordinator for managing hot updates.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::hot_update::FileChangeType;
 use cce_config::HotUpdateConfig;
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_common::RelationStorage;
+use cce_storage_metadb::RelationStore;
 
 use super::coordinator_core::HotUpdateCoordinator;
 use crate::hot_update::coordinator::change_merger::coalesce_pending_changes;
@@ -49,136 +49,137 @@ async fn test_change_detection_stats_and_debounce_info() {
 
 // ===== core hot-update logic coverage =====
 
-/// A coordinator whose metadata store is an in-memory SQLite database
+/// A coordinator whose metadata store is an in-memory backend
 /// with the project row present (foreign keys on manifests/chunks).
-fn coordinator_with_store(project_id: i64) -> (HotUpdateCoordinator, Arc<SqliteClient>) {
-    let store = Arc::new(SqliteClient::in_memory().expect("in-memory sqlite"));
-    let conn = store.write_connection().expect("write connection");
-    conn.execute(
-        "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-             VALUES (?1, 'p1', '/', ?2, ?2)",
-        rusqlite::params![project_id, chrono::Utc::now().timestamp()],
-    )
-    .expect("ensure project row");
-    drop(conn);
+async fn coordinator_with_store(project_id: i64) -> (HotUpdateCoordinator, RelationStore) {
+    let store = RelationStore::in_memory().expect("in-memory store");
+    store
+        .ensure_project(project_id, "/")
+        .await
+        .expect("ensure project row");
     let coordinator = HotUpdateCoordinator::new(HotUpdateConfig::default(), project_id)
         .expect("create coordinator")
         .with_metadata_store(store.clone());
     (coordinator, store)
 }
 
-fn insert_chunk_row(conn: &rusqlite::Connection, project_id: i64, epoch: i64, ids: &[i64]) {
-    conn.execute(
-        "INSERT INTO chunks (chunk_id, file_path, content, start_line, end_line,
-                                 entity_ids, entity_names, chunk_type, test_status, test_source,
-                                 created_at, updated_at, project_id, epoch, batch_id, path)
-             VALUES ('c', 'f', 'x', 0, 0, ?1, '[]', 't', 'unknown', 'none',
-                     0, 0, ?2, ?3, 0, 'emb')",
-        rusqlite::params![
-            serde_json::to_string(ids).expect("serialize ids"),
-            project_id,
-            epoch
-        ],
+async fn insert_chunk_row(store: &RelationStore, project_id: i64, epoch: i64, ids: &[i64]) {
+    use cce_storage_common::metadb::ChunkRecord;
+
+    let chunk = ChunkRecord::new(
+        format!("c::{epoch}"),
+        "f".to_string(),
+        "x".to_string(),
+        0,
+        0,
     )
-    .expect("insert chunk row");
+    .with_entity_ids(ids)
+    .with_project_id(project_id)
+    .with_epoch(epoch);
+    store
+        .chunks_upsert(std::slice::from_ref(&chunk))
+        .await
+        .expect("insert chunk row");
 }
 
 /// Insert an active manifest at the given data epoch.
-fn insert_active_manifest(conn: &rusqlite::Connection, project_id: i64, epoch: i64) {
-    conn.execute(
-        "INSERT OR REPLACE INTO project_index_manifests
-             (project_id, publication_epoch, data_epoch, relation_epoch, operation_id,
-              state, input_fingerprint, candidate_ready, created_at)
-             VALUES (?1, ?2, ?2, 0, 'op-active', 'active', NULL, 0, 0)",
-        rusqlite::params![project_id, epoch],
-    )
-    .expect("insert active manifest");
+async fn insert_active_manifest(store: &RelationStore, project_id: i64, epoch: i64) {
+    store
+        .manifest_begin_building(project_id, epoch, "op-active", None)
+        .await
+        .expect("insert building manifest");
+    store
+        .manifest_activate(project_id, epoch, 0, "op-active", None)
+        .await
+        .expect("insert active manifest");
 }
 
 /// Insert a building (candidate) manifest at the given data epoch.
-fn insert_building_manifest(conn: &rusqlite::Connection, project_id: i64, epoch: i64) {
-    conn.execute(
-        "INSERT OR REPLACE INTO project_index_manifests
-             (project_id, publication_epoch, data_epoch, relation_epoch, operation_id,
-              state, input_fingerprint, candidate_ready, created_at)
-             VALUES (?1, ?2, ?2, 0, 'op-building', 'building', NULL, 0, 0)",
-        rusqlite::params![project_id, epoch],
-    )
-    .expect("insert building manifest");
+async fn insert_building_manifest(store: &RelationStore, project_id: i64, epoch: i64) {
+    store
+        .manifest_begin_building(project_id, epoch, "op-building", None)
+        .await
+        .expect("insert building manifest");
 }
 
-#[test]
-fn test_entity_id_seed_empty() {
-    let (coordinator, _store) = coordinator_with_store(1);
+#[tokio::test]
+async fn test_entity_id_seed_empty() {
+    let (coordinator, _store) = coordinator_with_store(1).await;
     // No active/candidate epoch and no chunks: seed falls back to 1.
-    assert_eq!(coordinator.operation.blocking_lock().entity_id_seed(), 1);
+    assert_eq!(coordinator.operation.lock().await.entity_id_seed().await, 1);
 }
 
-#[test]
-fn test_entity_id_seed_with_active() {
-    let (coordinator, store) = coordinator_with_store(1);
-    let conn = store.write_connection().expect("write connection");
-    insert_active_manifest(&conn, 1, 3);
-    insert_chunk_row(&conn, 1, 3, &[10, 20, 30]);
-    drop(conn);
+#[tokio::test]
+async fn test_entity_id_seed_with_active() {
+    let (coordinator, store) = coordinator_with_store(1).await;
+    insert_active_manifest(&store, 1, 3).await;
+    insert_chunk_row(&store, 1, 3, &[10, 20, 30]).await;
 
     // Seed must be one above the maximum raw entity ID of the active epoch.
-    assert_eq!(coordinator.operation.blocking_lock().entity_id_seed(), 31);
+    assert_eq!(
+        coordinator.operation.lock().await.entity_id_seed().await,
+        31
+    );
 }
 
-#[test]
-fn test_entity_id_seed_with_candidate() {
-    let (coordinator, store) = coordinator_with_store(1);
-    let conn = store.write_connection().expect("write connection");
-    insert_active_manifest(&conn, 1, 3);
-    insert_chunk_row(&conn, 1, 3, &[10, 20]);
+#[tokio::test]
+async fn test_entity_id_seed_with_candidate() {
+    let (coordinator, store) = coordinator_with_store(1).await;
+    insert_active_manifest(&store, 1, 3).await;
+    insert_chunk_row(&store, 1, 3, &[10, 20]).await;
     // An interrupted run left a building candidate with higher entity IDs.
-    insert_building_manifest(&conn, 1, 4);
-    insert_chunk_row(&conn, 1, 4, &[100]);
-    drop(conn);
+    insert_building_manifest(&store, 1, 4).await;
+    insert_chunk_row(&store, 1, 4, &[100]).await;
 
     // The seed must cover the candidate epoch's IDs so a resumed re-parse
     // never collides with them.
-    assert_eq!(coordinator.operation.blocking_lock().entity_id_seed(), 101);
+    assert_eq!(
+        coordinator.operation.lock().await.entity_id_seed().await,
+        101
+    );
 }
 
-#[test]
-fn test_entity_id_seed_missing_metadata_store() {
+#[tokio::test]
+async fn test_entity_id_seed_missing_metadata_store() {
     // Without a metadata store the seed falls back to 0.
     let coordinator =
         HotUpdateCoordinator::new(HotUpdateConfig::default(), 1).expect("create coordinator");
-    assert_eq!(coordinator.operation.blocking_lock().entity_id_seed(), 0);
+    assert_eq!(coordinator.operation.lock().await.entity_id_seed().await, 0);
 }
 
-#[test]
-fn test_is_manifest_active_true_false() {
-    let (coordinator, store) = coordinator_with_store(1);
-    let conn = store.write_connection().expect("write connection");
-    insert_active_manifest(&conn, 1, 1);
-    insert_building_manifest(&conn, 1, 2);
-    drop(conn);
+#[tokio::test]
+async fn test_is_manifest_active_true_false() {
+    let (coordinator, store) = coordinator_with_store(1).await;
+    insert_active_manifest(&store, 1, 1).await;
+    insert_building_manifest(&store, 1, 2).await;
 
     assert!(
         coordinator
             .operation
-            .blocking_lock()
+            .lock()
+            .await
             .is_manifest_active("op-active")
+            .await
             .expect("read state"),
         "active state must be recognized"
     );
     assert!(
         !coordinator
             .operation
-            .blocking_lock()
+            .lock()
+            .await
             .is_manifest_active("op-building")
+            .await
             .expect("read state"),
         "building state must not be active"
     );
     assert!(
         !coordinator
             .operation
-            .blocking_lock()
+            .lock()
+            .await
             .is_manifest_active("missing-op")
+            .await
             .expect("read state"),
         "unknown operation must not be active"
     );
@@ -273,7 +274,7 @@ async fn test_compute_watch_change_mapping() {
     std::fs::create_dir_all(changed.parent().expect("parent")).expect("create dir");
     std::fs::write(&changed, "pub fn alpha() -> i32 { 1 }").expect("write file");
 
-    let (mut coordinator, store) = coordinator_with_store(1);
+    let (mut coordinator, store) = coordinator_with_store(1).await;
     coordinator
         .operation
         .lock()
@@ -354,12 +355,8 @@ async fn test_commit_file_hashes_publishes_and_deletes() {
     let deleted = dir.path().join("src/deleted.rs");
     std::fs::write(&deleted, "pub fn gone() {}").expect("write deleted file");
 
-    // A file-backed SQLite so the change-detector cache survives.
-    let db_dir = tempfile::TempDir::new().expect("db temp dir");
-    let store = Arc::new(
-        SqliteClient::with_path(db_dir.path().join("cce.db").to_string_lossy())
-            .expect("file-backed sqlite"),
-    );
+    // An isolated in-memory store so the change-detector view survives.
+    let store = RelationStore::in_memory().expect("in-memory store");
 
     let config = HotUpdateConfig::default();
 
@@ -383,16 +380,7 @@ async fn test_commit_file_hashes_publishes_and_deletes() {
     // Prime a baseline hash for the to-be-deleted file so it behaves like
     // a previously indexed path. `commit_file_hashes` keys rows by the
     // project-relative path, so both arguments must be relative.
-    {
-        let conn = store.write_connection().expect("write connection");
-        conn.execute(
-            "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (1, 'p1', '/', ?1, ?1)",
-            [chrono::Utc::now().timestamp()],
-        )
-        .expect("ensure project");
-        drop(conn);
-    }
+    store.ensure_project(1, "/").await.expect("ensure project");
     let relative = |path: &std::path::Path| {
         path.strip_prefix(dir.path())
             .expect("relative path")
@@ -407,21 +395,14 @@ async fn test_commit_file_hashes_publishes_and_deletes() {
         .expect("commit hashes");
 
     // The published file has a cache row; the deleted file's row is gone.
-    let conn = store.read_connection().expect("read connection");
-    let published_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM files WHERE project_id = 1 AND path = ?1",
-            rusqlite::params![relative(&published).to_string_lossy().to_string()],
-            |row| row.get(0),
-        )
-        .expect("count published hash");
-    assert_eq!(published_count, 1, "published path must be hashed");
-    let deleted_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM files WHERE project_id = 1 AND path = ?1",
-            rusqlite::params![relative(&deleted).to_string_lossy().to_string()],
-            |row| row.get(0),
-        )
-        .expect("count deleted hash");
-    assert_eq!(deleted_count, 0, "deleted path must be removed");
+    let published_hit = store
+        .file_by_path(1, &relative(&published).to_string_lossy())
+        .await
+        .expect("published lookup");
+    assert!(published_hit.is_some(), "published path must be hashed");
+    let deleted_hit = store
+        .file_by_path(1, &relative(&deleted).to_string_lossy())
+        .await
+        .expect("deleted lookup");
+    assert!(deleted_hit.is_none(), "deleted path must be removed");
 }

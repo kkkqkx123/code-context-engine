@@ -16,9 +16,9 @@ use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index_state::{
     ModuleType, ModuleUpdateState, TOKEN_LIMIT_ERROR_CODE, TrackerFailure,
 };
-use cce_storage_metadb_sqlite::{
-    NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
-};
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::EntityRecord;
+use cce_storage_metadb::RelationStore;
 
 /// Success-only stand-in for the OpenAI-compatible `/embeddings` endpoint.
 ///
@@ -224,48 +224,67 @@ async fn truncate_retry_repairs_dead_letter_embedding() {
         .parse("src/lib.rs", content)
         .expect("parse test source");
 
-    let database = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+    let database = RelationStore::in_memory().expect("in-memory store");
     database
-        .with_transaction(|tx| {
-            ProjectRepository::insert(
-                tx,
-                &NewProjectRecord::new("test".to_string(), dir.path().display().to_string()),
-            )?;
-            ProjectIndexManifestRepository::activate(tx, 1, 1, 0, "initial", None)?;
-            tx.execute(
-                "INSERT INTO files
-                    (path, language, last_modified, created_at, project_id, content_hash, epoch, batch_id)
-                 VALUES ('src/lib.rs', 'Rust', 1, 1, 1, ?1, 1, 0)",
-                rusqlite::params![hash],
-            )
-            .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
-            let file_id = tx.last_insert_rowid();
-
-            // Seed the entity records the embedding store path links chunks
-            // to. In a real run they are written before vectors; the store
-            // refuses to link a chunk whose epoch-scoped entity record is
-            // absent, so a repaired file must carry the same precondition as
-            // an interrupted run.
-            for entity in &parsed.entities {
-                tx.execute(
-                    "INSERT INTO entities
-                        (name, kind, file_id, signature, metadata, project_id, epoch, batch_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, 0)",
-                    rusqlite::params![
-                        entity.name,
-                        entity.kind.to_string(),
-                        file_id,
-                        entity.signature,
-                        format!(r#"{{"__source_entity_id":"{}"}}"#, entity.id.0),
-                    ],
-                )
-                .map_err(|error| {
-                    cce_types::StorageError::insert("entities", error.to_string())
-                })?;
-            }
-            Ok(())
-        })
+        .ensure_project(1, &dir.path().display().to_string())
+        .await
+        .expect("project should be ensured");
+    database
+        .manifest_begin_building(1, 1, "initial", None)
+        .await
+        .expect("manifest should be created");
+    database
+        .manifest_activate(1, 1, 0, "initial", None)
+        .await
+        .expect("initial generation should be activated");
+    database
+        .files_record_hashes(1, 1, &[("src/lib.rs".to_string(), hash.clone())])
+        .await
         .expect("initial generation should be created");
+    let file = database
+        .file_by_path(1, "src/lib.rs")
+        .await
+        .expect("file should load")
+        .expect("file should exist");
+    // Seed the entity records the embedding store path links chunks
+    // to. In a real run they are written before vectors; the store
+    // refuses to link a chunk whose epoch-scoped entity record is
+    // absent, so a repaired file must carry the same precondition as
+    // an interrupted run.
+    let records: Vec<EntityRecord> = parsed
+        .entities
+        .iter()
+        .map(|entity| EntityRecord {
+            id: 0,
+            name: entity.name.clone(),
+            kind: entity.kind.to_string(),
+            file_id: file.id,
+            signature: Some(entity.signature.clone()),
+            span_start_row: None,
+            span_end_row: None,
+            span_start_column: None,
+            span_end_column: None,
+            span_start_byte: None,
+            span_end_byte: None,
+            scoped_name: None,
+            overload_discriminator: String::new(),
+            depth: None,
+            parent_id: None,
+            metadata: Some(format!(r#"{{"__source_entity_id":"{}"}}"#, entity.id.0)),
+            parameters_json: None,
+            return_type: None,
+            doc_comment: None,
+            modifiers_json: None,
+            project_id: 1,
+            epoch: 1,
+            batch_id: 0,
+            rank: 0.0,
+        })
+        .collect();
+    database
+        .entities_upsert(&records)
+        .await
+        .expect("entities should seed");
 
     let qdrant_url = spawn_mock_qdrant_url().await;
     let mut orchestrator = IndexOrchestrator::new(1)
@@ -328,14 +347,9 @@ async fn truncate_retry_repairs_dead_letter_embedding() {
     assert!(tracker.get_truncate_retry_candidates().await.is_empty());
 
     // Stored active-generation records carry the truncate marker.
-    let conn = database.read_connection().expect("read connection");
-    let (total, truncated): (i64, i64) = conn
-        .query_row(
-            "SELECT COUNT(*), COALESCE(SUM(truncated), 0) FROM chunks
-             WHERE project_id = 1 AND epoch = 1 AND path = 'emb'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+    let (total, truncated): (i64, i64) = database
+        .chunks_stats(1, 1, "emb")
+        .await
         .expect("chunk counts should be queryable");
     assert!(total > 0, "embedding chunk records should be stored");
     assert!(

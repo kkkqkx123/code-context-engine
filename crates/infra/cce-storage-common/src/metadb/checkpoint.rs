@@ -61,6 +61,65 @@ pub struct WorkUnitCheckpointRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchCheckpointRecord {
+    pub id: Option<i64>,
+    pub operation_id: String,
+    pub batch_index: u32,
+    pub first_file: String,
+    pub last_file: String,
+    pub file_count: u32,
+    pub processed_files: u32,
+    pub failed_files: u32,
+    pub entities_extracted: u32,
+    pub relations_found: u32,
+    pub chunks_generated: u32,
+    pub vectors_stored: u32,
+    pub start_time: String,
+    pub end_time: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Validate an operation checkpoint before recovery.
+///
+/// Pure field check shared by every branch; storage state is validated
+/// separately by the caller.
+///
+/// # Errors
+///
+/// Returns a validation error when the operation id, type, phase, or
+/// timestamps are malformed.
+pub fn validate_checkpoint(checkpoint: &CheckpointRecord) -> Result<(), cce_types::StorageError> {
+    if checkpoint.operation_id.is_empty() {
+        return Err(cce_types::StorageError::validation(
+            "checkpoint operation_id is empty".to_string(),
+        ));
+    }
+    match checkpoint.operation_type.as_str() {
+        "full_index" | "hot_update" | "incremental" => {}
+        _ => {
+            return Err(cce_types::StorageError::validation(format!(
+                "Invalid operation_type: {}",
+                checkpoint.operation_type
+            )));
+        }
+    }
+    if checkpoint.current_phase.is_empty() {
+        return Err(cce_types::StorageError::validation(
+            "checkpoint current_phase is empty".to_string(),
+        ));
+    }
+    chrono::DateTime::parse_from_rfc3339(&checkpoint.created_at).map_err(|e| {
+        cce_types::StorageError::validation(format!("Invalid created_at timestamp: {e}"))
+    })?;
+    chrono::DateTime::parse_from_rfc3339(&checkpoint.updated_at).map_err(|e| {
+        cce_types::StorageError::validation(format!("Invalid updated_at timestamp: {e}"))
+    })?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckpointStatus {

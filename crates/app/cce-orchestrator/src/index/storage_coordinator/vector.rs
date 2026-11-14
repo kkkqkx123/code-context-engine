@@ -5,11 +5,10 @@
 
 use cce_llm::LlmError;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_common::{Payload, VectorPoint};
-use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
-use cce_storage_metadb_sqlite::{
-    ChunkRecord, ChunkRepository, EntityDetailMapping, EntityDetailMappingRepository,
+use cce_storage_common::metadb::{
+    ChunkRecord, EntityDetailMapping, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
+use cce_storage_common::{Payload, RelationStorage, VectorPoint};
 use cce_types::PointKind;
 use cce_types::TestSource;
 use cce_types::ast_to_nl::FileCategory;
@@ -220,7 +219,7 @@ impl StorageCoordinator {
         // Entity ID map is epoch-scoped and immutable for this pass: load it
         // once instead of once per microbatch (each load is a full-table
         // scan plus JSON parse that grows linearly with the microbatch count).
-        let source_entity_ids = self.load_source_entity_ids()?;
+        let source_entity_ids = self.load_source_entity_ids().await?;
 
         for (batch_idx, (batch, hash)) in pending_batches.iter().enumerate() {
             // Prepare texts for this batch
@@ -390,7 +389,8 @@ impl StorageCoordinator {
 
         // Store chunk records and entity mappings in one transaction.
         if !chunk_records.is_empty() || !entity_mappings.is_empty() {
-            self.store_chunks_and_mappings(&chunk_records, &entity_mappings)?;
+            self.store_chunks_and_mappings(&chunk_records, &entity_mappings)
+                .await?;
         }
 
         Ok(stored)
@@ -407,7 +407,7 @@ impl StorageCoordinator {
         if chunks.is_empty() {
             return Ok(0);
         }
-        let source_entity_ids = self.load_source_entity_ids()?;
+        let source_entity_ids = self.load_source_entity_ids().await?;
         let embeddings = cce_llm::EmbeddingResult {
             embeddings: vec![Vec::new(); chunks.len()],
             prompt_tokens: 0,
@@ -418,7 +418,8 @@ impl StorageCoordinator {
             .await?;
         // No vector backend: points are dropped, never upserted.
         let _ = points;
-        self.store_chunks_and_mappings(&chunk_records, &entity_mappings)?;
+        self.store_chunks_and_mappings(&chunk_records, &entity_mappings)
+            .await?;
         Ok(chunk_records.len())
     }
 
@@ -532,40 +533,20 @@ impl StorageCoordinator {
         Ok((points, chunk_records, entity_mappings))
     }
 
-    pub(crate) fn load_source_entity_ids(
+    pub(crate) async fn load_source_entity_ids(
         &self,
     ) -> Result<std::collections::HashMap<(String, i64), i64>, OrchestratorError> {
         let mut result = std::collections::HashMap::new();
-        let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) else {
+        let Some(store) = self.metadata_store.as_ref() else {
             return Ok(result);
         };
-        let conn = client
-            .write_connection()
+        let rows = store
+            .entities_with_files(self.project_id, self.epoch())
+            .await
             .map_err(OrchestratorError::Storage)?;
-        let mut statement = conn
-            .prepare(
-                "SELECT f.path, e.metadata, e.id
-                 FROM entities e JOIN files f ON f.id = e.file_id
-                 WHERE e.project_id = ?1 AND e.epoch = ?2",
-            )
-            .map_err(|error| {
-                OrchestratorError::Storage(cce_types::StorageError::query(error.to_string()))
-            })?;
-        let rows = statement
-            .query_map(rusqlite::params![self.project_id, self.epoch()], |row| {
-                let path: String = row.get(0)?;
-                let metadata: Option<String> = row.get(1)?;
-                let db_id: i64 = row.get(2)?;
-                Ok((path, metadata, db_id))
-            })
-            .map_err(|error| {
-                OrchestratorError::Storage(cce_types::StorageError::query(error.to_string()))
-            })?;
         let mut malformed = 0usize;
-        for row in rows {
-            let (path, metadata, db_id) = row.map_err(|error| {
-                OrchestratorError::Storage(cce_types::StorageError::query(error.to_string()))
-            })?;
+        for entry in rows {
+            let (path, metadata, db_id) = (entry.file_path, entry.entity.metadata, entry.entity.id);
             // Every stored entity carries `__source_entity_id` in its
             // metadata; a row without a parseable one is malformed and its
             // entity -> vector link will miss in the mapping lookup.
@@ -599,15 +580,17 @@ impl StorageCoordinator {
         Ok(result)
     }
 
-    /// Store chunk records in SQLite
-    pub(crate) fn store_chunk_records(
+    /// Store chunk records in the relation store
+    pub(crate) async fn store_chunk_records(
         &self,
         chunks: &[ChunkRecord],
     ) -> Result<(), OrchestratorError> {
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| ChunkRepository::insert_batch(tx, chunks));
-
-            result.map_err(OrchestratorError::Storage)?;
+        if let Some(store) = self.metadata_store.as_ref() {
+            store
+                .chunks_upsert(chunks)
+                .await
+                .map(|_| ())
+                .map_err(OrchestratorError::Storage)?;
         }
         Ok(())
     }
@@ -617,30 +600,24 @@ impl StorageCoordinator {
     /// The embedding and BM25 persist paths write both tables per
     /// microbatch; sharing one transaction halves the per-microbatch
     /// transaction count.
-    pub(crate) fn store_chunks_and_mappings(
+    pub(crate) async fn store_chunks_and_mappings(
         &self,
         chunks: &[ChunkRecord],
         mappings: &[EntityDetailMapping],
     ) -> Result<(), OrchestratorError> {
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                if !chunks.is_empty() {
-                    ChunkRepository::insert_batch(tx, chunks)?;
-                }
-                for mapping in mappings {
-                    EntityDetailMappingRepository::upsert(tx, mapping)?;
-                }
-                Ok(())
-            });
-
-            result.map_err(OrchestratorError::Storage)?;
+        if let Some(store) = self.metadata_store.as_ref() {
+            store
+                .chunks_and_mappings_upsert(chunks, mappings)
+                .await
+                .map(|_| ())
+                .map_err(OrchestratorError::Storage)?;
         }
         Ok(())
     }
 
-    /// Store only embedding-path chunk records to SQLite without requiring
-    /// an embedder or Qdrant. Used by benchmark data generation.
-    pub fn store_chunk_records_only(
+    /// Store only embedding-path chunk records to the relation store without
+    /// requiring an embedder or Qdrant. Used by benchmark data generation.
+    pub async fn store_chunk_records_only(
         &self,
         chunks: &[ChunkedResult],
     ) -> Result<(), OrchestratorError> {
@@ -659,7 +636,7 @@ impl StorageCoordinator {
             .collect();
 
         let chunk_records = chunk_records?;
-        self.store_chunk_records(&chunk_records)?;
+        self.store_chunk_records(&chunk_records).await?;
         Ok(())
     }
 
@@ -835,7 +812,7 @@ mod tests {
     use cce_parser::ast_to_nl::chunker::{
         ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata,
     };
-    use cce_storage_metadb_sqlite::ChunkRecord;
+    use cce_storage_common::metadb::ChunkRecord;
     use cce_types::ast_to_nl::FileCategory;
     use cce_types::entity::{EntityId, EntityKind};
     use cce_types::{Language, Span};

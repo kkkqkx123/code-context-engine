@@ -5,10 +5,7 @@
 //! here exactly once: project config merge, expansion resolver injection,
 //! coordinator assembly, execution, DTO conversion, and relation stamping.
 
-use std::sync::Arc;
-
 use cce_api::models::{ContentStateDto, SearchResultItem};
-use cce_codegraph::CallChainQuery;
 use cce_config::modules::search::RelationAnnotationConfig;
 use cce_orchestrator::SearchResult as OrchestratorResultItem;
 use cce_orchestrator::query::expansion::{ExpansionPathFilter, NeighbourResolver, stable_id_of};
@@ -17,8 +14,8 @@ use cce_orchestrator::query::types::{
     SearchSources,
 };
 use cce_orchestrator::query::{
-    AggregatedQueryOptions, FilterOptions, IndexCapabilities, QueryCoordinator, QueryIntent,
-    QueryOptions, RelationSearcher, SubQuery,
+    AggregatedQueryOptions, FilterOptions, QueryCoordinator, QueryIntent, QueryOptions,
+    RelationSearcher, SubQuery,
 };
 use cce_types::FileCategory;
 
@@ -493,59 +490,22 @@ impl<'a> SearchService<'a> {
     }
 
     /// Assemble the per-request query coordinator from engine components.
+    ///
+    /// Delegates to the engine's single query-assembly entry point so the
+    /// shared query service and every other engine entry observe identical
+    /// capability checks, caches, retry handling, and metrics.
     async fn build_coordinator(
         &self,
         project_id: i64,
-        entry: &cce_config::project_registry::ProjectEntry,
+        _entry: &cce_config::project_registry::ProjectEntry,
     ) -> Result<QueryCoordinator, SearchServiceError> {
-        let searcher = self
-            .state
+        self.state
             .engine
-            .get_searcher(project_id)
+            .build_query_coordinator(project_id)
             .await
             .map_err(|error| {
-                SearchServiceError::Execution(format!("Failed to get searcher: {error}"))
-            })?;
-        let relation_searcher = self
-            .state
-            .get_relation_searcher(project_id)
-            .await
-            .unwrap_or_else(|_| Arc::new(RelationSearcher::new(Arc::new(CallChainQuery::new()))));
-        let searcher = searcher.lock().await.clone();
-        // Expose the relation propagation configuration as a capability so
-        // query-side consumers can detect when call chains may lack
-        // cross-file edges. The relation config is the authoritative source
-        // for the propagation depth; the indexer-derived caps report
-        // unlimited (0) and must not override a finite configured depth.
-        let capabilities = IndexCapabilities::from(&entry.config.orchestrator.indexer)
-            .merge(&IndexCapabilities::from(&entry.config.relation))
-            .with_relation_propagation_depth(entry.config.relation.max_propagation_depth);
-        let mut coordinator = QueryCoordinator::with_capabilities(
-            Arc::new(searcher),
-            relation_searcher,
-            capabilities,
-            project_id,
-        )
-        .with_metrics(cce_metrics::QueryMetrics::new(
-            self.state.engine.metrics_registry(),
-            project_id,
-        ))
-        // The cache MUST be shared across requests: a fresh coordinator per
-        // request with a fresh cache always starts empty, so identical
-        // queries re-run the embedding pipeline and queue behind the shared
-        // LLM rate limiter. The clone shares the underlying store.
-        .with_shared_cache(self.state.engine.get_query_cache(project_id).await)
-        // The retry queue MUST be shared as well: the default per-coordinator
-        // queue is throwaway and would drop retryable failures with the
-        // coordinator. Sharing the engine-owned per-project queue keeps
-        // live queries and the background retry processor on one path.
-        .with_retry_queue(self.state.engine.get_retry_queue(project_id).await);
-        if let Some(store) = self.state.engine.relation_store() {
-            if let Ok(project_store) = store.for_project(project_id) {
-                coordinator = coordinator.with_relation_store(project_store);
-            }
-        }
-        Ok(coordinator)
+                SearchServiceError::Execution(format!("Failed to build coordinator: {error}"))
+            })
     }
 
     /// Convert orchestrator hits to API items, stamping stable symbol IDs

@@ -6,11 +6,11 @@
 //! - Querying checkpoint states
 //! - Recovery support
 
-use cce_storage_metadb_sqlite::CheckpointRepository;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::types::{
+use crate::index::vector_store::RelationStore;
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::{
     BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, FileCheckpointRecord,
-    WorkUnitCheckpointRecord, WorkUnitStatus,
+    WorkUnitCheckpointRecord, WorkUnitStatus, validate_checkpoint,
 };
 use cce_types::{OperationKind, StorageError};
 use chrono::Utc;
@@ -37,8 +37,8 @@ pub use payload::{
 pub struct CheckpointManager {
     /// Project ID for multi-project support: 0 for global project, >0 for user projects
     project_id: i64,
-    /// SQLite database for checkpoint persistence
-    db: Arc<SqliteClient>,
+    /// Relation backend for checkpoint persistence
+    db: RelationStore,
     /// Manager for file difference tracking
     file_diff_manager: Arc<FileDiffManager>,
 }
@@ -55,7 +55,7 @@ pub struct CreateCheckpointParams<'a> {
 
 impl CheckpointManager {
     /// Create a checkpoint manager for a specific project (project_id must be > 0)
-    pub fn new_for_project(project_id: i64, db: Arc<SqliteClient>) -> Self {
+    pub fn new_for_project(project_id: i64, db: RelationStore) -> Self {
         assert!(
             project_id > 0,
             "project_id must be > 0 for explicit project"
@@ -79,12 +79,12 @@ impl CheckpointManager {
         self.project_id
     }
 
-    /// Return the shared SQLite database used by checkpoints.
+    /// Return the shared relation backend used by checkpoints.
     ///
     /// File-level progress uses the same durable store so a recovered
     /// operation cannot observe a different state projection from its
     /// operation checkpoint.
-    pub fn database(&self) -> Arc<SqliteClient> {
+    pub fn database(&self) -> RelationStore {
         self.db.clone()
     }
 
@@ -122,15 +122,9 @@ impl CheckpointManager {
             failed_at: None,
         };
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        CheckpointRepository::create_checkpoint(&tx, self.project_id, &checkpoint)?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
+        self.db
+            .checkpoint_create(self.project_id, &checkpoint)
+            .await?;
 
         trace!(
             operation_id = %params.operation_id,
@@ -171,15 +165,9 @@ impl CheckpointManager {
             updated_at: chrono::Utc::now().to_rfc3339(),
         };
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        CheckpointRepository::insert_batch_checkpoint(&tx, self.project_id, &batch)?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
+        self.db
+            .checkpoint_batch_create(self.project_id, &batch)
+            .await?;
 
         trace!(
             operation_id = %operation_id,
@@ -240,15 +228,9 @@ impl CheckpointManager {
             "Saving file checkpoint"
         );
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        CheckpointRepository::upsert_file_checkpoint(&tx, self.project_id, file_checkpoint)?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
+        self.db
+            .file_checkpoint_upsert(self.project_id, file_checkpoint)
+            .await?;
 
         trace!(
             file_path = %file_checkpoint.file_path,
@@ -264,8 +246,9 @@ impl CheckpointManager {
         operation_id: &str,
         file_path: &str,
     ) -> Result<Option<FileCheckpointRecord>, StorageError> {
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_file_checkpoint(&conn, self.project_id, operation_id, file_path)
+        self.db
+            .file_checkpoint_get(self.project_id, operation_id, file_path)
+            .await
     }
 
     /// Get a checkpoint by operation ID
@@ -278,8 +261,7 @@ impl CheckpointManager {
             "Retrieving checkpoint"
         );
 
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_checkpoint(&conn, self.project_id, operation_id)
+        self.db.checkpoint_get(self.project_id, operation_id).await
     }
 
     /// Get all files in a batch
@@ -294,8 +276,9 @@ impl CheckpointManager {
             "Retrieving batch files"
         );
 
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_batch_files(&conn, self.project_id, operation_id, batch_index)
+        self.db
+            .checkpoint_batch_files(self.project_id, operation_id, batch_index)
+            .await
     }
 
     /// Get the batch checkpoint record of a specific batch.
@@ -308,13 +291,9 @@ impl CheckpointManager {
         operation_id: &str,
         batch_index: u32,
     ) -> Result<Option<BatchCheckpointRecord>, StorageError> {
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_batch_checkpoint(
-            &conn,
-            self.project_id,
-            operation_id,
-            batch_index,
-        )
+        self.db
+            .checkpoint_batch_get(self.project_id, operation_id, batch_index)
+            .await
     }
 
     /// Get failed files in an operation
@@ -327,8 +306,9 @@ impl CheckpointManager {
             "Retrieving failed files"
         );
 
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_failed_files(&conn, self.project_id, operation_id)
+        self.db
+            .checkpoint_failed_files(self.project_id, operation_id)
+            .await
     }
 
     /// Update checkpoint status
@@ -343,17 +323,9 @@ impl CheckpointManager {
             "Updating checkpoint status"
         );
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        CheckpointRepository::update_checkpoint_status(&tx, self.project_id, operation_id, status)?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
+        self.db
+            .checkpoint_set_status(self.project_id, operation_id, status)
+            .await
     }
 
     /// Update current batch index
@@ -368,22 +340,9 @@ impl CheckpointManager {
             "Updating current batch index"
         );
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        CheckpointRepository::update_current_batch_index(
-            &tx,
-            self.project_id,
-            operation_id,
-            batch_index,
-        )?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
+        self.db
+            .checkpoint_set_batch_index(self.project_id, operation_id, batch_index)
+            .await
     }
 
     /// Validate and recover from checkpoint
@@ -397,17 +356,13 @@ impl CheckpointManager {
         operation_type: OperationKind,
         root_dir: &str,
     ) -> Result<Option<CheckpointRecord>, StorageError> {
-        let conn = self.db.read_connection()?;
-
-        let checkpoint = CheckpointRepository::get_latest_incomplete_by_type(
-            &conn,
-            self.project_id,
-            operation_type.as_str(),
-            root_dir,
-        )?;
+        let checkpoint = self
+            .db
+            .checkpoint_latest_incomplete(self.project_id, operation_type.as_str(), root_dir)
+            .await?;
 
         if let Some(checkpoint) = checkpoint {
-            CheckpointRepository::validate_checkpoint(&checkpoint)?;
+            validate_checkpoint(&checkpoint)?;
             info!(
                 requested_operation_id = %operation_id,
                 recovered_operation_id = %checkpoint.operation_id,
@@ -431,19 +386,17 @@ impl CheckpointManager {
             "Marking operation checkpoint as completed"
         );
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
         // Get current checkpoint
-        let checkpoint = CheckpointRepository::get_checkpoint(&tx, self.project_id, operation_id)?;
+        let checkpoint = self
+            .db
+            .checkpoint_get(self.project_id, operation_id)
+            .await?;
 
         if let Some(mut cp) = checkpoint {
             cp.status = CheckpointStatus::Completed;
             cp.updated_at = Utc::now().to_rfc3339();
 
-            CheckpointRepository::update_checkpoint(&tx, self.project_id, &cp)?;
+            self.db.checkpoint_update(self.project_id, &cp).await?;
 
             trace!(
                 operation_id = %operation_id,
@@ -455,9 +408,6 @@ impl CheckpointManager {
                 "No checkpoint found for operation, skipping completion mark"
             );
         }
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
 
         Ok(())
     }
@@ -477,13 +427,11 @@ impl CheckpointManager {
             "Marking operation checkpoint as failed"
         );
 
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
         // Get current checkpoint
-        let checkpoint = CheckpointRepository::get_checkpoint(&tx, self.project_id, operation_id)?;
+        let checkpoint = self
+            .db
+            .checkpoint_get(self.project_id, operation_id)
+            .await?;
 
         if let Some(mut cp) = checkpoint {
             cp.status = CheckpointStatus::Failed;
@@ -494,7 +442,7 @@ impl CheckpointManager {
             // operation again.
             cp.active_flag = false;
 
-            CheckpointRepository::update_checkpoint(&tx, self.project_id, &cp)?;
+            self.db.checkpoint_update(self.project_id, &cp).await?;
 
             trace!(
                 operation_id = %operation_id,
@@ -507,9 +455,6 @@ impl CheckpointManager {
             );
         }
 
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
-
         Ok(())
     }
 
@@ -518,12 +463,9 @@ impl CheckpointManager {
         &self,
         operation_id: &str,
     ) -> Result<usize, StorageError> {
-        let conn = self.db.write_connection()?;
-        CheckpointRepository::delete_checkpoint_files_by_operation_id(
-            &conn,
-            self.project_id,
-            operation_id,
-        )
+        self.db
+            .checkpoint_files_delete_by_operation(self.project_id, operation_id)
+            .await
     }
 
     /// Delete all checkpoint batches for an operation
@@ -531,12 +473,9 @@ impl CheckpointManager {
         &self,
         operation_id: &str,
     ) -> Result<usize, StorageError> {
-        let conn = self.db.write_connection()?;
-        CheckpointRepository::delete_checkpoint_batches_by_operation_id(
-            &conn,
-            self.project_id,
-            operation_id,
-        )
+        self.db
+            .checkpoint_batches_delete_by_operation(self.project_id, operation_id)
+            .await
     }
 
     /// Delete all work unit checkpoints for an operation
@@ -544,20 +483,16 @@ impl CheckpointManager {
         &self,
         operation_id: &str,
     ) -> Result<usize, StorageError> {
-        let conn = self.db.write_connection()?;
-        CheckpointRepository::delete_work_units_by_operation_id(
-            &conn,
-            self.project_id,
-            operation_id,
-        )
+        self.db
+            .work_units_delete_by_operation(self.project_id, operation_id)
+            .await
     }
 
     /// Get all unfinished operations for recovery
     pub async fn get_unfinished_operations(&self) -> Result<Vec<CheckpointRecord>, StorageError> {
         debug!("Retrieving unfinished operations for recovery");
 
-        let conn = self.db.read_connection()?;
-        let operations = CheckpointRepository::get_unfinished_operations(&conn, self.project_id)?;
+        let operations = self.db.checkpoints_unfinished(self.project_id).await?;
 
         info!(
             unfinished_count = operations.len(),
@@ -575,8 +510,9 @@ impl CheckpointManager {
     /// must clear them so all modules re-execute against the fresh clone;
     /// a successful adoption keeps them and skips already-completed modules.
     pub async fn clear_module_progress(&self, operation_id: &str) -> Result<usize, StorageError> {
-        let conn = self.db.write_connection()?;
-        CheckpointRepository::clear_module_progress(&conn, self.project_id, operation_id)
+        self.db
+            .file_checkpoints_clear_module_progress(self.project_id, operation_id)
+            .await
     }
 
     // ---------------------------------------------------------------------------
@@ -594,17 +530,7 @@ impl CheckpointManager {
                 self.project_id, record.project_id
             )));
         }
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        let id = CheckpointRepository::insert_work_unit(&tx, record)?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(id)
+        self.db.work_unit_insert(record).await
     }
 
     /// Insert a batch of work unit checkpoints in a single transaction.
@@ -626,19 +552,7 @@ impl CheckpointManager {
                 )));
             }
         }
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        for record in records {
-            CheckpointRepository::insert_work_unit(&tx, record)?;
-        }
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
+        self.db.work_units_insert_batch(records).await.map(|_| ())
     }
 
     /// Update work unit status
@@ -649,24 +563,9 @@ impl CheckpointManager {
         work_unit_hash: &str,
         status: WorkUnitStatus,
     ) -> Result<(), StorageError> {
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
-        CheckpointRepository::update_work_unit_status(
-            &tx,
-            self.project_id,
-            operation_id,
-            stage,
-            work_unit_hash,
-            status,
-        )?;
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
+        self.db
+            .work_unit_set_status(self.project_id, operation_id, stage, work_unit_hash, status)
+            .await
     }
 
     /// Mark a batch of work units as committed in a single transaction.
@@ -684,24 +583,11 @@ impl CheckpointManager {
         if work_unit_hashes.is_empty() {
             return Ok(());
         }
-        let mut conn = self.db.write_connection()?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
-
         for hash in work_unit_hashes {
-            CheckpointRepository::update_work_unit_status(
-                &tx,
-                self.project_id,
-                operation_id,
-                stage,
-                hash,
-                status,
-            )?;
+            self.db
+                .work_unit_set_status(self.project_id, operation_id, stage, hash, status)
+                .await?;
         }
-
-        tx.commit()
-            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
 
         Ok(())
     }
@@ -712,8 +598,9 @@ impl CheckpointManager {
         operation_id: &str,
         stage: &str,
     ) -> Result<Vec<WorkUnitCheckpointRecord>, StorageError> {
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_work_units(&conn, self.project_id, operation_id, stage)
+        self.db
+            .work_units_list(self.project_id, operation_id, stage)
+            .await
     }
 
     /// Get a specific work unit by hash
@@ -723,14 +610,9 @@ impl CheckpointManager {
         stage: &str,
         work_unit_hash: &str,
     ) -> Result<Option<WorkUnitCheckpointRecord>, StorageError> {
-        let conn = self.db.read_connection()?;
-        CheckpointRepository::get_work_unit_by_hash(
-            &conn,
-            self.project_id,
-            operation_id,
-            stage,
-            work_unit_hash,
-        )
+        self.db
+            .work_unit_by_hash(self.project_id, operation_id, stage, work_unit_hash)
+            .await
     }
 }
 
@@ -775,7 +657,7 @@ mod tests {
             ParsedCheckpointPayload, decode_parsed_checkpoint, encode_parsed_checkpoint,
         };
 
-        let db = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let db = RelationStore::in_memory().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db);
         let operation_id = "op-summary-attach";
 
@@ -851,7 +733,7 @@ mod tests {
     /// later `read_module_progress` return an empty map.
     #[tokio::test]
     async fn clear_module_progress_empties_reads() {
-        let db = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let db = RelationStore::in_memory().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db);
         let operation_id = "op-with-progress";
 
@@ -918,7 +800,7 @@ mod tests {
     /// Clearing module progress leaves unrelated operations untouched.
     #[tokio::test]
     async fn clear_module_progress_is_operation_scoped() {
-        let db = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let db = RelationStore::in_memory().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db.clone());
 
         for (operation_id, marker) in [("op-a", "fp-a"), ("op-b", "fp-b")] {
@@ -973,24 +855,18 @@ mod tests {
     /// unfinished checkpoint of a full-index operation or of another root.
     #[tokio::test]
     async fn validate_and_recover_checkpoint_filters_type_and_root() {
-        let db = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let db = RelationStore::in_memory().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db.clone());
 
-        {
-            let mut conn = db.write_connection().expect("write connection");
-            let tx = conn
-                .transaction()
-                .expect("start transaction for checkpoint inserts");
-            for checkpoint in [
-                make_operation_checkpoint("hot-root-a", "hot_update", "/root/a"),
-                make_operation_checkpoint("full-root-a", "full_index", "/root/a"),
-                make_operation_checkpoint("hot-root-b", "hot_update", "/root/b"),
-                make_operation_checkpoint("done-hot", "hot_update", "/root/a"),
-            ] {
-                CheckpointRepository::create_checkpoint(&tx, 1, &checkpoint)
-                    .expect("checkpoint inserted");
-            }
-            tx.commit().expect("checkpoint inserts committed");
+        for checkpoint in [
+            make_operation_checkpoint("hot-root-a", "hot_update", "/root/a"),
+            make_operation_checkpoint("full-root-a", "full_index", "/root/a"),
+            make_operation_checkpoint("hot-root-b", "hot_update", "/root/b"),
+            make_operation_checkpoint("done-hot", "hot_update", "/root/a"),
+        ] {
+            db.checkpoint_create(1, &checkpoint)
+                .await
+                .expect("checkpoint inserted");
         }
 
         let mut done = manager
@@ -1040,7 +916,7 @@ mod tests {
     /// scoping, and the bulk Running-to-Committed transition.
     #[tokio::test]
     async fn work_unit_batch_interfaces_cover_empty_scoping_and_commit() {
-        let db = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let db = RelationStore::in_memory().expect("in-memory store");
         let manager = CheckpointManager::new_for_project(1, db);
         let operation_id = "op-work-unit-batch";
         let stage = "embedding_generation";

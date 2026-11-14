@@ -10,11 +10,9 @@ use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_orchestrator::index::{
     RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
 };
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::repo::{ProjectIndexManifestRepository, RelationSnapshotRepository};
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
+use cce_storage_metadb::RelationStore;
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
-use rusqlite::OptionalExtension;
 use tokio::sync::Mutex;
 
 use super::{RelationRuntime, SnapshotIntegrity};
@@ -40,17 +38,17 @@ impl Default for CompactionConfig {
 /// Publishes SQLite's canonical relation epoch and its process-local runtime
 /// projection as one serialized operation.
 pub struct ServerRelationSnapshotPublisher {
-    sqlite: SqliteClient,
+    store: RelationStore,
     runtime: Arc<RelationRuntime>,
     writer: ResolutionPipelineService,
     publish_lock: Arc<Mutex<()>>,
 }
 
 impl ServerRelationSnapshotPublisher {
-    pub fn new(sqlite: SqliteClient, runtime: Arc<RelationRuntime>) -> Self {
+    pub fn new(store: RelationStore, runtime: Arc<RelationRuntime>) -> Self {
         Self {
-            writer: ResolutionPipelineService::new_local(sqlite.clone()),
-            sqlite,
+            writer: ResolutionPipelineService::new(store.clone()),
+            store,
             publish_lock: runtime.publication_lock(),
             runtime,
         }
@@ -159,10 +157,11 @@ impl ServerRelationSnapshotPublisher {
         result
     }
 
-    fn mark_candidate_failed(&self, project_id: i64, epoch: i64, error: &StorageError) {
+    async fn mark_candidate_failed(&self, project_id: i64, epoch: i64, error: &StorageError) {
         if let Err(mark_error) = self
             .writer
             .mark_failed(project_id, epoch, &error.to_string())
+            .await
         {
             tracing::warn!(
                 project_id,
@@ -173,22 +172,15 @@ impl ServerRelationSnapshotPublisher {
         }
     }
 
-    pub(crate) fn has_project_publication_candidate(
+    pub(crate) async fn has_project_publication_candidate(
         &self,
         project_id: i64,
     ) -> Result<bool, StorageError> {
-        let conn = self.sqlite.read_connection()?;
-        let exists: Option<i64> = conn
-            .query_row(
-                "SELECT 1 FROM project_index_manifests
-                WHERE project_id = ?1 AND state = 'building'
-                 LIMIT 1",
-                rusqlite::params![project_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| StorageError::Query(error.to_string()))?;
-        Ok(exists.is_some())
+        Ok(self
+            .store
+            .manifest_building_max_epoch(project_id)
+            .await?
+            .is_some())
     }
 
     /// Resolve the current data generation epoch, preferring the durable
@@ -197,21 +189,19 @@ impl ServerRelationSnapshotPublisher {
     /// A missing manifest with a missing legacy meta row is the legitimate
     /// default 0 (never published); real DB failures are propagated instead
     /// of being silently downgraded.
-    fn active_data_epoch(&self, project_id: i64) -> Result<i64, StorageError> {
-        let manifest = self
-            .sqlite
-            .with_transaction(|tx| ProjectIndexManifestRepository::get_active(tx, project_id))?;
-        match manifest {
-            Some(manifest) => Ok(manifest.data_epoch),
-            None => self
-                .sqlite
-                .project_meta_get_int_optional(project_id, "active_epoch")
-                .map(|value| value.unwrap_or(0)),
+    async fn active_data_epoch(&self, project_id: i64) -> Result<i64, StorageError> {
+        if let Some(manifest) = self.store.manifest_active(project_id).await? {
+            return Ok(manifest.data_epoch);
         }
+        Ok(self
+            .store
+            .project_meta_get_int_optional(project_id, "active_epoch")
+            .await?
+            .unwrap_or(0))
     }
 
     /// Check whether the delta chain for a project exceeds compaction thresholds.
-    pub fn needs_compaction(
+    pub async fn needs_compaction(
         &self,
         project_id: i64,
         config: &CompactionConfig,
@@ -222,16 +212,17 @@ impl ServerRelationSnapshotPublisher {
             ));
         }
         let active_epoch = self
-            .sqlite
+            .store
             .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
             .map_err(|error| StorageError::Query(error.to_string()))?;
         if active_epoch <= 0 {
             return Ok(false);
         }
-        let conn = self.sqlite.read_connection()?;
-        let (chain_len, cumul_size, base_size) =
-            RelationSnapshotRepository::get_delta_chain_info(&conn, project_id, active_epoch)?;
-        drop(conn);
+        let (chain_len, cumul_size, base_size) = self
+            .store
+            .snapshot_delta_chain_info(project_id, active_epoch)
+            .await?;
 
         if chain_len == 0 {
             return Ok(false);
@@ -254,8 +245,9 @@ impl ServerRelationSnapshotPublisher {
         let _guard = self.publish_lock.lock().await;
 
         let active_epoch = self
-            .sqlite
+            .store
             .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
             .map_err(|error| {
                 StorageError::Validation(format!("cannot read active epoch: {error}"))
             })?;
@@ -267,12 +259,8 @@ impl ServerRelationSnapshotPublisher {
 
         self.runtime.set_updating().await;
 
-        // Load current full state (base + deltas) from SQLite
-        let full_index = match RelationSnapshotLoader::load(
-            &SqliteSnapshotStore::new(self.sqlite.clone()),
-            project_id,
-            active_epoch,
-        ) {
+        // Load current full state (base + deltas) through the relation contract
+        let full_index = match RelationSnapshotLoader::load(&self.store, project_id, active_epoch) {
             Ok(index) => index,
             Err(error) => {
                 self.runtime.report_failure(error.to_string()).await;
@@ -283,10 +271,9 @@ impl ServerRelationSnapshotPublisher {
         // Export as full canonical snapshot
         let config_fingerprint = {
             let manifest = self
-                .sqlite
-                .with_transaction(|tx| {
-                    RelationSnapshotRepository::get_manifest(tx, project_id, active_epoch)
-                })
+                .store
+                .snapshot_manifest(project_id, active_epoch)
+                .await
                 .map_err(|error| {
                     StorageError::Validation(format!("cannot read manifest: {error}"))
                 })?
@@ -313,6 +300,7 @@ impl ServerRelationSnapshotPublisher {
         let epoch = match self
             .writer
             .allocate_and_write(project_id, operation_id, &snapshot)
+            .await
         {
             Ok(epoch) => epoch,
             Err(error) => {
@@ -321,29 +309,22 @@ impl ServerRelationSnapshotPublisher {
             }
         };
 
-        let data_epoch = self.active_data_epoch(project_id)?;
-        if let Err(error) = self.sqlite.with_transaction(|tx| {
-            ProjectIndexManifestRepository::activate(
-                tx,
-                project_id,
-                data_epoch,
-                epoch,
-                operation_id,
-                None,
-            )
-            .map(|_| ())
-        }) {
-            self.mark_candidate_failed(project_id, epoch, &error);
+        let data_epoch = self.active_data_epoch(project_id).await?;
+        if let Err(error) = self
+            .store
+            .manifest_activate(project_id, data_epoch, epoch, operation_id, None)
+            .await
+        {
+            self.mark_candidate_failed(project_id, epoch, &error).await;
             self.runtime.report_failure(error.to_string()).await;
             return Err(error);
         }
 
         // GC old delta chain
         let _gc_count = self
-            .sqlite
-            .with_transaction(|tx| {
-                RelationSnapshotRepository::delete_manifests_except(tx, project_id, epoch)
-            })
+            .store
+            .snapshot_delete_manifests_except(project_id, epoch)
+            .await
             .unwrap_or(0);
 
         // Publish to runtime as base-only snapshot (no delta). The merged
@@ -389,8 +370,9 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         // each other.
         if let Some(base_epoch) = snapshot.base_relation_epoch {
             let active_epoch = self
-                .sqlite
+                .store
                 .project_meta_get_int(project_id, "active_relation_epoch")
+                .await
                 .map_err(|error| {
                     StorageError::Validation(format!("cannot read active epoch for CAS: {error}"))
                 })?;
@@ -419,6 +401,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         let epoch = match self
             .writer
             .allocate_and_write(project_id, operation_id, &snapshot)
+            .await
         {
             Ok(epoch) => epoch,
             Err(error) => {
@@ -427,21 +410,15 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             }
         };
 
-        let project_candidate = self.has_project_publication_candidate(project_id)?;
+        let project_candidate = self.has_project_publication_candidate(project_id).await?;
         if !project_candidate {
-            let data_epoch = self.active_data_epoch(project_id)?;
-            if let Err(error) = self.sqlite.with_transaction(|tx| {
-                ProjectIndexManifestRepository::activate(
-                    tx,
-                    project_id,
-                    data_epoch,
-                    epoch,
-                    operation_id,
-                    None,
-                )
-                .map(|_| ())
-            }) {
-                self.mark_candidate_failed(project_id, epoch, &error);
+            let data_epoch = self.active_data_epoch(project_id).await?;
+            if let Err(error) = self
+                .store
+                .manifest_activate(project_id, data_epoch, epoch, operation_id, None)
+                .await
+            {
+                self.mark_candidate_failed(project_id, epoch, &error).await;
                 self.runtime.report_failure(error.to_string()).await;
                 return Err(error);
             }
@@ -471,8 +448,9 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         let _guard = self.publish_lock.lock().await;
 
         let active_epoch = self
-            .sqlite
+            .store
             .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
             .map_err(|error| {
                 StorageError::Validation(format!("cannot read active epoch for CAS: {error}"))
             })?;
@@ -509,17 +487,14 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 // removal). No detached O(project) clone is performed here;
                 // `detached_clone` is reserved for scenarios that genuinely
                 // need an independent mutable copy (e.g. compaction)
-                let loaded = match RelationSnapshotLoader::load(
-                    &SqliteSnapshotStore::new(self.sqlite.clone()),
-                    project_id,
-                    delta.base_epoch,
-                ) {
-                    Ok(index) => index,
-                    Err(error) => {
-                        self.runtime.report_failure(error.to_string()).await;
-                        return Err(error);
-                    }
-                };
+                let loaded =
+                    match RelationSnapshotLoader::load(&self.store, project_id, delta.base_epoch) {
+                        Ok(index) => index,
+                        Err(error) => {
+                            self.runtime.report_failure(error.to_string()).await;
+                            return Err(error);
+                        }
+                    };
                 LayeredSnapshotIndex::new(Arc::new(RelationSnapshotIndex::from_index_shared(
                     &loaded,
                 )))
@@ -533,17 +508,17 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             )));
         }
 
-        let epoch = match self.sqlite.with_transaction(|tx| {
-            let epoch = RelationSnapshotRepository::allocate_building(
-                tx,
-                project_id,
-                operation_id,
-                &delta.config_fingerprint,
-            )?;
-            RelationSnapshotRepository::write_delta(tx, project_id, epoch, &delta)?;
-            Ok(epoch)
-        }) {
-            Ok(epoch) => epoch,
+        let allocated = self
+            .store
+            .snapshot_allocate(project_id, operation_id, &delta.config_fingerprint)
+            .await;
+        let epoch = match allocated {
+            Ok(epoch) => {
+                self.store
+                    .snapshot_write_delta(project_id, epoch, &delta)
+                    .await?;
+                epoch
+            }
             Err(error) => {
                 self.runtime.report_failure(error.to_string()).await;
                 return Err(error);
@@ -571,21 +546,15 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             ))
         };
 
-        let project_candidate = self.has_project_publication_candidate(project_id)?;
+        let project_candidate = self.has_project_publication_candidate(project_id).await?;
         if !project_candidate {
-            let data_epoch = self.active_data_epoch(project_id)?;
-            if let Err(error) = self.sqlite.with_transaction(|tx| {
-                ProjectIndexManifestRepository::activate(
-                    tx,
-                    project_id,
-                    data_epoch,
-                    epoch,
-                    operation_id,
-                    None,
-                )
-                .map(|_| ())
-            }) {
-                self.mark_candidate_failed(project_id, epoch, &error);
+            let data_epoch = self.active_data_epoch(project_id).await?;
+            if let Err(error) = self
+                .store
+                .manifest_activate(project_id, data_epoch, epoch, operation_id, None)
+                .await
+            {
+                self.mark_candidate_failed(project_id, epoch, &error).await;
                 self.runtime.report_failure(error.to_string()).await;
                 return Err(error);
             }
@@ -608,14 +577,17 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
     async fn maybe_compact(&self, project_id: i64) -> Result<(), StorageError> {
         // Thresholds are the defaults configured in `CompactionConfig`
         // (chain length 10 / cumulative delta volume ratio 0.2).
-        if !self.needs_compaction(project_id, &CompactionConfig::default())? {
+        if !self
+            .needs_compaction(project_id, &CompactionConfig::default())
+            .await?
+        {
             return Ok(());
         }
         // A data-side building candidate means another operation is in
         // flight; `compact_project` retires all non-active relation manifests
         // (`delete_manifests_except`), which would destroy an in-flight
         // operation's building delta. Defer compaction to the next call.
-        if self.has_project_publication_candidate(project_id)? {
+        if self.has_project_publication_candidate(project_id).await? {
             tracing::debug!(
                 project_id,
                 "Relation delta-chain compaction deferred: another publication candidate is in flight"
@@ -623,8 +595,9 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             return Ok(());
         }
         let active_epoch = self
-            .sqlite
+            .store
             .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
             .map_err(|error| {
                 StorageError::Validation(format!(
                     "cannot read active epoch for compaction: {error}"

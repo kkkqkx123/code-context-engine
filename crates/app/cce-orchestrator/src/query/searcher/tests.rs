@@ -178,74 +178,72 @@ fn test_merge_fusion_weights_algorithm_override() {
     assert_eq!(merged.algorithm, RecallFusionAlgorithm::WeightedMinMax);
 }
 
-fn project_meta_table(conn: &rusqlite::Connection) {
-    conn.execute_batch(
-        "CREATE TABLE project_meta (
-                project_id INTEGER NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                PRIMARY KEY (project_id, key)
-             );",
-    )
-    .expect("create project_meta");
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(future)
 }
 
 #[test]
-fn test_read_legacy_active_epoch_missing_row_defaults_to_zero() {
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    project_meta_table(&conn);
-    let epoch = crate::query::filter::read_legacy_active_epoch(&conn, 7).expect("read epoch");
-    assert_eq!(epoch, 0);
+fn test_legacy_active_epoch_missing_row_defaults_to_zero() {
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
+
+    let store = RelationStore::in_memory().expect("in-memory store");
+    block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
+    let view = block_on(crate::query::filter::load_active_query_filter_from_store(
+        &store, 7,
+    ))
+    .expect("read epoch");
+    assert_eq!(view.epoch_value(), 0);
 }
 
 #[test]
-fn test_read_legacy_active_epoch_reads_stored_value() {
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    project_meta_table(&conn);
-    conn.execute(
-        "INSERT INTO project_meta (project_id, key, value) VALUES (?1, 'active_epoch', '5')",
-        rusqlite::params![7],
-    )
-    .expect("insert active_epoch");
-    let epoch = crate::query::filter::read_legacy_active_epoch(&conn, 7).expect("read epoch");
-    assert_eq!(epoch, 5);
+fn test_legacy_active_epoch_reads_stored_value() {
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
+
+    let store = RelationStore::in_memory().expect("in-memory store");
+    block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
+    block_on(store.project_meta_set_int(7, "active_epoch", 5)).expect("write active_epoch");
+    let view = block_on(crate::query::filter::load_active_query_filter_from_store(
+        &store, 7,
+    ))
+    .expect("read epoch");
+    assert_eq!(view.epoch_value(), 5);
 }
 
 #[test]
-fn test_read_legacy_active_epoch_unparseable_value_is_error() {
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    project_meta_table(&conn);
-    conn.execute(
-        "INSERT INTO project_meta (project_id, key, value) VALUES (?1, 'active_epoch', 'abc')",
-        rusqlite::params![7],
-    )
-    .expect("insert active_epoch");
-    let err = crate::query::filter::read_legacy_active_epoch(&conn, 7)
-        .expect_err("unparseable value must fail");
-    assert!(matches!(err, QueryError::Invalid(_)));
+fn test_legacy_active_epoch_unparseable_value_is_error() {
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
+
+    let store = RelationStore::in_memory().expect("in-memory store");
+    block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
+    block_on(store.project_meta_set_string(7, "active_epoch", "abc")).expect("write active_epoch");
+    let err = block_on(crate::query::filter::load_active_query_filter_from_store(
+        &store, 7,
+    ))
+    .expect_err("unparseable value must fail");
+    assert!(matches!(err, QueryError::Config(_)));
     assert!(!err.is_retryable());
-    assert!(!err.is_config_error());
 }
 
 #[test]
-fn test_read_legacy_active_epoch_missing_table_is_error_not_silent() {
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    let err = crate::query::filter::read_legacy_active_epoch(&conn, 7)
-        .expect_err("missing table must fail");
-    assert!(matches!(err, QueryError::Storage(_)));
-}
+fn test_legacy_active_epoch_ignores_other_projects() {
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
 
-#[test]
-fn test_read_legacy_active_epoch_ignores_other_projects() {
-    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    project_meta_table(&conn);
-    conn.execute(
-        "INSERT INTO project_meta (project_id, key, value) VALUES (?1, 'active_epoch', '9')",
-        rusqlite::params![7],
-    )
-    .expect("insert active_epoch");
-    let epoch = crate::query::filter::read_legacy_active_epoch(&conn, 42).expect("read epoch");
-    assert_eq!(epoch, 0);
+    let store = RelationStore::in_memory().expect("in-memory store");
+    block_on(store.ensure_project(7, "/tmp/test")).expect("project should be ensured");
+    block_on(store.project_meta_set_int(7, "active_epoch", 9)).expect("write active_epoch");
+    let view = block_on(crate::query::filter::load_active_query_filter_from_store(
+        &store, 42,
+    ))
+    .expect("read epoch");
+    assert_eq!(view.epoch_value(), 0);
 }
 
 // ── Query-side plugin hooks (QueryRewrite / Fusion / ResultFilter) ──

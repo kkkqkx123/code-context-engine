@@ -13,4 +13,4 @@ pub mod temp_db;
 mod tests;
 
 pub(crate) use change_merger::coalesce_pending_changes;
-pub use coordinator_core::HotUpdateCoordinator;
+pub use coordinator_core::{HotUpdateCoordinator, ProjectConfigSource};

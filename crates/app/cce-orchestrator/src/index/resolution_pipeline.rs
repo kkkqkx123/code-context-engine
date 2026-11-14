@@ -5,13 +5,13 @@
 
 use std::collections::HashSet;
 
-use super::vector_store::RelationStore;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::repo::RelationSnapshotRepository;
-use cce_storage_metadb_sqlite::repo::RelationSnapshotState;
+use cce_storage_common::RelationStorage;
+use cce_types::relation::RelationSnapshotState;
 use cce_types::{
     CanonicalRelationSnapshot, CanonicalRelationTarget, StableSymbolKey, StorageError,
 };
+
+use super::vector_store::RelationStore;
 
 pub struct ResolutionPipelineService {
     store: RelationStore,
@@ -22,27 +22,11 @@ impl ResolutionPipelineService {
         Self { store }
     }
 
-    /// Local-only constructor for tests and single-branch callers.
-    pub fn new_local(db_client: SqliteClient) -> Self {
-        Self::new(RelationStore::Local(std::sync::Arc::new(db_client)))
-    }
-
-    fn local_client(&self) -> Result<SqliteClient, StorageError> {
-        self.store
-            .as_local()
-            .map(|client| client.as_ref().clone())
-            .ok_or_else(|| {
-                StorageError::validation(
-                    "remote relation branch is not wired into the snapshot write path",
-                )
-            })
-    }
-
     /// Allocate a building epoch and write snapshot data (without activating).
     ///
     /// Returns the epoch number on success. The caller should update memory
     /// (e.g. `RelationRuntime::publish_snapshot`) before calling [`Self::activate`].
-    pub fn allocate_and_write(
+    pub async fn allocate_and_write(
         &self,
         project_id: i64,
         operation_id: &str,
@@ -55,11 +39,12 @@ impl ResolutionPipelineService {
 
         let input_fingerprint = snapshot.input_fingerprint();
         let snapshot_fingerprint = snapshot.fingerprint();
-        let db_client = self.local_client()?;
+        let store = &self.store;
 
-        if let Some(existing) = db_client.with_transaction(|tx| {
-            RelationSnapshotRepository::get_manifest_by_operation(tx, project_id, operation_id)
-        })? {
+        if let Some(existing) = store
+            .snapshot_manifest_by_operation(project_id, operation_id)
+            .await?
+        {
             match existing.state {
                 RelationSnapshotState::Active | RelationSnapshotState::Ready => {
                     if existing.snapshot_fingerprint.as_deref()
@@ -72,42 +57,30 @@ impl ResolutionPipelineService {
                     return Ok(existing.relation_epoch);
                 }
                 RelationSnapshotState::Failed => {
-                    db_client.with_transaction(|tx| {
-                        RelationSnapshotRepository::retry_failed(
-                            tx,
-                            project_id,
-                            existing.relation_epoch,
-                        )
-                    })?;
+                    store
+                        .snapshot_retry_failed(project_id, existing.relation_epoch)
+                        .await?;
                 }
                 RelationSnapshotState::Building | RelationSnapshotState::Delta => {}
             }
         }
 
-        let epoch = db_client.with_transaction(|tx| {
-            RelationSnapshotRepository::allocate_building(
-                tx,
-                project_id,
-                operation_id,
-                &snapshot.config_fingerprint,
-            )
-        })?;
+        let epoch = store
+            .snapshot_allocate(project_id, operation_id, &snapshot.config_fingerprint)
+            .await?;
 
-        let write_result = db_client.with_transaction(|tx| {
-            RelationSnapshotRepository::write_snapshot_and_mark_ready(
-                tx,
+        let write_result = store
+            .snapshot_write_ready(
                 project_id,
                 epoch,
                 snapshot,
                 &input_fingerprint,
                 &snapshot_fingerprint,
             )
-        });
+            .await;
         if let Err(error) = write_result {
             let reason = error.to_string();
-            if let Err(mark_error) = db_client.with_transaction(|tx| {
-                RelationSnapshotRepository::mark_failed(tx, project_id, epoch, &reason)
-            }) {
+            if let Err(mark_error) = store.snapshot_mark_failed(project_id, epoch, &reason).await {
                 tracing::error!(
                     project_id,
                     epoch,
@@ -123,32 +96,31 @@ impl ResolutionPipelineService {
 
     /// Activate a previously allocated and written epoch.
     ///
-    /// This is intentionally a repository operation. Business paths must use
-    /// `RelationSnapshotPublisher` so the runtime and SQLite epoch move
-    /// together.
-    pub fn activate(&self, project_id: i64, epoch: i64) -> Result<(), StorageError> {
-        let db_client = self.local_client()?;
-        db_client
-            .with_transaction(|tx| RelationSnapshotRepository::activate(tx, project_id, epoch))?;
+    /// Business paths must use `RelationSnapshotPublisher` so the runtime
+    /// and the relation epoch move together.
+    pub async fn activate(&self, project_id: i64, epoch: i64) -> Result<(), StorageError> {
+        self.store.snapshot_activate(project_id, epoch).await?;
         let stale_before = chrono::Utc::now().timestamp() - 24 * 60 * 60;
-        if let Err(error) = db_client.with_transaction(|tx| {
-            RelationSnapshotRepository::collect_garbage(tx, project_id, stale_before).map(|_| ())
-        }) {
+        if let Err(error) = self
+            .store
+            .snapshot_collect_garbage(project_id, stale_before)
+            .await
+        {
             tracing::warn!(project_id, error = %error, "Relation epoch garbage collection failed");
         }
         Ok(())
     }
 
     /// Mark an uncommitted candidate as failed.
-    pub fn mark_failed(
+    pub async fn mark_failed(
         &self,
         project_id: i64,
         epoch: i64,
         reason: &str,
     ) -> Result<(), StorageError> {
-        self.local_client()?.with_transaction(|tx| {
-            RelationSnapshotRepository::mark_failed(tx, project_id, epoch, reason)
-        })
+        self.store
+            .snapshot_mark_failed(project_id, epoch, reason)
+            .await
     }
 }
 
@@ -232,17 +204,16 @@ fn validate_snapshot(snapshot: &CanonicalRelationSnapshot) -> Result<(), String>
 mod tests {
     use super::*;
 
-    fn insert_project(client: &SqliteClient) {
-        let conn = client
-            .write_connection()
-            .expect("test connection should open");
-        conn.execute(
-            "INSERT INTO projects
-                (id, name, root_path, config_file_path, created_at, updated_at)
-             VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
-            [],
-        )
-        .expect("test project should be inserted");
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
+
+    fn insert_project(store: &RelationStore) {
+        block_on(store.ensure_project(1, "/tmp/test")).expect("test project should be inserted");
     }
 
     #[test]
@@ -273,36 +244,27 @@ mod tests {
 
     #[test]
     fn failed_epoch_preserves_previous_active_epoch() {
-        let client = SqliteClient::in_memory().expect("in-memory database should open");
-        insert_project(&client);
+        let store = RelationStore::in_memory().expect("in-memory store should open");
+        insert_project(&store);
         let snapshot = CanonicalRelationSnapshot::new("config".to_string());
-        let writer = ResolutionPipelineService::new_local(client.clone());
+        let writer = ResolutionPipelineService::new(store.clone());
 
-        let first_epoch = writer
-            .allocate_and_write(1, "operation-1", &snapshot)
+        let first_epoch = block_on(writer.allocate_and_write(1, "operation-1", &snapshot))
             .expect("initial epoch should be written");
-        writer
-            .activate(1, first_epoch)
-            .expect("initial epoch should activate");
+        block_on(writer.activate(1, first_epoch)).expect("initial epoch should activate");
 
-        let failed_epoch = writer
-            .allocate_and_write(1, "operation-2", &snapshot)
+        let failed_epoch = block_on(writer.allocate_and_write(1, "operation-2", &snapshot))
             .expect("second epoch should be written");
-        writer
-            .mark_failed(1, failed_epoch, "simulated write failure")
+        block_on(writer.mark_failed(1, failed_epoch, "simulated write failure"))
             .expect("second epoch should be marked failed");
 
-        let manifest = client
-            .with_transaction(|tx| {
-                RelationSnapshotRepository::get_manifest_by_operation(tx, 1, "operation-2")
-            })
+        let manifest = block_on(store.snapshot_manifest_by_operation(1, "operation-2"))
             .expect("manifest query should succeed")
             .expect("second operation manifest should exist");
         assert_eq!(manifest.state, RelationSnapshotState::Failed);
 
         assert_eq!(
-            client
-                .project_meta_get_int(1, "active_relation_epoch")
+            block_on(store.project_meta_get_int(1, "active_relation_epoch"))
                 .expect("active epoch should remain readable"),
             first_epoch
         );

@@ -13,31 +13,25 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cce_bench_kit::{DEFAULT_LANG_DIST, ProjectSize, SyntheticProject};
-use cce_orchestrator::index::{IndexOptions, IndexOrchestrator};
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_orchestrator::index::{IndexOptions, IndexOrchestrator, RelationStore};
+use cce_storage_common::RelationStorage;
 
 /// Scale tier for the synthetic project.
 const SIZE: ProjectSize = ProjectSize::Small;
 
 /// Build an in-memory metadata store with one seeded project (id 1).
-fn make_metadata() -> Arc<SqliteClient> {
-    let client = SqliteClient::in_memory().expect("in-memory sqlite");
-    client
-        .with_transaction(|tx| {
-            cce_storage_metadb_sqlite::ProjectRepository::insert(
-                tx,
-                &cce_storage_metadb_sqlite::NewProjectRecord::new(
-                    "bench".to_string(),
-                    "/tmp/bench".to_string(),
-                ),
-            )
-        })
+fn make_metadata() -> RelationStore {
+    let store = RelationStore::in_memory().expect("in-memory store");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("seed runtime")
+        .block_on(store.ensure_project(1, "/tmp/bench"))
         .expect("seed project");
-    Arc::new(client)
+    store
 }
 
 /// Materialize the synthetic project to a fresh temp dir and return its root.
@@ -50,7 +44,7 @@ fn materialize() -> PathBuf {
     root
 }
 
-async fn run_once(root: &std::path::Path, metadata: Arc<SqliteClient>) -> u64 {
+async fn run_once(root: &std::path::Path, metadata: RelationStore) -> u64 {
     let mut orchestrator = IndexOrchestrator::new(1)
         .expect("orchestrator")
         .with_metadata_store(metadata);

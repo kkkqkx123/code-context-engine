@@ -214,7 +214,14 @@ pub(crate) async fn load_active_query_filter_from_store(
         .project_meta_get_int_optional(project_id, "active_epoch")
         .await
         .map_err(|error| {
-            QueryError::storage(&format!("Failed to read active_epoch for project {project_id}: {error}"))
+            // Deterministic corruption (unparseable stored value) is a
+            // config fault: retrying cannot repair it. IO failures stay in
+            // the retryable storage bucket.
+            let message = format!("Failed to read active_epoch for project {project_id}: {error}");
+            match error {
+                cce_types::StorageError::Validation(_) => QueryError::config(&message),
+                _ => QueryError::storage(&message),
+            }
         })?
         .unwrap_or(0);
     QueryFilter::new(epoch).map_err(|error| QueryError::config(&format!("Invalid epoch: {error}")))

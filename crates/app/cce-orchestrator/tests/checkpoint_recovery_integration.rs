@@ -12,16 +12,16 @@ use cce_orchestrator::hot_update::progress::{
 };
 use cce_orchestrator::operation::OperationType;
 use cce_orchestrator::operation::checkpoint::{CheckpointManager, CreateCheckpointParams};
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::types::{
+use cce_storage_common::metadb::{
     CheckpointStatus, FileCheckpointRecord, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
+use cce_storage_metadb::RelationStore;
 use cce_types::OperationKind;
 use std::sync::Arc;
 
 /// Helper to create a checkpoint manager for testing.
-fn create_cm() -> (CheckpointManager, Arc<SqliteClient>) {
-    let db = Arc::new(SqliteClient::in_memory().expect("in-memory SQLite"));
+fn create_cm() -> (CheckpointManager, RelationStore) {
+    let db = RelationStore::in_memory().expect("in-memory store");
     let cm = CheckpointManager::new_for_project(1, db.clone());
     (cm, db)
 }

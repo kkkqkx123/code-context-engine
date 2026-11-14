@@ -114,34 +114,34 @@ pub async fn reload_project(state: &SharedContext, project_id: i64) -> Result<()
                 ));
             generator
         });
-    let processors = ProcessorFactory::new().create_all_processors(
-        Some(state.engine.vector_clone()),
-        Some(state.engine.fulltext_clone()),
-        state
-            .engine
-            .metadata_store_clone()
-            .as_ref()
-            .and_then(|client| client.for_project(project_id).ok())
-            .or_else(|| state.engine.metadata_store_clone()),
-        Some(state.engine.embedder_clone()),
-        Some(project_group_id),
-        project_id,
-        relation_publisher,
-        &relation_config,
-        coord.checkpoint_manager().await,
-        summary_generator,
-        Some(&project_config.ast_to_nl),
-        &project_config.grouper,
-        &project_config.license_header,
-        Some(&project_config.summary),
-        &processor_config,
-        engine.get_plugin_registry(project_id).await,
-        None,
-        Some(cce_metrics::HotUpdateStorageMetrics::new(
-            state.engine.metrics_registry(),
+    let processors = ProcessorFactory::new()
+        .create_all_processors(
+            Some(state.engine.vector_clone()),
+            Some(state.engine.fulltext_clone()),
+            state
+                .engine
+                .relation_store()
+                .and_then(|store| store.for_project(project_id).ok()),
+            Some(state.engine.embedder_clone()),
+            Some(project_group_id),
             project_id,
-        )),
-    );
+            relation_publisher,
+            &relation_config,
+            coord.checkpoint_manager().await,
+            summary_generator,
+            Some(&project_config.ast_to_nl),
+            &project_config.grouper,
+            &project_config.license_header,
+            Some(&project_config.summary),
+            &processor_config,
+            engine.get_plugin_registry(project_id).await,
+            None,
+            Some(cce_metrics::HotUpdateStorageMetrics::new(
+                state.engine.metrics_registry(),
+                project_id,
+            )),
+        )
+        .await;
     let (processors, _storage_coordinator) = match processors {
         Ok(value) => value,
         Err(error) => {

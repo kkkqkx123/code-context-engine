@@ -20,7 +20,7 @@ use cce_metrics::SearchMetrics;
 
 use super::searcher_core::Searcher;
 
-pub struct SearcherBuilder {
+pub(crate) struct SearcherBuilder {
     vector: VectorStore,
     embedder: Arc<OpenAICompatibleProvider>,
     fulltext: FulltextStore,

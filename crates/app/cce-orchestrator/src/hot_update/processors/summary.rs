@@ -223,6 +223,7 @@ impl UpdateProcessor for SummaryUpdateProcessor {
     async fn commit_operation(&self, ctx: &OperationContext) -> Result<()> {
         self.storage
             .activate_hot_update_candidate(&ctx.operation_id)
+            .await
             .map_err(|error| HotUpdateError::summary(error.to_string()))?;
         if let Err(error) = self.storage.gc_stale_generations().await {
             tracing::warn!(error = %error, "Generation GC after summary publication failed");
@@ -233,6 +234,7 @@ impl UpdateProcessor for SummaryUpdateProcessor {
     async fn abort_operation(&self, ctx: &OperationContext, reason: &str) -> Result<()> {
         self.storage
             .fail_hot_update_candidate(&ctx.operation_id, reason)
+            .await
             .map_err(|error| HotUpdateError::summary(error.to_string()))
     }
 }

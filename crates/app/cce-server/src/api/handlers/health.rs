@@ -15,6 +15,7 @@ use cce_api::models::{
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
 use cce_server_shared::context::SharedContext;
+use cce_storage_common::RelationStorage;
 
 // --- Handlers ---
 
@@ -224,19 +225,14 @@ pub async fn handle_retry_queue_process(
             }
         }
     } else {
-        let project_ids: Vec<i64> = state
-            .engine
-            .metadata_store()
-            .map(|store| {
-                store
-                    .as_ref()
-                    .with_transaction(|tx| {
-                        cce_storage_metadb_sqlite::ProjectRepository::get_all(tx)
-                    })
-                    .map(|records| records.into_iter().map(|r| r.id).collect())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
+        let project_ids: Vec<i64> = match state.engine.relation_store() {
+            Some(store) => store
+                .projects_all()
+                .await
+                .map(|records| records.into_iter().map(|r| r.id).collect())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
         let mut total = 0usize;
         for project_id in project_ids {
             if let Ok(count) = state.engine.process_retry_queue(project_id).await {

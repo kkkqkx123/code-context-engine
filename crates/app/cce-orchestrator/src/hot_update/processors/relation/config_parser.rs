@@ -9,16 +9,16 @@ use std::path::{Path, PathBuf};
 
 use crate::hot_update::error::{HotUpdateError, Result};
 
+use crate::index::vector_store::RelationStore;
 use cce_codegraph::BuildConfigParser;
 use cce_codegraph::index::RelationIndexView;
 use cce_config::{RelationBuilderParams, RelationConfig};
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
 
 use super::external_packages::{BuildConfigParserExt, ExternalPackageData};
 use super::relation_processor::RelationUpdateProcessor;
 
-use cce_types::{LanguageInfo, StorageError};
+use cce_types::LanguageInfo;
 
 impl RelationUpdateProcessor {
     pub fn set_relation_config(&mut self, config: &RelationConfig) {
@@ -149,8 +149,8 @@ impl RelationUpdateProcessor {
             return Ok(Vec::new());
         }
 
-        let sqlite = match self.sqlite_client.as_ref() {
-            Some(sqlite) => sqlite,
+        let store = match self.relation_store.as_ref() {
+            Some(store) => store,
             None => {
                 tracing::warn!(
                     config = config_filename,
@@ -160,8 +160,9 @@ impl RelationUpdateProcessor {
             }
         };
         let project_id = self.persistence_project_id()?;
-        let active_epoch = sqlite
+        let active_epoch = store
             .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
             .map_err(|error| HotUpdateError::relation(error.to_string()))?;
         if active_epoch <= 0 {
             tracing::warn!(
@@ -172,15 +173,11 @@ impl RelationUpdateProcessor {
             return Ok(Vec::new());
         }
 
-        let project_root = self.project_root(sqlite)?;
+        let project_root = self.project_root(store).await?;
         // Reuse the process-internal materialized base + delta chain instead
         // of reloading the full graph from SQLite; a config reload typically
         // happens right after a hot update that already populated the cache.
-        let view = match self.base_cache.get_or_load(
-            &SqliteSnapshotStore::new(sqlite.as_ref().clone()),
-            project_id,
-            active_epoch,
-        ) {
+        let view = match self.base_cache.get_or_load(store, project_id, active_epoch) {
             Ok(view) => view,
             Err(error) => {
                 return Err(HotUpdateError::relation(error.to_string()));
@@ -246,7 +243,7 @@ impl RelationUpdateProcessor {
             self.record_config_fine_grained_fallback();
             return Ok(extension_files);
         }
-        let sqlite = match self.sqlite_client.as_ref() {
+        let store = match self.relation_store.as_ref() {
             Some(s) => s,
             None => {
                 self.record_config_fine_grained_fallback();
@@ -254,8 +251,9 @@ impl RelationUpdateProcessor {
             }
         };
         let project_id = self.persistence_project_id()?;
-        let active_epoch = sqlite
+        let active_epoch = store
             .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
             .map_err(|e| HotUpdateError::relation(e.to_string()))?;
         if active_epoch <= 0 {
             self.record_config_fine_grained_fallback();
@@ -263,13 +261,9 @@ impl RelationUpdateProcessor {
         }
         let view = self
             .base_cache
-            .get_or_load(
-                &SqliteSnapshotStore::new(sqlite.as_ref().clone()),
-                project_id,
-                active_epoch,
-            )
+            .get_or_load(store, project_id, active_epoch)
             .map_err(|e| HotUpdateError::relation(e.to_string()))?;
-        let project_root = self.project_root(sqlite)?;
+        let project_root = self.project_root(store).await?;
         // Build set of extension_files for quick lookup
         let ext_set: HashSet<String> = extension_files
             .iter()
@@ -385,25 +379,22 @@ impl RelationUpdateProcessor {
         Ok(config_parser.extract_external_packages())
     }
 
-    pub(crate) fn project_root(&self, sqlite: &SqliteClient) -> Result<PathBuf> {
+    pub(crate) async fn project_root(&self, store: &RelationStore) -> Result<PathBuf> {
         if let Ok(root) = self.project_root.try_lock()
             && let Some(path) = root.as_ref()
         {
             return Ok(path.clone());
         }
         let project_id = self.persistence_project_id()?;
-        sqlite
-            .with_transaction(|tx| {
-                tx.query_row(
-                    "SELECT root_path FROM projects WHERE id = ?1",
-                    rusqlite::params![project_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .map(PathBuf::from)
-                .map_err(|error| {
-                    StorageError::Query(format!("failed to load project root: {error}"))
-                })
+        store
+            .project_record(project_id)
+            .await
+            .map_err(|error| HotUpdateError::relation(error.to_string()))?
+            .map(|record| PathBuf::from(record.root_path))
+            .ok_or_else(|| {
+                HotUpdateError::relation(format!(
+                    "failed to load project root for project {project_id}"
+                ))
             })
-            .map_err(|error| HotUpdateError::relation(error.to_string()))
     }
 }

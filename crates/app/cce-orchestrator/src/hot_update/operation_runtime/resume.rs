@@ -51,6 +51,7 @@ impl HotUpdateOperationRuntime {
         if let Some(ref storage) = self.storage_coordinator {
             let adoptable = storage
                 .is_candidate_adoptable(&ctx.operation_id)
+                .await
                 .map_err(|e| HotUpdateError::hot_update(e.to_string()))?;
             if !adoptable {
                 let cleared = if let Some(ref cm) = self.checkpoint_manager {
@@ -81,7 +82,7 @@ impl HotUpdateOperationRuntime {
                 .await
                 .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
             let mut result = BatchChangeResult::new();
-            let mut file_processor = self.new_file_processor();
+            let mut file_processor = self.new_file_processor().await;
             for checkpoint in file_checkpoints {
                 // Restore the project-relative path identity used by the
                 // change-detection cache, `files` rows and storage removal,
@@ -206,7 +207,7 @@ impl HotUpdateOperationRuntime {
         // checkpoint/hash projection is committed. The manifest is the durable
         // publication record in that case; never prepare a new candidate or
         // write into the already-active generation.
-        if self.is_manifest_active(&ctx.operation_id)? {
+        if self.is_manifest_active(&ctx.operation_id).await? {
             let published_paths: Vec<_> = batch_result
                 .parse_results
                 .iter()

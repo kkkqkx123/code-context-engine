@@ -53,7 +53,7 @@ impl IndexOrchestrator {
             };
             let batch_paths: Vec<_> = batch.iter().map(|f| f.path.clone()).collect();
             let batch_num = batch_idx + 1;
-            self.storage.begin_batch(batch_num as i64)?;
+            self.storage.begin_batch(batch_num as i64).await?;
 
             // Create state tracking for this batch
             self.state_tracker
@@ -205,7 +205,11 @@ impl IndexOrchestrator {
             // one fault into entity-mapping errors downstream.
             let mut entity_store_ok = true;
             if !batch_result.parsed_files.is_empty() {
-                if let Err(error) = self.storage.store_parsed_files(&batch_result.parsed_files) {
+                if let Err(error) = self
+                    .storage
+                    .store_parsed_files(&batch_result.parsed_files)
+                    .await
+                {
                     entity_store_ok = false;
                     tracing::error!(
                         error = %error,
@@ -447,7 +451,7 @@ impl IndexOrchestrator {
                 let summary_config_fingerprint = self
                     .summary_config
                     .as_ref()
-                    .map(crate::export::fingerprint::config_fingerprint);
+                    .map(cce_export::config_fingerprint);
                 if let Some(cm) = &checkpoint_manager {
                     let entries: Vec<(String, cce_parser::summary::FileSummary, Option<String>)> =
                         batch_result

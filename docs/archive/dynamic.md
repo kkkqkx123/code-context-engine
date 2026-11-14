@@ -237,3 +237,18 @@ without leaking transport generics through the gateway.
 **Status:** Necessary — transport-independent streaming return type.
 
 
+
+### Tool port injections (cce-tools)
+
+**Files:**
+- `crates/app/cce-tools/src/render.rs` (`SharedRenderer = Arc<dyn SemanticRenderer>`)
+- `crates/app/cce-tools/src/compression.rs` (`Option<Arc<dyn IndexStateCheck>>`)
+
+Tool/rendering ports are implemented by downstream crates the tools crate
+cannot depend on: the display converter lives in `cce-export` and the
+project-state check lives in `cce-orchestrator`. Generics would leak those
+concrete types into every tool signature and public struct, defeating the
+layer boundary. Both ports have a built-in default (neutral renderer /
+no check), so dispatch only happens at explicitly injected boundaries.
+
+**Status:** Necessary — layer-boundary injection ports with defaults.

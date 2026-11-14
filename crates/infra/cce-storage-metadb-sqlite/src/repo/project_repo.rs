@@ -269,7 +269,7 @@ impl ProjectRepository {
         value
             .map(|value| {
                 value.parse::<i64>().map_err(|e| {
-                    StorageError::Query(format!(
+                    StorageError::validation(format!(
                         "Failed to parse project_meta {} as int: {}",
                         key, e
                     ))
@@ -420,7 +420,8 @@ mod tests {
             .expect("parseable value should be returned");
         assert_eq!(value, Some(5));
 
-        // Unparseable stored value → Err (not silently downgraded)
+        // Unparseable stored value → validation failure (deterministic
+        // corruption, not transient IO; callers must not retry it)
         conn.execute(
             "UPDATE project_meta SET value = 'corrupt' WHERE project_id = 1 AND key = 'active_epoch'",
             [],
@@ -428,6 +429,6 @@ mod tests {
         .expect("meta value should be corrupted");
         let err = ProjectRepository::meta_get_int_optional(&conn, 1, "active_epoch")
             .expect_err("corrupt value must be a failure");
-        assert!(matches!(err, StorageError::Query(_)));
+        assert!(matches!(err, StorageError::Validation(_)));
     }
 }

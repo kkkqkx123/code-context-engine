@@ -7,10 +7,9 @@ use super::change::compute::compute_entity_changes;
 use super::change::{EntityChange, EntityChangeType, FileChangeType, ParseResultWithChanges};
 use super::error::{HotUpdateError, Result};
 use super::watcher::{FileEvent, FileEventType};
+use crate::index::vector_store::RelationStore;
 use cce_parser::parser::ParseCoordinator;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::repo::entity_repo::EntityRepository;
-use cce_storage_metadb_sqlite::repo::file_repo::FileRepository;
+use cce_storage_common::RelationStorage;
 use cce_types::Span;
 use cce_types::entity::{Entity, EntityId, EntityKind};
 use cce_types::{LanguageInfo, ParsedFile};
@@ -79,7 +78,7 @@ impl FileProcessor {
     pub async fn process_file_from_event(
         &mut self,
         event: &FileEvent,
-        metadata_store: &Option<Arc<SqliteClient>>,
+        metadata_store: &Option<RelationStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         let change_type = match event.event_type {
@@ -100,7 +99,7 @@ impl FileProcessor {
         &mut self,
         path: &Path,
         change_type: FileChangeType,
-        metadata_store: &Option<Arc<SqliteClient>>,
+        metadata_store: &Option<RelationStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         self.process_file_change_at(
@@ -129,7 +128,7 @@ impl FileProcessor {
         read_path: &Path,
         parse_path: &str,
         change_type: FileChangeType,
-        metadata_store: &Option<Arc<SqliteClient>>,
+        metadata_store: &Option<RelationStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         // Event-driven read: no scan-phase hash baseline exists here, so the
@@ -166,7 +165,7 @@ impl FileProcessor {
         parse_path: &str,
         content: &str,
         change_type: FileChangeType,
-        metadata_store: &Option<Arc<SqliteClient>>,
+        metadata_store: &Option<RelationStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         // Route like the full-index path: documentation/config/text files
@@ -197,7 +196,8 @@ impl FileProcessor {
             parse_path,
             project_id,
             change_type,
-        );
+        )
+        .await;
 
         Ok(result)
     }
@@ -211,7 +211,7 @@ impl FileProcessor {
         &mut self,
         payload: &cce_scanner::FileContentPayload,
         change_type: FileChangeType,
-        metadata_store: &Option<Arc<SqliteClient>>,
+        metadata_store: &Option<RelationStore>,
         project_id: i64,
     ) -> Result<ParseResultWithChanges> {
         let parse_path = payload.identity_key();
@@ -365,10 +365,10 @@ impl Default for FileProcessor {
 /// entities (or mark everything as added) and record the changes on
 /// `result`. Shared by the fresh-parse path and the snapshot-cache resume
 /// path so both produce identical change records.
-pub(crate) fn populate_entity_changes(
+pub(crate) async fn populate_entity_changes(
     result: &mut ParseResultWithChanges,
     parsed_file: &cce_types::entity::ParsedFile,
-    metadata_store: &Option<Arc<SqliteClient>>,
+    metadata_store: &Option<RelationStore>,
     lookup_path: &str,
     project_id: i64,
     change_type: FileChangeType,
@@ -378,27 +378,22 @@ pub(crate) fn populate_entity_changes(
     let old_entities = if change_type == FileChangeType::Added {
         None
     } else if let Some(store) = metadata_store {
-        match store.read_connection() {
-            Ok(conn) => {
-                let path_str = lookup_path;
-                match FileRepository::get_by_path_and_project(&conn, path_str, project_id) {
-                    Ok(Some(file_record)) => {
-                        match EntityRepository::get_by_file_and_project(
-                            &conn,
-                            file_record.id,
-                            project_id,
-                        ) {
-                            Ok(records) if !records.is_empty() => {
-                                Some(entity_records_to_entities(&records))
-                            }
-                            _ => None,
-                        }
+        match store.file_by_path(project_id, lookup_path).await {
+            Ok(Some(file_record)) => {
+                match store.entities_by_file(project_id, file_record.id).await {
+                    Ok(records) if !records.is_empty() => {
+                        Some(entity_records_to_entities(&records))
                     }
-                    _ => None,
+                    Ok(_) => None,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "No metadata store — cannot query old entities for diff");
+                        None
+                    }
                 }
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "No database connection for entity diff");
+            Ok(None) => None,
+            Err(error) => {
+                tracing::warn!(error = %error, "No database connection for entity diff");
                 None
             }
         }
@@ -483,7 +478,7 @@ fn parse_entity_kind(s: &str) -> EntityKind {
     }
 }
 
-fn entity_records_to_entities(records: &[cce_storage_metadb_sqlite::EntityRecord]) -> Vec<Entity> {
+fn entity_records_to_entities(records: &[cce_storage_common::metadb::EntityRecord]) -> Vec<Entity> {
     records
         .iter()
         .enumerate()

@@ -11,8 +11,7 @@ use cce_orchestrator::RelationSnapshotPublisher;
 use cce_orchestrator::hot_update::processors::RelationUpdateProcessor;
 use cce_orchestrator::index::StorageCoordinator;
 use cce_orchestrator::query::retry_queue::RetryQueue;
-use cce_storage_metadb_sqlite::repo::ProjectRepository;
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
 
 impl super::CodeContextEngine {
     /// Get or create project-specific RelationRuntime
@@ -58,21 +57,13 @@ impl super::CodeContextEngine {
         &self,
         project_id: i64,
     ) -> Result<Arc<dyn RelationSnapshotPublisher>, EngineError> {
-        let sqlite = self
-            .metadata_store
-            .as_ref()
-            .map(|database| database.for_project(project_id))
-            .transpose()
-            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .ok_or_else(|| {
-                EngineError::Config(
-                    "SQLite database not initialized for relation publishing".to_string(),
-                )
-            })?;
+        let store = self
+            .relation_store
+            .for_project(project_id)
+            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?;
         let runtime = self.get_relation_runtime(project_id).await?;
         Ok(Arc::new(ServerRelationSnapshotPublisher::new(
-            sqlite.as_ref().clone(),
-            runtime,
+            store, runtime,
         )))
     }
 
@@ -81,11 +72,8 @@ impl super::CodeContextEngine {
         project_id: i64,
         runtime: &Arc<RelationRuntime>,
     ) {
-        let Some(database) = &self.metadata_store else {
-            return;
-        };
-        let sqlite = match database.for_project(project_id) {
-            Ok(client) => client,
+        let store = match self.relation_store.for_project(project_id) {
+            Ok(store) => store,
             Err(error) => {
                 tracing::warn!(
                     project_id,
@@ -95,46 +83,26 @@ impl super::CodeContextEngine {
                 return;
             }
         };
-        // read-only connection instead of a write transaction — this
-        // runs on the query path and must not contend with the write lock.
-        let active_epoch = match sqlite.read_connection() {
-            Ok(conn) => {
-                match cce_storage_metadb_sqlite::ProjectIndexManifestRepository::get_active(
-                    &conn, project_id,
-                ) {
-                    Ok(Some(manifest)) => manifest.relation_epoch,
-                    Ok(None) => {
-                        // Reuse the connection already held by `conn`: the
-                        // client-level `project_meta_get_int_optional` helper
-                        // would re-acquire the same `read_conn` parking_lot
-                        // mutex, which is not reentrant and deadlocks the
-                        // caller (the fallback is only reached when no active
-                        // manifest exists, e.g. a fresh project).
-                        match ProjectRepository::meta_get_int_optional(
-                            &conn,
-                            project_id,
-                            "active_relation_epoch",
-                        ) {
-                            Ok(Some(epoch)) => epoch,
-                            Ok(None) => 0,
-                            Err(error) => {
-                                tracing::warn!(
-                                    project_id,
-                                    error = %error,
-                                    "Failed to read active_relation_epoch for relation runtime refresh"
-                                );
-                                return;
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(project_id, error = %error, "Failed to read active project manifest");
-                        return;
-                    }
+        // Contract reads only; each call borrows a connection briefly, so
+        // the query path never holds the store across awaits.
+        let active_epoch = match store.manifest_active(project_id).await {
+            Ok(Some(manifest)) => manifest.relation_epoch,
+            Ok(None) => match store
+                .project_meta_get_int_optional(project_id, "active_relation_epoch")
+                .await
+            {
+                Ok(value) => value.unwrap_or(0),
+                Err(error) => {
+                    tracing::warn!(
+                        project_id,
+                        error = %error,
+                        "Failed to read active_relation_epoch for relation runtime refresh"
+                    );
+                    return;
                 }
-            }
+            },
             Err(error) => {
-                tracing::warn!(project_id, error = %error, "Failed to open read connection for relation runtime refresh");
+                tracing::warn!(project_id, error = %error, "Failed to read active project manifest");
                 return;
             }
         };
@@ -166,7 +134,7 @@ impl super::CodeContextEngine {
 
         runtime.set_updating().await;
         match cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            &SqliteSnapshotStore::new((*sqlite).clone()),
+            &store,
             project_id,
             active_epoch,
         ) {
@@ -241,33 +209,23 @@ impl super::CodeContextEngine {
         &self,
         project_id: i64,
     ) -> Result<(), EngineError> {
-        let sqlite = self
-            .metadata_store
-            .as_ref()
-            .map(|database| database.for_project(project_id))
-            .transpose()
-            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .ok_or_else(|| {
-                EngineError::Config(
-                    "SQLite database not initialized for relation publishing".to_string(),
-                )
-            })?;
-        let active_epoch = {
-            let conn = sqlite
-                .read_connection()
-                .map_err(|e| EngineError::Config(format!("Failed to open read connection: {e}")))?;
-            match cce_storage_metadb_sqlite::ProjectIndexManifestRepository::get_active(
-                &conn, project_id,
-            )
-            .map_err(|e| EngineError::Config(format!("Failed to read active manifest: {e}")))?
+        let store = self
+            .relation_store
+            .for_project(project_id)
+            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?;
+        let active_epoch =
             {
-                Some(manifest) => manifest.relation_epoch,
-                None => sqlite
-                    .project_meta_get_int_optional(project_id, "active_relation_epoch")
-                    .map_err(|e| EngineError::Config(e.to_string()))?
-                    .unwrap_or(0),
-            }
-        };
+                match store.manifest_active(project_id).await.map_err(|e| {
+                    EngineError::Config(format!("Failed to read active manifest: {e}"))
+                })? {
+                    Some(manifest) => manifest.relation_epoch,
+                    None => store
+                        .project_meta_get_int_optional(project_id, "active_relation_epoch")
+                        .await
+                        .map_err(|e| EngineError::Config(e.to_string()))?
+                        .unwrap_or(0),
+                }
+            };
         if active_epoch <= 0 {
             let message =
                 "cannot republish relation state without an active epoch; full rebuild required";
@@ -276,19 +234,14 @@ impl super::CodeContextEngine {
             return Err(EngineError::Config(message.to_string()));
         }
         let index = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            &SqliteSnapshotStore::new((*sqlite).clone()),
+            &store,
             project_id,
             active_epoch,
         )
         .map_err(|e| EngineError::Config(format!("Failed to load active epoch: {e}")))?;
-        let config_fingerprint = sqlite
-            .with_transaction(|tx| {
-                cce_storage_metadb_sqlite::repo::RelationSnapshotRepository::get_manifest(
-                    tx,
-                    project_id,
-                    active_epoch,
-                )
-            })
+        let config_fingerprint = store
+            .snapshot_manifest(project_id, active_epoch)
+            .await
             .map_err(|e| EngineError::Config(format!("cannot read manifest: {e}")))?
             .map(|manifest| manifest.config_fingerprint)
             .unwrap_or_else(|| "maintenance-republish".to_string());
@@ -333,18 +286,11 @@ impl super::CodeContextEngine {
             .get_or_load(project_id)
             .await
             .map_err(|error| EngineError::Config(error.to_string()))?;
-        let sqlite = self
-            .metadata_store
-            .as_ref()
-            .map(|database| database.for_project(project_id))
-            .transpose()
+        let store = self
+            .relation_store
+            .for_project(project_id)
             .map_err(|error| {
                 EngineError::Config(format!("Failed to open project database: {error}"))
-            })?
-            .ok_or_else(|| {
-                EngineError::Config(
-                    "SQLite database not initialized for relation publishing".to_string(),
-                )
             })?;
         let publisher = self.get_relation_snapshot_publisher(project_id).await?;
         let group_id =
@@ -352,7 +298,7 @@ impl super::CodeContextEngine {
         let storage = Arc::new(
             StorageCoordinator::new(project_id)
                 .map_err(|error| EngineError::Config(error.to_string()))?
-                .with_metadata_store(sqlite.clone())
+                .with_metadata_store(store.clone())
                 .with_vector(self.vector.clone())
                 .with_fulltext_store(self.fulltext.clone())
                 .with_embedder(self.embedder.clone())
@@ -363,7 +309,7 @@ impl super::CodeContextEngine {
             .await
             .map_err(|error| EngineError::Config(error.to_string()))?;
         let mut processor = RelationUpdateProcessor::with_persistence_and_config(
-            sqlite,
+            store,
             Path::new(&project.metadata.root_path),
             project_id,
         )
@@ -380,12 +326,15 @@ impl super::CodeContextEngine {
         {
             Ok(result) => result,
             Err(error) => {
-                let _ = storage.fail_hot_update_candidate(operation_id, &error.to_string());
+                let _ = storage
+                    .fail_hot_update_candidate(operation_id, &error.to_string())
+                    .await;
                 return Err(EngineError::Config(error.to_string()));
             }
         };
         storage
             .activate_hot_update_candidate(operation_id)
+            .await
             .map_err(|error| EngineError::Config(error.to_string()))?;
         if let Err(error) = publisher.maybe_compact(project_id).await {
             tracing::warn!(
@@ -436,13 +385,12 @@ impl super::CodeContextEngine {
     ) -> Result<crate::runtime::RelationCapabilityInfo, EngineError> {
         let runtime = self.get_relation_runtime(project_id).await?;
         let mut info = runtime.get_capability_info().await;
-        let active_epoch = match self
-            .metadata_store
-            .as_ref()
-            .map(|database| database.as_ref())
-        {
-            Some(sqlite) => {
-                match sqlite.project_meta_get_int_optional(project_id, "active_relation_epoch") {
+        let active_epoch = match self.relation_store.for_project(project_id) {
+            Ok(store) => {
+                match store
+                    .project_meta_get_int_optional(project_id, "active_relation_epoch")
+                    .await
+                {
                     Ok(value) => value.unwrap_or(0),
                     Err(error) => {
                         tracing::warn!(
@@ -454,7 +402,7 @@ impl super::CodeContextEngine {
                     }
                 }
             }
-            None => 0,
+            Err(_) => 0,
         };
         info.active_epoch = active_epoch;
         info.runtime_epoch = info.relation_epoch;

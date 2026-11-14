@@ -47,21 +47,20 @@ mod tests {
 
     use super::super::StorageCoordinator;
 
-    fn block_on<F: std::future::Future>(future: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime")
-            .block_on(future)
-    }
-
     #[tokio::test]
     async fn changed_and_deleted_files_register_generation_overrides() {
         let database = RelationStore::in_memory().expect("in-memory store");
-        block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
-        block_on(database.manifest_begin_building(1, 1, "initial", None))
+        database
+            .ensure_project(1, "/tmp/test")
+            .await
+            .expect("project should be ensured");
+        database
+            .manifest_begin_building(1, 1, "initial", None)
+            .await
             .expect("initial manifest should be created");
-        block_on(database.manifest_activate(1, 1, 0, "initial", None))
+        database
+            .manifest_activate(1, 1, 0, "initial", None)
+            .await
             .expect("initial generation should be activated");
 
         let storage = StorageCoordinator::new(1)
@@ -111,7 +110,9 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let overrides = block_on(database.overrides_for_generation(1, 2))
+        let overrides = database
+            .overrides_for_generation(1, 2)
+            .await
             .expect("overrides should list");
         assert_eq!(
             overrides

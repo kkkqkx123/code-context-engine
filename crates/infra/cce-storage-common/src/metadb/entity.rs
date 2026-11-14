@@ -4,6 +4,43 @@ use serde::{Deserialize, Serialize};
 
 pub type DbId = i64;
 
+/// Visible content hash of one file in the active generation view.
+///
+/// Rows whose stored hash is `None` are still visible paths (they count
+/// for change detection) but carry no hash for comparison.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileHashEntry {
+    pub path: String,
+    pub content_hash: Option<String>,
+}
+
+/// File classification row: path identity with its batch and content hash.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileEpochEntry {
+    pub path: String,
+    pub batch_id: i64,
+    pub content_hash: Option<String>,
+}
+
+/// File row ensured by an indexing batch without touching content hashes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileEnsureEntry {
+    pub path: String,
+    pub language: String,
+    pub category: u8,
+    pub last_modified: i64,
+}
+
+/// Entity row together with its owning file path.
+///
+/// Backs vector-side detail mapping and symbol-tool resolution without
+/// exposing a join over two roundtrips.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityWithFile {
+    pub entity: EntityRecord,
+    pub file_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRecord {
     pub id: i64,

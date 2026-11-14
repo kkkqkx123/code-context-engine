@@ -7,7 +7,7 @@ use cce_codegraph::index::relation_query::RelationQueryOps;
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_orchestrator::query::types::{QueryOptions, QueryResult};
 use cce_orchestrator::{IndexOptions, IndexResult};
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
 
 impl super::CodeContextEngine {
     // --- Index operations ---
@@ -138,17 +138,12 @@ impl super::CodeContextEngine {
     ) -> Result<RecoveryResult, EngineError> {
         tracing::info!(project_id, "Starting project startup recovery");
 
-        let sqlite_client = self
-            .metadata_store
-            .as_ref()
-            .map(|db| db.for_project(project_id))
-            .transpose()
-            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .ok_or_else(|| {
-                EngineError::Config("SQLite database not initialized for recovery".to_string())
-            })?;
+        let relation_store = self
+            .relation_store
+            .for_project(project_id)
+            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?;
 
-        let coordinator = StartupRecoveryCoordinator::new(sqlite_client.as_ref().clone());
+        let coordinator = StartupRecoveryCoordinator::new(relation_store.clone());
 
         // A failed orchestrator lookup leaves startup recovery running without
         // relation rehydration; make that degradation visible.
@@ -172,25 +167,20 @@ impl super::CodeContextEngine {
         // After file recovery, load the relation generation selected by the
         // project manifest. Legacy projects without a manifest retain the
         // previous project-meta fallback.
-        let meta = ProjectMeta::load(&sqlite_client, project_id).map_err(|e| {
-            EngineError::Recovery(format!("Failed to read project meta after recovery: {}", e))
-        })?;
-        let relation_epoch = sqlite_client
-            .with_transaction(|tx| {
-                cce_storage_metadb_sqlite::ProjectIndexManifestRepository::get_active(
-                    tx, project_id,
-                )
-            })
+        let meta = ProjectMeta::load(&relation_store, project_id)
+            .await
+            .map_err(|e| {
+                EngineError::Recovery(format!("Failed to read project meta after recovery: {}", e))
+            })?;
+        let relation_epoch = relation_store
+            .manifest_active(project_id)
+            .await
             .map_err(|error| EngineError::Recovery(error.to_string()))?
             .map(|manifest| manifest.relation_epoch)
             .unwrap_or(meta.active_relation_epoch);
 
         if relation_epoch > 0 {
-            match RelationSnapshotLoader::load(
-                &SqliteSnapshotStore::new((*sqlite_client).clone()),
-                project_id,
-                relation_epoch,
-            ) {
+            match RelationSnapshotLoader::load(&relation_store, project_id, relation_epoch) {
                 Ok(index) => {
                     result.entity_count = index.function_count();
                     result.relation_count = index.resolved_relation_count();
@@ -201,20 +191,11 @@ impl super::CodeContextEngine {
                     } else {
                         SnapshotIntegrity::Full
                     };
-                    let manifest_id = {
-                        let conn = sqlite_client.read_connection().map_err(|error| {
-                            EngineError::Recovery(format!(
-                                "Failed to read relation manifest: {error}"
-                            ))
-                        })?;
-                        cce_storage_metadb_sqlite::repo::RelationSnapshotRepository::get_manifest(
-                            &conn,
-                            project_id,
-                            relation_epoch,
-                        )
+                    let manifest_id = relation_store
+                        .snapshot_manifest(project_id, relation_epoch)
+                        .await
                         .map_err(|error| EngineError::Recovery(error.to_string()))?
-                        .map(|manifest| manifest.operation_id)
-                    };
+                        .map(|manifest| manifest.operation_id);
 
                     self.init_relation_runtime(
                         project_id,

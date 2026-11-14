@@ -5,10 +5,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::export::nl_exporter::NlDocumentExporter;
 use crate::hot_update::{HotUpdateError, Result};
 use crate::operation::OperationContext;
 use crate::operation::checkpoint::CheckpointManager;
+use cce_export::NlDocumentExporter;
 
 use super::export_staging::{ExportStaging, StagedWrite};
 
@@ -86,7 +86,7 @@ pub async fn flush_write(
         staging.backed_up.push(write.output_path.clone());
     }
     staging.committed.push(write.clone());
-    crate::export::path_utils::write_file_atomic(&write.output_path, &write.content)
+    cce_export::write_file_atomic(&write.output_path, &write.content)
         .await
         .map_err(|e| HotUpdateError::export(e.to_string()))?;
     persist_export_path(ctx, &write, checkpoint_manager).await?;

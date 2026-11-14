@@ -5,7 +5,7 @@ use cce_api::models::{
     ErrorResponse, INGEST_CHUNK_BYTES, IngestManifestRequest, IngestManifestResponse, MissingChunk,
     error_codes,
 };
-use cce_storage_metadb_sqlite::{FileRepository, ProjectRepository};
+use cce_storage_common::RelationStorage;
 
 use super::paths::storage_path;
 use super::staging::received_chunk_indices;
@@ -34,7 +34,7 @@ pub async fn handle_ingest_manifest(
     AxumPath(id): AxumPath<i64>,
     axum::Json(request): axum::Json<IngestManifestRequest>,
 ) -> ApiResult<IngestManifestResponse> {
-    let store = match state.engine.metadata_store() {
+    let store = match state.engine.relation_store() {
         Some(store) => store,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -43,21 +43,12 @@ pub async fn handle_ingest_manifest(
             ));
         }
     };
-    let conn = match store.as_ref().read_connection() {
-        Ok(conn) => conn,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to open metadata connection: {e}"),
-            ));
-        }
-    };
     let mut upload = Vec::new();
     let mut missing_chunks = Vec::new();
     let mut unchanged = 0usize;
     for meta in &request.files {
         let path = storage_path(&meta.relative_path);
-        let stored = match FileRepository::get_by_path_and_project(&conn, &path, id) {
+        let stored = match store.file_by_path(id, &path).await {
             Ok(record) => record,
             Err(e) => {
                 return ApiResult::Error(ErrorResponse::new(
@@ -112,15 +103,14 @@ pub async fn handle_ingest_manifest(
             .cmp(&right.relative_path)
             .then(left.chunk_index.cmp(&right.chunk_index))
     });
-    if let Some(store) = state.engine.metadata_store() {
-        let _ = store.as_ref().with_transaction(|tx| {
-            ProjectRepository::meta_set_string(
-                tx,
+    if let Some(store) = state.engine.relation_store() {
+        let _ = store
+            .project_meta_set_string(
                 id,
                 cce_api::models::SUPPLY_MODE_KEY,
                 cce_api::models::SUPPLY_MODE_GATEWAY,
             )
-        });
+            .await;
     }
     ApiResult::Success(IngestManifestResponse {
         success: true,

@@ -44,8 +44,8 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::metadb::ChunkRecord;
     use cce_storage_common::RelationStorage;
+    use cce_storage_common::metadb::ChunkRecord;
     use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
@@ -114,13 +114,11 @@ mod tests {
         block_on(storage.materialize_sqlite_generation(1, 2, &["src/replaced.rs".to_string()]))
             .expect("materialization over residue must succeed");
 
+        // Copied rows keep their source chunk IDs (cross-epoch identity is
+        // stable, like entity source IDs); assert by file and epoch.
         let chunk_content = |path: &str| -> String {
-            let chunks = block_on(database.chunks_by_ids(
-                1,
-                &[format!("{path}::2")],
-                &[2],
-            ))
-            .expect("target chunks should load");
+            let chunks = block_on(database.chunks_by_file_epoch(1, path, 2))
+                .expect("target chunks should load");
             chunks
                 .into_iter()
                 .next()

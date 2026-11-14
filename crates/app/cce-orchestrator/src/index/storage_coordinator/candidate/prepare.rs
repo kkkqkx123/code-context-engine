@@ -1,6 +1,7 @@
 use cce_storage_common::FulltextStorage;
+use cce_storage_common::RelationStorage;
 use cce_storage_common::VectorStorage;
-use cce_storage_metadb_sqlite::{GenerationOverrideRepository, OverrideDisposition};
+use cce_storage_common::metadb::OverrideDisposition;
 use cce_types::path::normalize_project_path;
 
 use crate::error::OrchestratorError;
@@ -54,9 +55,7 @@ impl StorageCoordinator {
     ///
     /// Module-scoped: it clears only the BM25 chunk rows of the candidate plus
     /// its candidate-epoch documents; the `replaced` override hides the parent
-    /// documents. The whole path set shares one fulltext search+commit and one
-    /// metadata transaction, so a multi-file rewrite does not pay a commit per
-    /// file. Recovery may re-run this for the same files (the epoch-scoped
+    /// documents. Recovery may re-run this for the same files (the epoch-scoped
     /// delete and the override upsert are idempotent).
     pub async fn prepare_hot_update_bm25(&self, paths: &[String]) -> Result<(), OrchestratorError> {
         if paths.is_empty() {
@@ -73,26 +72,14 @@ impl StorageCoordinator {
             )
             .await?;
         }
-        if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
-            client
-                .with_transaction(|tx| {
-                    for path in paths {
-                        let normalized = normalize_project_path(path);
-                        tx.execute(
-                            "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3 AND path = 'nl'",
-                            rusqlite::params![self.project_id, epoch, normalized],
-                        )
-                        .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
-                        GenerationOverrideRepository::upsert(
-                            tx,
-                            self.project_id,
-                            epoch,
-                            &normalized,
-                            OverrideDisposition::Replaced,
-                        )?;
-                    }
-                    Ok(())
-                })
+        if let Some(store) = self.metadata_store.as_ref() {
+            let normalized: Vec<String> = paths
+                .iter()
+                .map(|path| normalize_project_path(path))
+                .collect();
+            store
+                .candidate_prepare_channel(self.project_id, epoch, &normalized, "nl")
+                .await
                 .map_err(OrchestratorError::Storage)?;
         }
         Ok(())
@@ -116,73 +103,40 @@ impl StorageCoordinator {
                 .delete_by_file_path_scoped_epoch(&path, &self.project_group_id, epoch)
                 .await?;
         }
-        if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
-            client
-                .with_transaction(|tx| {
-                    tx.execute(
-                        "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3 AND path = 'emb'",
-                        rusqlite::params![self.project_id, epoch, path],
-                    )
-                    .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
-                    GenerationOverrideRepository::upsert(
-                        tx,
-                        self.project_id,
-                        epoch,
-                        &path,
-                        OverrideDisposition::Replaced,
-                    )
-                })
+        if let Some(store) = self.metadata_store.as_ref() {
+            store
+                .candidate_prepare_channel(self.project_id, epoch, &[path], "emb")
+                .await
                 .map_err(OrchestratorError::Storage)?;
         }
         Ok(())
     }
 
-    /// Clear every candidate-generation row of one file (chunks, entities,
-    /// entities). Used by both replace and delete preparations.
-    fn clear_candidate_file_rows(&self, path: &str) -> Result<(), OrchestratorError> {
+    /// Clear every candidate-generation row of one file (chunks, entities).
+    /// Used by both replace and delete preparations.
+    async fn clear_candidate_file_rows(&self, path: &str) -> Result<(), OrchestratorError> {
         self.clear_candidate_file_rows_batch(std::slice::from_ref(&path))
+            .await
     }
 
     /// Batch form of [`Self::clear_candidate_file_rows`]: every file's rows
     /// are removed inside one transaction instead of one per file.
-    fn clear_candidate_file_rows_batch(&self, paths: &[&str]) -> Result<(), OrchestratorError> {
+    async fn clear_candidate_file_rows_batch(
+        &self,
+        paths: &[&str],
+    ) -> Result<(), OrchestratorError> {
         if paths.is_empty() {
             return Ok(());
         }
         let epoch = self.epoch();
-        if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
-            client
-                .with_transaction(|tx| {
-                    for path in paths {
-                        Self::clear_candidate_file_rows_tx(tx, self.project_id, epoch, path)?;
-                    }
-                    Ok(())
-                })
-                .map_err(OrchestratorError::Storage)
-        } else {
-            Ok(())
+        if let Some(store) = self.metadata_store.as_ref() {
+            let owned: Vec<String> = paths.iter().map(|path| path.to_string()).collect();
+            store
+                .candidate_delete_file_rows(self.project_id, epoch, &owned)
+                .await
+                .map(|_| ())
+                .map_err(OrchestratorError::Storage)?;
         }
-    }
-
-    /// Remove one file's candidate-generation rows inside an existing
-    /// transaction.
-    fn clear_candidate_file_rows_tx(
-        tx: &rusqlite::Transaction<'_>,
-        project_id: i64,
-        epoch: i64,
-        path: &str,
-    ) -> Result<(), cce_types::StorageError> {
-        tx.execute(
-            "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3",
-            rusqlite::params![project_id, epoch, path],
-        )
-        .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
-        tx.execute(
-            "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN
-             (SELECT id FROM files WHERE path = ?3 AND project_id = ?1 AND epoch = ?2)",
-            rusqlite::params![project_id, epoch, path],
-        )
-        .map_err(|error| cce_types::StorageError::delete("entities", error.to_string()))?;
         Ok(())
     }
 
@@ -190,17 +144,18 @@ impl StorageCoordinator {
     ///
     /// A later call for the same file upgrades the disposition (e.g. a file
     /// prepared as replaced and deleted afterwards ends up `deleted`).
-    fn register_override(
+    async fn register_override(
         &self,
         path: &str,
         disposition: OverrideDisposition,
     ) -> Result<(), OrchestratorError> {
         self.register_overrides(std::slice::from_ref(&path), disposition)
+            .await
     }
 
     /// Batch form of [`Self::register_override`]: every disposition is written
     /// inside one transaction.
-    fn register_overrides(
+    async fn register_overrides(
         &self,
         paths: &[&str],
         disposition: OverrideDisposition,
@@ -208,25 +163,17 @@ impl StorageCoordinator {
         if paths.is_empty() {
             return Ok(());
         }
-        let epoch = self.epoch();
-        if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
-            client
-                .with_transaction(|tx| {
-                    for path in paths {
-                        GenerationOverrideRepository::upsert(
-                            tx,
-                            self.project_id,
-                            epoch,
-                            path,
-                            disposition,
-                        )?;
-                    }
-                    Ok(())
-                })
-                .map_err(OrchestratorError::Storage)
-        } else {
-            Ok(())
+        if let Some(store) = self.metadata_store.as_ref() {
+            let entries: Vec<(String, OverrideDisposition)> = paths
+                .iter()
+                .map(|path| (path.to_string(), disposition))
+                .collect();
+            store
+                .overrides_upsert_batch(self.project_id, self.epoch(), &entries)
+                .await
+                .map_err(OrchestratorError::Storage)?;
         }
+        Ok(())
     }
 
     /// Register a deleted file inside the candidate generation.
@@ -243,8 +190,9 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         let path = normalize_project_path(&file_path.to_string_lossy());
         self.delete_candidate_epoch_external_data(&path).await?;
-        self.clear_candidate_file_rows(&path)?;
+        self.clear_candidate_file_rows(&path).await?;
         self.register_override(&path, OverrideDisposition::Deleted)
+            .await
     }
 
     /// Register a set of deleted files inside the candidate generation in one
@@ -275,7 +223,8 @@ impl StorageCoordinator {
         let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
         self.delete_candidate_epoch_external_data_batch(&path_refs)
             .await?;
-        self.clear_candidate_file_rows_batch(&path_refs)?;
+        self.clear_candidate_file_rows_batch(&path_refs).await?;
         self.register_overrides(&path_refs, OverrideDisposition::Deleted)
+            .await
     }
 }

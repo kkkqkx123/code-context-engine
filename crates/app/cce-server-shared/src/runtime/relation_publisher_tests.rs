@@ -2,8 +2,8 @@ use super::RelationRuntime;
 use super::relation_publisher::*;
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_orchestrator::index::{RelationPublication, RelationSnapshotPublisher};
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
+use cce_storage_metadb::RelationStore;
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta};
 use std::sync::Arc;
 
@@ -11,25 +11,23 @@ use cce_codegraph::index::snapshot_query::{
     SnapshotEntityQueryOps, SnapshotFileQueryOps, SnapshotRelationQueryOps, SnapshotSymbolQueryOps,
 };
 use cce_codegraph::index::{LayeredSnapshotIndex, RelationSnapshotIndex};
-use cce_storage_metadb_sqlite::ProjectRepository;
-use cce_storage_metadb_sqlite::repo::ProjectIndexManifestRepository;
-use cce_storage_metadb_sqlite::types::NewProjectRecord;
+use cce_storage_common::metadb::NewProjectRecord;
 use cce_types::relation::CallContext;
 use cce_types::{
     CanonicalEntity, CanonicalFile, CanonicalRelation, CanonicalRelationTarget, EntityKind,
     RelationType, Span, StableSymbolKey,
 };
 
-fn insert_project(sqlite: &SqliteClient) {
-    sqlite
-        .with_transaction(|tx| {
-            ProjectRepository::insert(
-                tx,
-                &NewProjectRecord::new("test".to_string(), "/tmp/test".to_string()),
-            )
-            .map(|_| ())
-        })
+async fn setup_store() -> RelationStore {
+    let store = RelationStore::in_memory().expect("in-memory store should open");
+    store
+        .project_insert(&NewProjectRecord::new(
+            "test".to_string(),
+            "/tmp/test".to_string(),
+        ))
+        .await
         .expect("test project should be inserted");
+    store.for_project(1).expect("project scope should open")
 }
 
 fn snapshot() -> CanonicalRelationSnapshot {
@@ -130,10 +128,9 @@ fn test_layered_base_from_index(
 
 #[tokio::test]
 async fn cas_rejects_concurrent_publish_with_stale_base_epoch() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     // First publish (no CAS) — succeeds.
     let first_snapshot = snapshot();
@@ -161,8 +158,9 @@ async fn cas_rejects_concurrent_publish_with_stale_base_epoch() {
 
     // Active epoch must still point to the first publish.
     assert_eq!(
-        sqlite
+        store
             .project_meta_get_int(1, "active_relation_epoch")
+            .await
             .expect("active epoch should be readable"),
         first.relation_epoch
     );
@@ -170,10 +168,9 @@ async fn cas_rejects_concurrent_publish_with_stale_base_epoch() {
 
 #[tokio::test]
 async fn publish_is_restart_equivalent_and_idempotent() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let first_snapshot = snapshot();
     let first = publisher
@@ -197,8 +194,9 @@ async fn publish_is_restart_equivalent_and_idempotent() {
         .expect("same operation should be idempotent");
     assert_eq!(first.relation_epoch, second.relation_epoch);
     assert_eq!(
-        sqlite
+        store
             .project_meta_get_int(1, "active_relation_epoch")
+            .await
             .expect("active epoch should be readable"),
         first.relation_epoch
     );
@@ -210,12 +208,8 @@ async fn publish_is_restart_equivalent_and_idempotent() {
         .expect("runtime snapshot should be published")
         .index
         .clone();
-    let cold = RelationSnapshotLoader::load(
-        &SqliteSnapshotStore::new(sqlite.clone()),
-        1,
-        first.relation_epoch,
-    )
-    .expect("active epoch should cold-load");
+    let cold = RelationSnapshotLoader::load(&store, 1, first.relation_epoch)
+        .expect("active epoch should cold-load");
     assert_eq!(live.function_count(), cold.function_count());
     assert_eq!(
         live.resolved_relation_count(),
@@ -239,10 +233,9 @@ async fn publish_is_restart_equivalent_and_idempotent() {
 
 #[tokio::test]
 async fn delta_publish_is_immediately_visible_to_runtime_queries() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let base_snapshot = snapshot();
     let base = publisher
@@ -388,12 +381,8 @@ async fn delta_publish_is_immediately_visible_to_runtime_queries() {
     );
     assert!(live.contains_file("src/extra.rs"));
     // Delta chain replay from SQLite reconstructs the same merged graph.
-    let cold = RelationSnapshotLoader::load(
-        &SqliteSnapshotStore::new(sqlite.clone()),
-        1,
-        publication.relation_epoch,
-    )
-    .expect("delta chain should cold-load");
+    let cold = RelationSnapshotLoader::load(&store, 1, publication.relation_epoch)
+        .expect("delta chain should cold-load");
     assert_eq!(live.compute_fingerprint(), cold.compute_fingerprint());
 
     // A delta that leaves a dangling internal target is rejected before
@@ -437,8 +426,9 @@ async fn delta_publish_is_immediately_visible_to_runtime_queries() {
     );
     // Active epoch must remain on the previous valid publication.
     assert_eq!(
-        sqlite
+        store
             .project_meta_get_int(1, "active_relation_epoch")
+            .await
             .expect("active epoch should be readable"),
         base2.relation_epoch
     );
@@ -446,10 +436,9 @@ async fn delta_publish_is_immediately_visible_to_runtime_queries() {
 
 #[tokio::test]
 async fn cold_path_delta_publish_is_scoped_without_full_merge() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let base_snapshot = snapshot();
     let base = publisher
@@ -587,21 +576,16 @@ async fn cold_path_delta_publish_is_scoped_without_full_merge() {
     );
     assert!(live.contains_file("src/extra.rs"));
     // Replaying from SQLite reconstructs the same merged graph.
-    let cold = RelationSnapshotLoader::load(
-        &SqliteSnapshotStore::new(sqlite.clone()),
-        1,
-        publication.relation_epoch,
-    )
-    .expect("delta chain should cold-load");
+    let cold = RelationSnapshotLoader::load(&store, 1, publication.relation_epoch)
+        .expect("delta chain should cold-load");
     assert_eq!(live.compute_fingerprint(), cold.compute_fingerprint());
 }
 
 #[tokio::test]
 async fn chain_hot_publish_merges_accumulated_deltas_for_runtime() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let base_snapshot = snapshot();
     let base = publisher
@@ -842,21 +826,16 @@ async fn chain_hot_publish_merges_accumulated_deltas_for_runtime() {
     assert!(live.contains_file("src/extra2.rs"));
 
     // Full chain replay reconstructs the same merged graph.
-    let cold = RelationSnapshotLoader::load(
-        &SqliteSnapshotStore::new(sqlite.clone()),
-        1,
-        publication.relation_epoch,
-    )
-    .expect("delta chain should cold-load");
+    let cold = RelationSnapshotLoader::load(&store, 1, publication.relation_epoch)
+        .expect("delta chain should cold-load");
     assert_eq!(live.compute_fingerprint(), cold.compute_fingerprint());
 }
 
 #[tokio::test]
 async fn delta_with_provided_base_is_rejected_by_scoped_validation() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let base_snapshot = snapshot();
     let base_index = Arc::new(snapshot_index(&base_snapshot));
@@ -941,8 +920,9 @@ async fn delta_with_provided_base_is_rejected_by_scoped_validation() {
         "error should mention scoped validation, got: {error}"
     );
     assert_eq!(
-        sqlite
+        store
             .project_meta_get_int(1, "active_relation_epoch")
+            .await
             .expect("active epoch should be readable"),
         base.relation_epoch
     );
@@ -1021,10 +1001,9 @@ async fn publish_add_deltas(
 
 #[tokio::test]
 async fn maybe_compact_merges_delta_chain_at_threshold() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let base_snapshot = snapshot();
     let base = publisher
@@ -1042,19 +1021,22 @@ async fn maybe_compact_merges_delta_chain_at_threshold() {
     assert!(
         publisher
             .needs_compaction(1, &CompactionConfig::default())
+            .await
             .expect("threshold check should read the chain"),
         "chain must cross the compaction threshold"
     );
 
-    let active_before = sqlite
+    let active_before = store
         .project_meta_get_int(1, "active_relation_epoch")
+        .await
         .expect("active epoch should be readable");
     publisher
         .maybe_compact(1)
         .await
         .expect("compaction should succeed");
-    let active_after = sqlite
+    let active_after = store
         .project_meta_get_int(1, "active_relation_epoch")
+        .await
         .expect("active epoch should be readable");
     assert!(
         active_after > active_before,
@@ -1066,6 +1048,7 @@ async fn maybe_compact_merges_delta_chain_at_threshold() {
     assert!(
         !publisher
             .needs_compaction(1, &CompactionConfig::default())
+            .await
             .expect("threshold check should read the chain"),
         "compaction must reset the delta chain"
     );
@@ -1075,9 +1058,8 @@ async fn maybe_compact_merges_delta_chain_at_threshold() {
         .expect("no-op compaction should succeed");
 
     // Cold load reconstructs the merged graph including all added files.
-    let cold =
-        RelationSnapshotLoader::load(&SqliteSnapshotStore::new(sqlite.clone()), 1, active_after)
-            .expect("compacted epoch should cold-load");
+    let cold = RelationSnapshotLoader::load(&store, 1, active_after)
+        .expect("compacted epoch should cold-load");
     let live = runtime
         .get_snapshot()
         .await
@@ -1095,10 +1077,9 @@ async fn maybe_compact_merges_delta_chain_at_threshold() {
 
 #[tokio::test]
 async fn maybe_compact_defers_while_candidate_building() {
-    let sqlite = SqliteClient::in_memory().expect("in-memory SQLite should open");
-    insert_project(&sqlite);
+    let store = setup_store().await;
     let runtime = Arc::new(RelationRuntime::new(1));
-    let publisher = ServerRelationSnapshotPublisher::new(sqlite.clone(), runtime.clone());
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
 
     let base_snapshot = snapshot();
     let base = publisher
@@ -1115,28 +1096,29 @@ async fn maybe_compact_defers_while_candidate_building() {
     // An in-flight publication candidate (state = building) must defer
     // the compaction: the candidate's uncommitted manifest references
     // the same epochs, and `delete_manifests_except` would purge it.
-    sqlite
-        .with_transaction(|tx| {
-            ProjectIndexManifestRepository::begin_building(tx, 1, 0, "operation-inflight", None)
-                .map(|_| ())
-        })
+    store
+        .manifest_begin_building(1, 0, "operation-inflight", None)
+        .await
         .expect("building manifest should insert");
     assert!(
         publisher
             .has_project_publication_candidate(1)
+            .await
             .expect("candidate check"),
         "the building manifest must be visible"
     );
 
-    let active_before = sqlite
+    let active_before = store
         .project_meta_get_int(1, "active_relation_epoch")
+        .await
         .expect("active epoch should be readable");
     publisher
         .maybe_compact(1)
         .await
         .expect("deferred compaction should not fail");
-    let active_after = sqlite
+    let active_after = store
         .project_meta_get_int(1, "active_relation_epoch")
+        .await
         .expect("active epoch should be readable");
     assert_eq!(
         active_after, active_before,
@@ -1145,6 +1127,7 @@ async fn maybe_compact_defers_while_candidate_building() {
     assert!(
         publisher
             .needs_compaction(1, &CompactionConfig::default())
+            .await
             .expect("threshold check should read the chain"),
         "the chain must be left untouched for the next attempt"
     );

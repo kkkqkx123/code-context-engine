@@ -20,6 +20,7 @@ use cce_api::models::{
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
 use cce_server_shared::maintenance::ProjectIndexMaintenanceService;
+use cce_storage_common::RelationStorage;
 use cce_storage_common::{FulltextStorage, VectorStorage};
 
 // ============================================================================
@@ -58,7 +59,7 @@ pub async fn handle_clear_index(
         state.engine.clone(),
         Some(state.engine.vector_clone()),
         Some(state.engine.fulltext_clone()),
-        state.engine.metadata_store_clone(),
+        state.engine.relation_store(),
     );
 
     let m_result = maintenance.clear_project_index(request.project_id).await;
@@ -198,21 +199,12 @@ pub async fn handle_delete_file(
         }
     }
 
-    // Step 4: Remove entity detail mappings and file summary mappings from SQLite
-    if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
-        && let Ok(project) = client.for_project(project_id)
+    // Step 4: Remove entity detail mappings and file summary mappings
+    if let Some(store) = state.engine.relation_store()
+        && let Ok(project) = store.for_project(project_id)
     {
-        let file_id_opt = match project.with_transaction(|tx| {
-            use rusqlite::{OptionalExtension, params};
-            tx.query_row(
-                "SELECT id FROM files WHERE path = ?1 AND project_id = ?2",
-                params![&file_path, project_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(|e| cce_types::StorageError::Sqlite(e.to_string()))
-        }) {
-            Ok(id_opt) => id_opt,
+        let file_id_opt = match project.file_by_path(project_id, &file_path).await {
+            Ok(record) => record.map(|record| record.id),
             Err(e) => {
                 tracing::error!(file = %file_path, error = %e, "Failed to query file_id");
                 return ApiResult::Error(ErrorResponse::with_details(
@@ -223,19 +215,12 @@ pub async fn handle_delete_file(
             }
         };
 
-        if let Some(file_id_num) = file_id_opt {
-            match client.with_transaction(|tx| {
-                use cce_storage_metadb_sqlite::EntityDetailMappingRepository;
-                EntityDetailMappingRepository::delete_by_file_id(tx, file_id_num)?;
-                Ok(())
-            }) {
-                Ok(_) => {
-                    tracing::debug!(file = %file_path, "Deleted entity mappings");
-                }
-                Err(e) => {
-                    tracing::error!(file = %file_path, error = %e, "Failed to delete entity mappings");
-                }
-            }
+        if let Some(file_id_num) = file_id_opt
+            && let Err(e) = project
+                .mappings_delete_by_file_id(project_id, file_id_num)
+                .await
+        {
+            tracing::error!(file = %file_path, error = %e, "Failed to delete entity mappings");
         }
     }
 
@@ -348,14 +333,13 @@ pub async fn handle_delete_entity(
         }
     }
 
-    // Step 5: Remove entity detail mapping from SQLite
-    if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
-        && let Ok(project) = client.for_project(project_id)
+    // Step 5: Remove entity detail mapping through the relation contract
+    if let Some(store) = state.engine.relation_store()
+        && let Ok(project) = store.for_project(project_id)
     {
-        let _ = project.with_transaction(|tx| {
-            use cce_storage_metadb_sqlite::EntityDetailMappingRepository;
-            EntityDetailMappingRepository::delete_by_entity_id(tx, entity_id as i64, project_id)
-        });
+        let _ = project
+            .mappings_delete_by_entity_id(project_id, entity_id as i64)
+            .await;
     }
 
     let response = DeleteEntityResponse {
@@ -577,13 +561,14 @@ pub async fn handle_index_stats(
             .unwrap_or(0)
     };
 
-    // Get file count from metadata store (project-scoped)
-    let file_count = if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
-        && let Ok(project) = client.for_project(project_id)
+    // Get file count through the relation contract (project-scoped)
+    let file_count = if let Some(store) = state.engine.relation_store()
+        && let Ok(project) = store.for_project(project_id)
     {
-        use cce_storage_metadb_sqlite::FileRepository;
-        match project.with_transaction(|tx| FileRepository::count_by_project(tx, project_id)) {
-            Ok(count) => count as usize,
+        // `files_count` is epoch-scoped; the stats endpoint reports the
+        // project row total, resolved through the visible file listing.
+        match project.files_visible_hashes(project_id).await {
+            Ok(hashes) => hashes.len(),
             Err(_) => 0,
         }
     } else {

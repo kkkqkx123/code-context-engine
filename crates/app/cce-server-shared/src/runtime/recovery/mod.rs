@@ -10,7 +10,8 @@
 use std::sync::Arc;
 
 use cce_orchestrator::IndexOrchestrator;
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_common::RelationStorage;
+use cce_storage_metadb::RelationStore;
 use cce_types::StorageError;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -43,20 +44,20 @@ pub struct FileClassification {
     pub batch_id: i64,
 }
 
-/// Low-level recovery operations
+/// Low-level recovery operations over the relation contract.
 pub struct StartupRecoveryManager {
-    sqlite: SqliteClient,
+    store: RelationStore,
 }
 
 impl StartupRecoveryManager {
     /// Create a new recovery manager
-    pub fn new(sqlite: SqliteClient) -> Self {
-        Self { sqlite }
+    pub fn new(store: RelationStore) -> Self {
+        Self { store }
     }
 
-    /// Get reference to SQLite client
-    pub fn sqlite(&self) -> &SqliteClient {
-        &self.sqlite
+    /// Get reference to the relation store
+    pub fn store(&self) -> &RelationStore {
+        &self.store
     }
 
     /// Classify all files in a project for recovery
@@ -64,50 +65,25 @@ impl StartupRecoveryManager {
     /// Uses content hash comparison to determine if a file needs re-parsing.
     /// Files with mismatched hashes are marked as Modified for re-indexing.
     /// batch_id is preserved for logging/tracking but not used for state classification.
-    pub fn classify_files(
+    pub async fn classify_files(
         &self,
         project_id: i64,
         meta: &ProjectMeta,
     ) -> Result<Vec<FileClassification>, StorageError> {
-        let conn = self.sqlite.read_connection()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT path, epoch, batch_id, content_hash
-                 FROM files
-                 WHERE project_id = ?1 AND epoch = ?2
-                 ORDER BY path",
-            )
-            .map_err(|e| {
-                StorageError::Query(format!(
-                    "Failed to prepare file classification query: {}",
-                    e
-                ))
-            })?;
+        let entries = self
+            .store
+            .files_epoch_entries(project_id, meta.epoch)
+            .await?;
 
-        let classifications = stmt
-            .query_map(rusqlite::params![project_id, meta.epoch], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            })
-            .map_err(|e| {
-                StorageError::Query(format!("Failed to query files for classification: {}", e))
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                StorageError::Query(format!("Failed to collect file classifications: {}", e))
-            })?
+        let classifications = entries
             .into_iter()
-            .map(|(path, epoch, batch_id, stored_hash)| {
-                let state = match Self::compute_file_hash(&path) {
-                    Ok(disk_hash) => match &stored_hash {
+            .map(|entry| {
+                let state = match Self::compute_file_hash(&entry.path) {
+                    Ok(disk_hash) => match &entry.content_hash {
                         Some(stored) if disk_hash != *stored => {
                             debug!(
                                 project_id = project_id,
-                                path = %path,
+                                path = %entry.path,
                                 "File content mismatch detected"
                             );
                             FileState::Modified
@@ -123,7 +99,7 @@ impl StartupRecoveryManager {
                     Err(e) => {
                         warn!(
                             project_id = project_id,
-                            path = %path,
+                            path = %entry.path,
                             error = %e,
                         "Failed to compute file hash, marking storage state incomplete"
                         );
@@ -132,10 +108,10 @@ impl StartupRecoveryManager {
                 };
 
                 FileClassification {
-                    path,
+                    path: entry.path,
                     state,
-                    epoch,
-                    batch_id,
+                    epoch: meta.epoch,
+                    batch_id: entry.batch_id,
                 }
             })
             .collect();
@@ -152,24 +128,26 @@ impl StartupRecoveryManager {
     }
 
     /// Mark file for re-parsing in SQLite
-    pub fn mark_file_for_reparse(
+    pub async fn mark_file_for_reparse(
         &self,
         project_id: i64,
         file_path: &str,
+        epoch: i64,
     ) -> Result<(), StorageError> {
-        let conn = self.sqlite.write_connection()?;
-
-        conn.execute(
-            "UPDATE files SET epoch = (SELECT epoch FROM project_meta WHERE project_id = ?1 AND key = 'epoch')
-             WHERE project_id = ?1 AND path = ?2",
-            rusqlite::params![project_id, file_path],
-        )
-        .map_err(|e| {
-            StorageError::Query(format!(
-                "Failed to mark file '{}' for re-parse: {}",
-                file_path, e
-            ))
-        })?;
+        if !self
+            .store
+            .files_set_epoch(project_id, file_path, epoch)
+            .await
+            .map_err(|e| {
+                StorageError::Query(format!(
+                    "Failed to mark file '{file_path}' for re-parse: {e}"
+                ))
+            })?
+        {
+            return Err(StorageError::Query(format!(
+                "Failed to mark file '{file_path}' for re-parse: no file row"
+            )));
+        }
 
         Ok(())
     }
@@ -179,123 +157,47 @@ impl StartupRecoveryManager {
     /// Queries `checkpoint_file` for a file whose content hash matches the
     /// current disk content, allowing recovery to reuse previously parsed AST
     /// data instead of re-parsing from scratch.
-    pub fn find_cached_parsed_data(
+    pub async fn find_cached_parsed_data(
         &self,
         project_id: i64,
         file_path: &str,
         disk_content_hash: &str,
     ) -> Result<Option<Vec<u8>>, StorageError> {
-        let conn = self.sqlite.read_connection()?;
-
-        let mut stmt = conn
-            .prepare(
-                "SELECT cf.parsed_data
-                 FROM checkpoint_file cf
-                 JOIN checkpoint c ON cf.operation_id = c.operation_id
-                   AND c.project_id = cf.project_id
-                 WHERE cf.project_id = ?1
-                   AND cf.file_path = ?2
-                   AND cf.content_hash = ?3
-                   AND cf.parsed_data IS NOT NULL
-                   AND c.status = 'in_progress'
-                 ORDER BY cf.id DESC
-                 LIMIT 1",
-            )
-            .map_err(|e| {
-                StorageError::Query(format!("Failed to prepare cached parsed data query: {}", e))
-            })?;
-
-        let result: Option<Vec<u8>> = stmt
-            .query_row(
-                rusqlite::params![project_id, file_path, disk_content_hash],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .ok();
-
-        Ok(result)
+        self.store
+            .checkpoint_cached_parsed_data(project_id, file_path, disk_content_hash)
+            .await
     }
 
     /// Read chunks for a specific file at given epoch
-    pub fn read_chunks_for_file(
+    pub async fn read_chunks_for_file(
         &self,
         project_id: i64,
         file_path: &str,
         epoch: i64,
     ) -> Result<Vec<String>, StorageError> {
-        let conn = self.sqlite.read_connection()?;
-
-        let mut stmt = conn
-            .prepare(
-                "SELECT chunk_id FROM chunks
-                 WHERE project_id = ?1 AND file_path = ?2 AND epoch = ?3
-                 ORDER BY chunk_id",
-            )
-            .map_err(|e| {
-                StorageError::Query(format!(
-                    "Failed to prepare chunks query for file '{}': {}",
-                    file_path, e
-                ))
-            })?;
-
-        let chunk_ids: Vec<String> = stmt
-            .query_map(rusqlite::params![project_id, file_path, epoch], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|e| {
-                StorageError::Query(format!(
-                    "Failed to query chunks for file '{}': {}",
-                    file_path, e
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                StorageError::Query(format!(
-                    "Failed to collect chunks for file '{}': {}",
-                    file_path, e
-                ))
-            })?;
-
-        Ok(chunk_ids)
+        self.store
+            .chunks_by_file(project_id, file_path, epoch)
+            .await
     }
 
     /// Collect relation index recovery information
-    pub fn collect_relation_info(
+    pub async fn collect_relation_info(
         &self,
         project_id: i64,
         meta: &ProjectMeta,
     ) -> Result<RelationIndexRecoveryInfo, StorageError> {
-        let conn = self.sqlite.read_connection()?;
-
-        let mut relation_stmt = conn
-            .prepare(
-                "SELECT COUNT(DISTINCT relation_id) FROM relations
-                 WHERE project_id = ?1 AND relation_epoch = ?2",
-            )
-            .map_err(|e| {
-                StorageError::Query(format!("Failed to prepare relation count query: {}", e))
-            })?;
-
-        let relation_count: usize = relation_stmt
-            .query_row(
-                rusqlite::params![project_id, meta.active_relation_epoch],
-                |row| Ok(row.get::<_, i64>(0).map(|v| v as usize).unwrap_or(0)),
-            )
-            .unwrap_or(0);
-
-        let mut entity_stmt = conn
-            .prepare(
-                "SELECT COUNT(*) FROM entities
-                 WHERE project_id = ?1 AND epoch = ?2",
-            )
-            .map_err(|e| {
-                StorageError::Query(format!("Failed to prepare entity count query: {}", e))
-            })?;
-
-        let entity_count: usize = entity_stmt
-            .query_row(
-                rusqlite::params![project_id, meta.active_relation_epoch],
-                |row| Ok(row.get::<_, i64>(0).map(|v| v as usize).unwrap_or(0)),
-            )
+        // The legacy `relations` table no longer exists; relation counts now
+        // come from the canonical snapshot of the active relation epoch.
+        let entity_count = self
+            .store
+            .entities_count(project_id, meta.active_relation_epoch)
+            .await
+            .unwrap_or(0) as usize;
+        let relation_count = self
+            .store
+            .snapshot_read(project_id, meta.active_relation_epoch)
+            .await
+            .map(|snapshot| snapshot.relations.len())
             .unwrap_or(0);
 
         debug!(
@@ -336,9 +238,9 @@ pub struct StartupRecoveryCoordinator {
 
 impl StartupRecoveryCoordinator {
     /// Create a new recovery coordinator
-    pub fn new(sqlite: SqliteClient) -> Self {
+    pub fn new(store: RelationStore) -> Self {
         Self {
-            manager: StartupRecoveryManager::new(sqlite),
+            manager: StartupRecoveryManager::new(store),
         }
     }
 
@@ -356,7 +258,7 @@ impl StartupRecoveryCoordinator {
         };
 
         // Load project metadata
-        let meta = ProjectMeta::load(self.manager.sqlite(), project_id)?;
+        let meta = ProjectMeta::load(self.manager.store(), project_id).await?;
         debug!(
             project_id = project_id,
             epoch = meta.epoch,
@@ -366,7 +268,7 @@ impl StartupRecoveryCoordinator {
         );
 
         // Classify files
-        let classifications = self.manager.classify_files(project_id, &meta)?;
+        let classifications = self.manager.classify_files(project_id, &meta).await?;
         result.files_classified = classifications.len();
 
         let reparse_files: Vec<_> = classifications
@@ -416,7 +318,10 @@ impl StartupRecoveryCoordinator {
         }
 
         // Collect relation index info
-        let relation_info = self.manager.collect_relation_info(project_id, &meta)?;
+        let relation_info = self
+            .manager
+            .collect_relation_info(project_id, &meta)
+            .await?;
         result.entity_count = relation_info.entity_count;
         result.relation_count = relation_info.relation_count;
 
@@ -450,7 +355,8 @@ impl StartupRecoveryCoordinator {
         for classification in reparse_files {
             if let Err(e) = self
                 .manager
-                .mark_file_for_reparse(project_id, &classification.path)
+                .mark_file_for_reparse(project_id, &classification.path, classification.epoch)
+                .await
             {
                 warn!(
                     project_id = project_id,
@@ -464,15 +370,16 @@ impl StartupRecoveryCoordinator {
             processed += 1;
 
             // Check for cached parsed data from interrupted operations
-            let has_cached = StartupRecoveryManager::compute_file_hash(&classification.path)
-                .ok()
-                .and_then(|hash| {
-                    self.manager
-                        .find_cached_parsed_data(project_id, &classification.path, &hash)
-                        .ok()
-                        .flatten()
-                })
-                .is_some();
+            let has_cached = match StartupRecoveryManager::compute_file_hash(&classification.path) {
+                Ok(hash) => self
+                    .manager
+                    .find_cached_parsed_data(project_id, &classification.path, &hash)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some(),
+                Err(_) => false,
+            };
 
             if has_cached {
                 debug!(
@@ -627,13 +534,10 @@ impl StartupRecoveryCoordinator {
                 continue;
             }
 
-            self.manager.sqlite().with_transaction(|tx| {
-                cce_storage_metadb_sqlite::FileRepository::delete_by_path(
-                    tx,
-                    &classification.path,
-                    project_id,
-                )
-            })?;
+            self.manager
+                .store()
+                .files_delete_by_path(project_id, &classification.path)
+                .await?;
             deleted += 1;
         }
         Ok(deleted)
@@ -645,29 +549,22 @@ impl StartupRecoveryCoordinator {
         project_id: i64,
         operation_id: &str,
     ) -> Result<(), StorageError> {
-        let conn = self.manager.sqlite().write_connection()?;
+        let store = self.manager.store();
 
         // Delete all checkpoint files for this operation
-        let files_deleted = cce_storage_metadb_sqlite::repo::CheckpointRepository::delete_checkpoint_files_by_operation_id(
-            &conn,
-            project_id,
-            operation_id,
-        )?;
+        let files_deleted = store
+            .checkpoint_files_delete_by_operation(project_id, operation_id)
+            .await?;
 
         // Delete all checkpoint batches for this operation
-        let batches_deleted = cce_storage_metadb_sqlite::repo::CheckpointRepository::delete_checkpoint_batches_by_operation_id(
-            &conn,
-            project_id,
-            operation_id,
-        )?;
+        let batches_deleted = store
+            .checkpoint_batches_delete_by_operation(project_id, operation_id)
+            .await?;
 
         // Delete all work unit checkpoints for this operation
-        let work_units_deleted =
-            cce_storage_metadb_sqlite::repo::CheckpointRepository::delete_work_units_by_operation_id(
-                &conn,
-                project_id,
-                operation_id,
-            )?;
+        let work_units_deleted = store
+            .work_units_delete_by_operation(project_id, operation_id)
+            .await?;
 
         info!(
             operation_id = %operation_id,
@@ -714,8 +611,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery_coordinator_creation() -> Result<(), StorageError> {
-        let sqlite = SqliteClient::in_memory()?;
-        let _coordinator = StartupRecoveryCoordinator::new(sqlite);
+        let store = RelationStore::in_memory()?;
+        let _coordinator = StartupRecoveryCoordinator::new(store);
         Ok(())
     }
 }

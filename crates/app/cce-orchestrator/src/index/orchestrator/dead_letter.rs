@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_metadb_sqlite::FileRepository;
+use cce_storage_common::RelationStorage;
 use cce_types::OutputMode;
 use cce_utils::token_estimation::{estimate_tokens, truncate_to_token_budget};
 
@@ -81,14 +81,11 @@ impl IndexOrchestrator {
             return Ok(DeadLetterRetryReport::default());
         }
 
-        let client = self
+        let store = self
             .storage
-            .metadata_client()
+            .metadata_store()
             .ok_or_else(|| {
-                OrchestratorError::index(
-                    "dead_letter_retry",
-                    "SQLite metadata store is not configured",
-                )
+                OrchestratorError::index("dead_letter_retry", "metadata store is not configured")
             })?
             .clone();
         if self.storage.embedder().is_none() {
@@ -100,7 +97,12 @@ impl IndexOrchestrator {
 
         // Recovery writes must land in the generation queries read; a
         // restored orchestrator otherwise still sits at epoch 0.
-        if self.storage.align_epoch_to_active_generation()?.is_none() {
+        if self
+            .storage
+            .align_epoch_to_active_generation()
+            .await?
+            .is_none()
+        {
             return Err(OrchestratorError::index(
                 "dead_letter_retry",
                 "project has no active index generation to repair",
@@ -112,16 +114,17 @@ impl IndexOrchestrator {
         self.storage.set_checkpoint_context(None, None);
 
         let root = {
-            let conn = client
-                .read_connection()
-                .map_err(OrchestratorError::Storage)?;
-            cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, self.project_id)
+            store
+                .project_record(self.project_id)
+                .await
+                .map_err(OrchestratorError::Storage)?
+                .map(|record| std::path::PathBuf::from(record.root_path))
                 .ok_or_else(|| {
-                OrchestratorError::index(
-                    "dead_letter_retry",
-                    format!("project {} has no registered root path", self.project_id),
-                )
-            })?
+                    OrchestratorError::index(
+                        "dead_letter_retry",
+                        format!("project {} has no registered root path", self.project_id),
+                    )
+                })?
         };
 
         let mut report = DeadLetterRetryReport::default();
@@ -138,32 +141,15 @@ impl IndexOrchestrator {
             };
 
             let content_hash = {
-                let read_result = client.read_connection().map_err(OrchestratorError::Storage);
-                match read_result {
-                    Ok(conn) => {
-                        match FileRepository::get_content_hash_by_path(
-                            &conn,
-                            &relative_path,
-                            self.project_id,
-                        ) {
-                            Ok(hash) => hash,
-                            Err(error) => {
-                                // Infrastructure fault: keep the file queued so
-                                // a later pass can retry the lookup.
-                                tracing::error!(
-                                    file,
-                                    %error,
-                                    "dead-letter retry: content hash lookup failed; file stays queued"
-                                );
-                                continue;
-                            }
-                        }
-                    }
+                match store.file_by_path(self.project_id, &relative_path).await {
+                    Ok(record) => record.and_then(|file| file.content_hash),
                     Err(error) => {
+                        // Infrastructure fault: keep the file queued so
+                        // a later pass can retry the lookup.
                         tracing::error!(
                             file,
                             %error,
-                            "dead-letter retry: database connection failed; file stays queued"
+                            "dead-letter retry: content hash lookup failed; file stays queued"
                         );
                         continue;
                     }

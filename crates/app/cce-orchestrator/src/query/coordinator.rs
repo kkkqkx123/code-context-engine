@@ -52,7 +52,11 @@ use crate::index::vector_store::VectorStore;
 /// ```ignore
 /// use code_context_engine::orchestrator::query::coordinator::QueryCoordinator;
 ///
-/// // let coordinator = QueryCoordinator::new(searcher, relation_searcher);
+/// // let coordinator = QueryCoordinator::builder(
+/// //     vector, embedder, fulltext, call_chain_query, scope,
+/// // )
+/// // .with_capabilities(capabilities)
+/// // .build();
 /// //
 /// // // Vector search
 /// // let result = coordinator.search(&query_options).await?;
@@ -92,6 +96,7 @@ pub struct QueryCoordinatorBuilder {
     capabilities: Option<IndexCapabilities>,
     relation: Option<RelationStore>,
     metrics_registry: Option<Arc<MetricsRegistry>>,
+    retry_queue: Option<Arc<RetryQueue>>,
     project_id: i64,
 }
 
@@ -115,6 +120,7 @@ impl QueryCoordinatorBuilder {
             capabilities: None,
             relation: None,
             metrics_registry: None,
+            retry_queue: None,
             project_id,
         }
     }
@@ -136,6 +142,45 @@ impl QueryCoordinatorBuilder {
         if let Some(builder) = self.searcher_builder.take() {
             self.searcher_builder = Some(builder.with_rerank(rerank_handler));
         }
+        self
+    }
+
+    /// Enable plugin-based reranking (forwarded to the searcher).
+    pub fn with_plugin_rerank(
+        mut self,
+        plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
+    ) -> Self {
+        if let Some(builder) = self.searcher_builder.take() {
+            self.searcher_builder = Some(builder.with_plugin_rerank(plugins));
+        }
+        self
+    }
+
+    /// Attach the plugin registry for query-side capabilities (forwarded).
+    pub fn with_plugin_registry(mut self, registry: Arc<cce_plugin::PluginRegistry>) -> Self {
+        if let Some(builder) = self.searcher_builder.take() {
+            self.searcher_builder = Some(builder.with_plugin_registry(registry));
+        }
+        self
+    }
+
+    /// Attach a shared query result cache (forwarded to the searcher).
+    pub fn with_shared_cache(mut self, cache: QueryCache) -> Self {
+        if let Some(builder) = self.searcher_builder.take() {
+            self.searcher_builder = Some(builder.with_shared_cache(cache));
+        }
+        self
+    }
+
+    /// Override the relation searcher (e.g. snapshot-backed).
+    pub fn with_relation_searcher(mut self, searcher: Arc<RelationSearcher>) -> Self {
+        self.relation_searcher = Some(searcher);
+        self
+    }
+
+    /// Attach the engine-owned retry queue instead of a throwaway one.
+    pub fn with_retry_queue(mut self, queue: Arc<RetryQueue>) -> Self {
+        self.retry_queue = Some(queue);
         self
     }
 
@@ -178,7 +223,9 @@ impl QueryCoordinatorBuilder {
             capabilities: self.capabilities.unwrap_or_default(),
             relation: self.relation,
             metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
+            retry_queue: self
+                .retry_queue
+                .unwrap_or_else(|| Arc::new(RetryQueue::new())),
             project_id: self.project_id,
         }
     }
@@ -194,82 +241,6 @@ impl QueryCoordinator {
         scope: ProjectScope,
     ) -> QueryCoordinatorBuilder {
         QueryCoordinatorBuilder::new(vector, embedder, fulltext, call_chain_query, scope)
-    }
-
-    /// Create a new query coordinator bound to a specific project
-    pub fn new(
-        searcher: Arc<Searcher>,
-        relation_searcher: Arc<RelationSearcher>,
-        project_id: i64,
-    ) -> Self {
-        Self {
-            searcher,
-            relation_searcher,
-            cache: QueryCache::new(CacheConfig::default()),
-            capabilities: IndexCapabilities::default(),
-            relation: None,
-            metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
-            project_id,
-        }
-    }
-
-    /// Create a new query coordinator with cache configuration
-    pub fn with_cache(
-        searcher: Arc<Searcher>,
-        relation_searcher: Arc<RelationSearcher>,
-        cache_config: CacheConfig,
-        project_id: i64,
-    ) -> Self {
-        Self {
-            searcher,
-            relation_searcher,
-            cache: QueryCache::new(cache_config),
-            capabilities: IndexCapabilities::default(),
-            relation: None,
-            metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
-            project_id,
-        }
-    }
-
-    /// Create a new query coordinator with capabilities
-    pub fn with_capabilities(
-        searcher: Arc<Searcher>,
-        relation_searcher: Arc<RelationSearcher>,
-        capabilities: IndexCapabilities,
-        project_id: i64,
-    ) -> Self {
-        Self {
-            searcher,
-            relation_searcher,
-            cache: QueryCache::new(CacheConfig::default()),
-            capabilities,
-            relation: None,
-            metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
-            project_id,
-        }
-    }
-
-    /// Create a new query coordinator with all options
-    pub fn with_options(
-        searcher: Arc<Searcher>,
-        relation_searcher: Arc<RelationSearcher>,
-        cache_config: CacheConfig,
-        capabilities: IndexCapabilities,
-        project_id: i64,
-    ) -> Self {
-        Self {
-            searcher,
-            relation_searcher,
-            cache: QueryCache::new(cache_config),
-            capabilities,
-            relation: None,
-            metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
-            project_id,
-        }
     }
 
     /// Set monitoring metrics
@@ -310,11 +281,6 @@ impl QueryCoordinator {
     pub fn with_relation_store(mut self, store: RelationStore) -> Self {
         self.relation = Some(store);
         self
-    }
-
-    /// Get a reference to the searcher
-    pub fn searcher(&self) -> &Searcher {
-        &self.searcher
     }
 
     /// Get a reference to the relation searcher
@@ -372,7 +338,7 @@ impl QueryCoordinator {
         &self,
         query: &str,
         limit: i64,
-    ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>> {
+    ) -> Result<Vec<cce_storage_common::metadb::EntityRecord>> {
         let store = self
             .relation
             .as_ref()
@@ -407,7 +373,7 @@ impl QueryCoordinator {
         project_id: i64,
         limit: i64,
         view: &crate::query::filter::QueryFilter,
-    ) -> std::result::Result<Vec<cce_storage_metadb_sqlite::EntityRecord>, cce_types::StorageError>
+    ) -> std::result::Result<Vec<cce_storage_common::metadb::EntityRecord>, cce_types::StorageError>
     {
         use cce_storage_common::RelationStorage;
 

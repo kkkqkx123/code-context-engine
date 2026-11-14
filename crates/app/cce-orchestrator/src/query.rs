@@ -49,20 +49,17 @@
 //! # Usage Example
 //!
 //! ```ignore
-//! use code_context_engine::orchestrator::query::{QueryCoordinator, Searcher};
+//! use code_context_engine::orchestrator::query::QueryCoordinator;
 //!
-//! // Create a Searcher via its builder
-//! let searcher = Searcher::builder(vector, embedder, fulltext, scope)
-//!     .with_sqlite(sqlite)
+//! // Assemble the coordinator directly from the project stores; the
+//! // searcher stays behind the builder and is never named.
+//! let coordinator = QueryCoordinator::builder(
+//!     vector, embedder, fulltext, call_chain_query, scope,
+//! )
+//!     .with_relation_searcher(relation_searcher)
 //!     .with_rerank(rerank_handler)
+//!     .with_capabilities(capabilities)
 //!     .build();
-//!
-//! // Create a QueryCoordinator
-//! let coordinator = QueryCoordinator::new(
-//!     Arc::new(searcher),
-//!     Arc::new(relation_searcher),
-//!     project_id,
-//! );
 //!
 //! // Run a search
 //! let options = QueryConfigBuilder::default()
@@ -141,7 +138,8 @@ pub use capabilities::IndexCapabilities;
 pub use error::{QueryError, Result};
 
 // Re-export searcher
-pub use searcher::{Searcher, SearcherBuilder};
+pub use searcher::expand_multi_entity_results;
+pub(crate) use searcher::{Searcher, SearcherBuilder};
 
 // Re-export relation searcher
 pub use relation_searcher::{

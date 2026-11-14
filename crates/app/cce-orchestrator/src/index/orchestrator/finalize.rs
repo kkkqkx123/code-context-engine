@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::export::NlDocumentExporter;
 use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndexView};
+use cce_export::NlDocumentExporter;
 
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
@@ -42,7 +42,7 @@ impl IndexOrchestrator {
     ) {
         if let Some(ref exporter) = self.nl_exporter {
             if exporter.config().enable_relation_enhancement {
-                let enhancer_config = crate::export::RelationEnhancerConfig::default();
+                let enhancer_config = cce_export::RelationEnhancerConfig::default();
                 tracing::info!("Sharing published relation snapshot with NL document export");
                 exporter.set_relation_enhancement(Arc::clone(snapshot), enhancer_config);
             }
@@ -486,7 +486,7 @@ impl IndexOrchestrator {
             let summary = ctx
                 .export_summaries_by_file
                 .get(&file_path)
-                .map(crate::export::ExportSummaryView::from);
+                .map(cce_export::ExportSummaryView::from);
             match exporter.export_file(&chunks, summary.as_ref()).await {
                 Ok(_) => {
                     export_success += 1;
@@ -540,7 +540,7 @@ impl IndexOrchestrator {
             .file_paths()
             .into_iter()
             .map(|path| {
-                crate::export::path_utils::relative_source_path(&path, exporter.project_root())
+                cce_export::relative_source_path(&path, exporter.project_root())
                     .to_string_lossy()
                     .into_owned()
             })
@@ -578,16 +578,21 @@ impl IndexOrchestrator {
                 Some(epoch) => epoch,
                 // No relation generation was produced by this operation; reuse
                 // the currently active one (0 when none was ever published).
-                None => self.storage.active_relation_epoch()?,
+                None => self.storage.active_relation_epoch().await?,
             };
             if let Err(error) = self
                 .storage
                 .activate_project_manifest(&ctx.operation_id, relation_epoch)
+                .await
             {
-                if let Err(manifest_error) = self.storage.fail_project_manifest(
-                    &ctx.operation_id,
-                    &format!("manifest activation failed: {error}"),
-                ) {
+                if let Err(manifest_error) = self
+                    .storage
+                    .fail_project_manifest(
+                        &ctx.operation_id,
+                        &format!("manifest activation failed: {error}"),
+                    )
+                    .await
+                {
                     tracing::error!(
                         operation_id = %ctx.operation_id,
                         error = %manifest_error,
@@ -596,11 +601,19 @@ impl IndexOrchestrator {
                 }
                 return Err(error);
             }
-            if let Err(error) = self.storage.publish_file_hashes(ctx.file_indexer.files()) {
-                if let Err(manifest_error) = self.storage.fail_project_manifest(
-                    &ctx.operation_id,
-                    &format!("file hash publication failed: {error}"),
-                ) {
+            if let Err(error) = self
+                .storage
+                .publish_file_hashes(ctx.file_indexer.files())
+                .await
+            {
+                if let Err(manifest_error) = self
+                    .storage
+                    .fail_project_manifest(
+                        &ctx.operation_id,
+                        &format!("file hash publication failed: {error}"),
+                    )
+                    .await
+                {
                     tracing::error!(
                         operation_id = %ctx.operation_id,
                         error = %manifest_error,
@@ -620,10 +633,14 @@ impl IndexOrchestrator {
                 ));
                 ctx.all_batches_completed = false;
             }
-        } else if let Err(error) = self.storage.fail_project_manifest(
-            &ctx.operation_id,
-            "one or more required index stages did not complete",
-        ) {
+        } else if let Err(error) = self
+            .storage
+            .fail_project_manifest(
+                &ctx.operation_id,
+                "one or more required index stages did not complete",
+            )
+            .await
+        {
             tracing::warn!(operation_id = %ctx.operation_id, error = %error, "Failed to mark index manifest candidate as failed");
         }
         Ok(())

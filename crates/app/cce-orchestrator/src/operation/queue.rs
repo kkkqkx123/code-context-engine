@@ -12,9 +12,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, trace, warn};
 
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::repo::CheckpointRepository;
+use cce_storage_common::RelationStorage;
 use cce_types::{OperationKind, StorageError};
+
+use crate::index::vector_store::RelationStore;
 
 /// Maximum number of pending (queued, not active) operations.
 ///
@@ -97,8 +98,8 @@ pub struct OperationQueue {
     active: Arc<Mutex<Option<ActiveOperation>>>,
     /// Pending operations waiting for execution, ordered by priority
     pending: Arc<Mutex<VecDeque<PendingOperation>>>,
-    /// SQLite database for persistence
-    db: Arc<SqliteClient>,
+    /// Relation backend for persistence
+    db: RelationStore,
 }
 
 impl OperationQueue {
@@ -106,7 +107,7 @@ impl OperationQueue {
     ///
     /// Loads any persisted active operation from the database.
     /// project_id must be > 0 (no global/default projects allowed)
-    pub fn new_for_project(project_id: i64, db: Arc<SqliteClient>) -> Self {
+    pub fn new_for_project(project_id: i64, db: RelationStore) -> Self {
         assert!(
             project_id > 0,
             "project_id must be > 0 for explicit project"
@@ -122,10 +123,7 @@ impl OperationQueue {
     /// Load active operation from database (call on startup)
     pub async fn load_persisted_active(&self) -> Result<Option<ActiveOperation>, StorageError> {
         let active_op = {
-            let conn = self.db.read_connection()?;
-            if let Some(record) =
-                CheckpointRepository::get_active_checkpoint(&conn, self.project_id)?
-            {
+            if let Some(record) = self.db.checkpoint_active(self.project_id).await? {
                 Some(ActiveOperation {
                     project_id: record.project_id,
                     operation_id: record.operation_id,
@@ -283,19 +281,14 @@ impl OperationQueue {
 
         // Persist the active flag without holding either queue lock.
         // A failure rolls back the in-memory reservation made above.
-        let persist_result: Result<(), StorageError> = (|| {
-            let conn = self.db.write_connection()?;
-            let tx = conn
-                .unchecked_transaction()
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-            CheckpointRepository::set_active_flag(
-                &tx,
+        let persist_result: Result<(), StorageError> = self
+            .db
+            .checkpoint_set_active(
                 self.project_id,
                 &next_op.operation_id,
                 next_op.priority.as_i32(),
-            )?;
-            tx.commit().map_err(|e| StorageError::Sqlite(e.to_string()))
-        })();
+            )
+            .await;
 
         if let Err(error) = persist_result {
             // Roll back the reservation: restore the popped operation and free
@@ -326,8 +319,9 @@ impl OperationQueue {
     ///
     /// Call this periodically to indicate the operation is still running.
     pub async fn heartbeat(&self, operation_id: &str) -> Result<(), StorageError> {
-        let conn = self.db.write_connection()?;
-        CheckpointRepository::update_heartbeat(&conn, self.project_id, operation_id)
+        self.db
+            .checkpoint_heartbeat(self.project_id, operation_id)
+            .await
     }
 
     /// Mark the active operation as completed and remove it
@@ -335,14 +329,10 @@ impl OperationQueue {
         let mut active = self.active.lock().await;
 
         if let Some(completed) = active.take() {
-            // Clear active flag in database
-            let conn = self.db.write_connection()?;
-            let tx = conn
-                .unchecked_transaction()
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-            CheckpointRepository::clear_active_flag(&tx, self.project_id, &completed.operation_id)?;
-            tx.commit()
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
+            // Clear active flag in the relation backend
+            self.db
+                .checkpoint_clear_active(self.project_id, &completed.operation_id)
+                .await?;
 
             trace!(
                 operation_id = %completed.operation_id,
@@ -376,13 +366,9 @@ impl OperationQueue {
                 }
             }
         }
-        let conn = self.db.write_connection()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-        CheckpointRepository::clear_active_flag(&tx, self.project_id, operation_id)?;
-        tx.commit()
-            .map_err(|e| StorageError::Sqlite(e.to_string()))?;
+        self.db
+            .checkpoint_clear_active(self.project_id, operation_id)
+            .await?;
         trace!(
             operation_id = %operation_id,
             "Cleared DB active flag by operation id"
@@ -481,14 +467,12 @@ impl OperationQueue {
         stale_threshold_secs: i64,
     ) -> Result<usize, StorageError> {
         let (cleared, db_active) = {
-            let conn = self.db.write_connection()?;
-            let cleared = CheckpointRepository::cleanup_stale_active(
-                &conn,
-                self.project_id,
-                stale_threshold_secs,
-            )?;
+            let cleared = self
+                .db
+                .checkpoints_cleanup_stale(self.project_id, stale_threshold_secs)
+                .await?;
             let db_active = if cleared > 0 {
-                CheckpointRepository::get_active_checkpoint(&conn, self.project_id)?
+                self.db.checkpoint_active(self.project_id).await?
             } else {
                 None
             };
@@ -519,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_priority_ordering() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         // Enqueue in reverse priority order
@@ -582,7 +566,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduplication() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         // Enqueue same operation twice
@@ -613,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_active_prevents_dequeue() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         queue
@@ -662,7 +646,7 @@ mod tests {
     /// dropped when the queue exceeds its capacity.
     #[tokio::test]
     async fn test_pending_queue_bounded_drops_lowest_priority() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let queue = OperationQueue::new_for_project(1, db);
 
         // Distinct root dirs avoid deduplication across enqueues.
@@ -705,7 +689,7 @@ mod tests {
     /// two operations at once.
     #[tokio::test]
     async fn test_dequeue_reservation_blocks_concurrent_dequeue() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let queue = Arc::new(OperationQueue::new_for_project(1, db));
 
         queue

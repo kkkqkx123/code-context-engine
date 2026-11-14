@@ -178,22 +178,23 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::metadb::{ChunkRecord, FileRecord};
     use cce_storage_common::RelationStorage;
+    use cce_storage_common::metadb::{ChunkRecord, FileRecord};
     use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
 
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
+
     #[test]
     fn load_bm25_clone_content_reconstructs_chunk_text() {
         let database = RelationStore::in_memory().expect("in-memory store");
-        let block_on = |future| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("test runtime")
-                .block_on(future)
-        };
         block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
 
         block_on(database.files_upsert(

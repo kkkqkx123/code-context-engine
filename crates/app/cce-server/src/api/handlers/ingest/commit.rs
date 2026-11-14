@@ -2,8 +2,10 @@
 
 use axum::extract::{Path as AxumPath, State};
 use cce_api::models::{ErrorResponse, IngestCommitResponse, error_codes};
+use cce_storage_common::RelationStorage;
 use cce_storage_common::VectorStorage;
-use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
+use cce_storage_common::metadb::{ProjectRecord, ProjectUpdateRecord};
+use cce_storage_metadb::RelationStore;
 
 use super::staging::{INGEST_STAGING_RETENTION, clear_project_staging, sweep_project_staging};
 use crate::api::response::ApiResult;
@@ -29,7 +31,7 @@ pub async fn handle_ingest_commit(
     State(state): State<SharedContext>,
     AxumPath(id): AxumPath<i64>,
 ) -> ApiResult<IngestCommitResponse> {
-    let store = match state.engine.metadata_store() {
+    let store = match state.engine.relation_store() {
         Some(store) => store,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -38,10 +40,7 @@ pub async fn handle_ingest_commit(
             ));
         }
     };
-    let record = match store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::get_by_id(tx, id))
-    {
+    let record = match store.project_record(id).await {
         Ok(Some(record)) => record,
         Ok(None) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -84,15 +83,7 @@ pub async fn handle_ingest_commit(
                 error = %e,
                 "Hot-update coordinator unavailable, falling back to full index"
             );
-            return run_full_commit(
-                &state,
-                store.as_ref(),
-                &record,
-                index_options,
-                id,
-                index_start,
-            )
-            .await;
+            return run_full_commit(&state, &store, &record, index_options, id, index_start).await;
         }
     };
 
@@ -109,28 +100,12 @@ pub async fn handle_ingest_commit(
                 "Change-detection stats unavailable, falling back to full index"
             );
             drop(guard);
-            return run_full_commit(
-                &state,
-                store.as_ref(),
-                &record,
-                index_options,
-                id,
-                index_start,
-            )
-            .await;
+            return run_full_commit(&state, &store, &record, index_options, id, index_start).await;
         }
     };
     if stored_files == 0 {
         drop(guard);
-        return run_full_commit(
-            &state,
-            store.as_ref(),
-            &record,
-            index_options,
-            id,
-            index_start,
-        )
-        .await;
+        return run_full_commit(&state, &store, &record, index_options, id, index_start).await;
     }
 
     let operation = match guard.run_commit_update().await {
@@ -189,10 +164,7 @@ pub async fn handle_ingest_commit(
     let (total_entities, total_vectors) = read_index_totals(&state, id).await;
     let now = chrono::Utc::now().to_rfc3339();
     let updates = ProjectUpdateRecord::default().with_last_indexed(now);
-    if let Err(e) = store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::update(tx, id, &updates))
-    {
+    if let Err(e) = store.project_update(id, &updates).await {
         tracing::warn!("Failed to update last_indexed: {e}");
     }
     if success {
@@ -212,8 +184,8 @@ pub async fn handle_ingest_commit(
 /// Bootstrap path running the full index to establish the baseline.
 async fn run_full_commit(
     state: &SharedContext,
-    store: &cce_storage_metadb_sqlite::SqliteClient,
-    record: &cce_storage_metadb_sqlite::ProjectRecord,
+    store: &RelationStore,
+    record: &ProjectRecord,
     index_options: cce_orchestrator::IndexOptions,
     id: i64,
     index_start: std::time::Instant,
@@ -253,7 +225,7 @@ async fn run_full_commit(
     );
     let now = chrono::Utc::now().to_rfc3339();
     let updates = ProjectUpdateRecord::default().with_last_indexed(now);
-    if let Err(e) = store.with_transaction(|tx| ProjectRepository::update(tx, id, &updates)) {
+    if let Err(e) = store.project_update(id, &updates).await {
         tracing::warn!("Failed to update last_indexed: {e}");
     }
     clear_project_staging(id);

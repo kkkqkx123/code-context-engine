@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_common::FulltextDocument;
-use cce_storage_metadb_sqlite::ChunkRecord;
+use cce_storage_common::metadb::ChunkRecord;
 use cce_types::chunk_refs::ChunkEntityRefs;
 use cce_types::{TestInfo, TestStatus};
 
@@ -162,34 +162,6 @@ pub(crate) fn project_chunk_point_id(project_group_id: &str, epoch: i64, chunk_i
     format!("{project_group_id}::{epoch}::{chunk_id}")
 }
 
-/// Replace the epoch field in a structured ID without substring collisions.
-///
-/// IDs follow the pattern `{prefix}::{epoch}::{suffix}`. A naive
-/// `replace(&format!("::{old_epoch}::"), &format!("::{new_epoch}::"))` can
-/// mis-fire when epochs share a digit prefix (e.g. old=1, new=11 turns
-/// `::11::` into `::111::`). Splitting on `::` and replacing only the
-/// second field avoids this.
-pub(crate) fn replace_epoch_in_id(id: &str, old_epoch: i64, new_epoch: i64) -> String {
-    let mut parts: Vec<&str> = id.split("::").collect();
-    if parts.len() >= 2 && parts[1] == old_epoch.to_string() {
-        let new_epoch_str = new_epoch.to_string();
-        parts[1] = &new_epoch_str;
-        return parts.join("::");
-    }
-    id.to_string()
-}
-
-/// Replace epochs inside a JSON array of ID strings.
-pub(crate) fn replace_epoch_in_id_list(list: &str, old_epoch: i64, new_epoch: i64) -> String {
-    let Ok(mut ids) = serde_json::from_str::<Vec<String>>(list) else {
-        return list.to_string();
-    };
-    for id in &mut ids {
-        *id = replace_epoch_in_id(id, old_epoch, new_epoch);
-    }
-    serde_json::to_string(&ids).unwrap_or_else(|_| list.to_string())
-}
-
 /// Compute a deterministic hash from chunk IDs to identify a work unit.
 /// The hash is order-independent (IDs are sorted before hashing).
 pub(crate) fn compute_work_unit_hash(chunks: &[&ChunkedResult]) -> String {
@@ -204,9 +176,7 @@ pub(crate) fn compute_work_unit_hash(chunks: &[&ChunkedResult]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_chunk_record, project_chunk_point_id, replace_epoch_in_id, replace_epoch_in_id_list,
-    };
+    use super::{build_chunk_record, project_chunk_point_id};
     use cce_parser::ast_to_nl::chunker::{
         ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata,
     };
@@ -256,37 +226,6 @@ mod tests {
         assert_eq!(record.project_id, Some(7));
         let entity_ids = record.get_entity_ids();
         assert_eq!(entity_ids, vec![10, 20]);
-    }
-
-    #[test]
-    fn replace_epoch_in_id_handles_digit_overlap() {
-        assert_eq!(
-            replace_epoch_in_id("grp::1::chunk-x", 1, 11),
-            "grp::11::chunk-x"
-        );
-        assert_eq!(
-            replace_epoch_in_id("grp::11::chunk-x", 1, 11),
-            "grp::11::chunk-x"
-        );
-        assert_eq!(
-            replace_epoch_in_id("grp::1::chunk-y", 1, 2),
-            "grp::2::chunk-y"
-        );
-    }
-
-    #[test]
-    fn replace_epoch_in_id_list_replaces_all_entries() {
-        let input = serde_json::to_string(&vec![
-            "grp::1::chunk-a".to_string(),
-            "grp::1::chunk-b".to_string(),
-        ])
-        .unwrap();
-        let expected = serde_json::to_string(&vec![
-            "grp::3::chunk-a".to_string(),
-            "grp::3::chunk-b".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(replace_epoch_in_id_list(&input, 1, 3), expected);
     }
 
     #[test]

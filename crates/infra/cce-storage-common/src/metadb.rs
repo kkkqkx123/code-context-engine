@@ -36,13 +36,15 @@ pub use checkpoint::{
     WorkUnitCheckpointRecord, WorkUnitStatus, validate_checkpoint,
 };
 pub use chunk::{ChunkContent, ChunkRecord, EntityDetailMapping};
-pub use entity::{DbId, EntityRecord, EntityWithFile, FileEnsureEntry, FileHashEntry, FileRecord};
-pub use projection::IndexStateProjection;
+pub use entity::{
+    DbId, EntityRecord, EntityWithFile, FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord,
+};
 pub use generation::{
     AdmissionAuditRecord, GenerationGcPlan, GenerationOverride, OverrideDisposition,
     ProjectIndexManifest, ProjectIndexManifestState,
 };
 pub use project::{NewProjectRecord, ProjectRecord, ProjectUpdateRecord};
+pub use projection::IndexStateProjection;
 
 /// Backend-neutral record aliases shared by the local and remote branches.
 pub type RelationFile = FileRecord;
@@ -72,6 +74,53 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         project_id: i64,
     ) -> impl Future<Output = Result<Option<ProjectRecord>, StorageError>> + Send;
 
+    /// List every registered project, newest first.
+    fn projects_all(&self)
+    -> impl Future<Output = Result<Vec<ProjectRecord>, StorageError>> + Send;
+
+    /// Apply a partial project-row update.
+    fn project_update(
+        &self,
+        project_id: i64,
+        updates: &ProjectUpdateRecord,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Register a project row; returns the new id.
+    ///
+    /// Uniqueness violations on name or root path surface as errors whose
+    /// message contains `UNIQUE constraint failed`.
+    fn project_insert(
+        &self,
+        record: &NewProjectRecord,
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
+
+    /// Whether a project row already uses `root_path`.
+    fn project_path_exists(
+        &self,
+        root_path: &str,
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
+
+    /// Delete one project's record together with its checkpoint rows.
+    fn project_delete_with_cascade(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Remove one project's database files; returns the removed file count.
+    fn project_delete_db(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
+    /// Drop one project's index data while keeping the project row.
+    ///
+    /// Clears files, entities, chunks, entity mappings, relation snapshots,
+    /// project metadata and checkpoints in one storage-side transaction.
+    fn project_clear_index(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
     /// Read an integer project metadata value.
     fn project_meta_get_int(
         &self,
@@ -96,6 +145,21 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         project_id: i64,
         key: &str,
     ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
+
+    /// Read a string project metadata value, if the row exists.
+    fn project_meta_get_string_optional(
+        &self,
+        project_id: i64,
+        key: &str,
+    ) -> impl Future<Output = Result<Option<String>, StorageError>> + Send;
+
+    /// Write a string project metadata value.
+    fn project_meta_set_string(
+        &self,
+        project_id: i64,
+        key: &str,
+        value: &str,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     // -- Generation manifest --
 
@@ -160,6 +224,13 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         operation_id: &str,
         parent_data_epoch: Option<i64>,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Parent data epoch of one data epoch, if the generation inherits.
+    fn manifest_parent_epoch(
+        &self,
+        project_id: i64,
+        data_epoch: i64,
+    ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
 
     /// Whether an in-progress checkpoint of the given operation type exists.
     fn manifest_has_incomplete(
@@ -274,6 +345,13 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         path: &str,
     ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
+    /// File rows by row id scoped to one project.
+    fn files_by_ids(
+        &self,
+        project_id: i64,
+        ids: &[i64],
+    ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
+
     /// Latest file row of one path across all epochs, if any.
     fn file_by_path(
         &self,
@@ -314,6 +392,13 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         file_id: i64,
     ) -> impl Future<Output = Result<Vec<EntityRecord>, StorageError>> + Send;
 
+    /// Delete one entity row by id; returns whether a row was removed.
+    fn entities_delete_by_id(
+        &self,
+        project_id: i64,
+        entity_id: i64,
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
+
     /// Delete entity rows of one file at an epoch.
     fn entities_delete_by_file(
         &self,
@@ -342,6 +427,16 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         &self,
         project_id: i64,
     ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
+    /// Entity row ids of one file at one epoch, ascending.
+    ///
+    /// Backs cross-epoch stability assertions without hydrating full rows.
+    fn entity_ids_by_file_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> impl Future<Output = Result<Vec<i64>, StorageError>> + Send;
 
     /// Count entity rows of one project and epoch.
     fn entities_count(
@@ -374,6 +469,83 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         epochs: &[i64],
     ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
 
+    /// Page chunk rows of one project and epoch with their file category.
+    fn chunks_page_with_category(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        limit: i64,
+        offset: i64,
+    ) -> impl Future<Output = Result<Vec<(ChunkRecord, u8)>, StorageError>> + Send;
+
+    /// List `(path, batch_id, content_hash)` of one project and epoch ordered by path.
+    ///
+    /// Backs recovery classification without hydrating full file rows.
+    fn files_epoch_entries(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> impl Future<Output = Result<Vec<FileEpochEntry>, StorageError>> + Send;
+
+    /// Point one path's file row at `epoch` (recovery re-parse marking).
+    ///
+    /// Returns whether a row was updated.
+    fn files_set_epoch(
+        &self,
+        project_id: i64,
+        path: &str,
+        epoch: i64,
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
+
+    /// Latest cached parsed bytes for `(path, content_hash)` from an
+    /// in-progress operation, if any.
+    fn checkpoint_cached_parsed_data(
+        &self,
+        project_id: i64,
+        file_path: &str,
+        content_hash: &str,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>, StorageError>> + Send;
+
+    /// Chunk rows of one file at one epoch, ordered by chunk id.
+    fn chunks_by_file_epoch(
+        &self,
+        project_id: i64,
+        file_path: &str,
+        epoch: i64,
+    ) -> impl Future<Output = Result<Vec<ChunkRecord>, StorageError>> + Send;
+
+    /// Chunk ids of one file at one epoch, ordered by chunk id.
+    fn chunks_by_file(
+        &self,
+        project_id: i64,
+        file_path: &str,
+        epoch: i64,
+    ) -> impl Future<Output = Result<Vec<String>, StorageError>> + Send;
+
+    /// Count file rows of one project and epoch.
+    fn files_count(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
+
+    /// Whether a file row exists at one project, epoch and path.
+    fn files_exists_at_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
+
+    /// Page file rows of one project and epoch ordered by row id.
+    fn files_page(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        limit: i64,
+        offset: i64,
+    ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
+
     /// Idempotent batch write of chunk rows (records carry project/epoch).
     fn chunks_upsert(
         &self,
@@ -402,6 +574,13 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         project_id: i64,
     ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
+    /// Count chunk rows of one file across all epochs.
+    fn chunks_count_by_path(
+        &self,
+        project_id: i64,
+        file_path: &str,
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
+
     /// Count chunk rows of one project and epoch.
     fn chunks_count(
         &self,
@@ -415,6 +594,14 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         project_id: i64,
         epoch: i64,
     ) -> impl Future<Output = Result<Vec<ChunkContent>, StorageError>> + Send;
+
+    /// Chunk row and truncated-marker counts of one generation channel.
+    fn chunks_stats(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        channel: &str,
+    ) -> impl Future<Output = Result<(i64, i64), StorageError>> + Send;
 
     /// Largest entity id referenced by chunk rows of one generation.
     fn chunks_max_entity_id(
@@ -545,6 +732,16 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         stale_threshold_secs: i64,
     ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
+    /// Delete terminal checkpoints older than `ttl_seconds`.
+    ///
+    /// Only `completed`/`failed` rows whose `updated_at` precedes the cutoff
+    /// and that carry no active flag are removed; returns the deleted count.
+    fn checkpoints_delete_expired(
+        &self,
+        project_id: i64,
+        ttl_seconds: u64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
     /// List in-progress operations of one project.
     fn checkpoints_unfinished(
         &self,
@@ -609,6 +806,40 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         &self,
         project_id: i64,
         operation_id: &str,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
+    /// Overwrite one file checkpoint's parsed envelope bytes.
+    ///
+    /// Returns whether a row was updated.
+    fn checkpoint_file_set_parsed_data(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        file_path: &str,
+        data: &[u8],
+    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
+
+    /// `(entity id, Qdrant point ids JSON)` mappings of one file at one
+    /// epoch, ordered by entity id.
+    fn mappings_point_ids_by_file_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> impl Future<Output = Result<Vec<(i64, String)>, StorageError>> + Send;
+
+    /// Delete detail mappings of one file's entities.
+    fn mappings_delete_by_file_id(
+        &self,
+        project_id: i64,
+        file_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
+    /// Delete detail mappings of one entity.
+    fn mappings_delete_by_entity_id(
+        &self,
+        project_id: i64,
+        entity_id: i64,
     ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Clear per-module progress markers of one operation.
@@ -698,6 +929,15 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         epoch: i64,
     ) -> impl Future<Output = Result<Option<RelationSnapshotManifest>, StorageError>> + Send;
 
+    /// Persist one delta onto a building epoch allocated by
+    /// [`RelationStorage::snapshot_allocate`].
+    fn snapshot_write_delta(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        delta: &SnapshotDelta,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
     /// Read the incremental delta chain of an epoch range.
     fn snapshot_delta_chain(
         &self,
@@ -720,6 +960,21 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         epoch: i64,
         reason: &str,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
+    /// Delete snapshot manifests of every epoch but `keep_epoch`.
+    fn snapshot_delete_manifests_except(
+        &self,
+        project_id: i64,
+        keep_epoch: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
+    /// `(chain length, cumulative delta bytes, base snapshot bytes)` of the
+    /// delta chain ending at `active_epoch`; zeros when there is no chain.
+    fn snapshot_delta_chain_info(
+        &self,
+        project_id: i64,
+        active_epoch: i64,
+    ) -> impl Future<Output = Result<(usize, i64, i64), StorageError>> + Send;
 
     /// Delete every snapshot row of one epoch.
     fn snapshot_delete_epoch(

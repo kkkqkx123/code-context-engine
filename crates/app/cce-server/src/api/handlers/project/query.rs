@@ -43,7 +43,7 @@ fn project_error(error: ProjectServiceError) -> ErrorResponse {
 pub async fn handle_list_projects(
     State(state): State<cce_server_shared::context::SharedContext>,
 ) -> ApiResult<ProjectListResponse> {
-    let projects = match list_projects(&state) {
+    let projects = match list_projects(&state).await {
         Ok(projects) => projects,
         Err(error) => return ApiResult::Error(project_error(error)),
     };
@@ -72,7 +72,7 @@ pub async fn handle_get_project(
     State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectDetailResponse> {
-    let project = match get_project(&state, id) {
+    let project = match get_project(&state, id).await {
         Ok(project) => project,
         Err(error) => return ApiResult::Error(project_error(error)),
     };

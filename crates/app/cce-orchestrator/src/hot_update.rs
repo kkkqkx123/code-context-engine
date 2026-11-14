@@ -52,7 +52,7 @@ pub use self::change::{
 };
 pub use self::change_detector::CacheUpdateResult;
 pub use self::config::{ConfigReloadManager, ConfigVersion, ConfigVersionRegistry};
-pub use self::coordinator::HotUpdateCoordinator;
+pub use self::coordinator::{HotUpdateCoordinator, ProjectConfigSource};
 pub use self::debounce::{DebounceConfig, DebounceConfigBuilder, GlobalDebounce};
 pub use self::error::{HotUpdateError, Result};
 pub use self::event_loop::{EventLoopManager, EventLoopState, EventLoopStats};

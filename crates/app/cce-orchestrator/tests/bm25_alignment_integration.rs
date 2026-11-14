@@ -20,8 +20,8 @@ use cce_orchestrator::{
     CheckpointManager, IndexOptions, IndexOrchestrator, QueryCoordinator, SearchResult,
 };
 use cce_storage_bm25::{Bm25Client, Bm25Config};
-use cce_storage_metadb_sqlite::ChunkRepository;
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_common::RelationStorage;
+use cce_storage_metadb::RelationStore;
 use cce_storage_vector_qdrant::generate_group_id;
 use cce_storage_vector_qdrant::{QdrantClient, QdrantConfig};
 
@@ -68,7 +68,7 @@ The zephyrwind token is unique to this document and should never appear in code.
 struct AlignmentHarness {
     _fixture_dir: tempfile::TempDir,
     _bm25_dir: tempfile::TempDir,
-    sqlite: Arc<SqliteClient>,
+    sqlite: RelationStore,
     coordinator: QueryCoordinator,
 }
 
@@ -83,25 +83,15 @@ impl AlignmentHarness {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
 
         // Shared in-memory metadata store for the index and query sides.
-        let sqlite_db = Arc::new(SqliteClient::in_memory().expect("in-memory sqlite"));
+        let sqlite_db = RelationStore::in_memory().expect("in-memory store");
         let checkpoint_manager = Arc::new(CheckpointManager::new_for_project(1, sqlite_db.clone()));
 
         // Insert the project row so FK-scoped writes (files/entities/chunks)
         // resolve during indexing, mirroring production wiring. The real
         // fixture directory is registered as the root so query-time lazy
         // source reads (snippet/content) can resolve chunk file paths.
-        {
-            let conn = sqlite_db.write_connection().expect("sqlite connection");
-            conn.execute(
-                "INSERT INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (1, 'alignment-harness', ?2, ?1, ?1)",
-                rusqlite::params![
-                    chrono::Utc::now().timestamp(),
-                    fixture_dir.path().to_string_lossy().to_string()
-                ],
-            )
+        rt.block_on(sqlite_db.ensure_project(1, &fixture_dir.path().to_string_lossy()))
             .expect("insert project row");
-        }
 
         // BM25 client on a unique temp index path (mirrors QueryWorkflowTest).
         let bm25_dir = tempfile::tempdir().expect("bm25 temp dir");
@@ -163,7 +153,7 @@ impl AlignmentHarness {
             scope,
         )
         .with_capabilities(cce_orchestrator::query::IndexCapabilities::new().with_bm25(true))
-        .with_sqlite(sqlite_db.clone())
+        .with_relation_store(sqlite_db.clone())
         .build();
 
         Self {
@@ -447,14 +437,15 @@ fn test_bm25_chunk_records_persisted_in_sqlite() {
         .collect();
     assert!(!code_results.is_empty());
 
-    let conn = harness
-        .sqlite
-        .write_connection()
-        .expect("sqlite connection");
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
     for r in &code_results {
-        let records =
-            ChunkRepository::get_by_chunk_ids(&conn, std::slice::from_ref(&r.id), 1, None)
-                .expect("query chunk records");
+        let records = rt
+            .block_on(
+                harness
+                    .sqlite
+                    .chunks_by_ids(1, std::slice::from_ref(&r.id), &[]),
+            )
+            .expect("query chunk records");
         assert_eq!(
             records.len(),
             1,

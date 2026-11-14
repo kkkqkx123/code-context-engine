@@ -48,7 +48,7 @@ pub async fn handle_ingest_event(
             ),
         ));
     }
-    let root = match project_root(&state, id) {
+    let root = match project_root(&state, id).await {
         Ok(root) => root,
         Err(error) => return ApiResult::Error(error),
     };

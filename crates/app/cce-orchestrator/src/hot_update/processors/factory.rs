@@ -7,16 +7,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::NlDocumentUpdateProcessor;
-use crate::export::ExportConfig;
-use crate::export::NlDocumentExporter;
 use crate::index::RelationSnapshotPublisher;
 use crate::index::StorageCoordinator;
 use crate::index::{FulltextStore, RelationStore, VectorStore};
 use cce_config::{NestProcessorConfig, RelationConfig};
+use cce_export::ExportConfig;
+use cce_export::NlDocumentExporter;
 use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_common::RelationStorage;
 use cce_types::error::ConfigError;
 
 use super::{
@@ -141,9 +141,9 @@ pub fn create_export_processor(
     summary_config: Option<&cce_config::SummaryConfig>,
     plugin_registry: Option<Arc<PluginRegistry>>,
 ) -> NlDocumentUpdateProcessor {
-    let grouper_fingerprint = crate::export::fingerprint::config_fingerprint(grouper_config);
+    let grouper_fingerprint = cce_export::config_fingerprint(grouper_config);
     let summary_fingerprint = summary_config
-        .map(crate::export::fingerprint::config_fingerprint)
+        .map(cce_export::config_fingerprint)
         .unwrap_or_default();
     let processor = match (ast_to_nl_config, plugin_registry) {
         (Some(config), Some(registry)) => {
@@ -192,12 +192,10 @@ impl ProcessorFactory {
 
     /// Create all enabled processors from backend enums.
     ///
-    /// The fulltext backend flows into the storage coordinator through the
-    /// fulltext contract, so both branches share one write path; the
-    /// relation processor keeps the local client for its local-only
-    /// persistence reads.
+    /// Backends flow into the storage coordinator and the relation processor
+    /// through the storage contracts, so both branches share one write path.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_all_processors_from_stores(
+    pub async fn create_all_processors_from_stores(
         &self,
         vector: Option<VectorStore>,
         fulltext: Option<FulltextStore>,
@@ -221,7 +219,7 @@ impl ProcessorFactory {
         self.create_all_processors(
             vector,
             fulltext,
-            relation.and_then(RelationStore::into_local),
+            relation,
             embedder,
             project_group_id,
             project_id,
@@ -238,6 +236,7 @@ impl ProcessorFactory {
             relation_metrics,
             storage_metrics,
         )
+        .await
     }
 
     /// Create all enabled processors from individual components
@@ -256,11 +255,11 @@ impl ProcessorFactory {
     ///     - the in-memory fallback metadata store could not be created, or
     ///       the project ID is invalid (both surfaced as `ConfigError`).
     #[allow(clippy::too_many_arguments)]
-    pub fn create_all_processors(
+    pub async fn create_all_processors(
         &self,
         vector: Option<VectorStore>,
         fulltext: Option<FulltextStore>,
-        metadata_store: Option<Arc<SqliteClient>>,
+        metadata_store: Option<RelationStore>,
         embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
         project_group_id: Option<String>,
         project_id: i64,
@@ -297,17 +296,16 @@ impl ProcessorFactory {
             None => {
                 tracing::warn!(
                     "Metadata store not configured; relation data will use a temporary in-memory \
-                     database and will NOT persist across restarts"
+                     store and will NOT persist across restarts"
                 );
-                // Create a temporary in-memory database for processors that need it
-                Arc::new(SqliteClient::with_path(":memory:").map_err(|error| {
+                // Create a temporary in-memory store for processors that need it
+                RelationStore::in_memory().map_err(|error| {
                     ConfigError::Other(format!(
-                        "Failed to create in-memory SQLite database: {error}"
+                        "Failed to create in-memory metadata store: {error}"
                     ))
-                })?)
+                })?
             }
         };
-        let relation_sqlite = Some(metadata_store.as_ref().clone());
 
         // Create storage coordinator using builder pattern. These seed the
         // coordinator's write epoch, but the durable project manifest is
@@ -315,20 +313,25 @@ impl ProcessorFactory {
         // best-effort initial values only. A missing meta row is the legitimate
         // default 0; real DB failures are surfaced as warnings instead of being
         // silently downgraded.
-        let client = metadata_store.as_ref();
-        let read_seed = |key: &str| match client.project_meta_get_int_optional(project_id, key) {
-            Ok(value) => value.unwrap_or(0),
-            Err(error) => {
-                tracing::warn!(
-                    project_id,
-                    key,
-                    error = %error,
-                    "Failed to read project_meta seed for hot-update storage coordinator"
-                );
-                0
+        let read_seed = |key: &'static str| {
+            let store = metadata_store.clone();
+            async move {
+                match store.project_meta_get_int_optional(project_id, key).await {
+                    Ok(value) => value.unwrap_or(0),
+                    Err(error) => {
+                        tracing::warn!(
+                            project_id,
+                            key,
+                            error = %error,
+                            "Failed to read project_meta seed for hot-update storage coordinator"
+                        );
+                        0
+                    }
+                }
             }
         };
-        let (active_epoch, active_batch) = (read_seed("active_epoch"), read_seed("batch_id"));
+        let (active_epoch, active_batch) =
+            (read_seed("active_epoch").await, read_seed("batch_id").await);
         let mut storage_coordinator = StorageCoordinator::new(project_id)?
             .with_metadata_store(metadata_store.clone())
             .with_epoch(active_epoch)
@@ -385,7 +388,7 @@ impl ProcessorFactory {
                 None => Arc::new(RuleBasedGenerator::default()),
             };
             let summary_fingerprint = summary_config
-                .map(crate::export::fingerprint::config_fingerprint)
+                .map(cce_export::config_fingerprint)
                 .unwrap_or_default();
             let mut summary_processor =
                 SummaryUpdateProcessor::new(shared_storage.clone(), generator)
@@ -398,8 +401,8 @@ impl ProcessorFactory {
 
         // Add relation processor if enabled
         if config.enable_relation {
-            let mut relation_processor = if let Some(ref sqlite) = relation_sqlite {
-                RelationUpdateProcessor::with_persistence(Arc::new(sqlite.clone()))
+            let mut relation_processor = if metadata_store.is_local() {
+                RelationUpdateProcessor::with_persistence(metadata_store.clone())
             } else {
                 RelationUpdateProcessor::new()
             };
@@ -446,7 +449,7 @@ impl ProcessorFactory {
                 export_processor = export_processor.with_checkpoint_manager(cm.clone());
             }
             export_processor =
-                export_processor.with_relation_context(relation_sqlite.map(Arc::new), project_id);
+                export_processor.with_relation_context(Some(metadata_store.clone()), project_id);
             processors.push(Box::new(export_processor));
         }
 

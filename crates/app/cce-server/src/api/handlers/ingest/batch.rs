@@ -17,6 +17,7 @@ use super::staging::{
 };
 use crate::api::response::ApiResult;
 use cce_server_shared::context::SharedContext;
+use cce_storage_common::RelationStorage;
 
 /// Store pushed file contents under the project mirror without indexing.
 ///
@@ -51,7 +52,7 @@ pub async fn handle_ingest_batch(
             ),
         ));
     }
-    let root = match project_root(&state, id) {
+    let root = match project_root(&state, id).await {
         Ok(root) => root,
         Err(error) => return ApiResult::Error(error),
     };
@@ -63,24 +64,25 @@ pub async fn handle_ingest_batch(
             let raw_len = file.content_base64.len() as u64 * 3 / 4;
             batch_bytes = batch_bytes.saturating_add(raw_len);
         }
-        if let Some(store) = state.engine.metadata_store()
-            && let Ok(used) = store.as_ref().with_transaction(|tx| {
-                cce_storage_metadb_sqlite::AdmissionAuditRepository::get(tx, &context.fingerprint)
-                    .map(|record| record.map_or(0, |r| r.bytes_used.max(0) as u64))
-            })
-            && used.saturating_add(batch_bytes) > quota
-        {
+        let used: u64 = match state.engine.relation_store() {
+            Some(store) => store
+                .admission_get(&context.fingerprint)
+                .await
+                .map(|record| record.map_or(0, |r| r.bytes_used.max(0) as u64))
+                .unwrap_or(0),
+            None => 0,
+        };
+        if used.saturating_add(batch_bytes) > quota {
             metrics.record_quota_rejection();
-            if let Some(store) = state.engine.metadata_store() {
-                let _ = store.as_ref().with_transaction(|tx| {
-                    cce_storage_metadb_sqlite::AdmissionAuditRepository::record_rejection(
-                        tx,
+            if let Some(store) = state.engine.relation_store() {
+                let _ = store
+                    .admission_record_rejection(
                         &context.fingerprint,
                         &context.projects,
                         context.quota_bytes,
                         "quota",
                     )
-                });
+                    .await;
             }
             return ApiResult::Error(ErrorResponse::new(
                 error_codes::INVALID_REQUEST,
@@ -200,22 +202,21 @@ pub async fn handle_ingest_batch(
     }
     if errors.is_empty()
         && let Some(context) = context.map(|Extension(c)| c)
-        && let Some(store) = state.engine.metadata_store()
+        && let Some(store) = state.engine.relation_store()
     {
         let batch_bytes: u64 = request
             .files
             .iter()
             .map(|f| f.content_base64.len() as u64 * 3 / 4)
             .sum();
-        let _ = store.as_ref().with_transaction(|tx| {
-            cce_storage_metadb_sqlite::AdmissionAuditRepository::record_admitted(
-                tx,
+        let _ = store
+            .admission_record_admitted(
                 &context.fingerprint,
                 &context.projects,
                 context.quota_bytes,
                 batch_bytes,
             )
-        });
+            .await;
     }
     ApiResult::Success(IngestBatchResponse {
         success: errors.is_empty(),

@@ -10,11 +10,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use cce_scanner::{FSScanner, FileEntry, ScanOptions};
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::cache::FileHashCache;
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::FileHashEntry;
+
+use crate::index::vector_store::RelationStore;
 
 use super::error::HotUpdateError;
 use super::exclude_rules::ExcludeRules;
@@ -71,12 +73,12 @@ impl CacheUpdateResult {
 
 /// File change detector
 ///
-/// Detects file changes by comparing current filesystem state with cached hash in SQLite.
-/// Uses SQLite as the single source of truth for file hashes.
+/// Detects file changes by comparing current filesystem state with the
+/// hashes stored in the relation backend, the single source of truth.
 #[derive(Debug)]
 pub struct ChangeDetector {
-    /// Database connection
-    db: Arc<SqliteClient>,
+    /// Relation backend holding the content hashes
+    store: RelationStore,
     /// Scan options for file discovery
     scan_options: ScanOptions,
     /// Exclude rules for filtering files
@@ -89,9 +91,9 @@ pub struct ChangeDetector {
 
 impl ChangeDetector {
     /// Create a new change detector
-    pub fn new(db: Arc<SqliteClient>, scan_options: ScanOptions) -> Self {
+    pub fn new(store: RelationStore, scan_options: ScanOptions) -> Self {
         Self {
-            db,
+            store,
             scan_options,
             exclude_rules: None,
             project_id: 0,
@@ -114,9 +116,44 @@ impl ChangeDetector {
         self.scan_options.root_path = root_path.to_string();
     }
 
-    /// Content-hash cache scoped to the configured project.
-    pub fn cache(&self) -> FileHashCache {
-        FileHashCache::new(Arc::clone(&self.db), self.project_id)
+    /// Visible `(path, content_hash)` pairs of the active generation view.
+    ///
+    /// Own-generation rows win over inherited ones; overrides hide inherited
+    /// rows but never rows the published generation owns itself.
+    async fn visible_hashes(&self) -> Result<Vec<FileHashEntry>, HotUpdateError> {
+        Ok(self.store.files_visible_hashes(self.project_id).await?)
+    }
+
+    /// Epoch baseline hashes are recorded against: the active generation's
+    /// own epoch, falling back to 0 for a project that was never published.
+    pub(crate) async fn write_epoch(&self) -> Result<i64, HotUpdateError> {
+        if let Some(manifest) = self.store.manifest_active(self.project_id).await? {
+            return Ok(manifest.data_epoch);
+        }
+        Ok(self
+            .store
+            .project_meta_get_int_optional(self.project_id, "active_epoch")
+            .await?
+            .unwrap_or(0))
+    }
+
+    /// Record `(path, content_hash)` pairs at an epoch.
+    async fn record_hashes(
+        &self,
+        epoch: i64,
+        hashes: &[(PathBuf, String)],
+    ) -> Result<(), HotUpdateError> {
+        if hashes.is_empty() {
+            return Ok(());
+        }
+        let entries: Vec<(String, String)> = hashes
+            .iter()
+            .map(|(path, hash)| (path.to_string_lossy().into_owned(), hash.clone()))
+            .collect();
+        self.store
+            .files_record_hashes(self.project_id, epoch, &entries)
+            .await?;
+        Ok(())
     }
 
     /// Update scan options (for config reload)
@@ -211,7 +248,19 @@ impl ChangeDetector {
     /// failures to [`Self::check_changes`].
     async fn scan_and_check(&self) -> Result<bool, HotUpdateError> {
         let entries = self.scan_entries().await?;
-        let cache = self.cache();
+        // Own-generation rows win over inherited ones; an override only
+        // ever drops an inherited entry, never a row the published
+        // generation owns itself.
+        let visible = self.visible_hashes().await?;
+        let mut stored: HashMap<PathBuf, String> = HashMap::with_capacity(visible.len());
+        let mut visible_paths: HashSet<PathBuf> = HashSet::with_capacity(visible.len());
+        for entry in visible {
+            let path = PathBuf::from(entry.path);
+            visible_paths.insert(path.clone());
+            if let Some(hash) = entry.content_hash {
+                stored.insert(path, hash);
+            }
+        }
 
         let mut disk_count = 0usize;
         let mut current_paths = HashSet::with_capacity(entries.len());
@@ -230,7 +279,7 @@ impl ChangeDetector {
 
             match &entry.content_hash {
                 Some(hash) => {
-                    if cache.stored_hash(&entry.relative_path)?.as_deref() != Some(hash.as_str()) {
+                    if stored.get(&entry.relative_path) != Some(hash) {
                         return Ok(true);
                     }
                 }
@@ -242,11 +291,10 @@ impl ChangeDetector {
         // path sets coincide. Any other combination (count mismatch, or an
         // unhashable file that can mask a balanced add+delete batch) is
         // settled by the exact set difference used by scan_and_detect.
-        let visible = cache.visible_paths()?;
-        if visible.len() == disk_count && !saw_unhashable {
+        if visible_paths.len() == disk_count && !saw_unhashable {
             return Ok(false);
         }
-        Ok(visible
+        Ok(visible_paths
             .into_iter()
             .any(|path| !current_paths.contains(&path)))
     }
@@ -277,15 +325,15 @@ impl ChangeDetector {
             .map(|e| e.relative_path.clone())
             .collect();
 
-        // Find removed files (in database but not on disk)
-        let removed = self.find_removed_files(&current_paths).await?;
-        for path in &removed {
-            result.removed.push(path.clone());
+        // Find removed files (in the generation view but not on disk)
+        for path in self.find_removed_files(&current_paths).await? {
+            result.removed.push(path);
         }
 
-        // Load every stored hash of the current epoch in one query so the
-        // per-file comparison below touches the database exactly once (and
-        // resolves the epoch manifest once) instead of once per file.
+        // Load every visible (path, hash) pair of the active generation view
+        // in one pass so the per-file comparison below touches the backend
+        // once per round (and resolves the epoch view once) instead of once
+        // per file.
         let stored_hashes = self.load_stored_hashes().await?;
 
         // Check for added/modified files
@@ -337,9 +385,11 @@ impl ChangeDetector {
             })
             .collect::<Vec<_>>();
 
-        let cache = self.cache();
-        cache.ensure_project(&self.scan_options.root_path)?;
-        cache.record(cache.write_epoch()?, &hashes)?;
+        self.store
+            .ensure_project(self.project_id, &self.scan_options.root_path)
+            .await?;
+        self.record_hashes(self.write_epoch().await?, &hashes)
+            .await?;
 
         tracing::info!(count = filtered.len(), "Change detector initialized");
 
@@ -372,10 +422,10 @@ impl ChangeDetector {
             return Ok(());
         }
 
-        let cache = self.cache();
         // Baseline hashes are recorded against the active generation's own
         // epoch: unchanged files keep resolving through the inheritance chain.
-        cache.record(cache.write_epoch()?, &hashes)?;
+        self.record_hashes(self.write_epoch().await?, &hashes)
+            .await?;
 
         tracing::trace!(count = hashes.len(), "Updated file hashes in cache");
         Ok(())
@@ -385,15 +435,17 @@ impl ChangeDetector {
     /// generation view in a single pass.
     ///
     /// Used by [`Self::scan_and_detect`] so per-file comparison touches the
-    /// database once per round (and resolves the epoch view once) instead of
-    /// once per file.
+    /// backend once per round (and resolves the epoch view once) instead of
+    /// once per file. Rows without a stored hash are skipped: a file whose
+    /// stored hash is missing counts as "added".
     async fn load_stored_hashes(&self) -> Result<HashMap<PathBuf, String>, HotUpdateError> {
-        Ok(self.cache().stored_hashes()?)
-    }
-
-    /// Count file records visible from the active generation view.
-    pub async fn count_stored_files(&self) -> Result<usize, HotUpdateError> {
-        Ok(self.cache().visible_paths()?.len())
+        let mut stored = HashMap::new();
+        for entry in self.visible_hashes().await? {
+            if let Some(hash) = entry.content_hash {
+                stored.insert(PathBuf::from(entry.path), hash);
+            }
+        }
+        Ok(stored)
     }
 
     /// Find removed files (visible in the generation view but not on disk)
@@ -401,24 +453,46 @@ impl ChangeDetector {
         &self,
         current_paths: &HashSet<PathBuf>,
     ) -> Result<Vec<PathBuf>, HotUpdateError> {
-        Ok(self
-            .cache()
-            .visible_paths()?
-            .into_iter()
-            .filter(|path| !current_paths.contains(path))
-            .collect())
+        let mut removed = Vec::new();
+        for entry in self.visible_hashes().await? {
+            let path = PathBuf::from(entry.path);
+            if !current_paths.contains(&path) {
+                removed.push(path);
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Count file records visible from the active generation view.
+    pub async fn count_stored_files(&self) -> Result<usize, HotUpdateError> {
+        Ok(self.visible_hashes().await?.len())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_metadb_sqlite::SqliteClient;
-    use cce_storage_metadb_sqlite::repo::file_repo::FileRepository;
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
+
+    async fn seed_hashes(store: &RelationStore, root: &str, epoch: i64, hashes: &[(&str, &str)]) {
+        store
+            .ensure_project(1, root)
+            .await
+            .expect("project should be ensured");
+        let entries: Vec<(String, String)> = hashes
+            .iter()
+            .map(|(path, hash)| (path.to_string(), hash.to_string()))
+            .collect();
+        store
+            .files_record_hashes(1, epoch, &entries)
+            .await
+            .expect("hashes should seed");
+    }
 
     #[test]
     fn test_change_detector_creation() {
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let _detector = ChangeDetector::new(db, ScanOptions::default());
     }
 
@@ -429,7 +503,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(
             db.clone(),
             ScanOptions {
@@ -439,22 +513,9 @@ mod tests {
         );
         detector.set_project_id(1);
 
-        // Insert a file record directly into the DB so the detector believes
+        // Insert a file record directly into the store so the detector believes
         // a file exists that is no longer on disk.
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            // Ensure project exists (FK constraint)
-            tx.execute(
-                "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)",
-                rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
-            )
-            .unwrap();
-            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("deleted.rs"), "hash1", 1, 0)
-                .unwrap();
-            tx.commit().unwrap();
-        }
+        seed_hashes(&db, &tmp.to_string_lossy(), 0, &[("deleted.rs", "hash1")]).await;
 
         // check_changes should detect the deletion (DB has 1 file, disk has 0).
         assert!(detector.check_changes().await, "must detect pure deletion");
@@ -465,49 +526,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_by_path_removes_hash_record() {
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            // Insert project record (FK constraint)
-            tx.execute(
-                "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)",
-                rusqlite::params![1, "test", "/tmp", 0],
-            )
-            .unwrap();
-            FileRepository::insert_hash_for_epoch(
-                &tx,
-                &std::path::PathBuf::from("deleted.rs"),
-                "hash1",
-                1,
-                0,
-            )
-            .unwrap();
-            tx.commit().unwrap();
-        }
+        let db = RelationStore::in_memory().unwrap();
+        seed_hashes(&db, "/tmp", 0, &[("deleted.rs", "hash1")]).await;
 
         // Verify the record exists.
-        let before = {
-            let conn = db.write_connection().unwrap();
-            FileRepository::get_content_hash_by_path(&conn, "deleted.rs", 1).unwrap()
-        };
-        assert!(before.is_some(), "hash must exist before deletion");
+        let before = db.files_visible_hashes(1).await.unwrap();
+        assert!(
+            before.iter().any(|entry| entry.path == "deleted.rs"
+                && entry.content_hash.as_deref() == Some("hash1")),
+            "hash must exist before deletion"
+        );
 
-        // Delete via FileRepository.
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            FileRepository::delete_by_path(&tx, "deleted.rs", 1).unwrap();
-            tx.commit().unwrap();
-        }
+        // Delete through the contract.
+        db.files_remove_hashes(1, 0, &["deleted.rs".to_string()])
+            .await
+            .unwrap();
 
-        // Verify the record is gone (new scope to release MutexGuard).
-        let after = {
-            let conn = db.write_connection().unwrap();
-            FileRepository::get_content_hash_by_path(&conn, "deleted.rs", 1).unwrap()
-        };
-        assert!(after.is_none(), "hash must be removed after deletion");
+        // Verify the record is gone.
+        let after = db.files_visible_hashes(1).await.unwrap();
+        assert!(
+            after.iter().all(|entry| entry.path != "deleted.rs"),
+            "hash must be removed after deletion"
+        );
     }
 
     #[tokio::test]
@@ -518,7 +558,7 @@ mod tests {
         // Create a file that the scanner will find.
         std::fs::write(tmp.join("main.rs"), "fn main() {}").unwrap();
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(
             db.clone(),
             ScanOptions {
@@ -545,7 +585,7 @@ mod tests {
         let file_path = tmp.join("main.rs");
         std::fs::write(&file_path, "fn main() {}").unwrap();
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(
             db.clone(),
             ScanOptions {
@@ -567,22 +607,11 @@ mod tests {
             "first scan must detect deletion"
         );
 
-        // Simulate commit_file_hashes: remove the hash record from DB.
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            // Also ensure project exists
-            tx.execute(
-                "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)",
-                rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
-            )
+        // Simulate commit_file_hashes: remove the hash record from the store.
+        // The detector keys on the project-relative path.
+        db.files_remove_hashes(1, 0, &["main.rs".to_string()])
+            .await
             .unwrap();
-            // Delete the hash that was stored during initialize().
-            // The detector keys on the project-relative path.
-            FileRepository::delete_by_path(&tx, "main.rs", 1).unwrap();
-            tx.commit().unwrap();
-        }
 
         // Second scan: no changes expected (file is gone and hash is removed).
         assert!(
@@ -612,7 +641,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
 
@@ -637,21 +666,13 @@ mod tests {
         );
 
         // DB holds kept.rs (matching) and deleted.rs (no longer on disk).
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            tx.execute(
-                "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)",
-                rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
-            )
-            .unwrap();
-            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("kept.rs"), &kept_hash, 1, 0)
-                .unwrap();
-            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("deleted.rs"), "h1", 1, 0)
-                .unwrap();
-            tx.commit().unwrap();
-        }
+        seed_hashes(
+            &db,
+            &tmp.to_string_lossy(),
+            0,
+            &[("kept.rs", &kept_hash), ("deleted.rs", "h1")],
+        )
+        .await;
 
         // disk_count (2) == db_count (2), so a count-only deletion check
         // would return false and miss the removal of deleted.rs.
@@ -679,7 +700,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
         detector.initialize().await.unwrap();
@@ -716,7 +737,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
         detector.initialize().await.unwrap();
@@ -753,7 +774,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        let db = RelationStore::in_memory().unwrap();
         let mut detector = ChangeDetector::new(db.clone(), opts.clone());
         detector.set_project_id(1);
 
@@ -770,39 +791,27 @@ mod tests {
         };
         let mod_hash = hash_of("mod.rs");
 
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            tx.execute(
-                "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)",
-                rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
-            )
-            .unwrap();
-            // Unchanged: hash matches the disk content.
-            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("mod.rs"), &mod_hash, 1, 0)
-                .unwrap();
-            // Modified: stored hash differs from the disk content.
-            FileRepository::insert_hash_for_epoch(
-                &tx,
-                &PathBuf::from("changed.rs"),
-                "stale-hash",
-                1,
-                0,
-            )
-            .unwrap();
-            // new.rs exists only in a non-active epoch (1): the active epoch
-            // (0) snapshot must not see it, so it stays "added".
-            FileRepository::insert_hash_for_epoch(
-                &tx,
-                &PathBuf::from("new.rs"),
-                &hash_of("new.rs"),
-                1,
-                1,
-            )
-            .unwrap();
-            tx.commit().unwrap();
-        }
+        seed_hashes(
+            &db,
+            &tmp.to_string_lossy(),
+            0,
+            &[
+                // Unchanged: hash matches the disk content.
+                ("mod.rs", &mod_hash),
+                // Modified: stored hash differs from the disk content.
+                ("changed.rs", "stale-hash"),
+            ],
+        )
+        .await;
+        // new.rs exists only in a non-active epoch (1): the active epoch
+        // (0) snapshot must not see it, so it stays "added".
+        seed_hashes(
+            &db,
+            &tmp.to_string_lossy(),
+            1,
+            &[("new.rs", &hash_of("new.rs"))],
+        )
+        .await;
 
         let result = detector.scan_and_detect().await.unwrap();
         assert!(
@@ -824,63 +833,51 @@ mod tests {
     /// Seed an inherited publication: generation 1 is full, generation 2
     /// inherits from it and owns only `src/changed.rs`, with `src/gone.rs`
     /// registered as deleted.
-    fn seed_inherited_view(db: &SqliteClient) {
-        use cce_storage_metadb_sqlite::GenerationOverrideRepository;
-        use cce_storage_metadb_sqlite::OverrideDisposition;
-        use cce_storage_metadb_sqlite::ProjectIndexManifestRepository;
+    async fn seed_inherited_view(db: &RelationStore) {
+        use cce_storage_common::metadb::OverrideDisposition;
 
-        let conn = db.write_connection().unwrap();
-        let tx = conn.unchecked_transaction().unwrap();
-        tx.execute(
-            "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-             VALUES (1, 'test', '/tmp', 0, 0)",
-            [],
-        )
-        .unwrap();
-        ProjectIndexManifestRepository::activate(&tx, 1, 1, 0, "gen-1", None).unwrap();
-        for path in [
+        db.ensure_project(1, "/tmp").await.unwrap();
+        db.manifest_begin_building(1, 1, "gen-1", None)
+            .await
+            .unwrap();
+        db.manifest_activate(1, 1, 0, "gen-1", None).await.unwrap();
+        let epoch1: Vec<(String, String)> = [
             "src/keep.rs",
             "src/gone.rs",
             "src/removed.rs",
             "src/changed.rs",
-        ] {
-            FileRepository::insert_hash_for_epoch(
-                &tx,
-                &PathBuf::from(path),
-                &format!("hash-{path}"),
-                1,
-                1,
-            )
+        ]
+        .into_iter()
+        .map(|path| (path.to_string(), format!("hash-{path}")))
+        .collect();
+        db.files_record_hashes(1, 1, &epoch1).await.unwrap();
+        db.manifest_begin_building(1, 2, "gen-2", None)
+            .await
             .unwrap();
-        }
-        ProjectIndexManifestRepository::begin_building(&tx, 1, 2, "gen-2", None).unwrap();
-        ProjectIndexManifestRepository::set_parent_data_epoch(&tx, 1, "gen-2", Some(1)).unwrap();
-        ProjectIndexManifestRepository::activate(&tx, 1, 2, 0, "gen-2", None).unwrap();
-        FileRepository::insert_hash_for_epoch(
-            &tx,
-            &PathBuf::from("src/changed.rs"),
-            "hash-changed",
+        db.manifest_set_parent(1, "gen-2", Some(1)).await.unwrap();
+        db.manifest_activate(1, 2, 0, "gen-2", None).await.unwrap();
+        db.files_record_hashes(
             1,
             2,
+            &[("src/changed.rs".to_string(), "hash-changed".to_string())],
         )
+        .await
         .unwrap();
-        GenerationOverrideRepository::upsert(
-            &tx,
+        db.overrides_upsert_batch(
             1,
             2,
-            "src/gone.rs",
-            OverrideDisposition::Deleted,
+            &[("src/gone.rs".to_string(), OverrideDisposition::Deleted)],
         )
+        .await
         .unwrap();
-        tx.commit().unwrap();
     }
 
     #[tokio::test]
     async fn stored_hashes_merge_parent_chain_and_honor_overrides() {
         use std::path::Path;
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
-        seed_inherited_view(&db);
+        let db = RelationStore::in_memory().unwrap();
+        seed_inherited_view(&db).await;
         let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
         detector.set_project_id(1);
 
@@ -905,42 +902,35 @@ mod tests {
     async fn stored_hash_resolves_own_generation_before_ancestors() {
         use std::path::Path;
 
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
-        seed_inherited_view(&db);
+        let db = RelationStore::in_memory().unwrap();
+        seed_inherited_view(&db).await;
         let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
         detector.set_project_id(1);
-        let cache = detector.cache();
+        let stored = detector.load_stored_hashes().await.unwrap();
 
         // src/changed.rs owns rows in both generations with different
         // hashes: the own-generation row must win, or a reverted file would
         // read as unchanged while scan_and_detect classifies it as modified.
         assert_eq!(
-            cache
-                .stored_hash(Path::new("src/changed.rs"))
-                .unwrap()
-                .as_deref(),
+            stored.get(Path::new("src/changed.rs")).map(String::as_str),
             Some("hash-changed"),
             "own-generation rows win over inherited rows"
         );
         assert_eq!(
-            cache
-                .stored_hash(Path::new("src/keep.rs"))
-                .unwrap()
-                .as_deref(),
+            stored.get(Path::new("src/keep.rs")).map(String::as_str),
             Some("hash-src/keep.rs"),
             "unchanged files resolve against the inherited parent"
         );
-        assert_eq!(
-            cache.stored_hash(Path::new("src/gone.rs")).unwrap(),
-            None,
+        assert!(
+            !stored.contains_key(Path::new("src/gone.rs")),
             "overridden files must not resolve against an ancestor"
         );
     }
 
     #[tokio::test]
     async fn removed_detection_covers_parent_resident_files() {
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
-        seed_inherited_view(&db);
+        let db = RelationStore::in_memory().unwrap();
+        seed_inherited_view(&db).await;
         let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
         detector.set_project_id(1);
 

@@ -140,9 +140,7 @@ impl StorageCoordinator {
             return;
         };
         let result = async {
-            let entity_count = store
-                .entities_count(self.project_id, data_epoch)
-                .await?;
+            let entity_count = store.entities_count(self.project_id, data_epoch).await?;
             let snapshot_count = store
                 .snapshot_entities_count(self.project_id, relation_epoch)
                 .await?;
@@ -174,7 +172,10 @@ impl StorageCoordinator {
     }
 
     /// Record the candidate generation before any data writes begin.
-    pub async fn begin_project_manifest(&self, operation_id: &str) -> Result<(), OrchestratorError> {
+    pub async fn begin_project_manifest(
+        &self,
+        operation_id: &str,
+    ) -> Result<(), OrchestratorError> {
         let Some(store) = self.metadata_store.as_ref() else {
             return Ok(());
         };

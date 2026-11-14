@@ -37,7 +37,6 @@ pub use dead_letter::DeadLetterRetryReport;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::export::NlDocumentExporter;
 use cce_codegraph::IndexBuilder;
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrategy;
@@ -45,6 +44,7 @@ use cce_config::{
     AstToNlConfig, BatchConfig, NestProcessorConfig, RelationConfig, SummaryConfig,
     default_embed_input_token_limit,
 };
+use cce_export::NlDocumentExporter;
 use cce_llm::ChatConfig;
 use cce_llm_client::SuiteChatClient;
 use cce_metrics::ProgressTracker;
@@ -270,11 +270,8 @@ impl IndexOrchestrator {
         self
     }
 
-    /// Set metadata store (SQLite)
-    pub fn with_metadata_store(
-        mut self,
-        store: Arc<cce_storage_metadb_sqlite::SqliteClient>,
-    ) -> Self {
+    /// Set metadata store through the relation backend enum.
+    pub fn with_metadata_store(mut self, store: crate::index::vector_store::RelationStore) -> Self {
         self.storage = self.storage.with_metadata_store(store);
         self
     }
@@ -286,12 +283,9 @@ impl IndexOrchestrator {
     }
 
     /// Set the relation backend through the backend enum.
-    pub fn with_relation_store(
-        mut self,
-        store: crate::index::vector_store::RelationStore,
-    ) -> Result<Self, cce_types::StorageError> {
-        self.storage = self.storage.with_relation_store(store)?;
-        Ok(self)
+    pub fn with_relation_store(mut self, store: crate::index::vector_store::RelationStore) -> Self {
+        self.storage = self.storage.with_relation_store(store);
+        self
     }
 
     /// Set pre-processor configuration
@@ -528,7 +522,7 @@ impl IndexOrchestrator {
             tracing::warn!(error = %e, "Failed to initialize vector collections, vector storage may be unavailable");
             errors.push(format!("Vector initialization failed: {}", e));
         }
-        let target_epoch = self.storage.begin_full_index()?;
+        let target_epoch = self.storage.begin_full_index().await?;
         tracing::info!(
             project_id = self.project_id,
             target_epoch,
@@ -554,16 +548,20 @@ impl IndexOrchestrator {
         // Pass checkpoint context to storage coordinator for work-unit-level tracking
         self.storage
             .set_checkpoint_context(self.checkpoint_manager.clone(), Some(operation_id.clone()));
-        self.storage.begin_project_manifest(&operation_id)?;
+        self.storage.begin_project_manifest(&operation_id).await?;
 
         // Create file rows for the candidate epoch before summaries, entities
         // and chunks reference them. The change-detector hashes remain
         // unpublished until the project manifest is activated.
-        if let Err(error) = self.storage.ensure_file_records(file_indexer.files()) {
-            if let Err(manifest_error) = self.storage.fail_project_manifest(
-                &operation_id,
-                &format!("failed to publish file hashes: {error}"),
-            ) {
+        if let Err(error) = self.storage.ensure_file_records(file_indexer.files()).await {
+            if let Err(manifest_error) = self
+                .storage
+                .fail_project_manifest(
+                    &operation_id,
+                    &format!("failed to publish file hashes: {error}"),
+                )
+                .await
+            {
                 tracing::error!(
                     operation_id = %operation_id,
                     error = %manifest_error,

@@ -136,9 +136,9 @@ impl SharedContext {
         self.engine.embedder_clone()
     }
 
-    /// Get a clone of the metadata store (SQLite client)
-    pub fn metadata_store_clone(&self) -> Option<Arc<cce_storage_metadb_sqlite::SqliteClient>> {
-        self.engine.metadata_store_clone()
+    /// Get the relation store selected at assembly time.
+    pub fn relation_store(&self) -> Option<cce_storage_metadb::RelationStore> {
+        self.engine.relation_store()
     }
 
     /// Get a clone of the project registry
@@ -155,6 +155,7 @@ mod tests {
     use crate::engine::CodeContextEngine;
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
+    use cce_storage_common::RelationStorage;
     use std::collections::HashMap;
 
     /// Create a minimal test config with mock provider and model for engine construction
@@ -197,9 +198,9 @@ mod tests {
         config
     }
 
-    /// Test metadata store accessibility via engine
+    /// Test relation store accessibility via engine
     ///
-    /// Verifies that the engine properly initializes its SQLite metadata store
+    /// Verifies that the engine properly initializes its relation store
     /// so all project CRUD API endpoints can operate correctly by accessing it
     /// through the engine facade.
     #[tokio::test]
@@ -214,22 +215,22 @@ mod tests {
             .await
             .expect("CodeContextEngine should build with test config");
 
-        // Verify engine has a metadata store
+        // Verify engine has a relation store
         assert!(
-            engine.metadata_store().is_some(),
-            "CodeContextEngine should have a metadata_store after construction"
+            engine.relation_store().is_some(),
+            "CodeContextEngine should have a relation_store after construction"
         );
 
         // Create SharedContext - it delegates to engine for component access
         let _state = SharedContext::from_engine(&engine, None).await;
 
-        // Metadata store is accessible through the engine
+        // Relation store is accessible through the engine
         let store = engine
-            .metadata_store()
-            .expect("metadata_store should be initialized");
+            .relation_store()
+            .expect("relation_store should be initialized");
         assert!(
-            store.as_ref().read_connection().is_ok(),
-            "metadata_store should have a usable SQLite connection"
+            store.projects_all().await.is_ok(),
+            "relation_store should serve contract reads"
         );
 
         // Clean up temp file

@@ -7,11 +7,11 @@
 
 pub mod post_processing;
 pub mod search_builder;
-pub mod searcher_core;
+pub(crate) mod searcher_core;
 
 #[cfg(test)]
 mod tests;
 
-pub use search_builder::SearcherBuilder;
-pub use searcher_core::Searcher;
+pub(crate) use search_builder::SearcherBuilder;
+pub(crate) use searcher_core::Searcher;
 pub use searcher_core::expand_multi_entity_results;

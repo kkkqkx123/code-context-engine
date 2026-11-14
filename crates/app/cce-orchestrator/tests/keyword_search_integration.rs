@@ -6,18 +6,16 @@
 
 use std::sync::Arc;
 
-use cce_orchestrator::tools::keyword_search::{
-    KeywordSearchError, KeywordSearchRequest, KeywordSearchTool,
-};
+use cce_orchestrator::{KeywordSearchError, KeywordSearchRequest, KeywordSearchTool};
 use cce_storage_bm25::{Bm25Client, Bm25Config};
 use cce_storage_common::FulltextDocument;
-use cce_storage_metadb_sqlite::{
-    ChunkRecord, ChunkRepository, NewProjectRecord, ProjectRepository, SqliteClient,
-};
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::ChunkRecord;
+use cce_storage_metadb::RelationStore;
 
 struct TestEnv {
     bm25: Arc<Bm25Client>,
-    sqlite: Arc<SqliteClient>,
+    sqlite: RelationStore,
     project_id: i64,
     _tmpdir: tempfile::TempDir,
 }
@@ -41,20 +39,16 @@ async fn setup() -> TestEnv {
         .await
         .expect("Failed to connect to BM25 index");
 
-    let sqlite = SqliteClient::in_memory().expect("Failed to create SQLite client");
-    let project_id = sqlite
-        .with_transaction(|tx| {
-            let project = NewProjectRecord::new(
-                "keyword-search-test".to_string(),
-                tmpdir.path().to_string_lossy().to_string(),
-            );
-            ProjectRepository::insert(tx, &project)
-        })
+    let sqlite = RelationStore::in_memory().expect("Failed to create metadata store");
+    let project_id = 1;
+    sqlite
+        .ensure_project(project_id, &tmpdir.path().to_string_lossy())
+        .await
         .expect("Failed to create project");
 
     TestEnv {
         bm25: Arc::new(client),
-        sqlite: Arc::new(sqlite),
+        sqlite,
         project_id,
         _tmpdir: tmpdir,
     }
@@ -85,11 +79,11 @@ fn doc(document_id: &str, fields: &[(&str, &str)]) -> FulltextDocument {
     doc
 }
 
-fn tool(env: &TestEnv) -> KeywordSearchTool {
+fn tool(env: &TestEnv) -> KeywordSearchTool<cce_orchestrator::index::FulltextStore> {
     KeywordSearchTool::new(cce_orchestrator::index::FulltextStore::local(
         env.bm25.clone(),
     ))
-    .with_sqlite(env.sqlite.clone())
+    .with_relation_store(env.sqlite.clone())
 }
 
 fn request(query: &str, top_n: usize, project_id: i64, epoch: Option<i64>) -> KeywordSearchRequest {
@@ -123,7 +117,8 @@ async fn test_keyword_search_full_flow_with_snippets() {
         ),
     ];
     env.sqlite
-        .with_transaction(|tx| ChunkRepository::insert_batch(tx, &chunks))
+        .chunks_upsert(&chunks)
+        .await
         .expect("Failed to insert chunks");
 
     let bm25_docs = vec![
@@ -186,13 +181,10 @@ async fn test_keyword_search_full_flow_with_snippets() {
 #[tokio::test]
 async fn test_keyword_search_project_scoping() {
     let env = setup().await;
-    let other_project_id = env
-        .sqlite
-        .with_transaction(|tx| {
-            let project =
-                NewProjectRecord::new("other-project".to_string(), "/tmp/other".to_string());
-            ProjectRepository::insert(tx, &project)
-        })
+    let other_project_id = 2;
+    env.sqlite
+        .ensure_project(other_project_id, "/tmp/other")
+        .await
         .expect("Failed to create other project");
 
     let chunks = vec![chunk(
@@ -203,7 +195,8 @@ async fn test_keyword_search_project_scoping() {
         "fn shared_helper() -> u8 { 42 }",
     )];
     env.sqlite
-        .with_transaction(|tx| ChunkRepository::insert_batch(tx, &chunks))
+        .chunks_upsert(&chunks)
+        .await
         .expect("Failed to insert chunks");
 
     let bm25_docs = vec![
@@ -273,7 +266,8 @@ async fn test_keyword_search_epoch_filtering() {
         ),
     ];
     env.sqlite
-        .with_transaction(|tx| ChunkRepository::insert_batch(tx, &chunks))
+        .chunks_upsert(&chunks)
+        .await
         .expect("Failed to insert chunks");
 
     let bm25_docs = vec![
@@ -322,7 +316,8 @@ async fn test_keyword_search_keeps_title_only_hits() {
         "fn unrelated() -> () {}",
     )];
     env.sqlite
-        .with_transaction(|tx| ChunkRepository::insert_batch(tx, &chunks))
+        .chunks_upsert(&chunks)
+        .await
         .expect("Failed to insert chunks");
 
     let bm25_docs = vec![doc(
@@ -378,7 +373,8 @@ async fn test_keyword_search_sorted_by_score() {
         ),
     ];
     env.sqlite
-        .with_transaction(|tx| ChunkRepository::insert_batch(tx, &chunks))
+        .chunks_upsert(&chunks)
+        .await
         .expect("Failed to insert chunks");
 
     let bm25_docs = vec![

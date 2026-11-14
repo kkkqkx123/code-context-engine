@@ -88,31 +88,15 @@ impl Searcher {
     /// # Example
     ///
     /// ```ignore
-    /// let searcher = Searcher::builder(vector, embedder, fulltext, scope)
-    ///     .with_sqlite(sqlite)
-    ///     .with_rerank(rerank_handler)
-    ///     .build();
+    /// let builder = Searcher::builder(vector, embedder, fulltext, scope);
     /// ```
-    pub fn builder(
+    pub(crate) fn builder(
         vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         fulltext: FulltextStore,
         scope: ProjectScope,
     ) -> SearcherBuilder {
         SearcherBuilder::new(vector, embedder, fulltext, scope)
-    }
-
-    /// Create a searcher builder from backend enums.
-    ///
-    /// Calls go through the fulltext contract, so both branches share one
-    /// read path and branch selection stays inside the enum.
-    pub fn builder_from_stores(
-        vector: VectorStore,
-        embedder: Arc<OpenAICompatibleProvider>,
-        fulltext: FulltextStore,
-        scope: ProjectScope,
-    ) -> Result<SearcherBuilder> {
-        Ok(SearcherBuilder::new(vector, embedder, fulltext, scope))
     }
 
     /// Fulltext backend enum backing this searcher.

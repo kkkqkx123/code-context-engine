@@ -21,7 +21,6 @@ use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index::{FulltextStore, RelationStore, VectorStore};
 use cce_orchestrator::query::cache::{CacheConfig, QueryCache};
 use cce_orchestrator::query::retry_queue::RetryQueue;
-use cce_orchestrator::query::searcher::Searcher;
 use cce_plugin::PluginRegistry;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
@@ -63,9 +62,6 @@ pub struct CodeContextEngine {
     fulltext: FulltextStore,
     embedder: Arc<OpenAICompatibleProvider>,
 
-    /// SQLite metadata store for persistent storage
-    metadata_store: Option<Arc<SqliteClient>>,
-
     /// Relation storage backend selected at assembly time.
     ///
     /// Kept as the backend-neutral handle so callers cannot assume the
@@ -77,9 +73,6 @@ pub struct CodeContextEngine {
 
     /// Project-specific plugin registry cache (lazy-loaded per project)
     plugin_registry_cache: ProjectCache<PluginRegistry>,
-
-    /// Project-specific Searcher cache (lazy-loaded per project)
-    searcher_cache: ProjectCache<Mutex<Searcher>>,
 
     /// Per-project shared query result cache. Injected into every
     /// searcher and query coordinator so identical queries across requests
@@ -195,13 +188,13 @@ impl CodeContextEngine {
         let relation_store = RelationStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
         let relation_store_for_engine = relation_store.clone();
-        let sqlite_client = relation_store.into_local().ok_or_else(|| {
-            EngineError::Config(
-                "remote relation branch is not wired into the engine write path yet".to_string(),
-            )
-        })?;
-        // The SQLite client is shared as the metadata store
-        let metadata_store = Some(sqlite_client.clone());
+        // Infra-owned components (project registry, metrics aggregation)
+        // still construct from the local branch handle; every engine read
+        // goes through the relation contract instead.
+        let sqlite_client = relation_store
+            .as_local()
+            .cloned()
+            .ok_or_else(|| EngineError::Config("relation store has no local branch".to_string()))?;
 
         // Create project registry
         let project_registry = Arc::new(ProjectRegistry::new(
@@ -298,11 +291,9 @@ impl CodeContextEngine {
             vector,
             fulltext: fulltext_store,
             embedder,
-            metadata_store,
             relation_store: relation_store_for_engine,
             orchestrator_cache: ProjectCache::new(),
             plugin_registry_cache: ProjectCache::new(),
-            searcher_cache: ProjectCache::new(),
             query_result_cache: ProjectCache::new(),
             query_cache_config,
             project_registry,

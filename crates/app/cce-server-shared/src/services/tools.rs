@@ -208,8 +208,10 @@ pub async fn keyword_search(
     spec: KeywordSpec,
 ) -> Result<KeywordSearchResponse, ToolsServiceError> {
     let mut tool = KeywordSearchTool::new(state.engine.fulltext_clone());
-    if let Some(sqlite) = state.engine.metadata_store_clone() {
-        tool = tool.with_sqlite(sqlite);
+    if let Some(store) = state.engine.relation_store()
+        && let Ok(store) = store.for_project(spec.project_id)
+    {
+        tool = tool.with_relation_store(store);
     }
     tool.search(KeywordSearchRequest {
         query: spec.query,
@@ -234,6 +236,7 @@ pub struct CompressSpec {
 /// Compress one file into its semantic representation.
 pub async fn compress(spec: CompressSpec) -> Result<CompressionResponse, ToolsServiceError> {
     CompressionRetrieval::new()
+        .with_semantic_renderer(std::sync::Arc::new(cce_export::PresentationConverter::new()))
         .compress(CompressionRequest {
             file_path: spec.file_path,
             include_entities: spec.include_entities,
@@ -255,6 +258,7 @@ pub struct BatchCompressSpec {
 /// Compress several files, reporting per-file successes and failures.
 pub async fn compress_batch(spec: BatchCompressSpec) -> cce_orchestrator::BatchCompressionResponse {
     CompressionRetrieval::new()
+        .with_semantic_renderer(std::sync::Arc::new(cce_export::PresentationConverter::new()))
         .compress_batch(BatchCompressionRequest {
             file_paths: spec.file_paths,
             include_entities: spec.include_entities,
@@ -398,14 +402,15 @@ pub async fn find_references(
         }
     };
     let mut tool = FindReferencesTool::new(snapshot.index.clone(), project_id);
-    if let Some(sqlite) = state.engine.metadata_store()
-        && let Ok(project) = sqlite.for_project(project_id)
+    if let Some(store) = state.engine.relation_store()
+        && let Ok(project) = store.for_project(project_id)
     {
-        tool = tool.with_sqlite(project);
+        tool = tool.with_relation_store(project);
     }
     ToolAnswer {
         result: tool
             .find_references(request)
+            .await
             .map_err(|error| error.to_string()),
         relation_info: Some(capability),
     }
@@ -449,14 +454,15 @@ pub async fn goto_definition(
         }
     };
     let mut tool = GotoDefinitionTool::new(snapshot.index.clone(), project_id);
-    if let Some(sqlite) = state.engine.metadata_store()
-        && let Ok(project) = sqlite.for_project(project_id)
+    if let Some(store) = state.engine.relation_store()
+        && let Ok(project) = store.for_project(project_id)
     {
-        tool = tool.with_sqlite(project);
+        tool = tool.with_relation_store(project);
     }
     ToolAnswer {
         result: tool
             .goto_definition(request)
+            .await
             .map_err(|error| error.to_string()),
         relation_info: Some(capability),
     }

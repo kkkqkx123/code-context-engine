@@ -18,8 +18,8 @@ use tokio::sync::Mutex;
 
 use std::time::Duration;
 
+use crate::index::vector_store::RelationStore;
 use cce_metrics::HotUpdateMetrics;
-use cce_storage_metadb_sqlite::SqliteClient;
 use cce_types::OperationKind;
 
 use super::change::{BatchChangeResult, FileChange, FileChangeType};
@@ -45,7 +45,7 @@ pub struct HotUpdateOperationRuntime {
     /// Change detector for scan-based change detection.
     change_detector: ChangeDetector,
     /// Metadata store for reading the previously indexed state.
-    metadata_store: Option<Arc<SqliteClient>>,
+    metadata_store: Option<RelationStore>,
     /// Checkpoint manager for hot-update checkpoint persistence.
     checkpoint_manager: Option<Arc<crate::operation::CheckpointManager>>,
     /// Storage coordinator shared with the update processors.
@@ -102,10 +102,10 @@ impl HotUpdateOperationRuntime {
     /// Create the runtime for a project.
     pub fn new(
         project_id: i64,
-        db: Arc<SqliteClient>,
+        store: RelationStore,
         scan_options: cce_scanner::ScanOptions,
     ) -> Self {
-        let mut change_detector = ChangeDetector::new(db, scan_options);
+        let mut change_detector = ChangeDetector::new(store, scan_options);
         change_detector.set_project_id(project_id);
         Self {
             project_id,
@@ -149,11 +149,11 @@ impl HotUpdateOperationRuntime {
         &mut self.change_detector
     }
 
-    pub fn metadata_store(&self) -> Option<&Arc<SqliteClient>> {
+    pub fn metadata_store(&self) -> Option<&RelationStore> {
         self.metadata_store.as_ref()
     }
 
-    pub fn set_metadata_store(&mut self, store: Arc<SqliteClient>) {
+    pub fn set_metadata_store(&mut self, store: RelationStore) {
         self.metadata_store = Some(store.clone());
         self.change_detector =
             ChangeDetector::new(store, self.change_detector.scan_options().clone());
@@ -872,7 +872,7 @@ impl HotUpdateOperationRuntime {
         // groups produced for different files never collide (a per-file
         // processor would re-seed the counter at the same value and generate
         // duplicate group/chunk ids).
-        let mut file_processor = self.new_file_processor();
+        let mut file_processor = self.new_file_processor().await;
         for path in changed_paths {
             // Skip non-text files (e.g., binary, images) silently
             if !cce_utils::file::is_text_file(&path) {
@@ -933,7 +933,7 @@ impl HotUpdateOperationRuntime {
         pending: &[(PathBuf, bool)],
     ) -> Result<BatchChangeResult> {
         let mut result = BatchChangeResult::new();
-        let mut file_processor = self.new_file_processor();
+        let mut file_processor = self.new_file_processor().await;
 
         for (path, is_deletion) in pending {
             if *is_deletion {

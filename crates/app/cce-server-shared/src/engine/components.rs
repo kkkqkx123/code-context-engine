@@ -7,9 +7,9 @@ use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
 use cce_orchestrator::index::VectorStore;
 use cce_orchestrator::index::{FulltextStore, RelationStore};
+use cce_storage_common::RelationStorage;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
-use cce_storage_metadb_sqlite::repo::{CheckpointRepository, ProjectRepository};
 use tokio::sync::Mutex;
 
 impl super::CodeContextEngine {
@@ -70,16 +70,6 @@ impl super::CodeContextEngine {
         self.embedder.clone()
     }
 
-    /// Get a reference to the SQLite metadata store
-    pub fn metadata_store(&self) -> Option<&Arc<SqliteClient>> {
-        self.metadata_store.as_ref()
-    }
-
-    /// Get a clone of the SQLite metadata store
-    pub fn metadata_store_clone(&self) -> Option<Arc<SqliteClient>> {
-        self.metadata_store.clone()
-    }
-
     /// Get the relation backend enum selected at assembly time.
     ///
     /// The backend is stored as a neutral handle so callers cannot assume
@@ -118,10 +108,6 @@ impl super::CodeContextEngine {
             tracing::debug!(project_id, "Cleared IndexOrchestrator cache");
         }
 
-        if self.searcher_cache.remove(project_id).await.is_some() {
-            tracing::debug!(project_id, "Cleared Searcher cache");
-        }
-
         if self.hot_update_cache.remove(project_id).await.is_some() {
             tracing::debug!(project_id, "Cleared HotUpdateCoordinator cache");
         }
@@ -144,7 +130,6 @@ impl super::CodeContextEngine {
 
     pub async fn clear_all_component_caches(&self) {
         self.orchestrator_cache.clear().await;
-        self.searcher_cache.clear().await;
         self.hot_update_cache.clear().await;
         self.operation_coordinator_cache.clear().await;
         self.relation_runtime_cache.clear().await;
@@ -391,7 +376,7 @@ impl super::CodeContextEngine {
     /// `OperationQueue::cleanup_stale_operations`), which only clears the
     /// active flag so a crashed run can be recovered by checkpoint.
     pub fn start_checkpoint_cleanup_task(&self, interval_secs: u64, default_ttl_seconds: u64) {
-        let metadata_store = self.metadata_store.clone();
+        let relation_store = self.relation_store.clone();
         let project_registry = self.project_registry.clone();
         let operation_coordinator_cache = self.operation_coordinator_cache.clone();
 
@@ -403,16 +388,9 @@ impl super::CodeContextEngine {
             loop {
                 interval.tick().await;
 
-                let store = match &metadata_store {
-                    Some(store) => store.clone(),
-                    None => continue,
-                };
+                let store = relation_store.clone();
 
-                let client = store.as_ref().clone();
-
-                let project_ids: Vec<i64> = match client
-                    .with_transaction(|tx| ProjectRepository::get_all(tx))
-                {
+                let project_ids: Vec<i64> = match store.projects_all().await {
                     Ok(records) => records.into_iter().map(|r| r.id).collect(),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to list projects for checkpoint cleanup");
@@ -430,26 +408,18 @@ impl super::CodeContextEngine {
                     };
 
                     {
-                        let project_client = match store.for_project(*project_id) {
-                            Ok(client) => client,
+                        let project_store = match store.for_project(*project_id) {
+                            Ok(store) => store,
                             Err(e) => {
                                 tracing::warn!(project_id = *project_id, error = %e, "Failed to open project database for checkpoint cleanup");
                                 continue;
                             }
                         };
-                        let conn = match project_client.write_connection() {
-                            Ok(conn) => conn,
-                            Err(e) => {
-                                tracing::warn!(project_id = *project_id, error = %e, "Failed to get connection for checkpoint cleanup");
-                                continue;
-                            }
-                        };
 
-                        match CheckpointRepository::delete_expired_checkpoints(
-                            &conn,
-                            *project_id,
-                            ttl_seconds,
-                        ) {
+                        match project_store
+                            .checkpoints_delete_expired(*project_id, ttl_seconds)
+                            .await
+                        {
                             Ok(count) => {
                                 if count > 0 {
                                     tracing::info!(
@@ -551,10 +521,7 @@ impl super::CodeContextEngine {
                             cfg.output_dir()
                         };
                         if output_dir.exists() {
-                            let read_client = store.for_project(*project_id).ok();
-                            let read_conn = read_client
-                                .as_ref()
-                                .and_then(|client| client.read_connection().ok());
+                            let read_store = store.for_project(*project_id).ok();
                             if let Ok(read_dir) = std::fs::read_dir(&output_dir) {
                                 for dir_entry in read_dir.flatten() {
                                     let path = dir_entry.path();
@@ -566,19 +533,19 @@ impl super::CodeContextEngine {
                                         continue;
                                     }
                                     let operation_id = &name[".export-backup-".len()..];
-                                    let is_expired = if let Some(ref conn) = read_conn {
-                                        match cce_storage_metadb_sqlite::CheckpointRepository::get_checkpoint(
-                                            conn, *project_id, operation_id,
-                                        ) {
+                                    let is_expired = if let Some(ref read_store) = read_store {
+                                        match read_store
+                                            .checkpoint_get(*project_id, operation_id)
+                                            .await
+                                        {
                                             Ok(Some(checkpoint)) => {
                                                 match chrono::DateTime::parse_from_rfc3339(
                                                     &checkpoint.updated_at,
                                                 ) {
                                                     Ok(updated_at) => {
                                                         let age_secs = (chrono::Utc::now()
-                                                            - updated_at.with_timezone(
-                                                                &chrono::Utc,
-                                                            ))
+                                                            - updated_at
+                                                                .with_timezone(&chrono::Utc))
                                                         .num_seconds()
                                                         .max(0)
                                                             as u64;
@@ -737,22 +704,15 @@ impl super::CodeContextEngine {
     ) {
         use crate::runtime::GenerationGcWorker;
 
-        let metadata_store = self.metadata_store.clone();
+        let relation_store = self.relation_store.clone();
         tokio::spawn(async move {
-            let store = match &metadata_store {
-                Some(store) => store.clone(),
-                None => {
-                    tracing::warn!("Generation GC worker: no metadata store available");
-                    return;
-                }
-            };
-            let client = store.as_ref().clone();
+            let store = relation_store.clone();
             let config = crate::runtime::GenerationGcWorkerConfig {
                 scan_interval_secs: interval_secs,
                 keep_active_generations,
                 stale_after_secs,
             };
-            let worker = Arc::new(GenerationGcWorker::new(client, config));
+            let worker = Arc::new(GenerationGcWorker::new(store, config));
             tracing::info!(
                 interval_secs = interval_secs,
                 keep_active_generations = keep_active_generations,

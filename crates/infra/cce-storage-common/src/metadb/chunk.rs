@@ -209,6 +209,17 @@ impl ChunkRecord {
     }
 }
 
+/// Chunk text needed to rebuild BM25 documents during compaction.
+///
+/// The tantivy `content`/`keywords` fields are index-only, so the clone
+/// path reconstructs them from this storage-side projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChunkContent {
+    pub chunk_id: String,
+    pub content: String,
+    pub bm25_keywords: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityDetailMapping {
     pub id: i64,

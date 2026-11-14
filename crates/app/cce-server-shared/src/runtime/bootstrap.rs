@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use cce_storage_metadb_sqlite::ProjectRepository;
+use cce_storage_common::RelationStorage;
 use cce_storage_vector_qdrant::QdrantProcessHandle;
 
 use crate::engine::{CodeContextEngine, EngineError};
@@ -94,15 +94,12 @@ async fn recover_registered_projects(
     coordinator: &StartupCoordinator,
     engine: &CodeContextEngine,
 ) -> usize {
-    let Some(store) = engine.metadata_store() else {
-        tracing::debug!("No metadata store; skipping startup recovery");
+    let Some(store) = engine.relation_store() else {
+        tracing::debug!("No relation store; skipping startup recovery");
         return 0;
     };
 
-    let project_ids: Vec<i64> = match store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::get_all(tx))
-    {
+    let project_ids: Vec<i64> = match store.projects_all().await {
         Ok(records) => records.into_iter().map(|record| record.id).collect(),
         Err(e) => {
             tracing::warn!(error = %e, "Failed to enumerate projects for startup recovery");

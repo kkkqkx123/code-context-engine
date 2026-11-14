@@ -45,8 +45,8 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use cce_storage_common::metadb::EntityRecord;
     use cce_storage_common::RelationStorage;
+    use cce_storage_common::metadb::EntityRecord;
     use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
@@ -157,8 +157,8 @@ mod tests {
             Some("hash-1"),
             "content hash must survive the copy"
         );
-        let copied_entities = block_on(database.entities_with_files(1, 6))
-            .expect("copied entities should load");
+        let copied_entities =
+            block_on(database.entities_with_files(1, 6)).expect("copied entities should load");
         assert_eq!(copied_entities.len(), 2, "both entities must be copied");
         let parent = copied_entities
             .iter()
@@ -202,5 +202,4 @@ mod tests {
             .expect("unknown path is a legitimate no-op");
         assert_eq!(copied, 0);
     }
-
 }

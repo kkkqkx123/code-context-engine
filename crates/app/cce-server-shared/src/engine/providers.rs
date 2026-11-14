@@ -8,19 +8,38 @@ use cce_config::project_registry::{ProjectEntry, ProjectScope};
 #[cfg(feature = "plugins")]
 use cce_metrics::PluginMetrics;
 use cce_metrics::RelationMetrics;
-use cce_metrics::{QueryMetrics, SearchMetrics, WatchMetrics};
+use cce_metrics::{QueryMetrics, WatchMetrics};
 use cce_orchestrator::OperationCoordinator;
+use cce_orchestrator::ProjectConfigSource;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
 use cce_orchestrator::index::IndexOrchestrator;
-use cce_orchestrator::index::RelationStore;
-use cce_orchestrator::query::searcher::Searcher;
 use cce_orchestrator::query::{IndexCapabilities, QueryCoordinator, RelationSearcher};
 use cce_parser::summary::SummaryGenerator;
 use cce_plugin::PluginRegistry;
 #[cfg(feature = "plugins")]
 use cce_plugin_runtime::FilePluginSource;
 use tokio::sync::Mutex;
+
+/// [`ProjectConfigSource`] adapter over the server-owned project registry.
+///
+/// The coordinator only needs registry reads; the concrete registry type
+/// lives in the storage branch, so the engine injects it behind the
+/// orchestration-layer port rather than exposing the branch type.
+struct RegistrySource(std::sync::Arc<cce_storage_metadb_sqlite::project_registry::ProjectRegistry>);
+
+#[async_trait::async_trait]
+impl ProjectConfigSource for RegistrySource {
+    async fn get_or_load(
+        &self,
+        project_id: i64,
+    ) -> std::result::Result<
+        cce_config::project_registry::ProjectEntry,
+        cce_config::project_registry::RegistryError,
+    > {
+        self.0.get_or_load(project_id).await
+    }
+}
 
 impl super::CodeContextEngine {
     /// Get or create project-specific hot update coordinator
@@ -56,9 +75,8 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .and_then(RelationStore::into_local)
             .ok_or_else(|| {
-                EngineError::Config("SQLite database not initialized for hot update".to_string())
+                EngineError::Config("Relation store not initialized for hot update".to_string())
             })?;
         let checkpoint_manager = operation_coordinator.checkpoint_manager();
         let project_group_id = cce_storage_common::generate_project_group_id(
@@ -102,7 +120,7 @@ impl super::CodeContextEngine {
             .create_all_processors_from_stores(
                 Some(self.vector.clone()),
                 Some(self.fulltext_store()),
-                Some(RelationStore::local(metadata_store.clone())),
+                Some(metadata_store.clone()),
                 Some(self.embedder.clone()),
                 Some(project_group_id),
                 project_id,
@@ -122,6 +140,7 @@ impl super::CodeContextEngine {
                     project_id,
                 )),
             )
+            .await
             .map_err(|e| EngineError::Config(e.to_string()))?;
 
         // A file-watch-capable coordinator is the only construction that can
@@ -143,7 +162,7 @@ impl super::CodeContextEngine {
         }
         .map_err(|e| EngineError::Config(e.to_string()))?;
         coordinator = coordinator
-            .with_project_registry(self.project_registry.clone())
+            .with_project_registry(Arc::new(RegistrySource(self.project_registry.clone())))
             .with_metadata_store(metadata_store)
             .with_checkpoint_manager(checkpoint_manager)
             .with_storage_coordinator(storage_coordinator)
@@ -211,9 +230,8 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .and_then(RelationStore::into_local)
             .ok_or_else(|| {
-                EngineError::Config("SQLite database not initialized for indexing".to_string())
+                EngineError::Config("Relation store not initialized for indexing".to_string())
             })?;
         let operation_coordinator = self.get_operation_coordinator(project_id).await?;
 
@@ -226,8 +244,7 @@ impl super::CodeContextEngine {
                 .with_vector(self.vector.clone())
                 .with_fulltext_store(self.fulltext_store())
                 .with_embedder(self.embedder.clone())
-                .with_relation_store(RelationStore::local(metadata_store))
-                .map_err(|e| EngineError::Config(e.to_string()))?
+                .with_relation_store(metadata_store)
                 .with_checkpoint_manager(operation_coordinator.checkpoint_manager())
                 .with_progress_tracker(project_progress_tracker)
                 // Apply project-specific grouper (pre-processor) and ast_to_nl configs
@@ -409,10 +426,9 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .and_then(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config(
-                    "SQLite database not initialized for OperationCoordinator".to_string(),
+                    "Relation store not initialized for OperationCoordinator".to_string(),
                 )
             })?;
 
@@ -456,21 +472,18 @@ impl super::CodeContextEngine {
         }
     }
 
-    /// Get or create project-specific Searcher
+    /// Assemble the per-request query coordinator for a project.
     ///
-    /// This method implements lazy loading with caching.
-    /// Note: Searcher is mostly stateless, but we cache it to avoid
-    /// recreating rerank handlers and other optional components.
-    pub async fn get_searcher(&self, project_id: i64) -> Result<Arc<Mutex<Searcher>>, EngineError> {
-        // Fast path: check cache
-        if let Some(searcher) = self.searcher_cache.get(project_id).await {
-            tracing::debug!(project_id, "Searcher cache hit");
-            return Ok(searcher);
-        }
-
-        // Cache miss - create new searcher
-        tracing::info!(project_id, "Creating project-specific Searcher");
-
+    /// Single source of truth for engine-side query assembly: searcher
+    /// construction from the project stores, rerank/plugin wiring, relation
+    /// searcher, capabilities, shared cache, shared retry queue, metrics,
+    /// and relation store. Engine entry points delegate here so direct
+    /// searcher calls cannot bypass capability checks, timeouts, retry
+    /// handling, and metrics.
+    pub async fn build_query_coordinator(
+        &self,
+        project_id: i64,
+    ) -> Result<QueryCoordinator, EngineError> {
         let project_entry = self
             .project_registry
             .get_or_load(project_id)
@@ -483,35 +496,32 @@ impl super::CodeContextEngine {
             &project_entry.metadata.root_path,
         );
 
-        // Create rerank handler if enabled
-        let rerank_handler = build_rerank_handler(config, &self.metrics_registry)?;
-
         let scope = ProjectScope::new(project_id, project_group_id)
             .map_err(|e| EngineError::Config(format!("Invalid project scope: {}", e)))?;
 
-        let mut builder = Searcher::builder_from_stores(
+        let relation_searcher = self.coordinator_relation_searcher(project_id).await;
+        let capabilities = IndexCapabilities::from(&project_entry.config.orchestrator.indexer)
+            .merge(&IndexCapabilities::from(&project_entry.config.relation))
+            .with_relation_propagation_depth(project_entry.config.relation.max_propagation_depth);
+
+        // Searcher construction lives behind the coordinator builder; the
+        // engine never names the searcher type, so query assembly cannot
+        // bypass the coordinator's capability checks and metrics.
+        let mut builder = QueryCoordinator::builder(
             self.vector.clone(),
             self.embedder.clone(),
             self.fulltext_store(),
+            Arc::new(CallChainQuery::new()),
             scope,
         )
-        .map_err(|e| EngineError::Config(e.to_string()))?
-        .with_search_metrics(SearchMetrics::new(&self.metrics_registry, project_id));
+        .with_relation_searcher(relation_searcher)
+        .with_capabilities(capabilities)
+        .with_metrics_registry(self.metrics_registry.clone())
+        .with_shared_cache(self.get_query_cache(project_id).await)
+        .with_retry_queue(self.get_retry_queue(project_id).await);
 
-        // Pass the relation store for the epoch view and chunk enrichment.
-        // Reads go through the relation contract, so no branch downcast is
-        // needed here.
-        if let Some(store) = self
-            .relation_store()
-            .map(|store| store.for_project(project_id))
-            .transpose()
-            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-        {
-            builder = builder.with_relation_store(store);
-        }
-
-        // Add rerank handler if available
-        if let Some(handler) = rerank_handler {
+        // Create rerank handler if enabled
+        if let Some(handler) = build_rerank_handler(config, &self.metrics_registry)? {
             builder = builder.with_rerank(handler);
         }
 
@@ -528,64 +538,21 @@ impl super::CodeContextEngine {
             builder = builder.with_plugin_registry(registry);
         }
 
-        // Share one query result cache across requests for this project.
-        // The searcher is cached, so a private cache here would
-        // still serve repeats, but the engine-level instance also covers
-        // the QueryCoordinator path and survives searcher recreation.
-        let builder = builder.with_shared_cache(self.get_query_cache(project_id).await);
-
-        let searcher = Arc::new(Mutex::new(builder.build()));
-
-        // Double-check: another task may have inserted while we were building
-        if let Some(existing) = self.searcher_cache.get(project_id).await {
-            tracing::debug!(project_id, "Searcher found after double-check");
-            return Ok(existing);
+        // Pass the relation store for the epoch view and chunk enrichment.
+        // Reads go through the relation contract, so no branch downcast is
+        // needed here.
+        if let Some(store) = self
+            .relation_store()
+            .map(|store| store.for_project(project_id))
+            .transpose()
+            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
+        {
+            builder = builder.with_relation_store(store);
         }
-        self.searcher_cache
-            .insert(project_id, searcher.clone())
-            .await;
 
-        tracing::info!(project_id, "Created and cached Searcher");
-        Ok(searcher)
-    }
-
-    /// Build the per-request query coordinator for a project.
-    ///
-    /// Single source of truth for engine-side query assembly: the same
-    /// searcher, relation searcher, capabilities, shared cache, shared
-    /// retry queue, metrics, and relation store that the shared query
-    /// service uses. Engine entry points delegate here so direct searcher
-    /// calls cannot bypass capability checks, timeouts, retry handling,
-    /// and metrics.
-    pub async fn build_query_coordinator(
-        &self,
-        project_id: i64,
-    ) -> Result<QueryCoordinator, EngineError> {
-        let project_entry = self
-            .project_registry
-            .get_or_load(project_id)
-            .await
-            .map_err(|e| EngineError::Config(format!("Failed to load project config: {e}")))?;
-        let searcher = self.get_searcher(project_id).await?;
-        let searcher = searcher.lock().await.clone();
-        let relation_searcher = self.coordinator_relation_searcher(project_id).await;
-        let capabilities = IndexCapabilities::from(&project_entry.config.orchestrator.indexer)
-            .merge(&IndexCapabilities::from(&project_entry.config.relation))
-            .with_relation_propagation_depth(project_entry.config.relation.max_propagation_depth);
-        let mut coordinator = QueryCoordinator::with_capabilities(
-            Arc::new(searcher),
-            relation_searcher,
-            capabilities,
-            project_id,
-        )
-        .with_metrics(QueryMetrics::new(&self.metrics_registry, project_id))
-        .with_shared_cache(self.get_query_cache(project_id).await)
-        .with_retry_queue(self.get_retry_queue(project_id).await);
-        if let Some(store) = self.relation_store() {
-            if let Ok(project_store) = store.for_project(project_id) {
-                coordinator = coordinator.with_relation_store(project_store);
-            }
-        }
+        let mut coordinator = builder.build();
+        coordinator =
+            coordinator.with_metrics(QueryMetrics::new(&self.metrics_registry, project_id));
         Ok(coordinator)
     }
 
@@ -618,7 +585,8 @@ mod tests {
     use crate::engine::CodeContextEngine;
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-    use cce_storage_metadb_sqlite::{NewProjectRecord, ProjectRepository};
+    use cce_storage_common::RelationStorage;
+    use cce_storage_common::metadb::NewProjectRecord;
     use std::collections::HashMap;
 
     fn create_test_config() -> AppConfig {
@@ -675,21 +643,15 @@ mod tests {
             .await
             .expect("Engine should build with test config");
 
-        // Insert a test project into SQLite so get_or_load can find it
-        let store = engine
-            .metadata_store()
-            .expect("Engine should have metadata_store");
-        let project_id = store
-            .as_ref()
-            .with_transaction(|tx| {
-                ProjectRepository::insert(
-                    tx,
-                    &NewProjectRecord::new(
-                        "test_concurrent_project".to_string(),
-                        "/tmp/cce_test_concurrent".to_string(),
-                    ),
-                )
-            })
+        // Insert a test project so get_or_load can find it
+        let project_id = engine
+            .relation_store()
+            .expect("Engine should have relation_store")
+            .project_insert(&NewProjectRecord::new(
+                "test_concurrent_project".to_string(),
+                "/tmp/cce_test_concurrent".to_string(),
+            ))
+            .await
             .expect("Failed to insert test project");
 
         // Spawn two concurrent tasks both calling get_orchestrator

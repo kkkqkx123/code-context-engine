@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 
-use cce_storage_metadb_sqlite::ChunkRepository;
+use cce_storage_common::RelationStorage;
 
 use crate::hot_update::ParseResultWithChanges;
 use crate::hot_update::error::{HotUpdateError, Result};
@@ -133,22 +133,24 @@ impl EmbeddingUpdateProcessor {
         };
         let current_fp = embedder_fingerprint(embedder.as_ref());
 
-        let Some(client) = storage.metadata_client() else {
+        let Some(store) = storage.metadata_store() else {
             return Ok(());
         };
-        let stored_fp = client
+        let stored_fp = store
             .project_meta_get_string_optional(storage.project_id(), EMBEDDER_FINGERPRINT_KEY)
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
 
         match stored_fp.as_deref() {
             Some(fp) if fp == current_fp => return Ok(()),
             None => {
-                client
+                store
                     .project_meta_set_string(
                         storage.project_id(),
                         EMBEDDER_FINGERPRINT_KEY,
                         &current_fp,
                     )
+                    .await
                     .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
                 return Ok(());
             }
@@ -158,15 +160,17 @@ impl EmbeddingUpdateProcessor {
         // Drift detected: sweep chunks page by page at the active epoch.
         let Some(active_epoch) = storage
             .active_data_epoch()
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?
         else {
             // Never published: nothing to regenerate; record the baseline.
-            client
+            store
                 .project_meta_set_string(
                     storage.project_id(),
                     EMBEDDER_FINGERPRINT_KEY,
                     &current_fp,
                 )
+                .await
                 .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
             return Ok(());
         };
@@ -179,19 +183,15 @@ impl EmbeddingUpdateProcessor {
 
         let mut offset: i64 = 0;
         loop {
-            let page = {
-                let conn = client
-                    .read_connection()
-                    .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
-                ChunkRepository::get_by_project_and_epoch_with_category_paged(
-                    &conn,
+            let page = store
+                .chunks_page_with_category(
                     storage.project_id(),
                     active_epoch,
                     REEMBED_PAGE_SIZE as i64,
                     offset,
                 )
-                .map_err(|e| HotUpdateError::embedding(e.to_string()))?
-            };
+                .await
+                .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
             if page.is_empty() {
                 break;
             }
@@ -202,8 +202,9 @@ impl EmbeddingUpdateProcessor {
                 .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
         }
 
-        client
+        store
             .project_meta_set_string(storage.project_id(), EMBEDDER_FINGERPRINT_KEY, &current_fp)
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
 
         tracing::info!(
@@ -230,10 +231,10 @@ impl EmbeddingUpdateProcessor {
         use crate::hot_update::processors::rechunk::{
             FingerprintDrift, detect_fingerprint_drift, persist_fingerprint, resolve_project_root,
         };
-        use cce_storage_metadb_sqlite::FileRepository;
+        use cce_storage_common::RelationStorage;
 
         let storage = &self.context.storage;
-        let Some(client) = storage.metadata_client() else {
+        let Some(store) = storage.metadata_store() else {
             return Ok(());
         };
         let pipeline_fp = self
@@ -243,11 +244,12 @@ impl EmbeddingUpdateProcessor {
             .await
             .pipeline_fingerprint();
         match detect_fingerprint_drift(
-            client,
+            store,
             storage.project_id(),
             EMBEDDING_RECHUNK_KEY,
             &pipeline_fp,
         )
+        .await
         .map_err(|e| HotUpdateError::embedding(e.to_string()))?
         {
             FingerprintDrift::Current | FingerprintDrift::BaselineWritten => return Ok(()),
@@ -256,14 +258,16 @@ impl EmbeddingUpdateProcessor {
 
         let Some(active_epoch) = storage
             .active_data_epoch()
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?
         else {
             persist_fingerprint(
-                client,
+                store,
                 storage.project_id(),
                 EMBEDDING_RECHUNK_KEY,
                 &pipeline_fp,
             )
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
             return Ok(());
         };
@@ -274,26 +278,23 @@ impl EmbeddingUpdateProcessor {
             "Chunking configuration changed; re-chunking unchanged files from disk"
         );
 
-        let root_path = resolve_project_root(client, storage.project_id())
+        let root_path = resolve_project_root(store, storage.project_id())
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
 
         let mut offset: i64 = 0;
         let mut rebuilt = 0usize;
         let mut skipped = 0usize;
         loop {
-            let page = {
-                let conn = client
-                    .read_connection()
-                    .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
-                FileRepository::get_by_project_and_epoch_paged(
-                    &conn,
+            let page = store
+                .files_page(
                     storage.project_id(),
                     active_epoch,
                     RECHUNK_PAGE_SIZE,
                     offset,
                 )
-                .map_err(|e| HotUpdateError::embedding(e.to_string()))?
-            };
+                .await
+                .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
             if page.is_empty() {
                 break;
             }
@@ -334,8 +335,9 @@ impl EmbeddingUpdateProcessor {
                 // the vector-store flow writes detail mappings against the new
                 // point ids instead of leaving them in the ancestor generation,
                 // where compaction would eventually retire them.
-                if let Err(e) =
-                    storage.copy_file_rows_between_epochs(active_epoch, storage.epoch(), &file.path)
+                if let Err(e) = storage
+                    .copy_file_rows_between_epochs(active_epoch, storage.epoch(), &file.path)
+                    .await
                 {
                     tracing::warn!(
                         path = %file.path,
@@ -357,11 +359,12 @@ impl EmbeddingUpdateProcessor {
         }
 
         persist_fingerprint(
-            client,
+            store,
             storage.project_id(),
             EMBEDDING_RECHUNK_KEY,
             &pipeline_fp,
         )
+        .await
         .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
 
         if let Some(metrics) = &self.context.storage_metrics {
@@ -436,6 +439,7 @@ impl EmbeddingUpdateProcessor {
             self.context
                 .storage
                 .store_parsed_files(&parsed_files)
+                .await
                 .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
         }
 
@@ -613,6 +617,7 @@ impl UpdateProcessor for EmbeddingUpdateProcessor {
         self.context
             .storage
             .activate_hot_update_candidate(&ctx.operation_id)
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
         if let Err(error) = self.context.storage.gc_stale_generations().await {
             tracing::warn!(error = %error, "Generation GC after embedding publication failed");
@@ -628,6 +633,7 @@ impl UpdateProcessor for EmbeddingUpdateProcessor {
         self.context
             .storage
             .fail_hot_update_candidate(&ctx.operation_id, reason)
+            .await
             .map_err(|e| HotUpdateError::embedding(e.to_string()))
     }
 

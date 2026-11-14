@@ -5,8 +5,8 @@
 
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_storage_common::FulltextStorage;
+use cce_storage_common::RelationStorage;
 use cce_storage_common::VectorStorage;
-use cce_storage_metadb_sqlite::ChunkRepository;
 use cce_types::path::normalize_project_path;
 
 use crate::error::OrchestratorError;
@@ -56,33 +56,23 @@ impl StorageCoordinator {
         }
 
         // Remove entity detail mappings and file records via FK cascade.
-        // DELETE FROM files cascades to entities → entity_detail_mappings.
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                use rusqlite::params;
-                tx.execute(
-                    "DELETE FROM files WHERE path = ?1 AND project_id = ?2",
-                    params![&file_id, self.project_id],
-                )
-                .map_err(|e| cce_types::StorageError::Sqlite(e.to_string()))?;
-                Ok(())
-            });
+        // File deletion cascades to entities → entity_detail_mappings.
+        if let Some(store) = self.metadata_store.as_ref() {
+            let result = store.files_delete_by_path(self.project_id, &file_id).await;
 
             if let Err(error) = result.map_err(OrchestratorError::Storage) {
                 tracing::warn!(path = %file_id, error = %error, "Failed to remove file records");
-                backend_errors.push(format!("sqlite files: {error}"));
+                backend_errors.push(format!("metadata files: {error}"));
             }
         }
 
-        // Remove chunk records from SQLite
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                ChunkRepository::delete_by_file_path(tx, &file_id, self.project_id)
-            });
+        // Remove chunk records from the relation store
+        if let Some(store) = self.metadata_store.as_ref() {
+            let result = store.chunks_delete_by_file(self.project_id, &file_id).await;
 
             if let Err(error) = result.map_err(OrchestratorError::Storage) {
                 tracing::warn!(path = %file_id, error = %error, "Failed to remove chunk records");
-                backend_errors.push(format!("sqlite chunks: {error}"));
+                backend_errors.push(format!("metadata chunks: {error}"));
             }
         }
 
@@ -146,7 +136,8 @@ impl StorageCoordinator {
             .collect();
         self.prepare_hot_update_bm25(&paths).await?;
         for parsed in parsed_files {
-            self.store_parsed_files(std::slice::from_ref(*parsed))?;
+            self.store_parsed_files(std::slice::from_ref(*parsed))
+                .await?;
         }
 
         self.store_bm25(chunks).await

@@ -12,7 +12,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use cce_scanner::{FSScanner, FileProcessor, ScanOptions, compute_content_hash};
@@ -96,17 +96,11 @@ fn main() {
         "files", "scan(ms)", "rescan(ms)", "hash(ms)", "2xread(ms)", "overhead%"
     );
 
-    let mut out = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/scan_hash.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# files\tscan_ms\trescan_ms\thash_ms\tdouble_read_ms\toverhead_pct"
-        );
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "scan_hash.tsv",
+        "# files\tscan_ms\trescan_ms\thash_ms\tdouble_read_ms\toverhead_pct",
+    );
 
     for count in [100usize, 300] {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -124,12 +118,10 @@ fn main() {
         println!(
             "{count:<10} {scan:>12.2} {rescan:>12.2} {hash:>12.2} {reread:>12.2} {overhead:>12.1}"
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "{count}\t{scan:.2}\t{rescan:.2}\t{hash:.2}\t{reread:.2}\t{overhead:.1}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "{count}\t{scan:.2}\t{rescan:.2}\t{hash:.2}\t{reread:.2}\t{overhead:.1}"
+        );
         let _ = n;
     }
 }

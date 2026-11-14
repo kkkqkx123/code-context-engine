@@ -10,12 +10,26 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::hot_update::watcher::{FileEvent, FileEventType, WatchConfig, WatchCoordinator};
+use crate::index::vector_store::RelationStore;
 use cce_config::HotUpdateConfig;
 use cce_metrics::{HotUpdateMetrics, WatchMetrics};
 use cce_parser::parser::ParseCoordinator;
 use cce_scanner::ScanOptions;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
+
+/// Project configuration source for hot-update config reloads.
+///
+/// The coordinator only needs registry reads; the concrete registry lives
+/// in the server layer and is injected behind this port.
+#[async_trait::async_trait]
+pub trait ProjectConfigSource: Send + Sync + 'static {
+    async fn get_or_load(
+        &self,
+        project_id: i64,
+    ) -> std::result::Result<
+        cce_config::project_registry::ProjectEntry,
+        cce_config::project_registry::RegistryError,
+    >;
+}
 
 use crate::hot_update::change::BatchChangeResult;
 use crate::hot_update::change_detector::ChangeDetector;
@@ -82,7 +96,7 @@ pub struct HotUpdateCoordinator {
 
     // ===== Project Context =====
     /// Project registry reference (for loading project config)
-    pub(crate) project_registry: Option<Arc<ProjectRegistry>>,
+    pub(crate) project_registry: Option<Arc<dyn ProjectConfigSource>>,
 
     // ===== Monitoring =====
     /// Watcher metrics (optional)
@@ -251,7 +265,7 @@ impl HotUpdateCoordinator {
     }
 
     /// Set metadata store
-    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+    pub fn with_metadata_store(mut self, store: RelationStore) -> Self {
         self.runtime_builder().set_metadata_store(store);
         self
     }
@@ -322,7 +336,7 @@ impl HotUpdateCoordinator {
     }
 
     /// Set project registry reference
-    pub fn with_project_registry(mut self, registry: Arc<ProjectRegistry>) -> Self {
+    pub fn with_project_registry(mut self, registry: Arc<dyn ProjectConfigSource>) -> Self {
         self.project_registry = Some(registry);
         self
     }

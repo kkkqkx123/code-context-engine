@@ -21,6 +21,7 @@ use crate::hot_update::error::{HotUpdateError, Result};
 use crate::hot_update::processors::trait_def::UpdateProcessor;
 use crate::hot_update::{BatchChangeResult, FileChangeType};
 
+use crate::index::vector_store::RelationStore;
 use cce_codegraph::BuildConfigParser;
 use cce_codegraph::IndexBuilder;
 use cce_codegraph::index::{
@@ -29,9 +30,8 @@ use cce_codegraph::index::{
 use cce_config::RelationBuilderParams;
 use cce_metrics::RelationMetrics;
 use cce_plugin::PluginRegistry;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::repo::RelationSnapshotRepository;
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
+
 use cce_types::{LanguageInfo, StorageError};
 
 use crate::index::RelationBaseCache;
@@ -40,9 +40,9 @@ use crate::index::StorageCoordinator;
 use cce_types::normalize_project_path;
 
 pub struct RelationUpdateProcessor {
-    /// SQLite client for persistence (project_meta reads, manifest access,
+    /// Relation backend for persistence (project_meta reads, manifest access,
     /// and the base-cache snapshot port).
-    pub(crate) sqlite_client: Option<Arc<SqliteClient>>,
+    pub(crate) relation_store: Option<RelationStore>,
     /// Sole publisher for complete canonical snapshots.
     pub(crate) publisher: Option<Arc<dyn RelationSnapshotPublisher>>,
     /// Whether this processor is enabled
@@ -107,7 +107,7 @@ impl RelationUpdateProcessor {
     pub fn new() -> Self {
         let params = RelationBuilderParams::default();
         Self {
-            sqlite_client: None,
+            relation_store: None,
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -136,7 +136,7 @@ impl RelationUpdateProcessor {
     pub fn with_build_config(project_root: &std::path::Path) -> Self {
         let params = RelationBuilderParams::default();
         Self {
-            sqlite_client: None,
+            relation_store: None,
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -161,11 +161,11 @@ impl RelationUpdateProcessor {
         }
     }
 
-    /// Create a new relation update processor with SQLite persistence
-    pub fn with_persistence(sqlite_client: Arc<SqliteClient>) -> Self {
+    /// Create a new relation update processor with relation-store persistence
+    pub fn with_persistence(store: RelationStore) -> Self {
         let params = RelationBuilderParams::default();
         Self {
-            sqlite_client: Some(Arc::clone(&sqlite_client)),
+            relation_store: Some(store),
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -192,13 +192,13 @@ impl RelationUpdateProcessor {
 
     /// Create a new relation update processor with SQLite persistence and build config
     pub fn with_persistence_and_config(
-        sqlite_client: Arc<SqliteClient>,
+        store: RelationStore,
         project_root: &std::path::Path,
         project_id: i64,
     ) -> Self {
         let params = RelationBuilderParams::default();
         Self {
-            sqlite_client: Some(Arc::clone(&sqlite_client)),
+            relation_store: Some(store),
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -309,7 +309,7 @@ impl RelationUpdateProcessor {
         // module failures. The server-side publisher additionally transitions
         // the relation runtime to Degraded and emits an explicit
         // `PublishFailed` runtime event.
-        let sqlite = self.sqlite_client.as_ref().ok_or_else(|| {
+        let store = self.relation_store.as_ref().ok_or_else(|| {
             HotUpdateError::relation("relation hot update requires normalized epoch persistence")
         })?;
         let publisher = self.publisher.as_ref().ok_or_else(|| {
@@ -335,22 +335,22 @@ impl RelationUpdateProcessor {
                 );
             }
 
-            let active_epoch =
-                match sqlite.project_meta_get_int(project_id, "active_relation_epoch") {
-                    Ok(epoch) if epoch > 0 => epoch,
-                    Ok(_) => {
-                        return Err(HotUpdateError::relation(
-                            "relation hot update requires an active canonical epoch",
-                        ));
-                    }
-                    Err(error) => {
-                        return Err(HotUpdateError::relation(error.to_string()));
-                    }
-                };
+            let active_epoch = match store
+                .project_meta_get_int(project_id, "active_relation_epoch")
+                .await
+            {
+                Ok(epoch) if epoch > 0 => epoch,
+                Ok(_) => {
+                    return Err(HotUpdateError::relation(
+                        "relation hot update requires an active canonical epoch",
+                    ));
+                }
+                Err(error) => {
+                    return Err(HotUpdateError::relation(error.to_string()));
+                }
+            };
 
-            let manifest = match sqlite.with_transaction(|tx| {
-                RelationSnapshotRepository::get_manifest(tx, project_id, active_epoch)
-            }) {
+            let manifest = match store.snapshot_manifest(project_id, active_epoch).await {
                 Ok(Some(manifest)) => manifest,
                 Ok(None) => {
                     return Err(HotUpdateError::relation(
@@ -370,17 +370,13 @@ impl RelationUpdateProcessor {
             // it. Dependency propagation, fingerprinting, and delta
             // computation all read through this view; the cached base is
             // never mutated.
-            let base_view = match self.base_cache.get_or_load(
-                &SqliteSnapshotStore::new(sqlite.as_ref().clone()),
-                project_id,
-                active_epoch,
-            ) {
+            let base_view = match self.base_cache.get_or_load(store, project_id, active_epoch) {
                 Ok(view) => view,
                 Err(error) => {
                     return Err(HotUpdateError::relation(error.to_string()));
                 }
             };
-            let project_root = match self.project_root(sqlite) {
+            let project_root = match self.project_root(store).await {
                 Ok(root) => root,
                 Err(error) => return Err(error),
             };
@@ -911,6 +907,7 @@ impl UpdateProcessor for RelationUpdateProcessor {
         };
         storage
             .activate_hot_update_candidate(&ctx.operation_id)
+            .await
             .map_err(|error| HotUpdateError::relation(error.to_string()))?;
         if let Err(error) = storage.gc_stale_generations().await {
             tracing::warn!(error = %error, "Generation GC after relation publication failed");
@@ -941,6 +938,7 @@ impl UpdateProcessor for RelationUpdateProcessor {
         };
         storage
             .fail_hot_update_candidate(&ctx.operation_id, reason)
+            .await
             .map_err(|error| HotUpdateError::relation(error.to_string()))
     }
 
@@ -1005,10 +1003,12 @@ impl UpdateProcessor for RelationUpdateProcessor {
             {
                 Ok(_) => storage
                     .activate_hot_update_candidate(&operation_id)
+                    .await
                     .map_err(|error| HotUpdateError::relation(error.to_string()))?,
                 Err(error) => {
-                    if let Err(fail_error) =
-                        storage.fail_hot_update_candidate(&operation_id, &error.to_string())
+                    if let Err(fail_error) = storage
+                        .fail_hot_update_candidate(&operation_id, &error.to_string())
+                        .await
                     {
                         tracing::error!(
                             operation_id = %operation_id,
@@ -1067,10 +1067,10 @@ impl UpdateProcessor for RelationUpdateProcessor {
             let config_path = ctx.config_path.as_deref().ok_or_else(|| {
                 HotUpdateError::relation("ConfigChange operation requires a config path")
             })?;
-            let sqlite = self.sqlite_client.as_ref().ok_or_else(|| {
+            let store = self.relation_store.as_ref().ok_or_else(|| {
                 HotUpdateError::relation("config change requires normalized epoch persistence")
             })?;
-            let project_root = self.project_root(sqlite)?;
+            let project_root = self.project_root(store).await?;
             let processed_count = self
                 .rebuild_affected_for_config(config_path, &project_root, &ctx.operation_id)
                 .await?;

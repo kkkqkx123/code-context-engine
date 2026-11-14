@@ -36,6 +36,7 @@ use tokio::sync::Mutex;
 use crate::hot_update::{
     BatchChangeResult, HotUpdateError, ParseResultWithChanges, Result, UpdateProcessor,
 };
+use crate::index::vector_store::RelationStore;
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_config::{AstToNlConfig, NestProcessorConfig, Settings};
 use cce_parser::ast_to_nl::AstToNlConverter;
@@ -43,20 +44,19 @@ use cce_parser::ast_to_nl::chunker::GroupChunker;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::grouper::types::ProcessingResult;
 use cce_plugin::PluginRegistry;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_common::RelationStorage;
 
-use crate::export::export_config_rebuild;
 use crate::export::export_fingerprint::{current_relation_epoch, should_skip_export};
 use crate::export::export_staging::{self, ExportContext, ExportStaging, StagedWrite};
 use crate::export::export_transaction;
-use crate::export::nl_exporter::NlDocumentExporter;
-use crate::export::presentation::PresentationConverter;
-use crate::export::summary_view::ExportSummaryView;
 use crate::operation::checkpoint::CheckpointManager;
 use crate::operation::{
     ModuleFailure, OperationContext, OperationMetrics, OperationProcessResult, OperationType,
 };
+use cce_export;
+use cce_export::ExportSummaryView;
+use cce_export::NlDocumentExporter;
+use cce_export::PresentationConverter;
 
 /// Natural language document update processor
 ///
@@ -87,9 +87,9 @@ pub struct NlDocumentUpdateProcessor {
     enabled: bool,
     /// Checkpoint manager used to persist `export_path` for recovery skipping.
     checkpoint_manager: Option<Arc<CheckpointManager>>,
-    /// SQLite client used to load the published relation snapshot for
+    /// Relation backend used to load the published relation snapshot for
     /// relation enhancement during hot updates.
-    sqlite: Option<Arc<SqliteClient>>,
+    relation: Option<RelationStore>,
     /// Project ID used for relation snapshot queries.
     project_id: i64,
     /// Per-operation staging state.
@@ -168,7 +168,7 @@ impl NlDocumentUpdateProcessor {
             grouper: PreprocessingPipeline::with_config(NestProcessorConfig::default()),
             enabled: true,
             checkpoint_manager: None,
-            sqlite: None,
+            relation: None,
             project_id: 0,
             staging: Mutex::new(ExportStaging::default()),
             relation_epoch_cache: Mutex::new(None),
@@ -201,14 +201,14 @@ impl NlDocumentUpdateProcessor {
         self
     }
 
-    /// Wire the SQLite client (for published relation snapshot queries) and
+    /// Wire the relation backend (for published relation snapshot queries) and
     /// the owning project ID.
     pub fn with_relation_context(
         mut self,
-        sqlite: Option<Arc<SqliteClient>>,
+        relation: Option<RelationStore>,
         project_id: i64,
     ) -> Self {
-        self.sqlite = sqlite;
+        self.relation = relation;
         self.project_id = project_id;
         self
     }
@@ -256,11 +256,11 @@ impl NlDocumentUpdateProcessor {
         Some(self.grouper.process(parsed_file))
     }
 
-    /// Refresh relation enhancement from the published SQLite relation
+    /// Refresh relation enhancement from the published relation
     /// snapshot when the active relation epoch changes.
     async fn refresh_relation_enhancement(&self) -> Result<()> {
-        let (Some(sqlite), enable) = (
-            self.sqlite.clone(),
+        let (Some(store), enable) = (
+            self.relation.clone(),
             self.exporter().await.config().enable_relation_enhancement,
         ) else {
             return Ok(());
@@ -268,11 +268,13 @@ impl NlDocumentUpdateProcessor {
         if !enable {
             return Ok(());
         }
-        let epoch =
-            match sqlite.project_meta_get_int_optional(self.project_id, "active_relation_epoch") {
-                Ok(Some(epoch)) => epoch,
-                _ => 0,
-            };
+        let epoch = match store
+            .project_meta_get_int_optional(self.project_id, "active_relation_epoch")
+            .await
+        {
+            Ok(Some(epoch)) => epoch,
+            _ => 0,
+        };
         if epoch <= 0 {
             return Ok(());
         }
@@ -280,14 +282,10 @@ impl NlDocumentUpdateProcessor {
         if *cache == Some(epoch) {
             return Ok(());
         }
-        match RelationSnapshotLoader::load(
-            &SqliteSnapshotStore::new(sqlite.as_ref().clone()),
-            self.project_id,
-            epoch,
-        ) {
+        match RelationSnapshotLoader::load(&store, self.project_id, epoch) {
             Ok(index) => {
                 let exporter = self.exporter().await;
-                let enhancer_config = crate::export::RelationEnhancerConfig::default();
+                let enhancer_config = cce_export::RelationEnhancerConfig::default();
                 // The loaded index is owned by this refresh and never mutated
                 // afterwards, so its maps can be shared into the snapshot
                 // without a deep copy.
@@ -326,7 +324,7 @@ impl NlDocumentUpdateProcessor {
             &export_config,
             &ast_to_nl_config,
             &self.grouper_fingerprint,
-            &self.sqlite,
+            &self.relation,
             self.project_id,
         )
         .await
@@ -351,7 +349,7 @@ impl NlDocumentUpdateProcessor {
         let ast_converter = self.ast_converter.read().await.clone();
         let export_config = exporter.config().clone();
         let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
-        let epoch = current_relation_epoch(&self.sqlite, self.project_id);
+        let epoch = current_relation_epoch(&self.relation, self.project_id).await;
 
         let ctx = ExportContext {
             exporter: &exporter,
@@ -385,7 +383,7 @@ impl NlDocumentUpdateProcessor {
         let exporter = self.exporter().await;
         let export_config = exporter.config().clone();
         let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
-        let epoch = current_relation_epoch(&self.sqlite, self.project_id);
+        let epoch = current_relation_epoch(&self.relation, self.project_id).await;
 
         let ctx = ExportContext {
             exporter: &exporter,
@@ -496,7 +494,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
                     "ConfigChange operation requires a config path".to_string(),
                 )
             })?;
-            export_config_rebuild::rebuild_from_config(
+            cce_export::rebuild_from_config(
                 &self.exporter,
                 &self.ast_converter,
                 &self.chunker,
@@ -505,7 +503,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
                 &self.relation_epoch_cache,
                 config_path,
             )
-            .await?;
+            .await;
             return Ok(OperationProcessResult {
                 operation_id: ctx.operation_id.clone(),
                 processed_files: 0,
@@ -690,7 +688,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
     }
 
     async fn reload_config(&self, config_path: &Path, _project_root: &Path) -> Result<()> {
-        export_config_rebuild::rebuild_from_config(
+        cce_export::rebuild_from_config(
             &self.exporter,
             &self.ast_converter,
             &self.chunker,
@@ -699,11 +697,12 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
             &self.relation_epoch_cache,
             config_path,
         )
-        .await
+        .await;
+        Ok(())
     }
 
     async fn on_config_change(&self, config_path: &Path, _project_root: &Path) -> Result<()> {
-        export_config_rebuild::rebuild_from_config(
+        cce_export::rebuild_from_config(
             &self.exporter,
             &self.ast_converter,
             &self.chunker,
@@ -712,7 +711,8 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
             &self.relation_epoch_cache,
             config_path,
         )
-        .await
+        .await;
+        Ok(())
     }
 }
 
@@ -724,7 +724,7 @@ mod tests {
     use cce_parser::summary::FileSummary;
 
     fn test_processor(root: &std::path::Path) -> NlDocumentUpdateProcessor {
-        let config = crate::export::config::ExportConfig::new(root.to_path_buf(), 1);
+        let config = cce_export::ExportConfig::new(root.to_path_buf(), 1);
         let exporter = Arc::new(NlDocumentExporter::new(config));
         NlDocumentUpdateProcessor::new(exporter)
     }
@@ -752,14 +752,14 @@ mod tests {
             &export_config,
             &ast_to_nl_config,
             &processor.grouper_fingerprint,
-            current_relation_epoch(&processor.sqlite, processor.project_id),
+            current_relation_epoch(&processor.relation, processor.project_id).await,
         )
         .await
     }
 
     #[test]
     fn test_processor_name() {
-        let config = crate::export::config::ExportConfig::default();
+        let config = cce_export::ExportConfig::default();
         let exporter = Arc::new(NlDocumentExporter::new(config));
         let processor = NlDocumentUpdateProcessor::new(exporter);
 
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn test_processor_enabled() {
-        let config = crate::export::config::ExportConfig::default();
+        let config = cce_export::ExportConfig::default();
         let exporter = Arc::new(NlDocumentExporter::new(config));
         let processor = NlDocumentUpdateProcessor::new(exporter);
 
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn test_processor_supports_config_reload() {
-        let config = crate::export::config::ExportConfig::default();
+        let config = cce_export::ExportConfig::default();
         let exporter = Arc::new(NlDocumentExporter::new(config));
         let processor = NlDocumentUpdateProcessor::new(exporter);
 
@@ -886,15 +886,13 @@ mod tests {
 
         let mut grouper = cce_config::NestProcessorConfig::default();
         grouper.small_class_threshold += 1;
-        let exporter = Arc::new(NlDocumentExporter::new(
-            crate::export::config::ExportConfig::new(tmp.path().to_path_buf(), 1),
-        ));
+        let exporter = Arc::new(NlDocumentExporter::new(cce_export::ExportConfig::new(
+            tmp.path().to_path_buf(),
+            1,
+        )));
         let configured =
             NlDocumentUpdateProcessor::from_config(exporter, &cce_config::AstToNlConfig::default())
-                .with_render_inputs(
-                    crate::export::fingerprint::config_fingerprint(&grouper),
-                    String::new(),
-                );
+                .with_render_inputs(cce_export::config_fingerprint(&grouper), String::new());
         let fp_configured = compute_fingerprint_for_test(&configured, source, None).await;
         assert_ne!(
             fp_base, fp_configured,
@@ -1175,8 +1173,7 @@ mod tests {
                 .with_imports(vec!["std::io".to_string()]),
         );
 
-        let config =
-            crate::export::config::ExportConfig::new(root.to_path_buf(), 1).with_summary(true);
+        let config = cce_export::ExportConfig::new(root.to_path_buf(), 1).with_summary(true);
         let exporter = NlDocumentExporter::new(config);
         let (_, content_with_summary) = exporter
             .render_file(&chunks, Some(&summary))
@@ -1184,8 +1181,7 @@ mod tests {
         assert!(content_with_summary.contains("- imports:"));
         assert!(content_with_summary.contains("summary:"));
 
-        let config =
-            crate::export::config::ExportConfig::new(root.to_path_buf(), 1).with_summary(false);
+        let config = cce_export::ExportConfig::new(root.to_path_buf(), 1).with_summary(false);
         let exporter = NlDocumentExporter::new(config);
         let (_, content_without_summary) = exporter
             .render_file(&chunks, Some(&summary))

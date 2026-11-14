@@ -21,9 +21,12 @@ use std::time::Duration;
 
 use cce_circuit_breaker::CircuitBreaker;
 use cce_storage_common::metadb::{
-    AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, EntityDetailMapping,
-    EntityRecord, FileCheckpointRecord, FileRecord, GenerationOverride, ProjectIndexManifest,
-    ProjectRecord, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
+    AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
+    ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileCheckpointRecord,
+    FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord, GenerationGcPlan,
+    GenerationOverride, IndexStateProjection, NewProjectRecord, OverrideDisposition,
+    ProjectIndexManifest, ProjectRecord, ProjectUpdateRecord, RelationStorage,
+    WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 use cce_types::error::common::ErrorClassify;
 use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta, StorageError};
@@ -220,6 +223,892 @@ impl std::fmt::Debug for PostgresClient {
     }
 }
 
+/// Stub implementations for relation operations the remote branch does not
+/// serve yet. The orchestrator rejects the remote relation backend at
+/// startup, so these only keep the contract total while the branch is
+/// unwired.
+macro_rules! remote_unimplemented {
+    () => {
+        async fn project_meta_get_int_optional(
+            &self,
+            _project_id: i64,
+            _key: &str,
+        ) -> Result<Option<i64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn project_meta_get_string_optional(
+            &self,
+            _project_id: i64,
+            _key: &str,
+        ) -> Result<Option<String>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn project_meta_set_string(
+            &self,
+            _project_id: i64,
+            _key: &str,
+            _value: &str,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_page_with_category(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _limit: i64,
+            _offset: i64,
+        ) -> Result<Vec<(ChunkRecord, u8)>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_page(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _limit: i64,
+            _offset: i64,
+        ) -> Result<Vec<FileRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_visible_hashes(
+            &self,
+            _project_id: i64,
+        ) -> Result<Vec<FileHashEntry>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_record_hashes(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _entries: &[(String, String)],
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_remove_hashes(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _paths: &[String],
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_ensure(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _batch_id: i64,
+            _entries: &[FileEnsureEntry],
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_delete_by_path(
+            &self,
+            _project_id: i64,
+            _path: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn file_by_path(
+            &self,
+            _project_id: i64,
+            _path: &str,
+        ) -> Result<Option<FileRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_insert_returning_ids(
+            &self,
+            _entities: &[EntityRecord],
+        ) -> Result<Vec<i64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_with_files(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<Vec<EntityWithFile>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_by_ids(
+            &self,
+            _project_id: i64,
+            _ids: &[i64],
+        ) -> Result<Vec<EntityRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_by_file(
+            &self,
+            _project_id: i64,
+            _file_id: i64,
+        ) -> Result<Vec<EntityRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_delete_by_file(
+            &self,
+            _file_id: i64,
+            _epoch: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_set_parent(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _child_id: i64,
+            _parent_id: i64,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_content_by_epoch(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<Vec<ChunkContent>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_stats(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _channel: &str,
+        ) -> Result<(i64, i64), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_max_entity_id(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<Option<u64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_delete_by_file(
+            &self,
+            _project_id: i64,
+            _path: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_and_mappings_upsert(
+            &self,
+            _chunks: &[ChunkRecord],
+            _mappings: &[EntityDetailMapping],
+        ) -> Result<(usize, usize), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn mappings_by_entity(
+            &self,
+            _project_id: i64,
+            _entity_id: i64,
+            _epoch: i64,
+        ) -> Result<Option<EntityDetailMapping>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn manifest_by_operation(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<Option<ProjectIndexManifest>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn manifest_building_max_epoch(
+            &self,
+            _project_id: i64,
+        ) -> Result<Option<i64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn manifest_set_parent(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _parent_data_epoch: Option<i64>,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn manifest_has_incomplete(
+            &self,
+            _project_id: i64,
+            _operation_type: &str,
+        ) -> Result<bool, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn overrides_upsert_batch(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _entries: &[(String, OverrideDisposition)],
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn overrides_clear(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn generation_copy_file(
+            &self,
+            _project_id: i64,
+            _source_epoch: i64,
+            _target_epoch: i64,
+            _path: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn generation_materialize(
+            &self,
+            _project_id: i64,
+            _source_epoch: i64,
+            _target_epoch: i64,
+            _excluded_paths: &[String],
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn generation_gc_plan(
+            &self,
+            _project_id: i64,
+            _keep_active_generations: usize,
+            _stale_before: i64,
+        ) -> Result<GenerationGcPlan, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn generation_gc_apply(
+            &self,
+            _project_id: i64,
+            _plan: &GenerationGcPlan,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn candidate_begin(
+            &self,
+            _project_id: i64,
+            _candidate_epoch: i64,
+            _operation_id: &str,
+            _parent_data_epoch: Option<i64>,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn candidate_clear_epoch(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn candidate_delete_file_rows(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _paths: &[String],
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn candidate_prepare_channel(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _paths: &[String],
+            _channel: &str,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn projection_load(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<Vec<IndexStateProjection>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn projection_upsert(&self, _row: &IndexStateProjection) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn projection_delete(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _file_path: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn projection_delete_by_operation(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn projection_delete_by_project(
+            &self,
+            _project_id: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_active(
+            &self,
+            _project_id: i64,
+        ) -> Result<Option<CheckpointRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_set_active(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _priority: i32,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_clear_active(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_heartbeat(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoints_cleanup_stale(
+            &self,
+            _project_id: i64,
+            _stale_threshold_secs: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoints_delete_expired(
+            &self,
+            _project_id: i64,
+            _ttl_seconds: u64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_epoch_entries(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<Vec<FileEpochEntry>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_set_epoch(
+            &self,
+            _project_id: i64,
+            _path: &str,
+            _epoch: i64,
+        ) -> Result<bool, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_cached_parsed_data(
+            &self,
+            _project_id: i64,
+            _file_path: &str,
+            _content_hash: &str,
+        ) -> Result<Option<Vec<u8>>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_by_file(
+            &self,
+            _project_id: i64,
+            _file_path: &str,
+            _epoch: i64,
+        ) -> Result<Vec<String>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_delete_manifests_except(
+            &self,
+            _project_id: i64,
+            _keep_epoch: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_delta_chain_info(
+            &self,
+            _project_id: i64,
+            _active_epoch: i64,
+        ) -> Result<(usize, i64, i64), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_write_delta(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _delta: &SnapshotDelta,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn manifest_parent_epoch(
+            &self,
+            _project_id: i64,
+            _data_epoch: i64,
+        ) -> Result<Option<i64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_count(&self, _project_id: i64, _epoch: i64) -> Result<i64, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_exists_at_epoch(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _path: &str,
+        ) -> Result<bool, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entity_ids_by_file_epoch(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _path: &str,
+        ) -> Result<Vec<i64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_by_file_epoch(
+            &self,
+            _project_id: i64,
+            _file_path: &str,
+            _epoch: i64,
+        ) -> Result<Vec<ChunkRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_file_set_parsed_data(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _file_path: &str,
+            _data: &[u8],
+        ) -> Result<bool, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn mappings_point_ids_by_file_epoch(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+            _path: &str,
+        ) -> Result<Vec<(i64, String)>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn chunks_count_by_path(
+            &self,
+            _project_id: i64,
+            _file_path: &str,
+        ) -> Result<i64, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn entities_delete_by_id(
+            &self,
+            _project_id: i64,
+            _entity_id: i64,
+        ) -> Result<bool, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn mappings_delete_by_file_id(
+            &self,
+            _project_id: i64,
+            _file_id: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn mappings_delete_by_entity_id(
+            &self,
+            _project_id: i64,
+            _entity_id: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn project_delete_with_cascade(&self, _project_id: i64) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn project_delete_db(&self, _project_id: i64) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn files_by_ids(
+            &self,
+            _project_id: i64,
+            _ids: &[i64],
+        ) -> Result<Vec<FileRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn project_update(
+            &self,
+            _project_id: i64,
+            _updates: &ProjectUpdateRecord,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoints_unfinished(
+            &self,
+            _project_id: i64,
+        ) -> Result<Vec<CheckpointRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_latest_incomplete(
+            &self,
+            _project_id: i64,
+            _operation_type: &str,
+            _root_dir: &str,
+        ) -> Result<Option<CheckpointRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_set_batch_index(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _batch_index: u32,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_batch_create(
+            &self,
+            _project_id: i64,
+            _batch: &BatchCheckpointRecord,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_batch_get(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _batch_index: u32,
+        ) -> Result<Option<BatchCheckpointRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_batch_files(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _batch_index: u32,
+        ) -> Result<Vec<FileCheckpointRecord>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_failed_files(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<Vec<(String, String)>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn checkpoint_batches_delete_by_operation(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn file_checkpoints_clear_module_progress(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn work_units_insert_batch(
+            &self,
+            _records: &[WorkUnitCheckpointRecord],
+        ) -> Result<Vec<i64>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn work_units_delete_by_operation(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_manifest_by_operation(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<Option<RelationSnapshotManifest>, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_activate(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_retry_failed(
+            &self,
+            _project_id: i64,
+            _epoch: i64,
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_collect_garbage(
+            &self,
+            _project_id: i64,
+            _stale_before: i64,
+        ) -> Result<usize, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
+        async fn snapshot_entities_count(
+            &self,
+            _project_id: i64,
+            _relation_epoch: i64,
+        ) -> Result<i64, StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+    };
+}
+
 impl RelationStorage for PostgresClient {
     async fn ensure_project(&self, project_id: i64, root_path: &str) -> Result<(), StorageError> {
         self.ensure_project(project_id, root_path).await
@@ -227,6 +1116,30 @@ impl RelationStorage for PostgresClient {
 
     async fn project_record(&self, project_id: i64) -> Result<Option<ProjectRecord>, StorageError> {
         self.project_record(project_id).await
+    }
+
+    async fn projects_all(&self) -> Result<Vec<ProjectRecord>, StorageError> {
+        Err(StorageError::validation(
+            "remote relation branch is not wired yet".to_string(),
+        ))
+    }
+
+    async fn project_insert(&self, _record: &NewProjectRecord) -> Result<i64, StorageError> {
+        Err(StorageError::validation(
+            "remote relation branch is not wired yet".to_string(),
+        ))
+    }
+
+    async fn project_path_exists(&self, _root_path: &str) -> Result<bool, StorageError> {
+        Err(StorageError::validation(
+            "remote relation branch is not wired yet".to_string(),
+        ))
+    }
+
+    async fn project_clear_index(&self, _project_id: i64) -> Result<(), StorageError> {
+        Err(StorageError::validation(
+            "remote relation branch is not wired yet".to_string(),
+        ))
     }
 
     async fn project_meta_get_int(&self, project_id: i64, key: &str) -> Result<i64, StorageError> {
@@ -656,6 +1569,8 @@ impl RelationStorage for PostgresClient {
     async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError> {
         self.delete_project_db(project_id).await
     }
+
+    remote_unimplemented! {}
 
     fn backend_name(&self) -> &'static str {
         "remote"

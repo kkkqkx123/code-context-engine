@@ -22,6 +22,8 @@ cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage
 cce-storage-vector-local = { version = "0.1.0", path = "../../infra/cce-storage-vector-local" }
 cce-storage-metadb = { version = "0.1.0", path = "../../infra/cce-storage-metadb" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
+cce-export = { version = "0.1.0", path = "../cce-export" }
+cce-tools = { version = "0.1.0", path = "../cce-tools" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-circuit-breaker = { version = "0.1.0", path = "../../infra/cce-circuit-breaker" }

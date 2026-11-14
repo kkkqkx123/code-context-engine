@@ -19,7 +19,7 @@ use cce_orchestrator::index::StorageCoordinator;
 use cce_parser::ast_to_nl::chunker::{
     ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata,
 };
-use cce_storage_metadb_sqlite::ChunkRecord;
+use cce_storage_common::metadb::ChunkRecord;
 use cce_storage_vector_qdrant::QdrantClient;
 use cce_types::ast_to_nl::FileCategory;
 use cce_types::entity::{EntityId, EntityKind};

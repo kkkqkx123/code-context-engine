@@ -18,7 +18,6 @@
 //! Run: `cargo run -p cce-scanner --bench scan_parallel`
 
 use std::fs;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -28,23 +27,6 @@ use cce_bench_kit::ProjectSize;
 use cce_scanner::FileProcessor;
 use cce_scanner::{FSScanner, ScanOptions};
 
-/// Open the results TSV for appending, creating `benches/results` on demand.
-///
-/// The directory is not part of the worktree, so a first run used to lose every
-/// measurement: `open(...).ok()` failed silently and each row was guarded by
-/// `if let Some(f)`. Failing loudly is the point — a bench that cannot record
-/// its own output is broken.
-fn results_tsv(name: &str) -> std::fs::File {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results");
-    fs::create_dir_all(&dir).expect("create benches/results");
-    let path = dir.join(name);
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
-}
-
 struct Harness {
     root: PathBuf,
     paths: Vec<(PathBuf, std::fs::Metadata)>,
@@ -53,9 +35,7 @@ struct Harness {
 fn harness() -> &'static Harness {
     static H: OnceLock<Harness> = OnceLock::new();
     H.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("cce_scan_bench_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("mk temp");
+        let dir = cce_bench_kit::fresh_temp_dir("cce_scan_bench");
         let proj = cce_bench_kit::SyntheticProject::generate(
             ProjectSize::Medium,
             cce_bench_kit::DEFAULT_LANG_DIST,
@@ -114,10 +94,10 @@ fn main() {
     );
 
     // --- 1. single-thread vs bounded concurrency hashing ---
-    let mut out = results_tsv("scan_parallel.tsv");
-    let _ = writeln!(
-        out,
-        "# scenario\tthreads\tfiles\tms\tfiles_per_sec\tspeedup"
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "scan_parallel.tsv",
+        "# scenario\tthreads\tfiles\tms\tfiles_per_sec\tspeedup",
     );
 
     let fp = Arc::new(FileProcessor::new());

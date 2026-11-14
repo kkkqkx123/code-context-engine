@@ -1,0 +1,30 @@
+[package]
+name = "cce-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Code analysis tools over storage contracts (symbol lookup, keyword search, compression)"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
+cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
+cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
+cce-storage-metadb = { version = "0.1.0", path = "../../infra/cce-storage-metadb" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+parking_lot = { workspace = true }
+async-trait = { workspace = true }
+tree-sitter = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

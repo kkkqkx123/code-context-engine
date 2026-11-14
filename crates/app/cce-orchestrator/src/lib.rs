@@ -18,7 +18,6 @@ pub mod index;
 pub mod index_state;
 pub mod query;
 pub mod supply;
-pub mod tools;
 
 mod error;
 
@@ -31,7 +30,7 @@ pub use query::{
     GraphService, PathQueryOptions, QueryCoordinator, QueryError, QueryOptions,
     QueryOptions as SearchOptions, QueryResult, QueryResult as SearchQueryResult,
     RelationQueryOptions, RelationSearcher, Result as QueryResultType, SearchConfig, SearchResult,
-    SearchSources, Searcher, SubGraph, SubQuery,
+    SearchSources, SubGraph, SubQuery,
 };
 
 pub use index::{
@@ -41,7 +40,7 @@ pub use index::{
 
 pub use hot_update::{
     DebounceConfigBuilder, DebounceInfo, GlobalDebounce, HotUpdateCoordinator, HotUpdateError,
-    HotUpdateMode, HotUpdateState, UpdateProcessor,
+    HotUpdateMode, HotUpdateState, ProjectConfigSource, UpdateProcessor,
 };
 
 pub use hot_update::processors::{
@@ -49,7 +48,7 @@ pub use hot_update::processors::{
     RelationUpdateProcessor, SummaryUpdateProcessor,
 };
 
-pub use export::{ExportConfig, NlDocumentExporter};
+pub use cce_export::{ExportConfig, NlDocumentExporter};
 pub use export_processor::NlDocumentUpdateProcessor;
 
 pub use index_state::{
@@ -58,7 +57,7 @@ pub use index_state::{
     ModuleUpdateState, StateTrackerError, calculate_retry_delay,
 };
 
-pub use tools::{
+pub use cce_tools::{
     AstDiagnosis, BatchCompressionRequest, BatchCompressionResponse, CompressionError,
     CompressionRequest, CompressionResponse, CompressionRetrieval, DefinitionCode,
     DefinitionLocation, DiagnosisError, DiagnosisRequest, DiagnosisResponse, Diagnostic,

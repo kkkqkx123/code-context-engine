@@ -32,9 +32,11 @@ cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
 cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
+cce-storage-metadb = { version = "0.1.0", path = "../../infra/cce-storage-metadb" }
 cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
 cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage-vector-qdrant" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
+cce-export = { version = "0.1.0", path = "../cce-export" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
 

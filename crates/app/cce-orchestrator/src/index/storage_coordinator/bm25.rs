@@ -4,8 +4,8 @@ use cce_storage_common::FulltextStorage;
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_common::FulltextDocument;
-use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
-use cce_storage_metadb_sqlite::{ChunkRecord, EntityDetailMapping};
+use cce_storage_common::metadb::{ChunkRecord, EntityDetailMapping};
+use cce_storage_common::metadb::{WorkUnitCheckpointRecord, WorkUnitStatus};
 
 use crate::error::OrchestratorError;
 
@@ -62,7 +62,7 @@ impl StorageCoordinator {
         let mut pending: Vec<PendingBatch> = Vec::new();
         // Entity ID map is epoch-scoped and immutable for this pass: load it
         // once instead of once per microbatch.
-        let source_entity_ids = self.load_source_entity_ids()?;
+        let source_entity_ids = self.load_source_entity_ids().await?;
         for batch in bm25_chunks.chunks(batch_size) {
             let hash = if tracking {
                 Some(compute_work_unit_hash(batch))
@@ -148,7 +148,8 @@ impl StorageCoordinator {
         }
 
         if !all_records.is_empty() || !all_mappings.is_empty() {
-            self.store_chunks_and_mappings(&all_records, &all_mappings)?;
+            self.store_chunks_and_mappings(&all_records, &all_mappings)
+                .await?;
         }
 
         if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op)

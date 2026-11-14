@@ -53,7 +53,7 @@ pub struct ProjectArgs {
 
 /// Run the list projects tool call.
 pub async fn list_projects(state: &Arc<SharedContext>) -> Result<CallToolResult, rmcp::ErrorData> {
-    match cce_server_shared::services::project::list_projects(state) {
+    match cce_server_shared::services::project::list_projects(state).await {
         Ok(projects) => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({ "projects": projects }).to_string(),
         )])),
@@ -215,7 +215,7 @@ pub async fn health(
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({
             "project_id": args.project_id,
-            "metadata_store_configured": state.engine.metadata_store().is_some(),
+            "metadata_store_configured": state.engine.relation_store().is_some(),
             "bm25_enabled": bm25_enabled,
             "relation": relation,
         })

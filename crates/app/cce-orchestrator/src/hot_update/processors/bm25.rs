@@ -143,10 +143,10 @@ impl Bm25UpdateProcessor {
         use crate::hot_update::processors::rechunk::{
             FingerprintDrift, detect_fingerprint_drift, persist_fingerprint, resolve_project_root,
         };
-        use cce_storage_metadb_sqlite::FileRepository;
+        use cce_storage_common::RelationStorage;
 
         let storage = &self.context.storage;
-        let Some(client) = storage.metadata_client() else {
+        let Some(store) = storage.metadata_store() else {
             return Ok(());
         };
         let pipeline_fp = self
@@ -155,7 +155,8 @@ impl Bm25UpdateProcessor {
             .lock()
             .await
             .pipeline_fingerprint();
-        match detect_fingerprint_drift(client, storage.project_id(), BM25_RECHUNK_KEY, &pipeline_fp)
+        match detect_fingerprint_drift(store, storage.project_id(), BM25_RECHUNK_KEY, &pipeline_fp)
+            .await
             .map_err(|e| HotUpdateError::bm25(e.to_string()))?
         {
             FingerprintDrift::Current | FingerprintDrift::BaselineWritten => return Ok(()),
@@ -164,9 +165,11 @@ impl Bm25UpdateProcessor {
 
         let Some(active_epoch) = storage
             .active_data_epoch()
+            .await
             .map_err(|e| HotUpdateError::bm25(e.to_string()))?
         else {
-            persist_fingerprint(client, storage.project_id(), BM25_RECHUNK_KEY, &pipeline_fp)
+            persist_fingerprint(store, storage.project_id(), BM25_RECHUNK_KEY, &pipeline_fp)
+                .await
                 .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
             return Ok(());
         };
@@ -177,26 +180,23 @@ impl Bm25UpdateProcessor {
             "Chunking configuration changed; re-indexing BM25 unchanged files from disk"
         );
 
-        let root_path = resolve_project_root(client, storage.project_id())
+        let root_path = resolve_project_root(store, storage.project_id())
+            .await
             .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
 
         let mut offset: i64 = 0;
         let mut rebuilt = 0usize;
         let mut skipped = 0usize;
         loop {
-            let page = {
-                let conn = client
-                    .read_connection()
-                    .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
-                FileRepository::get_by_project_and_epoch_paged(
-                    &conn,
+            let page = store
+                .files_page(
                     storage.project_id(),
                     active_epoch,
                     RECHUNK_PAGE_SIZE,
                     offset,
                 )
-                .map_err(|e| HotUpdateError::bm25(e.to_string()))?
-            };
+                .await
+                .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
             if page.is_empty() {
                 break;
             }
@@ -249,7 +249,8 @@ impl Bm25UpdateProcessor {
             }
         }
 
-        persist_fingerprint(client, storage.project_id(), BM25_RECHUNK_KEY, &pipeline_fp)
+        persist_fingerprint(store, storage.project_id(), BM25_RECHUNK_KEY, &pipeline_fp)
+            .await
             .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
 
         if let Some(metrics) = &self.context.storage_metrics {
@@ -308,6 +309,7 @@ impl UpdateProcessor for Bm25UpdateProcessor {
         self.context
             .storage
             .activate_hot_update_candidate(&ctx.operation_id)
+            .await
             .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
         if let Err(error) = self.context.storage.gc_stale_generations().await {
             tracing::warn!(error = %error, "Generation GC after BM25 publication failed");
@@ -323,6 +325,7 @@ impl UpdateProcessor for Bm25UpdateProcessor {
         self.context
             .storage
             .fail_hot_update_candidate(&ctx.operation_id, reason)
+            .await
             .map_err(|e| HotUpdateError::bm25(e.to_string()))
     }
 

@@ -6,8 +6,9 @@
 use cce_orchestrator::query::{
     CacheConfig, CacheKey, QueryCache, QueryConfigBuilder, QueryOptions, QueryResult,
 };
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::{ChunkRecord, ChunkRepository};
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::ChunkRecord;
+use cce_storage_metadb::RelationStore;
 use cce_storage_vector_qdrant::generate_project_group_id;
 
 // ---------------------------------------------------------------------------
@@ -142,69 +143,70 @@ fn test_same_root_has_distinct_vector_namespaces() {
     );
 }
 
-#[test]
-fn test_same_chunk_id_is_isolated_across_project_lifecycle() {
-    let sqlite = SqliteClient::in_memory().expect("Failed to create SQLite database");
-    let now = chrono::Utc::now().timestamp();
-    sqlite
-        .with_transaction(|tx| {
-            tx.execute(
-                "INSERT INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (1, 'project-one', '/project-a', ?1, ?1),
-                        (2, 'project-two', '/project-b', ?1, ?1)",
-                [now],
-            )
-            .map_err(|error| cce_types::StorageError::Sqlite(error.to_string()))?;
+#[tokio::test]
+async fn test_same_chunk_id_is_isolated_across_project_lifecycle() {
+    let store = RelationStore::in_memory().expect("Failed to create metadata store");
+    store
+        .ensure_project(1, "/project-a")
+        .await
+        .expect("Failed to ensure project one");
+    store
+        .ensure_project(2, "/project-b")
+        .await
+        .expect("Failed to ensure project two");
 
-            let first = ChunkRecord::new(
-                "same-chunk".to_string(),
-                "src/lib.rs".to_string(),
-                "project one".to_string(),
-                1,
-                1,
-            )
-            .with_project_id(1);
-            let second = ChunkRecord::new(
-                "same-chunk".to_string(),
-                "src/lib.rs".to_string(),
-                "project two".to_string(),
-                1,
-                1,
-            )
-            .with_project_id(2);
-            ChunkRepository::insert(tx, &first)?;
-            ChunkRepository::insert(tx, &second)
-        })
+    let first = ChunkRecord::new(
+        "same-chunk".to_string(),
+        "src/lib.rs".to_string(),
+        "project one".to_string(),
+        1,
+        1,
+    )
+    .with_project_id(1);
+    let second = ChunkRecord::new(
+        "same-chunk".to_string(),
+        "src/lib.rs".to_string(),
+        "project two".to_string(),
+        1,
+        1,
+    )
+    .with_project_id(2);
+    store
+        .chunks_upsert(&[first, second])
+        .await
         .expect("Failed to store project chunks");
 
-    let conn = sqlite
-        .write_connection()
-        .expect("Failed to get SQLite connection");
-    let first = ChunkRepository::get_by_id(&conn, "same-chunk", 1)
-        .expect("Failed to read project one")
-        .expect("Project one chunk missing");
-    let second = ChunkRepository::get_by_id(&conn, "same-chunk", 2)
-        .expect("Failed to read project two")
-        .expect("Project two chunk missing");
-    assert_eq!(first.content, "project one");
-    assert_eq!(second.content, "project two");
-    drop(conn);
+    let first = store
+        .chunks_by_ids(1, &["same-chunk".to_string()], &[])
+        .await
+        .expect("Failed to read project one");
+    assert_eq!(first.len(), 1, "Project one chunk missing");
+    assert_eq!(first[0].content, "project one");
+    let second = store
+        .chunks_by_ids(2, &["same-chunk".to_string()], &[])
+        .await
+        .expect("Failed to read project two");
+    assert_eq!(second.len(), 1, "Project two chunk missing");
+    assert_eq!(second[0].content, "project two");
 
-    sqlite
-        .with_transaction(|tx| ChunkRepository::delete_by_id(tx, "same-chunk", 1))
-        .expect("Failed to delete project one chunk");
-    let conn = sqlite
-        .write_connection()
-        .expect("Failed to get SQLite connection");
+    store
+        .chunks_delete_by_project(1)
+        .await
+        .expect("Failed to delete project one chunks");
     assert!(
-        ChunkRepository::get_by_id(&conn, "same-chunk", 1)
+        store
+            .chunks_by_ids(1, &["same-chunk".to_string()], &[])
+            .await
             .expect("Failed to query project one")
-            .is_none()
+            .is_empty()
     );
-    assert!(
-        ChunkRepository::get_by_id(&conn, "same-chunk", 2)
+    assert_eq!(
+        store
+            .chunks_by_ids(2, &["same-chunk".to_string()], &[])
+            .await
             .expect("Failed to query project two")
-            .is_some()
+            .len(),
+        1
     );
 }
 

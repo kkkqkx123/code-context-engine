@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use tracing::{debug, info, trace, warn};
 
-use cce_storage_metadb_sqlite::SqliteClient;
+use crate::index::vector_store::RelationStore;
 use cce_types::error::common::NotFoundError;
 use cce_types::{OperationKind, StorageError};
 
@@ -55,7 +55,7 @@ impl OperationCoordinator {
     /// project_id must be > 0 (no global/default projects allowed)
     pub fn new_for_project(
         project_id: i64,
-        db: Arc<SqliteClient>,
+        db: RelationStore,
     ) -> Result<Self, cce_types::error::ConfigError> {
         if project_id <= 0 {
             return Err(cce_types::error::ConfigError::invalid_project_id(
@@ -80,7 +80,7 @@ impl OperationCoordinator {
     /// project_id must be > 0 (no global/default projects allowed)
     pub fn with_recovery_for_project(
         project_id: i64,
-        db: Arc<SqliteClient>,
+        db: RelationStore,
         file_indexer: Arc<FileIndexer>,
     ) -> Result<Self, cce_types::error::ConfigError> {
         if project_id <= 0 {
@@ -684,7 +684,7 @@ impl OperationCoordinator {
     /// window and must be skipped (and marked Failed) instead of replayed.
     fn is_stale_for_recovery(
         &self,
-        checkpoint: &cce_storage_metadb_sqlite::types::CheckpointRecord,
+        checkpoint: &cce_storage_common::metadb::CheckpointRecord,
     ) -> bool {
         let Some(freshness_secs) = self.recovery_freshness_secs else {
             return false;
@@ -720,7 +720,7 @@ impl OperationCoordinator {
 
         // Check checkpoint for terminal states
         if let Ok(Some(checkpoint)) = self.checkpoint_manager.get_checkpoint(operation_id).await {
-            use cce_storage_metadb_sqlite::types::CheckpointStatus;
+            use cce_storage_common::metadb::CheckpointStatus;
             match checkpoint.status {
                 CheckpointStatus::Completed => return Ok(OperationPhase::Completed),
                 CheckpointStatus::Failed => return Ok(OperationPhase::Failed),
@@ -736,8 +736,8 @@ impl OperationCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_metadb_sqlite::CheckpointRepository;
-    use cce_storage_metadb_sqlite::types::{CheckpointRecord, CheckpointStatus};
+    use cce_storage_common::RelationStorage;
+    use cce_storage_common::metadb::{CheckpointRecord, CheckpointStatus};
 
     fn make_checkpoint(
         operation_id: &str,
@@ -767,19 +767,15 @@ mod tests {
         }
     }
 
-    fn insert_checkpoint(db: &Arc<SqliteClient>, record: &CheckpointRecord) {
-        let mut conn = db
-            .write_connection()
-            .expect("Failed to get write connection");
-        let tx = conn.transaction().expect("Failed to create transaction");
-        CheckpointRepository::create_checkpoint(&tx, record.project_id, record)
+    async fn insert_checkpoint(db: &RelationStore, record: &CheckpointRecord) {
+        db.checkpoint_create(record.project_id, record)
+            .await
             .expect("Failed to insert checkpoint");
-        tx.commit().expect("Failed to commit transaction");
     }
 
     #[tokio::test]
     async fn test_recover_unfinished_operations_filters_stale() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let coordinator = OperationCoordinator::new_for_project(1, db.clone())
             .expect("Failed to create coordinator")
             .with_recovery_freshness(3600);
@@ -792,7 +788,8 @@ mod tests {
                 now - chrono::Duration::seconds(60),
                 "/project-a",
             ),
-        );
+        )
+        .await;
         insert_checkpoint(
             &db,
             &make_checkpoint(
@@ -800,7 +797,8 @@ mod tests {
                 now - chrono::Duration::seconds(7200),
                 "/project-b",
             ),
-        );
+        )
+        .await;
 
         let recovered = coordinator
             .recover_unfinished_operations()
@@ -830,7 +828,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recover_unfinished_operations_replays_all_without_window() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         // No freshness window configured: legacy behavior replays everything.
         let coordinator = OperationCoordinator::new_for_project(1, db.clone())
             .expect("Failed to create coordinator");
@@ -843,11 +841,13 @@ mod tests {
                 now - chrono::Duration::seconds(60),
                 "/project-a",
             ),
-        );
+        )
+        .await;
         insert_checkpoint(
             &db,
             &make_checkpoint("old-op", now - chrono::Duration::days(30), "/project-b"),
-        );
+        )
+        .await;
 
         let recovered = coordinator
             .recover_unfinished_operations()
@@ -864,14 +864,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_recover_unfinished_operations_rejects_unparseable_timestamp() {
-        let db = Arc::new(SqliteClient::in_memory().expect("Failed to create memory database"));
+        let db = RelationStore::in_memory().expect("Failed to create memory store");
         let coordinator = OperationCoordinator::new_for_project(1, db.clone())
             .expect("Failed to create coordinator")
             .with_recovery_freshness(3600);
 
         let mut record = make_checkpoint("corrupt-op", chrono::Utc::now(), "/project-a");
         record.updated_at = "not-a-timestamp".to_string();
-        insert_checkpoint(&db, &record);
+        insert_checkpoint(&db, &record).await;
 
         let recovered = coordinator
             .recover_unfinished_operations()

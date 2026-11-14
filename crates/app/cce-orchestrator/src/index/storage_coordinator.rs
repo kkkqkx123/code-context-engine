@@ -31,7 +31,6 @@ use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_common::RelationStorage;
 use cce_storage_vector_qdrant::QdrantClient;
-use cce_types::StorageError;
 
 use super::super::error::OrchestratorError;
 use super::vector_store::{FulltextStore, RelationStore, VectorStore};

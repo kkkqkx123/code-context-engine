@@ -13,11 +13,11 @@ use cce_config::Settings;
 use cce_config::project_registry::RegistryError;
 use cce_config::validation::Validate;
 use cce_llm::LlmClient;
-use cce_storage_metadb_sqlite::{
-    NewProjectRecord, ProjectRecord, ProjectRepository, SqliteClient, generate_project_name,
-};
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::{NewProjectRecord, ProjectRecord};
+use cce_storage_metadb::RelationStore;
+use cce_storage_metadb_sqlite::generate_project_name;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::context::SharedContext;
 
@@ -58,8 +58,8 @@ impl std::fmt::Display for ProjectCreateError {
 impl std::error::Error for ProjectCreateError {}
 
 /// Shared project creation logic.
-pub fn create_project(
-    store: &Arc<SqliteClient>,
+pub async fn create_project(
+    store: &RelationStore,
     request: &CreateProjectRequest,
 ) -> Result<CreatedProject, ProjectCreateError> {
     let supply_is_gateway = request
@@ -92,9 +92,9 @@ pub fn create_project(
             .to_string()
     };
 
-    let client = store.as_ref();
-    let exists = client
-        .with_transaction(|tx| ProjectRepository::path_exists(tx, &root_path_str))
+    let exists = store
+        .project_path_exists(&root_path_str)
+        .await
         .map_err(|e| ProjectCreateError::Storage(e.to_string()))?;
     if exists {
         return Err(ProjectCreateError::PathExists);
@@ -113,8 +113,7 @@ pub fn create_project(
     );
     new_project.profile_json = Some(initial_profile.to_canonical_json());
 
-    let project_id = match client.with_transaction(|tx| ProjectRepository::insert(tx, &new_project))
-    {
+    let project_id = match store.project_insert(&new_project).await {
         Ok(id) => id,
         Err(e) => {
             let msg = e.to_string();
@@ -130,7 +129,8 @@ pub fn create_project(
     };
 
     // Initialize project metadata (non-critical).
-    if let Err(e) = crate::runtime::recovery::ProjectMeta::init_for_project(client, project_id) {
+    if let Err(e) = crate::runtime::recovery::ProjectMeta::init_for_project(store, project_id).await
+    {
         tracing::warn!(
             project_id = project_id,
             error = %e,
@@ -141,9 +141,10 @@ pub fn create_project(
     if let Some(supply_mode) = request.supply_mode.as_deref() {
         let normalized = supply_mode.trim().to_lowercase();
         if normalized == SUPPLY_MODE_GATEWAY || normalized == SUPPLY_MODE_LOCAL {
-            if let Err(e) = client.with_transaction(|tx| {
-                ProjectRepository::meta_set_string(tx, project_id, SUPPLY_MODE_KEY, &normalized)
-            }) {
+            if let Err(e) = store
+                .project_meta_set_string(project_id, SUPPLY_MODE_KEY, &normalized)
+                .await
+            {
                 tracing::warn!(
                     project_id = project_id,
                     error = %e,
@@ -217,30 +218,32 @@ pub fn registry_error(error: RegistryError) -> ProjectServiceError {
 impl std::error::Error for ProjectServiceError {}
 
 /// Project every stored project row onto the wire view.
-pub fn list_projects(state: &SharedContext) -> Result<Vec<ProjectConfig>, ProjectServiceError> {
+pub async fn list_projects(
+    state: &SharedContext,
+) -> Result<Vec<ProjectConfig>, ProjectServiceError> {
     let store = state
         .engine
-        .metadata_store()
+        .relation_store()
         .ok_or(ProjectServiceError::MetadataUnavailable)?;
     let records = store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::get_all(tx))
+        .projects_all()
+        .await
         .map_err(|e| ProjectServiceError::Storage(format!("Failed to query projects: {e}")))?;
     Ok(records.iter().map(project_config_from_record).collect())
 }
 
 /// Project one stored project row onto the wire view.
-pub fn get_project(
+pub async fn get_project(
     state: &SharedContext,
     project_id: i64,
 ) -> Result<ProjectConfig, ProjectServiceError> {
     let store = state
         .engine
-        .metadata_store()
+        .relation_store()
         .ok_or(ProjectServiceError::MetadataUnavailable)?;
     let record = store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::get_by_id(tx, project_id))
+        .project_record(project_id)
+        .await
         .map_err(|e| ProjectServiceError::Storage(format!("Failed to query project: {e}")))?
         .ok_or(ProjectServiceError::NotFound(project_id))?;
     Ok(project_config_from_record(&record))

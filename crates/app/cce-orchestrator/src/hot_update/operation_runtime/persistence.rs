@@ -12,8 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use cce_scanner::FileEntry;
-use cce_storage_metadb_sqlite::repo::{ChunkRepository, ProjectIndexManifestRepository};
-use rusqlite::OptionalExtension;
+use cce_storage_common::RelationStorage;
 
 use crate::hot_update::change::{BatchChangeResult, FileChangeType};
 use crate::hot_update::error::{HotUpdateError, Result};
@@ -187,8 +186,8 @@ impl HotUpdateOperationRuntime {
     // ==================== File processing ====================
 
     /// Create a file processor whose parser seeds the raw entity ID counter.
-    pub(crate) fn new_file_processor(&self) -> FileProcessor {
-        let processor = FileProcessor::with_entity_id_seed(self.entity_id_seed())
+    pub(crate) async fn new_file_processor(&self) -> FileProcessor {
+        let processor = FileProcessor::with_entity_id_seed(self.entity_id_seed().await)
             .with_license_config(self.license_header.clone());
         match &self.parse_probe {
             Some(probe) => processor.with_parse_counter(probe.clone()),
@@ -197,39 +196,42 @@ impl HotUpdateOperationRuntime {
     }
 
     /// Compute the parser entity-ID seed for a hot-update batch.
-    pub(crate) fn entity_id_seed(&self) -> u64 {
+    pub(crate) async fn entity_id_seed(&self) -> u64 {
         let Some(store) = &self.metadata_store else {
             return 0;
         };
-        // Resolve the active epoch through the same cache entry every other
-        // read path uses, instead of re-deriving the manifest fallback here.
-        let cache = cce_storage_metadb_sqlite::cache::FileHashCache::new(
-            std::sync::Arc::clone(store),
-            self.project_id,
-        );
-        let active_epoch = match cache.active_epoch() {
-            Ok(Some(epoch)) => epoch,
-            Ok(None) => 0,
+        // Resolve the active epoch through the manifest, falling back to
+        // the legacy meta key for projects never published through one.
+        let active_epoch = match store.manifest_active(self.project_id).await {
+            Ok(Some(manifest)) => manifest.data_epoch,
+            Ok(None) => match store
+                .project_meta_get_int_optional(self.project_id, "active_epoch")
+                .await
+            {
+                Ok(value) => value.unwrap_or(0),
+                Err(_) => return 0,
+            },
             Err(_) => return 0,
         };
-        let Ok(conn) = store.read_connection() else {
-            return 0;
-        };
         let project_id = self.project_id;
-        let candidate_epoch =
-            ProjectIndexManifestRepository::get_building_max_epoch(&conn, project_id)
-                .ok()
-                .flatten()
-                .unwrap_or(0);
-        let active_max = ChunkRepository::max_entity_id_for_epoch(&conn, project_id, active_epoch)
+        let candidate_epoch = store
+            .manifest_building_max_epoch(project_id)
+            .await
             .ok()
             .flatten()
             .unwrap_or(0);
-        let candidate_max =
-            ChunkRepository::max_entity_id_for_epoch(&conn, project_id, candidate_epoch)
-                .ok()
-                .flatten()
-                .unwrap_or(0);
+        let active_max = store
+            .chunks_max_entity_id(project_id, active_epoch)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        let candidate_max = store
+            .chunks_max_entity_id(project_id, candidate_epoch)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0);
         active_max.max(candidate_max) + 1
     }
 
@@ -243,9 +245,17 @@ impl HotUpdateOperationRuntime {
         // 1. Remove hash records for deleted files so the next scan does not
         //    re-discover them as stale entries.
         if !deleted_paths.is_empty() {
-            let cache = self.change_detector.cache();
-            let epoch = cache.write_epoch()?;
-            cache.remove(epoch, deleted_paths)?;
+            if let Some(store) = &self.metadata_store {
+                let epoch = self.change_detector.write_epoch().await?;
+                let paths: Vec<String> = deleted_paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect();
+                store
+                    .files_remove_hashes(self.project_id, epoch, &paths)
+                    .await
+                    .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
+            }
         }
 
         if paths.is_empty() {
@@ -311,23 +321,14 @@ impl HotUpdateOperationRuntime {
     }
 
     /// Check the durable publication state for a recovered operation.
-    pub(crate) fn is_manifest_active(&self, operation_id: &str) -> Result<bool> {
+    pub(crate) async fn is_manifest_active(&self, operation_id: &str) -> Result<bool> {
         let Some(store) = &self.metadata_store else {
             return Ok(false);
         };
-        let client = store.as_ref();
-        let conn = client
-            .read_connection()
+        let manifest = store
+            .manifest_active(self.project_id)
+            .await
             .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
-        let state = conn
-            .query_row(
-                "SELECT state FROM project_index_manifests
-                 WHERE project_id = ?1 AND operation_id = ?2",
-                rusqlite::params![self.project_id, operation_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
-        Ok(state.as_deref() == Some("active"))
+        Ok(manifest.is_some_and(|manifest| manifest.operation_id == operation_id))
     }
 }

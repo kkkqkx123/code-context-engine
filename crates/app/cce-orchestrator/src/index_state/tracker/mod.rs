@@ -10,7 +10,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_common::RelationStorage;
+use cce_storage_common::metadb::IndexStateProjection;
+
+use crate::index::vector_store::RelationStore;
 
 use crate::index_state::{FileUpdateState, StateTrackerError};
 
@@ -40,7 +43,17 @@ pub struct UpdateStateTracker {
     /// Operation ID for the current indexing operation
     current_operation_id: Arc<RwLock<Option<String>>>,
     /// Optional durable file-level state projection.
-    database: Arc<RwLock<Option<Arc<SqliteClient>>>>,
+    database: Arc<RwLock<Option<RelationStore>>>,
+}
+
+#[async_trait::async_trait]
+impl cce_tools::IndexStateCheck for UpdateStateTracker {
+    /// Whether the file at `path` is fully updated in the index.
+    async fn is_fully_updated(&self, path: &std::path::Path) -> bool {
+        self.get_state(path)
+            .await
+            .is_some_and(|state| state.all_success())
+    }
 }
 
 impl UpdateStateTracker {
@@ -61,7 +74,7 @@ impl UpdateStateTracker {
     /// restart; a failure to acquire the write lock is reported so the caller
     /// can decide whether running with an in-memory-only projection is
     /// acceptable.
-    pub fn set_database(&self, database: Arc<SqliteClient>) -> Result<(), StateTrackerError> {
+    pub fn set_database(&self, database: RelationStore) -> Result<(), StateTrackerError> {
         match self.database.try_write() {
             Ok(mut value) => {
                 *value = Some(database);
@@ -82,7 +95,7 @@ impl UpdateStateTracker {
         let database = self.database.read().await.clone();
         let Some(database) = database else { return };
         let (restored, max_version) =
-            Self::load_projection(&database, self.project_id, operation_id);
+            Self::load_projection(&database, self.project_id, operation_id).await;
 
         if restored.is_empty() {
             return;
@@ -98,33 +111,12 @@ impl UpdateStateTracker {
         );
     }
 
-    fn load_projection(
-        database: &Arc<SqliteClient>,
+    async fn load_projection(
+        store: &RelationStore,
         project_id: i64,
         operation_id: &str,
     ) -> (HashMap<String, FileUpdateState>, u64) {
-        let client = database.as_ref();
-        let Ok(conn) = client.read_connection() else {
-            return (HashMap::new(), 0);
-        };
-        let mut statement = match conn.prepare(
-            "SELECT file_path, version, state_json
-             FROM index_state_projection
-             WHERE project_id = ?1 AND operation_id = ?2",
-        ) {
-            Ok(statement) => statement,
-            Err(error) => {
-                tracing::warn!(%error, "Failed to prepare durable index state recovery");
-                return (HashMap::new(), 0);
-            }
-        };
-        let rows = match statement.query_map(rusqlite::params![project_id, operation_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        }) {
+        let rows = match store.projection_load(project_id, operation_id).await {
             Ok(rows) => rows,
             Err(error) => {
                 tracing::warn!(%error, "Failed to query durable index state recovery");
@@ -135,24 +127,17 @@ impl UpdateStateTracker {
         let mut restored = HashMap::new();
         let mut max_version = 0u64;
         for row in rows {
-            let (path, raw_version, json) = match row {
-                Ok(value) => value,
-                Err(error) => {
-                    tracing::warn!(%error, "Failed to read durable index state row");
-                    continue;
-                }
-            };
-            let Ok(version) = u64::try_from(raw_version) else {
-                tracing::warn!(file = %path, raw_version, "Ignoring invalid durable index state version");
+            let Ok(version) = u64::try_from(row.version) else {
+                tracing::warn!(file = %row.file_path, version = row.version, "Ignoring invalid durable index state version");
                 continue;
             };
-            match serde_json::from_str::<FileUpdateState>(&json) {
+            match serde_json::from_str::<FileUpdateState>(&row.state_json) {
                 Ok(state) if state.project_id == project_id && state.version == version => {
                     max_version = max_version.max(version);
-                    restored.insert(path, state);
+                    restored.insert(row.file_path, state);
                 }
                 Ok(_) | Err(_) => {
-                    tracing::warn!(file = %path, "Ignoring incompatible durable index state row");
+                    tracing::warn!(file = %row.file_path, "Ignoring incompatible durable index state row");
                 }
             }
         }
@@ -161,8 +146,7 @@ impl UpdateStateTracker {
 
     pub(crate) async fn persist_state(&self, state: &FileUpdateState) {
         let database = self.database.read().await.clone();
-        let Some(database) = database else { return };
-        let client = database.as_ref();
+        let Some(store) = database else { return };
         let operation_id = self
             .current_operation_id
             .read()
@@ -180,29 +164,16 @@ impl UpdateStateTracker {
             tracing::warn!(file = %state.file_path, "Index state version exceeds SQLite range");
             return;
         };
-        let result = client.with_transaction(|tx| {
-            tx.execute(
-                "INSERT INTO index_state_projection
-                    (project_id, operation_id, file_path, version, state_json, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(project_id, operation_id, file_path) DO UPDATE SET
-                    version = excluded.version, state_json = excluded.state_json,
-                    updated_at = excluded.updated_at
-                 WHERE excluded.version >= index_state_projection.version",
-                rusqlite::params![
-                    self.project_id,
-                    operation_id,
-                    state.file_path,
-                    version,
-                    state_json,
-                    Utc::now().to_rfc3339(),
-                ],
-            )
-            .map(|_| ())
-            .map_err(|error| {
-                cce_types::StorageError::insert("index_state_projection", error.to_string())
+        let result = store
+            .projection_upsert(&IndexStateProjection {
+                project_id: self.project_id,
+                operation_id,
+                file_path: state.file_path.clone(),
+                version,
+                state_json,
+                updated_at: Utc::now().to_rfc3339(),
             })
-        });
+            .await;
         if let Err(error) = result {
             tracing::warn!(%error, file = %state.file_path, "Failed to persist index state");
         }
@@ -210,25 +181,16 @@ impl UpdateStateTracker {
 
     pub(crate) async fn delete_persisted_state(&self, file_path: &str) {
         let database = self.database.read().await.clone();
-        let Some(database) = database else { return };
-        let client = database.as_ref();
+        let Some(store) = database else { return };
         let operation_id = self
             .current_operation_id
             .read()
             .await
             .clone()
             .unwrap_or_else(|| "state".to_string());
-        let result = client.with_transaction(|tx| {
-            tx.execute(
-                "DELETE FROM index_state_projection
-                 WHERE project_id = ?1 AND operation_id = ?2 AND file_path = ?3",
-                rusqlite::params![self.project_id, operation_id, file_path],
-            )
-            .map(|_| ())
-            .map_err(|error| {
-                cce_types::StorageError::delete("index_state_projection", error.to_string())
-            })
-        });
+        let result = store
+            .projection_delete(self.project_id, &operation_id, file_path)
+            .await;
         if let Err(error) = result {
             tracing::warn!(%error, file = %file_path, "Failed to delete persisted index state");
         }
@@ -246,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn durable_projection_restores_file_state_after_restart() {
-        let database = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let database = RelationStore::in_memory().expect("in-memory store");
         let checkpoint_manager = CheckpointManager::new_for_project(1, database.clone());
         checkpoint_manager
             .create_checkpoint(CreateCheckpointParams {

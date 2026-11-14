@@ -13,7 +13,6 @@
 //! `benches/results/poll_rates.tsv`.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -21,18 +20,6 @@ use std::time::Instant;
 use cce_scanner::{FSScanner, FileEntry, ScanOptions};
 
 const FILE_COUNT: usize = 300;
-
-fn write_files(root: &Path, count: usize) {
-    for i in 0..count {
-        let dir = root.join(format!("src/mod_{:03}", i % 10));
-        std::fs::create_dir_all(&dir).expect("create dir");
-        std::fs::write(
-            dir.join(format!("file_{i:04}.rs")),
-            format!("pub fn func_{i}(x: u64) -> u64 {{ x * 2 + {i} }}\n"),
-        )
-        .expect("write file");
-    }
-}
 
 fn opts(root: &Path) -> ScanOptions {
     ScanOptions {
@@ -59,18 +46,15 @@ fn main() {
         "changed", "ms", "files", "reused%"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/poll_rates.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# changed\tms\tfiles\treused_pct");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "poll_rates.tsv",
+        "# changed\tms\tfiles\treused_pct",
+    );
 
     for changed in [0usize, 5, 50, 150] {
         let tmp = tempfile::tempdir().expect("tempdir");
-        write_files(tmp.path(), FILE_COUNT);
+        cce_bench_kit::write_simple_tree(tmp.path(), FILE_COUNT).expect("write fixture");
         let options = opts(tmp.path());
 
         let mut scanner = FSScanner::new();
@@ -104,14 +88,10 @@ fn main() {
             .count();
         let reused_pct = reused as f64 / FILE_COUNT as f64 * 100.0;
         println!("{changed:<16} {ms:>12.2} {FILE_COUNT:>12} {reused_pct:>12.1}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{changed}\t{ms:.2}\t{FILE_COUNT}\t{reused_pct:.1}");
-        }
+        let _ = writeln!(out, "{changed}\t{ms:.2}\t{FILE_COUNT}\t{reused_pct:.1}");
         if changed == 0 {
             println!("  full-scan baseline for comparison: {full_ms:.2} ms");
-            if let Some(f) = out.as_mut() {
-                let _ = writeln!(f, "# full_scan_baseline_ms={full_ms:.2}");
-            }
+            let _ = writeln!(out, "# full_scan_baseline_ms={full_ms:.2}");
         }
     }
 }

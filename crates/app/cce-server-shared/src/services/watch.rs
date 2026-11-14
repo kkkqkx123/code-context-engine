@@ -7,6 +7,7 @@ use cce_api::models::{
 };
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
+use cce_storage_common::RelationStorage;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -57,26 +58,28 @@ pub async fn watch_status(
         }
         Err(_) => None,
     };
-    let data_epoch = state
-        .metadata_store_clone()
-        .and_then(|sqlite| {
-            sqlite
-                .with_transaction(|tx| {
-                    cce_storage_metadb_sqlite::repo::ProjectIndexManifestRepository::get_active(
-                        tx, project_id,
-                    )
-                })
+    let data_epoch = match state.engine.relation_store() {
+        Some(store) => {
+            // Prefer the durable manifest; a missing manifest with a missing
+            // legacy meta row is the legitimate default 0 (never published).
+            let from_manifest = store
+                .manifest_active(project_id)
+                .await
                 .ok()
                 .flatten()
-                .map(|manifest| manifest.data_epoch)
-                .or_else(|| {
-                    sqlite
-                        .project_meta_get_int_optional(project_id, "active_epoch")
-                        .ok()
-                        .flatten()
-                })
-        })
-        .filter(|epoch| *epoch > 0);
+                .map(|manifest| manifest.data_epoch);
+            match from_manifest {
+                Some(epoch) => Some(epoch),
+                None => store
+                    .project_meta_get_int_optional(project_id, "active_epoch")
+                    .await
+                    .ok()
+                    .flatten(),
+            }
+            .filter(|epoch| *epoch > 0)
+        }
+        None => None,
+    };
 
     Ok(WatchStatusResponse {
         success: true,
@@ -99,14 +102,10 @@ pub async fn watch_start(
     if project_id <= 0 {
         return Err(WatchStartError::InvalidProjectId);
     }
-    if let Some(store) = state.engine.metadata_store()
-        && let Ok(mode) = store.as_ref().with_transaction(|tx| {
-            cce_storage_metadb_sqlite::ProjectRepository::meta_get_string_optional(
-                tx,
-                project_id,
-                SUPPLY_MODE_KEY,
-            )
-        })
+    if let Some(store) = state.engine.relation_store()
+        && let Ok(mode) = store
+            .project_meta_get_string_optional(project_id, SUPPLY_MODE_KEY)
+            .await
         && mode.as_deref() == Some(SUPPLY_MODE_GATEWAY)
     {
         return Err(WatchStartError::GatewaySupplied);

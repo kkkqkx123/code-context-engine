@@ -1,0 +1,17 @@
+[package]
+name = "cce-storage-metadb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Metadata backend facade: backend enum, construction, and contract dispatch"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-storage-common = { version = "0.1.0", path = "../cce-storage-common" }
+cce-storage-metadb-sqlite = { version = "0.1.0", path = "../cce-storage-metadb-sqlite" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -9,6 +9,7 @@ use cce_api::models::{
 };
 
 use crate::api::response::ApiResult;
+use cce_storage_common::RelationStorage;
 
 /// Unified response type for entity search handler
 pub type EntitySearchApiResponse = ApiResult<EntitySearchResponse>;
@@ -115,25 +116,27 @@ pub async fn handle_entity_search(
 
     // Resolve project-relative paths for the surviving hits. File mapping
     // stays a direct lookup; relevance itself comes from the coordinator.
-    let project_client = state
-        .engine
-        .metadata_store()
-        .and_then(|client| client.for_project(project_id).ok());
-    let file_conn = project_client
-        .as_ref()
-        .and_then(|client| client.read_connection().ok());
+    let file_ids: Vec<i64> = filtered_results
+        .iter()
+        .map(|record| record.file_id)
+        .collect();
+    let file_paths: std::collections::HashMap<i64, String> = match state.engine.relation_store() {
+        Some(store) => store
+            .files_by_ids(project_id, &file_ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|file| (file.id, file.path))
+            .collect(),
+        None => std::collections::HashMap::new(),
+    };
     // Convert to response format
     let items: Vec<EntitySearchResult> = filtered_results
         .into_iter()
         .map(|record| {
             // Resolve the project-relative path so the hit is directly
             // actionable without a second file lookup.
-            let file_path = file_conn.as_ref().and_then(|conn| {
-                cce_storage_metadb_sqlite::repo::FileRepository::get_by_id(conn, record.file_id)
-                    .ok()
-                    .flatten()
-                    .map(|file| file.path)
-            });
+            let file_path = file_paths.get(&record.file_id).cloned();
             EntitySearchResult {
                 id: record.id,
                 name: record.name,

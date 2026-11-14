@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use cce_storage_metadb_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
+use cce_storage_common::source::{SourceFileCache, read_source_lines_cached};
 
 use super::annotation::{
     AnnotatedResult, AnnotationMetadata, ExpandedUnit, ExpansionOrigin, RelationAnnotationConfig,

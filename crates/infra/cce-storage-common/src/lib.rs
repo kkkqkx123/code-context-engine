@@ -38,8 +38,10 @@ use serde::{Deserialize, Serialize};
 use cce_types::{FileCategory, PointKind, TestSource, normalize_project_path};
 
 pub mod fulltext;
+pub mod ids;
 pub mod metadb;
 pub mod process;
+pub mod source;
 
 pub use fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,

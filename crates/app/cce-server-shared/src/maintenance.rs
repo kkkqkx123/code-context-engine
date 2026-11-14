@@ -9,8 +9,9 @@ use std::sync::Arc;
 use tracing::info;
 
 use cce_orchestrator::index::{FulltextStore, VectorStore};
+use cce_storage_common::RelationStorage;
 use cce_storage_common::{FulltextStorage, VectorStorage};
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb::RelationStore;
 
 use crate::engine::CodeContextEngine;
 
@@ -59,7 +60,7 @@ pub struct ProjectIndexMaintenanceService {
     engine: Arc<CodeContextEngine>,
     vector: Option<VectorStore>,
     fulltext: Option<FulltextStore>,
-    metadata_store: Option<Arc<SqliteClient>>,
+    relation_store: Option<RelationStore>,
 }
 
 impl ProjectIndexMaintenanceService {
@@ -67,18 +68,18 @@ impl ProjectIndexMaintenanceService {
         engine: Arc<CodeContextEngine>,
         vector: Option<VectorStore>,
         fulltext: Option<FulltextStore>,
-        metadata_store: Option<Arc<SqliteClient>>,
+        relation_store: Option<RelationStore>,
     ) -> Self {
         Self {
             engine,
             vector,
             fulltext,
-            metadata_store,
+            relation_store,
         }
     }
 
-    fn sqlite_client(&self) -> Option<SqliteClient> {
-        self.metadata_store.as_ref().map(|db| db.as_ref().clone())
+    fn relation_store(&self) -> Option<RelationStore> {
+        self.relation_store.clone()
     }
 
     /// Clear a project's index data from all backends, leaving the project
@@ -139,12 +140,16 @@ impl ProjectIndexMaintenanceService {
             result.push("bm25", true, "BM25 not configured, skipped".to_string());
         }
 
-        // 3. SQLite: clean index artifacts in a single transaction
-        if let Some(sqlite) = self.sqlite_client() {
-            let cleanup_result = sqlite
-                .for_project(project_id)
-                .map_err(|e| e.to_string())
-                .and_then(|project| self.clear_sqlite_index(&project, project_id));
+        // 3. Relation store: clean index artifacts in one storage-side call
+        if let Some(store) = self.relation_store() {
+            let cleanup_result = async {
+                let project = store.for_project(project_id).map_err(|e| e.to_string())?;
+                project
+                    .project_clear_index(project_id)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+            .await;
             match cleanup_result {
                 Ok(()) => result.push("sqlite", true, "Index artifacts deleted".to_string()),
                 Err(e) => result.push("sqlite", false, format!("Failed to clean SQLite: {}", e)),
@@ -181,60 +186,6 @@ impl ProjectIndexMaintenanceService {
         }
 
         result
-    }
-
-    fn clear_sqlite_index(&self, sqlite: &SqliteClient, project_id: i64) -> Result<(), String> {
-        use cce_types::StorageError;
-
-        sqlite
-            .with_transaction(|tx| {
-                use rusqlite::params;
-
-                tx.execute(
-                    "DELETE FROM files WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                tx.execute(
-                    "DELETE FROM entities WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                tx.execute(
-                    "DELETE FROM chunks WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                tx.execute(
-                    "DELETE FROM relations WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                tx.execute(
-                    "DELETE FROM entity_detail_mappings WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                tx.execute(
-                    "DELETE FROM project_meta WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                tx.execute(
-                    "DELETE FROM checkpoint WHERE project_id = ?1",
-                    params![project_id],
-                )
-                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
-
-                Ok(())
-            })
-            .map_err(|e: StorageError| e.to_string())
     }
 
     /// Delete a project's data from all backends AND remove the project record.
@@ -277,16 +228,14 @@ impl ProjectIndexMaintenanceService {
         }
 
         // Step B: Delete SQLite project record and project database
-        if let Some(sqlite) = self.sqlite_client() {
-            let registry_result = sqlite.with_transaction(|tx| {
-                cce_storage_metadb_sqlite::ProjectRepository::delete_with_cascade(tx, project_id)
-            });
+        if let Some(store) = self.relation_store() {
+            let registry_result = store.project_delete_with_cascade(project_id).await;
             match registry_result {
                 Ok(()) => {
                     result.push("project_record", true, "Project record deleted".to_string());
                     // Remove the project's database file (its data is gone
                     // with the record; the file may still hold residual state)
-                    match sqlite.delete_project_db(project_id) {
+                    match store.project_delete_db(project_id).await {
                         Ok(removed) => {
                             result.push(
                                 "project_db",

@@ -4,23 +4,24 @@
 //! matches the current inputs; otherwise the document may have been rendered
 //! under a different configuration and must be regenerated.
 
-use crate::export::config::ExportConfig;
-use crate::export::fingerprint::{
-    config_fingerprint, render_fingerprint, summary_content_fingerprint,
-};
-use crate::export::nl_exporter::NlDocumentExporter;
-use crate::export::summary_view::ExportSummaryView;
+use cce_export::ExportConfig;
+use cce_export::{config_fingerprint, render_fingerprint, summary_content_fingerprint};
+use cce_storage_common::RelationStorage;
+
 use crate::hot_update::ParseResultWithChanges;
+use crate::index::vector_store::RelationStore;
+use cce_export::ExportSummaryView;
+use cce_export::NlDocumentExporter;
 
 /// Current published relation epoch used for enhancement, or 0 when
 /// relation enhancement is disabled or no snapshot is published.
-pub fn current_relation_epoch(
-    sqlite: &Option<std::sync::Arc<cce_storage_metadb_sqlite::SqliteClient>>,
-    project_id: i64,
-) -> i64 {
-    match sqlite.as_ref() {
-        Some(sqlite) => {
-            match sqlite.project_meta_get_int_optional(project_id, "active_relation_epoch") {
+pub async fn current_relation_epoch(store: &Option<RelationStore>, project_id: i64) -> i64 {
+    match store.as_ref() {
+        Some(store) => {
+            match store
+                .project_meta_get_int_optional(project_id, "active_relation_epoch")
+                .await
+            {
                 Ok(Some(epoch)) => epoch.max(0),
                 _ => 0,
             }
@@ -72,7 +73,7 @@ pub async fn should_skip_export(
     export_config: &ExportConfig,
     ast_to_nl_config: &cce_config::AstToNlConfig,
     grouper_fingerprint: &str,
-    sqlite: &Option<std::sync::Arc<cce_storage_metadb_sqlite::SqliteClient>>,
+    store: &Option<RelationStore>,
     project_id: i64,
 ) -> bool {
     if !parse_result.already_exported {
@@ -82,7 +83,7 @@ pub async fn should_skip_export(
         return false;
     };
     let source = &*parse_result.parsed_file.source;
-    let epoch = current_relation_epoch(sqlite, project_id);
+    let epoch = current_relation_epoch(store, project_id).await;
     let export_view = parse_result
         .file_summary
         .as_ref()
