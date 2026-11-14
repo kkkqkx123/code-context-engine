@@ -4,22 +4,22 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::CliApi;
 use crate::output::{print_error, print_success, print_table, truncate};
 use cce_api::models::{
-    CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest, ProjectConfigUpdateResponse,
-    ProjectDetailResponse, ProjectIndexResponse, UpdateProjectRequest,
+    CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest, UpdateProjectRequest,
 };
-use cce_transport::SharedHttpClient;
+use cce_client::Client;
 
-fn project_path(id: &str) -> String {
-    cce_api::paths::PROJECT_DETAIL_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id)
+/// Parse a project id given on the command line.
+fn project_id(raw: &str) -> Result<i64> {
+    raw.parse()
+        .map_err(|_| anyhow::anyhow!("project id must be a number: {raw}"))
 }
 
 /// Execute project commands through the client abstraction.
 pub async fn execute_with_client(
     cmd: &ProjectCommands,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
@@ -47,7 +47,7 @@ pub async fn execute_with_client(
             if verbose {
                 println!("Creating project at: {}", path);
             }
-            match client.create_project(request).await {
+            match client.create_project(&request).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Project created: {}", response.project.name));
@@ -96,8 +96,7 @@ pub async fn execute_with_client(
             }
         },
         ProjectCommands::Get { id } => {
-            let project_id: i64 = id.parse().unwrap_or(-1);
-            match client.get_project(project_id).await {
+            match client.get_project(project_id(id)?).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Project: {}", response.project.name));
@@ -112,8 +111,7 @@ pub async fn execute_with_client(
             Ok(())
         }
         ProjectCommands::Delete { id } => {
-            let project_id: i64 = id.parse().unwrap_or(-1);
-            match client.delete_project(project_id).await {
+            match client.delete_project(project_id(id)?).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Project {} deleted", response.project_id));
@@ -127,8 +125,7 @@ pub async fn execute_with_client(
         }
         ProjectCommands::Index { id } => index_project(client, id, verbose).await,
         ProjectCommands::Reload { id } => {
-            let project_id: i64 = id.parse().unwrap_or(-1);
-            match client.reload_project(project_id).await {
+            match client.reload_project(project_id(id)?).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!(
@@ -150,7 +147,7 @@ pub async fn execute_with_client(
 }
 
 async fn update_project(
-    client: &SharedHttpClient,
+    client: &Client,
     id: &str,
     name: &Option<String>,
     verbose: bool,
@@ -164,8 +161,7 @@ async fn update_project(
         println!("Updating project: {}", id);
     }
 
-    let path = project_path(id);
-    let response: ProjectDetailResponse = client.put(&path, &request).await?;
+    let response = client.update_project(project_id(id)?, &request).await?;
 
     if response.success {
         print_success(&format!("Project updated: {}", response.project.name));
@@ -178,14 +174,12 @@ async fn update_project(
     Ok(())
 }
 
-async fn index_project(client: &SharedHttpClient, id: &str, verbose: bool) -> Result<()> {
+async fn index_project(client: &Client, id: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Indexing project: {}", id);
     }
 
-    let path =
-        cce_api::paths::PROJECT_INDEX_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id);
-    let response: ProjectIndexResponse = client.post(&path, &serde_json::json!({})).await?;
+    let response = client.index_project(project_id(id)?).await?;
 
     if response.success {
         print_success(&format!(
@@ -213,17 +207,17 @@ fn print_project_details(project: &ProjectConfig) {
     }
 }
 
-async fn update_project_config(client: &SharedHttpClient, id: &str, verbose: bool) -> Result<()> {
+async fn update_project_config(client: &Client, id: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Updating project config: {}", id);
     }
 
-    let path =
-        cce_api::paths::PROJECT_CONFIG_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id);
     let request = ProjectConfigUpdateRequest {
         config: serde_json::json!({}),
     };
-    let response: ProjectConfigUpdateResponse = client.put(&path, &request).await?;
+    let response = client
+        .update_project_config(project_id(id)?, &request)
+        .await?;
 
     if response.success {
         print_success(&format!("Project {} configuration updated", id));

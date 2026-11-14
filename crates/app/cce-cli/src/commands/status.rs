@@ -6,8 +6,8 @@ use serde::Serialize;
 
 use crate::icons;
 use crate::output::{print_error, print_output, print_success};
-use cce_api::models::{HealthStatus, StorageComponentStatus, StorageStatus, StorageStatusResponse};
-use cce_transport::SharedHttpClient;
+use cce_api::models::{StorageComponentStatus, StorageStatus};
+use cce_client::Client;
 
 /// Combined status response for JSON output
 #[derive(Debug, Serialize)]
@@ -18,7 +18,7 @@ struct CombinedStatus {
 }
 
 pub async fn execute_with_client(
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
@@ -29,7 +29,7 @@ pub async fn execute_with_client(
     let healthy: bool;
     let mut storage_status = None;
 
-    match client.get::<HealthStatus>(cce_api::paths::HEALTH).await {
+    match client.health().await {
         Ok(health) => {
             healthy = health.healthy;
 
@@ -54,18 +54,13 @@ pub async fn execute_with_client(
             }
 
             // Also fetch storage status for detailed info
-            if let Ok(response) = client
-                .get::<StorageStatusResponse>(cce_api::paths::STORAGE_STATUS)
-                .await
-            {
+            if let Ok(response) = client.storage_status().await {
                 if response.success {
-                    storage_status = Some(response.status);
+                    let status = response.status;
 
                     if !matches!(format, crate::cli::OutputFormat::Json) {
                         println!("Storage Status:");
                         println!("{}", "─".repeat(50));
-
-                        let status = storage_status.as_ref().unwrap();
 
                         println!("\nVector Storage:");
                         print_component_status("  ", &status.vector_storage);
@@ -79,6 +74,8 @@ pub async fn execute_with_client(
                         println!("\n{}", "─".repeat(50));
                         println!("Total Disk Usage: {:.2} MB", status.total_disk_usage_mb);
                     }
+
+                    storage_status = Some(status);
                 }
             }
         }

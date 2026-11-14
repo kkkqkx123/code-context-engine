@@ -9,7 +9,8 @@
 use anyhow::Result;
 use clap::Parser;
 
-use cce_gateway::{GatewayClient, SyncParamOverrides, SyncParams, sync_once, watch_loop};
+use cce_client::Client;
+use cce_gateway::{SyncParamOverrides, SyncParams, sync_once, watch_loop};
 
 /// Resident file supply gateway.
 #[derive(Debug, Parser)]
@@ -127,7 +128,7 @@ async fn main() -> Result<()> {
     if let Ok(cfg) = cce_config::Settings::logger() {
         let _ = cce_logging::init(&cfg);
     }
-    let client = GatewayClient::new_with_token(&args.server, args.token.clone())?;
+    let client = Client::with_token(args.server.clone(), args.token.clone())?;
     let params = params_from(&args);
     if args.once {
         sync_once(&client, &params, args.verbose).await.map(|_| ())

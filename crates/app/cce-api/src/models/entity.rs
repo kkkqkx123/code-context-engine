@@ -89,7 +89,7 @@ pub struct CallChainResponse {
 }
 
 /// Call path query parameters
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct CallPathQuery {
     pub start_id: String,
@@ -157,7 +157,7 @@ pub struct InterfaceRelation {
 }
 
 /// File-scope filter parameters shared by relation query endpoints.
-#[derive(Debug, Clone, Default, Deserialize, IntoParams, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, IntoParams, ToSchema)]
 pub struct RelationFilterParams {
     /// Exclude entities located in test files
     #[serde(default)]
@@ -165,9 +165,9 @@ pub struct RelationFilterParams {
     /// Keep only entities under this directory prefix
     #[serde(default)]
     pub directory_prefix: Option<String>,
-    /// Exact file paths to exclude
+    /// Comma-separated exact file paths to exclude
     #[serde(default)]
-    pub excluded_files: Option<Vec<String>>,
+    pub excluded_files: Option<String>,
     /// Keep only relations in these coarse domains (`call`, `dependency`,
     /// `structural`, `reference`, `template`, `other`).
     #[serde(default)]
@@ -178,7 +178,7 @@ pub struct RelationFilterParams {
 }
 
 /// Query parameters for callees/callers queries
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct CallChainQueryParams {
     #[serde(default = "default_query_max_depth")]
@@ -193,9 +193,9 @@ pub struct CallChainQueryParams {
     /// Keep only entities under this directory prefix
     #[serde(default)]
     pub directory_prefix: Option<String>,
-    /// Exact file paths to exclude
+    /// Comma-separated exact file paths to exclude
     #[serde(default)]
-    pub excluded_files: Option<Vec<String>>,
+    pub excluded_files: Option<String>,
     /// Keep only relations in these coarse domains (`call`, `dependency`,
     /// `structural`, `reference`, `template`, `other`).
     #[serde(default)]
@@ -206,7 +206,7 @@ pub struct CallChainQueryParams {
 }
 
 /// Query parameters for call chain direction queries
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct CallChainDirectionParams {
     #[serde(default = "default_direction")]
@@ -223,9 +223,9 @@ pub struct CallChainDirectionParams {
     /// Keep only entities under this directory prefix
     #[serde(default)]
     pub directory_prefix: Option<String>,
-    /// Exact file paths to exclude
+    /// Comma-separated exact file paths to exclude
     #[serde(default)]
-    pub excluded_files: Option<Vec<String>>,
+    pub excluded_files: Option<String>,
     /// Keep only relations in these coarse domains (`call`, `dependency`,
     /// `structural`, `reference`, `template`, `other`).
     #[serde(default)]
@@ -236,7 +236,7 @@ pub struct CallChainDirectionParams {
 }
 
 /// Query parameters for classification filtering
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ClassificationQueryParams {
     /// Maximum number of results (default 1000)

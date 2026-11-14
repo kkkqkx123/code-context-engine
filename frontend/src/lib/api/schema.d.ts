@@ -3181,7 +3181,7 @@ export interface components {
         };
         /** @description Sub-query definition for aggregated search */
         SubQueryRequest: {
-            /** @description Query type (vector, bm25, hybrid, summary) */
+            /** @description Query type (vector, bm25, hybrid) */
             query_type?: string;
             /** @description Query text */
             text: string;
@@ -4544,8 +4544,8 @@ export interface operations {
                 exclude_tests?: boolean;
                 /** @description Keep only entities under this directory prefix */
                 directory_prefix?: string;
-                /** @description Exact file paths to exclude */
-                excluded_files?: string[];
+                /** @description Comma-separated exact file paths to exclude */
+                excluded_files?: string;
                 /**
                  * @description Keep only relations in these coarse domains (`call`, `dependency`,
                  *     `structural`, `reference`, `template`, `other`).
@@ -5103,8 +5103,8 @@ export interface operations {
                 exclude_tests?: boolean;
                 /** @description Keep only entities under this directory prefix */
                 directory_prefix?: string;
-                /** @description Exact file paths to exclude */
-                excluded_files?: string[];
+                /** @description Comma-separated exact file paths to exclude */
+                excluded_files?: string;
                 /**
                  * @description Keep only relations in these coarse domains (`call`, `dependency`,
                  *     `structural`, `reference`, `template`, `other`).
@@ -5181,8 +5181,8 @@ export interface operations {
                 exclude_tests?: boolean;
                 /** @description Keep only entities under this directory prefix */
                 directory_prefix?: string;
-                /** @description Exact file paths to exclude */
-                excluded_files?: string[];
+                /** @description Comma-separated exact file paths to exclude */
+                excluded_files?: string;
                 /**
                  * @description Keep only relations in these coarse domains (`call`, `dependency`,
                  *     `structural`, `reference`, `template`, `other`).

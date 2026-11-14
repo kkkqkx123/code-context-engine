@@ -154,7 +154,7 @@ pub struct SubGraph {
 }
 
 /// Ego neighborhood query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct EgoQuery {
     pub entity_id: String,
@@ -176,7 +176,7 @@ pub struct EgoQuery {
 }
 
 /// Two-point path query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct GraphPathQuery {
     pub start: String,
@@ -193,7 +193,7 @@ pub struct GraphPathQuery {
 }
 
 /// Explicit entity set query parameters (comma-separated stable ids).
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct SubgraphQuery {
     pub ids: String,
@@ -211,7 +211,7 @@ pub struct SubgraphQuery {
 }
 
 /// Full export query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ExportQuery {
     #[serde(default = "default_export_limit")]
@@ -228,7 +228,7 @@ pub struct ExportQuery {
 }
 
 /// Connected component query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ComponentsQuery {
     #[serde(default)]
@@ -245,14 +245,14 @@ pub struct ComponentsQuery {
 }
 
 /// File impact query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ImpactQuery {
     pub file: String,
 }
 
 /// Entity impact query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct EntityImpactQuery {
     pub entity_id: String,
@@ -269,7 +269,7 @@ fn default_impact_scope() -> String {
 }
 
 /// Dependency cycle query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct CyclesQuery {
     /// `entity` or `file`.
@@ -283,7 +283,7 @@ pub struct CyclesQuery {
 ///
 /// Selects one of the typed structural/frontend relation families rooted at an
 /// entity.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct StructuralQuery {
     pub entity_id: String,
@@ -483,7 +483,7 @@ fn default_true() -> bool {
 }
 
 /// File module relation query parameters.
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ModuleQuery {
     pub file: String,

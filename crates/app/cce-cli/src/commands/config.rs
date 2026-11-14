@@ -7,14 +7,12 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::CliApi;
 use crate::output::{print_error, print_success, print_warning};
-use cce_api::models::{ConfigInfoResponse, ConfigValidateResponse};
-use cce_transport::SharedHttpClient;
+use cce_client::Client;
 
 /// Execute configuration reload through the client abstraction.
 pub async fn execute_reload_with_client(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     verbose: bool,
 ) -> Result<()> {
@@ -48,15 +46,12 @@ pub async fn execute_reload_with_client(
 }
 
 /// Execute config info
-pub async fn execute_info_with_client(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+pub async fn execute_info_with_client(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("Fetching configuration info...");
     }
 
-    match client
-        .get::<ConfigInfoResponse>(cce_api::paths::CONFIG_INFO)
-        .await
-    {
+    match client.config_info().await {
         Ok(response) => {
             println!("  Initialized: {}", response.initialized);
             println!("  Project count: {}", response.project_count);
@@ -78,15 +73,12 @@ pub async fn execute_info_with_client(client: &SharedHttpClient, verbose: bool) 
 }
 
 /// Execute config validation
-pub async fn execute_validate_with_client(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+pub async fn execute_validate_with_client(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("Validating configuration...");
     }
 
-    match client
-        .get::<ConfigValidateResponse>(cce_api::paths::CONFIG_VALIDATE)
-        .await
-    {
+    match client.config_validate().await {
         Ok(response) => {
             if response.valid {
                 print_success("Configuration is valid");

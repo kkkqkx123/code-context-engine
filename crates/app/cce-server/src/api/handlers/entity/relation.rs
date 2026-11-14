@@ -14,6 +14,7 @@ use cce_api::models::{
     ClassImplementationsResponse, ClassInheritanceResponse, ErrorResponse, error_codes,
 };
 
+use super::filter::apply_filters;
 use super::seed::{resolve_symbol_seed, stable_id};
 use crate::api::response::ApiResult;
 
@@ -88,34 +89,6 @@ async fn relation_query_config(
                 format!("Failed to load relation configuration: {error}"),
             )
         })
-}
-
-/// Apply the HTTP filter parameters onto query options.
-fn apply_filters(
-    filter: cce_api::models::RelationFilterParams,
-    options: RelationQueryOptions,
-) -> RelationQueryOptions {
-    let mut options = options.with_exclude_tests(filter.exclude_tests.unwrap_or(false));
-    if let Some(prefix) = filter.directory_prefix {
-        options = options.with_directory_prefix(prefix);
-    }
-    if let Some(files) = filter.excluded_files {
-        options = options.with_excluded_files(files);
-    }
-    if let Some(domains) = filter.domains {
-        options = options.with_relation_domains(parse_domains(&domains));
-    }
-    options = options.with_include_external(filter.include_external);
-    options
-}
-
-/// Split a comma-separated relation-domain list into trimmed lowercase names.
-fn parse_domains(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(str::to_lowercase)
-        .collect()
 }
 
 /// Handle call chain request

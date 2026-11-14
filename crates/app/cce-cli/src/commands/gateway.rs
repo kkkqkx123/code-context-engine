@@ -10,7 +10,7 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use cce_gateway::{sync_once, watch_loop, GatewayClient, SyncParamOverrides, SyncParams};
+use cce_gateway::{sync_once, watch_loop, SyncParamOverrides, SyncParams};
 
 use crate::cli::OutputFormat;
 
@@ -90,7 +90,7 @@ pub fn explicit_token(cmd: &GatewayCommands) -> Option<String> {
 /// one place; this handler only translates the command into sync params.
 pub async fn execute_with_client(
     cmd: &GatewayCommands,
-    client: &GatewayClient,
+    client: &cce_client::Client,
     verbose: bool,
     format: OutputFormat,
 ) -> Result<()> {

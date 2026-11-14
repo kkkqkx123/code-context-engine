@@ -4,8 +4,8 @@
     "title": "CCE API",
     "description": "Code context engine: indexing, search, relations and tool endpoints",
     "license": {
-      "name": "GPL-3.0-only",
-      "identifier": "GPL-3.0-only"
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
     },
     "version": "1.0.0"
   },
@@ -1612,13 +1612,10 @@
           {
             "name": "excluded_files",
             "in": "query",
-            "description": "Exact file paths to exclude",
+            "description": "Comma-separated exact file paths to exclude",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -2427,13 +2424,10 @@
           {
             "name": "excluded_files",
             "in": "query",
-            "description": "Exact file paths to exclude",
+            "description": "Comma-separated exact file paths to exclude",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -2584,13 +2578,10 @@
           {
             "name": "excluded_files",
             "in": "query",
-            "description": "Exact file paths to exclude",
+            "description": "Comma-separated exact file paths to exclude",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -10782,7 +10773,7 @@
         "properties": {
           "query_type": {
             "type": "string",
-            "description": "Query type (vector, bm25, hybrid, summary)"
+            "description": "Query type (vector, bm25, hybrid)"
           },
           "text": {
             "type": "string",

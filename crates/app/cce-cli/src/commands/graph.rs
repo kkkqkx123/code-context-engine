@@ -4,7 +4,6 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::CliApi;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::GraphSubgraphResponse;
 
@@ -14,14 +13,13 @@ use cce_api::models::GraphSubgraphResponse;
 /// client's typed domain methods.
 pub async fn execute_with_client(
     cmd: &GraphCommands,
-    client: &cce_transport::SharedHttpClient,
+    client: &cce_client::Client,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
-    use cce_api::service_params::{
-        GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
-        GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
-        GraphStructuralParams, GraphSubgraphParams,
+    use cce_api::models::{
+        ComponentsQuery, CyclesQuery, EgoQuery, EntityImpactQuery, ExportQuery, GraphPathQuery,
+        ImpactQuery, ModuleQuery, StructuralQuery, SubgraphQuery,
     };
     match cmd {
         GraphCommands::Ego {
@@ -41,7 +39,7 @@ pub async fn execute_with_client(
             match client
                 .graph_ego(
                     *project_id,
-                    GraphEgoParams {
+                    &EgoQuery {
                         entity_id: id.clone(),
                         depth: *depth,
                         direction: direction.clone(),
@@ -81,7 +79,7 @@ pub async fn execute_with_client(
             match client
                 .graph_path(
                     *project_id,
-                    GraphPathParams {
+                    &GraphPathQuery {
                         start: from.clone(),
                         end: to.clone(),
                         max_depth: *depth,
@@ -132,12 +130,12 @@ pub async fn execute_with_client(
                 .split(',')
                 .map(str::trim)
                 .filter(|part| !part.is_empty())
-                .map(str::to_string)
-                .collect();
+                .collect::<Vec<&str>>()
+                .join(",");
             match client
                 .graph_subgraph(
                     *project_id,
-                    GraphSubgraphParams {
+                    &SubgraphQuery {
                         ids: seeds,
                         offset: *offset,
                         limit: *limit,
@@ -174,7 +172,7 @@ pub async fn execute_with_client(
             match client
                 .graph_components(
                     *project_id,
-                    GraphComponentsParams {
+                    &ComponentsQuery {
                         offset: *offset,
                         limit: *limit,
                         domains: domains.clone(),
@@ -218,7 +216,7 @@ pub async fn execute_with_client(
             match client
                 .graph_export(
                     *project_id,
-                    GraphExportParams {
+                    &ExportQuery {
                         limit: *limit,
                         offset: *offset,
                         domains: domains.clone(),
@@ -245,7 +243,7 @@ pub async fn execute_with_client(
                 println!("Analyzing impact: {file}");
             }
             match client
-                .graph_impact(*project_id, GraphImpactParams { file: file.clone() })
+                .graph_impact(*project_id, &ImpactQuery { file: file.clone() })
                 .await
             {
                 Ok(response) => {
@@ -281,7 +279,7 @@ pub async fn execute_with_client(
             match client
                 .graph_entity_impact(
                     *project_id,
-                    GraphEntityImpactParams {
+                    &EntityImpactQuery {
                         entity_id: entity_id.clone(),
                         max_depth: *max_depth,
                         scope: scope.clone(),
@@ -321,7 +319,7 @@ pub async fn execute_with_client(
             match client
                 .graph_cycles(
                     *project_id,
-                    GraphCyclesParams {
+                    &CyclesQuery {
                         level: level.clone(),
                         limit: *limit,
                     },
@@ -367,7 +365,7 @@ pub async fn execute_with_client(
             match client
                 .graph_structural(
                     *project_id,
-                    GraphStructuralParams {
+                    &StructuralQuery {
                         entity_id: entity_id.clone(),
                         kind: kind.clone(),
                         direction: direction.clone(),
@@ -413,7 +411,7 @@ pub async fn execute_with_client(
                 println!("Fetching module relations for {file}");
             }
             match client
-                .graph_module(*project_id, GraphModuleParams { file: file.clone() })
+                .graph_module(*project_id, &ModuleQuery { file: file.clone() })
                 .await
             {
                 Ok(response) => {

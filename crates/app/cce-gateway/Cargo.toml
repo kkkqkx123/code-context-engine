@@ -23,7 +23,7 @@ anyhow = { workspace = true }
 clap = { version = "4.6", features = ["derive", "env"] }
 base64 = "0.22"
 cce-api = { version = "0.1.0", path = "../cce-api" }
-cce-transport = { version = "0.1.0", path = "../cce-transport" }
+cce-client = { version = "0.1.0", path = "../cce-client" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer" }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }

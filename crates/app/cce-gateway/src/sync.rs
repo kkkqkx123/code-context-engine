@@ -11,7 +11,6 @@ use cce_api::models::{
     MissingChunk,
 };
 
-use super::client::GatewayClient;
 use super::params::SyncParams;
 use super::scan::{
     ScanOutcome, ScanSnapshot, load_cached_entries, manifest_version_for_snapshot,
@@ -29,7 +28,7 @@ use super::scan::{
 /// reads. The returned outcome seeds the watch loop's baseline and its next
 /// incremental pass.
 pub async fn sync_once(
-    client: &GatewayClient,
+    client: &cce_client::Client,
     params: &SyncParams,
     verbose: bool,
 ) -> Result<ScanOutcome> {
@@ -83,7 +82,7 @@ pub async fn sync_once(
         manifest_version,
     };
     let manifest_response: IngestManifestResponse =
-        client.post_manifest(params.project_id, &manifest).await?;
+        client.ingest_manifest(params.project_id, &manifest).await?;
     if params.json_progress {
         println!(
             "{}",
@@ -123,9 +122,7 @@ pub async fn sync_once(
         anyhow::bail!("gateway staged {staged} files with {} errors", errors.len());
     }
     if params.commit {
-        let commit: IngestCommitResponse = client
-            .post_commit(params.project_id, &serde_json::json!({}))
-            .await?;
+        let commit: IngestCommitResponse = client.ingest_commit(params.project_id).await?;
         if params.json_progress {
             println!(
                 "{}",
@@ -162,7 +159,7 @@ pub async fn sync_once(
 /// with `verbose` (or `json_progress`) observe per-batch progress while the
 /// overall pass still ends with a single commit.
 pub async fn upload_paths(
-    client: &GatewayClient,
+    client: &cce_client::Client,
     params: &SyncParams,
     snapshot: &ScanSnapshot,
     upload: &[String],
@@ -305,7 +302,7 @@ fn emit_batch_progress(
 
 /// Send one upload batch to the remote ingest entry.
 async fn flush_batch(
-    client: &GatewayClient,
+    client: &cce_client::Client,
     project_id: i64,
     manifest_version: u64,
     batch: &mut Vec<IngestedFile>,
@@ -318,7 +315,7 @@ async fn flush_batch(
         manifest_version,
     };
     *batch_bytes = 0;
-    match client.post_batch(project_id, &request).await {
+    match client.ingest_batch(project_id, &request).await {
         Ok(response) => {
             *staged += response.staged;
             errors.extend(response.errors);

@@ -11,9 +11,9 @@
 use std::sync::Arc;
 
 use cce_codegraph::{CallChainQuery, RelationIndex};
-use cce_config::AppConfig;
 use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
 use cce_config::project_registry::ProjectScope;
+use cce_config::{AppConfig, AstToNlConfig, NestProcessorConfig};
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_orchestrator::query::types::{QueryOptions, SearchConfig, SearchSources};
 use cce_orchestrator::{
@@ -113,11 +113,25 @@ impl AlignmentHarness {
         rt.block_on(bm25.connect()).expect("bm25 connect");
         let bm25 = Arc::new(bm25);
 
+        // The shared-segment contract only has teeth when one logical group
+        // really splits into several BM25 fragments. The fixture group carries
+        // roughly 30-50 BM25 terms, so a 20-term budget splits it by
+        // construction instead of depending on the default ceiling.
+        let mut ast_config = AstToNlConfig::default();
+        ast_config.chunking.max_bm25_terms = 20;
+        ast_config.chunking.min_chunk_bm25_terms = 6;
+        ast_config.chunking.overlap_bm25_terms = 5;
+
         let mut orchestrator = IndexOrchestrator::new(1).expect("orchestrator");
         orchestrator = orchestrator
             .with_checkpoint_manager(checkpoint_manager)
             .with_metadata_store(sqlite_db.clone())
-            .with_bm25_client(bm25.clone());
+            .with_bm25_client(bm25.clone())
+            .with_file_processor_configs(
+                NestProcessorConfig::default(),
+                &ast_config,
+                &cce_config::LicenseHeaderConfig::default(),
+            );
 
         let options = IndexOptions {
             root_dir: fixture_dir.path().to_path_buf(),

@@ -702,8 +702,12 @@ impl Default for IndexerConfig {
                 "dist".to_string(),
                 "build".to_string(),
             ],
-            store_vectors: false,
-            store_bm25: false,
+            // Storage flags default to enabled, matching the field-level
+            // serde defaults and the documented configuration defaults:
+            // "no configuration file" must index vectors and BM25 rather
+            // than silently storing nothing.
+            store_vectors: true,
+            store_bm25: true,
             store_summaries: true,
             build_relations: true,
             dead_letter_truncate_retry: false,
@@ -761,8 +765,13 @@ mod tests {
 
     #[test]
     fn test_default_indexer_config() {
+        // Struct defaults must match the field-level serde defaults and the
+        // documented configuration defaults: storage flags are on unless the
+        // operator turns them off.
         let config = IndexerConfig::default();
-        assert!(!config.store_vectors);
+        assert!(config.store_vectors);
+        assert!(config.store_bm25);
+        assert!(config.store_summaries);
         assert!(config.build_relations);
     }
 

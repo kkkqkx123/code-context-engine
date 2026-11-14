@@ -71,7 +71,7 @@ pub fn extract_gradle_dependencies(
     let (language, query) = if is_kotlin {
         (tree_sitter_kotlin_ng::LANGUAGE.into(), KOTLIN_DEP_QUERY)
     } else {
-        (tree_sitter_groovy::language(), GROOVY_DEP_QUERY)
+        (tree_sitter_groovy::LANGUAGE.into(), GROOVY_DEP_QUERY)
     };
     let query = match tree_sitter::Query::new(&language, query) {
         Ok(query) => query,

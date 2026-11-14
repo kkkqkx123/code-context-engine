@@ -479,8 +479,8 @@ async fn wait_for_ready(
 async fn probe_once(
     server_url: &str,
 ) -> std::result::Result<cce_api::models::HealthStatus, String> {
-    let client = cce_transport::SharedHttpClient::new(server_url).map_err(|e| format!("{e:#}"))?;
-    match tokio::time::timeout(Duration::from_secs(2), client.get(cce_api::paths::HEALTH)).await {
+    let client = cce_client::Client::new(server_url).map_err(|e| format!("{e:#}"))?;
+    match tokio::time::timeout(Duration::from_secs(2), client.health()).await {
         Ok(Ok(health)) => Ok(health),
         Ok(Err(e)) => Err(format!("{e:#}")),
         Err(_) => Err("health probe timed out".to_string()),
@@ -489,13 +489,8 @@ async fn probe_once(
 
 /// Best-effort reachability used by stop and status paths.
 async fn probe_health(server_url: &str) -> Result<Option<cce_api::models::HealthStatus>> {
-    let client = cce_transport::SharedHttpClient::new(server_url)?;
-    match tokio::time::timeout(
-        Duration::from_secs(5),
-        client.get::<cce_api::models::HealthStatus>(cce_api::paths::HEALTH),
-    )
-    .await
-    {
+    let client = cce_client::Client::new(server_url)?;
+    match tokio::time::timeout(Duration::from_secs(5), client.health()).await {
         Ok(Ok(health)) => Ok(Some(health)),
         Ok(Err(_)) | Err(_) => Ok(None),
     }

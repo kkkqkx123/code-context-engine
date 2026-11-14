@@ -1,11 +1,17 @@
 //! Single source of truth for HTTP route paths.
 //!
-//! Server routers register these templates while CLI and gateway clients
-//! build concrete paths through the helpers below. Templates use the unified
-//! project placeholder so routers and documentation never diverge.
+//! Server routers register these templates and `cce-client` expands them into
+//! concrete paths. Templates use the unified project placeholder so routers,
+//! clients and documentation never diverge.
 
 /// Project identifier placeholder used by every project scoped template.
 pub const PROJECT_ID_PLACEHOLDER: &str = "{project_id}";
+
+/// Identifier placeholder used by id scoped templates (entity, file, name).
+pub const ID_PLACEHOLDER: &str = "{id}";
+
+/// File path placeholder used by storage templates.
+pub const FILE_PATH_PLACEHOLDER: &str = "{path}";
 
 pub const INDEX: &str = "/api/index";
 pub const INDEX_INCREMENTAL: &str = "/api/index/incremental";
@@ -112,93 +118,8 @@ pub const INGEST_EVENT_TEMPLATE: &str = "/api/project/{project_id}/ingest/event"
 pub const ADMISSION_STATS: &str = "/api/admission/stats";
 
 /// Build a project scoped path from a template holding the unified placeholder.
-fn expand_project(template: &str, project_id: i64) -> String {
+pub fn project_scoped(template: &str, project_id: i64) -> String {
     template.replace(PROJECT_ID_PLACEHOLDER, &project_id.to_string())
-}
-
-/// Concrete project detail path.
-pub fn project_detail(project_id: i64) -> String {
-    expand_project(PROJECT_DETAIL_TEMPLATE, project_id)
-}
-
-/// Concrete project index path.
-pub fn project_index(project_id: i64) -> String {
-    expand_project(PROJECT_INDEX_TEMPLATE, project_id)
-}
-
-/// Concrete dead letter list path.
-pub fn project_dead_letters(project_id: i64) -> String {
-    expand_project(PROJECT_DEAD_LETTERS_TEMPLATE, project_id)
-}
-
-/// Concrete dead letter retry path.
-pub fn project_dead_letters_retry(project_id: i64) -> String {
-    expand_project(PROJECT_DEAD_LETTERS_RETRY_TEMPLATE, project_id)
-}
-
-/// Concrete dead letter acknowledge path.
-pub fn project_dead_letters_acknowledge(project_id: i64) -> String {
-    expand_project(PROJECT_DEAD_LETTERS_ACK_TEMPLATE, project_id)
-}
-
-/// Concrete project reload path.
-pub fn project_reload(project_id: i64) -> String {
-    expand_project(PROJECT_RELOAD_TEMPLATE, project_id)
-}
-
-/// Concrete project config path.
-pub fn project_config(project_id: i64) -> String {
-    expand_project(PROJECT_CONFIG_TEMPLATE, project_id)
-}
-
-/// Concrete project LLM overview path.
-pub fn project_llm_overview(project_id: i64) -> String {
-    expand_project(PROJECT_LLM_OVERVIEW_TEMPLATE, project_id)
-}
-
-/// Concrete project LLM config path.
-pub fn project_llm_config(project_id: i64) -> String {
-    expand_project(PROJECT_LLM_CONFIG_TEMPLATE, project_id)
-}
-
-/// Concrete project LLM test path.
-pub fn project_llm_test(project_id: i64) -> String {
-    expand_project(PROJECT_LLM_TEST_TEMPLATE, project_id)
-}
-
-/// Concrete ingest manifest path.
-pub fn ingest_manifest(project_id: i64) -> String {
-    expand_project(INGEST_MANIFEST_TEMPLATE, project_id)
-}
-
-/// Concrete ingest batch path.
-pub fn ingest_batch(project_id: i64) -> String {
-    expand_project(INGEST_BATCH_TEMPLATE, project_id)
-}
-
-/// Concrete ingest commit path.
-pub fn ingest_commit(project_id: i64) -> String {
-    expand_project(INGEST_COMMIT_TEMPLATE, project_id)
-}
-
-/// Concrete ingest event path.
-pub fn ingest_event(project_id: i64) -> String {
-    expand_project(INGEST_EVENT_TEMPLATE, project_id)
-}
-
-/// Concrete watch start path.
-pub fn watch_start(project_id: i64) -> String {
-    expand_project(WATCH_START_TEMPLATE, project_id)
-}
-
-/// Concrete watch stop path.
-pub fn watch_stop(project_id: i64) -> String {
-    expand_project(WATCH_STOP_TEMPLATE, project_id)
-}
-
-/// Concrete watch status path.
-pub fn watch_status(project_id: i64) -> String {
-    expand_project(WATCH_STATUS_TEMPLATE, project_id)
 }
 
 #[cfg(test)]
@@ -255,10 +176,16 @@ mod tests {
     }
 
     #[test]
-    fn builders_expand_project_placeholder() {
-        assert_eq!(project_detail(7), "/api/project/7");
-        assert_eq!(ingest_manifest(7), "/api/project/7/ingest/manifest");
-        assert_eq!(watch_status(7), "/api/project/7/watch/status");
+    fn project_scoped_expands_the_placeholder() {
+        assert_eq!(project_scoped(PROJECT_DETAIL_TEMPLATE, 7), "/api/project/7");
+        assert_eq!(
+            project_scoped(INGEST_MANIFEST_TEMPLATE, 7),
+            "/api/project/7/ingest/manifest"
+        );
+        assert_eq!(
+            project_scoped(WATCH_STATUS_TEMPLATE, 7),
+            "/api/project/7/watch/status"
+        );
     }
 
     #[test]

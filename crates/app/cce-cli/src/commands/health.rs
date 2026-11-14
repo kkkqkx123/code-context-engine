@@ -7,12 +7,8 @@ use colored::Colorize;
 
 use crate::icons;
 use crate::output::{print_error, print_output, print_success, print_warning};
-use cce_api::models::{
-    AdmissionStatsResponse, Bm25HealthResponse, EmbeddingHealthResponse, HealthStatus,
-    QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
-    RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueStatusResponse,
-};
-use cce_transport::SharedHttpClient;
+use cce_api::models::RetryQueueQuery;
+use cce_client::Client;
 
 /// Health command variants
 pub enum HealthCommand {
@@ -38,10 +34,15 @@ pub enum HealthCommand {
     AdmissionStats,
 }
 
+/// The CLI never scopes retry-queue operations to a single project.
+fn queue_query() -> RetryQueueQuery {
+    RetryQueueQuery { project_id: None }
+}
+
 /// Execute a health command
 pub async fn execute_with_client(
     cmd: &HealthCommand,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
@@ -61,7 +62,7 @@ pub async fn execute_with_client(
 
 /// Full health check
 async fn health_check(
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
@@ -69,7 +70,7 @@ async fn health_check(
         println!("{}", "Fetching unified health status...".cyan());
     }
 
-    match client.get::<HealthStatus>(cce_api::paths::HEALTH).await {
+    match client.health().await {
         Ok(response) => {
             if matches!(format, crate::cli::OutputFormat::Json) {
                 print_output(format, &response);
@@ -121,15 +122,12 @@ fn print_service_status(name: &str, status: &cce_api::models::ServiceStatus) {
 }
 
 /// Qdrant health check
-async fn health_qdrant(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn health_qdrant(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching Qdrant health...".cyan());
     }
 
-    match client
-        .get::<QdrantHealthResponse>(cce_api::paths::HEALTH_QDRANT)
-        .await
-    {
+    match client.health_qdrant().await {
         Ok(response) => {
             println!("{}", "Qdrant Health".bold());
             println!("{}", icons::SEPARATOR.repeat(50));
@@ -160,15 +158,12 @@ async fn health_qdrant(client: &SharedHttpClient, verbose: bool) -> Result<()> {
 }
 
 /// Embedding health check
-async fn health_embedding(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn health_embedding(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching Embedding health...".cyan());
     }
 
-    match client
-        .get::<EmbeddingHealthResponse>(cce_api::paths::HEALTH_EMBEDDING)
-        .await
-    {
+    match client.health_embedding().await {
         Ok(response) => {
             println!("{}", "Embedding Health".bold());
             println!("{}", icons::SEPARATOR.repeat(50));
@@ -188,15 +183,12 @@ async fn health_embedding(client: &SharedHttpClient, verbose: bool) -> Result<()
 }
 
 /// BM25 health check
-async fn health_bm25(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn health_bm25(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching BM25 health...".cyan());
     }
 
-    match client
-        .get::<Bm25HealthResponse>(cce_api::paths::HEALTH_BM25)
-        .await
-    {
+    match client.health_bm25().await {
         Ok(response) => {
             println!("{}", "BM25 Health".bold());
             println!("{}", icons::SEPARATOR.repeat(50));
@@ -216,15 +208,12 @@ async fn health_bm25(client: &SharedHttpClient, verbose: bool) -> Result<()> {
 }
 
 /// Get retry queue status
-async fn retry_queue_status(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn retry_queue_status(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching retry queue status...".cyan());
     }
 
-    match client
-        .get::<RetryQueueStatusResponse>(cce_api::paths::RETRY_QUEUE)
-        .await
-    {
+    match client.retry_queue_status(&queue_query()).await {
         Ok(response) => {
             println!("{}", "Retry Queue Status".bold());
             println!("{}", icons::SEPARATOR.repeat(50));
@@ -248,15 +237,12 @@ async fn retry_queue_status(client: &SharedHttpClient, verbose: bool) -> Result<
 }
 
 /// Process retry queue
-async fn retry_queue_process(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn retry_queue_process(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Processing retry queue...".cyan());
     }
 
-    match client
-        .post::<(), RetryQueueProcessResponse>(cce_api::paths::RETRY_QUEUE_PROCESS, &())
-        .await
-    {
+    match client.retry_queue_process(&queue_query()).await {
         Ok(response) => {
             print_success(&format!(
                 "Processed {} queries: {}",
@@ -272,15 +258,12 @@ async fn retry_queue_process(client: &SharedHttpClient, verbose: bool) -> Result
 }
 
 /// Clear retry queue
-async fn retry_queue_clear(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn retry_queue_clear(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Clearing retry queue...".cyan());
     }
 
-    match client
-        .delete::<RetryQueueClearResponse>(cce_api::paths::RETRY_QUEUE)
-        .await
-    {
+    match client.retry_queue_clear(&queue_query()).await {
         Ok(response) => {
             print_success(&format!(
                 "Cleared {} queries: {}",
@@ -296,14 +279,11 @@ async fn retry_queue_clear(client: &SharedHttpClient, verbose: bool) -> Result<(
 }
 
 /// List dead retry-queue entries
-async fn retry_queue_dead_list(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn retry_queue_dead_list(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching dead retry queue entries...".cyan());
     }
-    match client
-        .get::<RetryQueueDeadResponse>(cce_api::paths::RETRY_QUEUE_DEAD)
-        .await
-    {
+    match client.retry_queue_dead(&queue_query()).await {
         Ok(response) => {
             println!("dead_count={}", response.dead_count);
         }
@@ -315,14 +295,11 @@ async fn retry_queue_dead_list(client: &SharedHttpClient, verbose: bool) -> Resu
 }
 
 /// Clear dead retry-queue entries
-async fn retry_queue_dead_clear(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn retry_queue_dead_clear(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Clearing dead retry queue entries...".cyan());
     }
-    match client
-        .delete::<RetryQueueDeadClearResponse>(cce_api::paths::RETRY_QUEUE_DEAD)
-        .await
-    {
+    match client.retry_queue_dead_clear(&queue_query()).await {
         Ok(response) => {
             print_success(&format!("Cleared: {}", response.message));
         }
@@ -334,14 +311,11 @@ async fn retry_queue_dead_clear(client: &SharedHttpClient, verbose: bool) -> Res
 }
 
 /// Show admission counters and per-token audit
-async fn admission_stats(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn admission_stats(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching admission stats...".cyan());
     }
-    match client
-        .get::<AdmissionStatsResponse>(cce_api::paths::ADMISSION_STATS)
-        .await
-    {
+    match client.admission_stats().await {
         Ok(response) => {
             println!("admitted={}", response.global.admitted);
             println!("tokens={}", response.tokens.len());

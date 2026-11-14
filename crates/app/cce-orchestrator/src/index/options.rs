@@ -175,9 +175,12 @@ mod tests {
 
     #[test]
     fn test_default_options() {
+        // Delegates to `IndexerConfig::default()`, so storage flags follow the
+        // documented configuration defaults.
         let options = IndexOptions::default();
-        assert!(!options.store_vectors);
-        assert!(!options.store_bm25);
+        assert!(options.store_vectors);
+        assert!(options.store_bm25);
+        assert!(options.store_summaries);
         assert!(options.build_relations);
     }
 }

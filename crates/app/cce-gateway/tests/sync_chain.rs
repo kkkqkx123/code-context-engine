@@ -1,7 +1,7 @@
 //! Gateway full-chain tests against a loopback stub server.
 //!
 //! The stub speaks just enough HTTP/1.1 (request line, headers,
-//! `Content-Length` bodies) to exercise the real `GatewayClient` transport:
+//! `Content-Length` bodies) to exercise the real client transport:
 //! ingest path templates, bearer forwarding, base64+zstd chunk round-trips,
 //! `manifest_version` echo, missing-chunk resume and staged-only passes.
 //! No external network, no new dependencies: the stub runs on
@@ -19,7 +19,8 @@ use std::time::Duration;
 type Responder = dyn Fn(&str, &[u8]) -> (u16, serde_json::Value) + Send + Sync + 'static;
 
 use base64::Engine as _;
-use cce_gateway::{GatewayClient, SyncParams, sync_once};
+use cce_client::Client;
+use cce_gateway::{SyncParams, sync_once};
 
 struct Recorded {
     method: String,
@@ -228,8 +229,7 @@ async fn sync_once_runs_manifest_batch_commit_in_order() {
         }
     });
 
-    let client = GatewayClient::new_with_token(&stub.url, Some("test-token-xyz".to_string()))
-        .expect("client");
+    let client = Client::with_token(&stub.url, Some("test-token-xyz".to_string())).expect("client");
     let outcome = sync_once(&client, &params_for(7, &dir, true), false)
         .await
         .expect("sync completes");
@@ -319,8 +319,7 @@ async fn sync_once_without_commit_stages_only() {
         }
     });
 
-    let client =
-        GatewayClient::new_with_token(&stub.url, Some("stage-only".to_string())).expect("client");
+    let client = Client::with_token(&stub.url, Some("stage-only".to_string())).expect("client");
     sync_once(&client, &params_for(9, &dir, false), false)
         .await
         .expect("staged-only sync completes");
@@ -379,8 +378,7 @@ async fn missing_chunks_resume_uploads_only_the_missing_chunk() {
         }
     });
 
-    let client =
-        GatewayClient::new_with_token(&stub.url, Some("resume-token".to_string())).expect("client");
+    let client = Client::with_token(&stub.url, Some("resume-token".to_string())).expect("client");
     sync_once(&client, &params_for(11, &dir, true), false)
         .await
         .expect("resume sync completes");

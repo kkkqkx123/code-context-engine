@@ -8,7 +8,6 @@ use base64::Engine as _;
 
 use cce_api::models::{IngestEvent, IngestEventKind, IngestEventRequest, MAX_INGEST_FILE_BYTES};
 
-use super::client::GatewayClient;
 use super::health::write_heartbeat;
 use super::params::SyncParams;
 use super::scan::{
@@ -54,7 +53,11 @@ fn fingerprint_map(snapshot: &ScanSnapshot) -> BTreeMap<String, BaselineFingerpr
 /// itself always compares the size, modification time and content hash
 /// triple of the baseline; the reuse decision never takes part in it. The
 /// wait between polls adapts to the baseline size when enabled.
-pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bool) -> Result<()> {
+pub async fn watch_loop(
+    client: &cce_client::Client,
+    params: &SyncParams,
+    verbose: bool,
+) -> Result<()> {
     let first = sync_once(client, params, verbose).await?;
     let mut baseline = fingerprint_map(&first.snapshot);
     let mut previous_entries = first.entries;
@@ -192,7 +195,7 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
             continue;
         }
         let request = IngestEventRequest { events };
-        match client.post_event(params.project_id, &request).await {
+        match client.ingest_event(params.project_id, &request).await {
             Ok(response) => {
                 if !response.errors.is_empty() {
                     for error in &response.errors {

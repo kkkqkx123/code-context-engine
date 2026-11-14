@@ -5,15 +5,12 @@ use clap::Subcommand;
 use anyhow::Result;
 
 use crate::output::{format_duration, print_error, print_success};
-use cce_api::models::{
-    BatchDeleteRequest, ClearIndexRequest, ClearIndexResponse, DeleteEntityResponse,
-    DeleteFileResponse, IndexStatsResponse, StorageStatusResponse,
-};
-use cce_transport::SharedHttpClient;
+use cce_api::models::{BatchDeleteRequest, ClearIndexRequest};
+use cce_client::Client;
 
 pub async fn execute_with_client(
     cmd: &StorageCommands,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
@@ -51,12 +48,12 @@ pub async fn execute_with_client(
     }
 }
 
-async fn storage_status(client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn storage_status(client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("Fetching storage status...");
     }
 
-    let response: StorageStatusResponse = client.get(cce_api::paths::STORAGE_STATUS).await?;
+    let response = client.storage_status().await?;
 
     if response.success {
         let status = &response.status;
@@ -109,13 +106,12 @@ fn print_component_status(component: &cce_api::models::StorageComponentStatus) {
     }
 }
 
-async fn index_stats(project_id: i64, client: &SharedHttpClient, verbose: bool) -> Result<()> {
+async fn index_stats(project_id: i64, client: &Client, verbose: bool) -> Result<()> {
     if verbose {
         println!("Fetching index statistics...");
     }
 
-    let url = format!("{}?project_id={}", cce_api::paths::INDEX_STATS, project_id);
-    let response: IndexStatsResponse = client.get(&url).await?;
+    let response = client.index_stats(project_id).await?;
 
     if response.success {
         let stats = &response.statistics;
@@ -139,7 +135,7 @@ async fn index_stats(project_id: i64, client: &SharedHttpClient, verbose: bool) 
 
 async fn clear_index(
     project_id: i64,
-    client: &SharedHttpClient,
+    client: &Client,
     vectors: bool,
     bm25: bool,
     relations: bool,
@@ -158,8 +154,7 @@ async fn clear_index(
         println!("Clearing index...");
     }
 
-    let url = format!("{}?project_id={}", cce_api::paths::INDEX, project_id);
-    let response: ClearIndexResponse = client.delete_with_body(&url, &request).await?;
+    let response = client.clear_index(&request).await?;
 
     if response.success {
         print_success(&response.message);
@@ -180,22 +175,12 @@ async fn clear_index(
     Ok(())
 }
 
-async fn delete_file(
-    project_id: i64,
-    client: &SharedHttpClient,
-    path: &str,
-    verbose: bool,
-) -> Result<()> {
+async fn delete_file(project_id: i64, client: &Client, path: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Deleting file: {}", path);
     }
 
-    let url = format!(
-        "{}?project_id={}",
-        cce_api::paths::INDEX_FILE_TEMPLATE.replace("{path}", &urlencoding::encode(path)),
-        project_id
-    );
-    let response: DeleteFileResponse = client.delete(&url).await?;
+    let response = client.delete_file(project_id, path).await?;
 
     if response.success {
         print_success(&response.message);
@@ -214,22 +199,15 @@ async fn delete_file(
     Ok(())
 }
 
-async fn delete_entity(
-    project_id: i64,
-    client: &SharedHttpClient,
-    id: &str,
-    verbose: bool,
-) -> Result<()> {
+async fn delete_entity(project_id: i64, client: &Client, id: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Deleting entity: {}", id);
     }
 
-    let url = format!(
-        "{}?project_id={}",
-        cce_api::paths::INDEX_ENTITY_TEMPLATE.replace("{id}", &urlencoding::encode(id)),
-        project_id
-    );
-    let response: DeleteEntityResponse = client.delete(&url).await?;
+    let entity_id: u64 = id
+        .parse()
+        .map_err(|_| anyhow::anyhow!("entity id must be a number: {id}"))?;
+    let response = client.delete_entity(project_id, entity_id).await?;
 
     if response.success {
         print_success(&response.message);
@@ -251,7 +229,7 @@ async fn delete_entity(
 
 async fn batch_delete(
     project_id: i64,
-    client: &SharedHttpClient,
+    client: &Client,
     files: &Option<String>,
     entities: &Option<String>,
     verbose: bool,
@@ -279,9 +257,7 @@ async fn batch_delete(
         println!("Executing batch delete...");
     }
 
-    let url = format!("{}?project_id={}", cce_api::paths::INDEX_BATCH, project_id);
-    let response: cce_api::models::BatchDeleteResponse =
-        client.delete_with_body(&url, &request).await?;
+    let response = client.batch_delete(project_id, &request).await?;
 
     if response.success {
         print_success("Batch delete completed");

@@ -5,15 +5,15 @@
 use anyhow::Result;
 
 use crate::output::{print_error, print_success};
-use cce_api::models::{BatchCompressRequest, BatchCompressResponse};
-use cce_transport::SharedHttpClient;
+use cce_api::models::BatchCompressRequest;
+use cce_client::Client;
 
 pub async fn execute_with_client(
     file_paths: &[String],
     include_entities: bool,
     include_groups: bool,
     max_concurrency: usize,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     if verbose {
@@ -33,13 +33,7 @@ pub async fn execute_with_client(
         max_concurrency,
     };
 
-    match client
-        .post::<BatchCompressRequest, BatchCompressResponse>(
-            cce_api::paths::TOOLS_COMPRESS_BATCH,
-            &request,
-        )
-        .await
-    {
+    match client.compress_batch(&request).await {
         Ok(response) => {
             let total = response.successes.len() + response.failures.len();
             print_success(&format!(

@@ -59,7 +59,7 @@ pub struct StorageComponentStatus {
 }
 
 /// Storage query parameters
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct StorageQuery {
     /// Project ID for scoped storage operations

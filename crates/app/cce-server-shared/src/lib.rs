@@ -14,3 +14,6 @@ pub mod engine;
 pub mod maintenance;
 pub mod runtime;
 pub mod services;
+
+#[cfg(test)]
+mod test_support;

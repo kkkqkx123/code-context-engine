@@ -160,67 +160,67 @@ impl Cli {
         match &self.command {
             Commands::Index(cmd) => self.execute_index(cmd).await,
             Commands::Search(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::search::execute_with_client(cmd, &client, self.verbose, self.format).await
             }
             Commands::AggSearch(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 cmd.execute_with_client(&client, self.verbose).await
             }
             Commands::Project(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::project::execute_with_client(cmd, &client, self.verbose).await
             }
             Commands::Entity(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::entity::execute_with_client(cmd, &client, self.verbose, self.format).await
             }
             Commands::Graph(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::graph::execute_with_client(cmd, &client, self.verbose, self.format).await
             }
             Commands::Watch(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::watch::execute_with_client(cmd, &client, self.verbose).await
             }
             Commands::Storage(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::storage::execute_with_client(cmd, &client, self.verbose).await
             }
             Commands::Tools(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::tools::execute_with_client(cmd, &client, self.verbose).await
             }
             Commands::Summary(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 self.execute_summary_with_client(cmd, &client).await
             }
             Commands::Config(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 self.execute_config_with_client(cmd, &client).await
             }
             Commands::Qdrant(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::qdrant::execute_with_client(cmd, &client, self.verbose).await
             }
             Commands::Metrics(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 self.execute_metrics_with_client(cmd, &client).await
             }
             Commands::Server(cmd) => {
                 commands::server::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Health(cmd) => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 self.execute_health_with_client(cmd, &client).await
             }
             Commands::Status => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::status::execute_with_client(&client, self.verbose, self.format).await
             }
             Commands::Gateway(cmd) => {
-                let gateway_client = cce_gateway::GatewayClient::new_with_token(
-                    &self.server,
+                let gateway_client = cce_client::Client::with_token(
+                    self.server.clone(),
                     commands::gateway::explicit_token(cmd),
                 )?;
                 commands::gateway::execute_with_client(
@@ -246,20 +246,19 @@ impl Cli {
                 ..
             } if *push => {
                 let gateway_client =
-                    cce_gateway::GatewayClient::new_with_token(&self.server, token.clone())?;
+                    cce_client::Client::with_token(self.server.clone(), token.clone())?;
                 commands::index::execute_push_with_gateway(cmd, &gateway_client, self.verbose).await
             }
             IndexCommands::Run { timeout_secs, .. } if timeout_secs.is_some() => {
                 let secs = timeout_secs.unwrap_or(300).max(1);
-                let client = cce_transport::SharedHttpClient::new_with_token_and_timeout(
-                    &self.server,
-                    None,
-                    std::time::Duration::from_secs(secs),
+                let client = cce_client::Client::with_config(
+                    cce_client::ClientConfig::new(self.server.clone())
+                        .with_long_task_budget(std::time::Duration::from_secs(secs)),
                 )?;
                 commands::index::execute_with_client(cmd, &client, self.verbose).await
             }
             _ => {
-                let client = cce_transport::SharedHttpClient::new(&self.server)?;
+                let client = cce_client::Client::new(&self.server)?;
                 commands::index::execute_with_client(cmd, &client, self.verbose).await
             }
         }
@@ -269,7 +268,7 @@ impl Cli {
     async fn execute_summary_with_client(
         &self,
         cmd: &SummaryCommands,
-        client: &cce_transport::SharedHttpClient,
+        client: &cce_client::Client,
     ) -> anyhow::Result<()> {
         match cmd {
             SummaryCommands::Generate {
@@ -306,7 +305,7 @@ impl Cli {
     async fn execute_config_with_client(
         &self,
         cmd: &ConfigCommands,
-        client: &cce_transport::SharedHttpClient,
+        client: &cce_client::Client,
     ) -> anyhow::Result<()> {
         match cmd {
             ConfigCommands::Reload { project_id } => {
@@ -326,7 +325,7 @@ impl Cli {
     async fn execute_metrics_with_client(
         &self,
         cmd: &MetricsCommands,
-        client: &cce_transport::SharedHttpClient,
+        client: &cce_client::Client,
     ) -> anyhow::Result<()> {
         match cmd {
             MetricsCommands::Prometheus => {
@@ -384,7 +383,7 @@ impl Cli {
     async fn execute_health_with_client(
         &self,
         cmd: &HealthCommands,
-        client: &cce_transport::SharedHttpClient,
+        client: &cce_client::Client,
     ) -> anyhow::Result<()> {
         let health_cmd = match cmd {
             HealthCommands::Check => commands::health::HealthCommand::Check,

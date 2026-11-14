@@ -3,7 +3,6 @@
 //! A standalone CLI client that communicates with the CCE server via HTTP API.
 
 mod cli;
-mod client;
 mod commands;
 mod icons;
 mod output;

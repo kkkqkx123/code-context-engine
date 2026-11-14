@@ -180,6 +180,33 @@ mod tests {
     use super::*;
     use crate::tree_sitter_query::capture::{behavior, control};
 
+    /// Drop double-quoted string literals so their contents cannot be read as
+    /// captures: `"@interface"` matches a keyword in the grammar, it does not
+    /// name a capture.
+    fn strip_string_literals(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut in_string = false;
+        let mut escaped = false;
+        for ch in line.chars() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            if ch == '"' {
+                in_string = true;
+                continue;
+            }
+            out.push(ch);
+        }
+        out
+    }
+
     fn extract_and_validate_captures(
         query: &str,
         language: &str,
@@ -193,7 +220,8 @@ mod tests {
                 continue;
             }
 
-            let captures: Vec<&str> = line
+            let code = strip_string_literals(line);
+            let captures: Vec<&str> = code
                 .split('@')
                 .skip(1)
                 .filter_map(|s| s.split_whitespace().next())

@@ -206,11 +206,19 @@ impl LabeledGauge {
 
     /// Decrement the gauge by 1, saturating at 0
     pub fn decrement(&self) {
-        self.value
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                Some(v.saturating_sub(1))
-            })
-            .ok();
+        let mut current = self.value.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_sub(1);
+            match self.value.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
     }
 
     /// Increment the gauge by a specific amount

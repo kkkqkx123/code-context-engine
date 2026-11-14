@@ -5,12 +5,12 @@ use clap::Subcommand;
 use anyhow::Result;
 
 use crate::output::{print_error, print_success};
-use cce_api::models::{QdrantActionResponse, QdrantProcessStatus, QdrantProcessStatusResponse};
-use cce_transport::SharedHttpClient;
+use cce_api::models::QdrantProcessStatus;
+use cce_client::Client;
 
 pub async fn execute_with_client(
     cmd: &QdrantCommands,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
@@ -26,28 +26,24 @@ pub async fn execute_with_client(
                 println!("Qdrant process action: {}", action_str);
             }
 
-            let path = match action_str {
-                "status" => cce_api::paths::QDRANT_PROCESS_STATUS.to_string(),
-                "start" => cce_api::paths::QDRANT_PROCESS_START.to_string(),
-                "stop" => cce_api::paths::QDRANT_PROCESS_STOP.to_string(),
-                _ => cce_api::paths::QDRANT_PROCESS_RESTART.to_string(),
-            };
-
-            if action_str == "status" {
-                let response: QdrantProcessStatusResponse = client.get(&path).await?;
-                println!("Qdrant process status:");
-                println!("  Managed: {}", response.managed);
-                println!("  Status:  {}", format_status(&response.status));
-            } else {
-                let response: QdrantActionResponse =
-                    client.post(&path, &serde_json::json!({})).await?;
-                if response.success {
-                    print_success(&response.message);
-                } else {
-                    print_error(&response.message);
+            let response = match action {
+                QdrantProcessAction::Status => {
+                    let response = client.qdrant_process_status().await?;
+                    println!("Qdrant process status:");
+                    println!("  Managed: {}", response.managed);
+                    println!("  Status:  {}", format_status(&response.status));
+                    return Ok(());
                 }
-                println!("  Status:  {}", format_status(&response.status));
+                QdrantProcessAction::Start => client.qdrant_process_start().await?,
+                QdrantProcessAction::Stop => client.qdrant_process_stop().await?,
+                QdrantProcessAction::Restart => client.qdrant_process_restart().await?,
+            };
+            if response.success {
+                print_success(&response.message);
+            } else {
+                print_error(&response.message);
             }
+            println!("  Status:  {}", format_status(&response.status));
 
             Ok(())
         }

@@ -6,8 +6,8 @@ use anyhow::Result;
 use chrono::{Duration, Utc};
 
 use crate::output::{print_error, print_success};
-use cce_api::models::AggregatedMetric;
-use cce_transport::SharedHttpClient;
+use cce_api::models::{MetricsCleanupQuery, MetricsHistoryQuery};
+use cce_client::Client;
 
 pub enum MetricsFormat {
     Prometheus,
@@ -16,24 +16,34 @@ pub enum MetricsFormat {
 
 pub async fn execute_with_client(
     format: MetricsFormat,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
-    let path = match format {
-        MetricsFormat::Prometheus => cce_api::paths::METRICS,
-        MetricsFormat::Json => cce_api::paths::METRICS_JSON,
-    };
-
     if verbose {
-        println!("Fetching metrics from: {}", path);
+        println!(
+            "Fetching metrics as {}",
+            match &format {
+                MetricsFormat::Prometheus => "Prometheus text",
+                MetricsFormat::Json => "JSON",
+            }
+        );
     }
 
-    let content = match client.get_text(path).await {
-        Ok(content) => content,
-        Err(error) => {
-            print_error(&format!("Failed to fetch metrics: {error}"));
-            return Ok(());
-        }
+    let content = match format {
+        MetricsFormat::Prometheus => match client.metrics_prometheus().await {
+            Ok(content) => content,
+            Err(error) => {
+                print_error(&format!("Failed to fetch metrics: {error}"));
+                return Ok(());
+            }
+        },
+        MetricsFormat::Json => match client.metrics_json().await {
+            Ok(snapshot) => serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
+            Err(error) => {
+                print_error(&format!("Failed to fetch metrics: {error}"));
+                return Ok(());
+            }
+        },
     };
     println!("{}", content);
 
@@ -52,37 +62,26 @@ pub async fn execute_history_with_client(
     metric: Option<&str>,
     project_id: Option<i64>,
     operation_type: Option<&str>,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     let (default_from, default_to) = default_history_window();
     let from = from.unwrap_or(&default_from);
     let to = to.unwrap_or(&default_to);
 
-    let mut path = format!(
-        "{}?from={}&to={}",
-        cce_api::paths::METRICS_HISTORY,
-        urlencoding::encode(from),
-        urlencoding::encode(to)
-    );
-    if let Some(metric) = metric {
-        path.push_str(&format!("&metric={}", urlencoding::encode(metric)));
-    }
-    if let Some(project_id) = project_id {
-        path.push_str(&format!("&project_id={}", project_id));
-    }
-    if let Some(operation_type) = operation_type {
-        path.push_str(&format!(
-            "&operation_type={}",
-            urlencoding::encode(operation_type)
-        ));
-    }
+    let query = MetricsHistoryQuery {
+        from: from.to_string(),
+        to: to.to_string(),
+        metric: metric.map(str::to_string),
+        project_id,
+        operation_type: operation_type.map(str::to_string),
+    };
 
     if verbose {
         println!("Fetching metrics history from {} to {}...", from, to);
     }
 
-    let response: Vec<AggregatedMetric> = client.get(&path).await?;
+    let response = client.metrics_history(&query).await?;
 
     if response.is_empty() {
         print_success("No historical records found");
@@ -134,7 +133,7 @@ pub async fn execute_cleanup_with_client(
     all: bool,
     before: Option<&str>,
     keep_days: u64,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     if verbose {
@@ -147,24 +146,17 @@ pub async fn execute_cleanup_with_client(
         }
     }
 
-    let response: cce_api::models::MetricsCleanupResponse = if all {
-        client
-            .delete(&(cce_api::paths::METRICS_CLEANUP.to_string() + "?all=true"))
-            .await?
+    let before = if all {
+        None
     } else {
-        let before_timestamp = if let Some(before) = before {
-            before.to_string()
-        } else {
-            (Utc::now() - Duration::days(keep_days as i64)).to_rfc3339()
-        };
-        client
-            .delete(&format!(
-                "{}?before={}",
-                cce_api::paths::METRICS_CLEANUP,
-                urlencoding::encode(&before_timestamp)
-            ))
-            .await?
+        Some(match before {
+            Some(before) => before.to_string(),
+            None => (Utc::now() - Duration::days(keep_days as i64)).to_rfc3339(),
+        })
     };
+    let response = client
+        .cleanup_metrics(&MetricsCleanupQuery { all, before })
+        .await?;
 
     if response.success {
         print_success(&format!(

@@ -16,10 +16,10 @@
 //! daemon; both share this crate so behavior cannot drift.
 //!
 //! The implementation is split by responsibility across the modules below:
-//! transport, parameters, scanning, full sync, health, and the watch loop.
-//! This module re-exports the public surface so callers keep one import path.
+//! parameters, scanning, full sync, health, and the watch loop. HTTP calls go
+//! through `cce-client`, so the gateway holds no transport of its own. This
+//! module re-exports the public surface so callers keep one import path.
 
-mod client;
 mod health;
 mod params;
 mod policy;
@@ -27,7 +27,6 @@ mod scan;
 mod sync;
 mod watch;
 
-pub use client::GatewayClient;
 pub use health::{GatewayHealth, write_health_file};
 pub use params::{SyncParamOverrides, SyncParams, adaptive_enabled, compression_enabled};
 pub use policy::{

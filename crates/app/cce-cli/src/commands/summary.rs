@@ -6,10 +6,10 @@
 use clap::Subcommand;
 
 use anyhow::Result;
-use cce_api::models::{SummaryRequest, SummaryResponse};
+use cce_api::models::SummaryRequest;
 
 use crate::output::{print_error, print_success, print_warning};
-use cce_transport::SharedHttpClient;
+use cce_client::Client;
 
 /// Input paths configuration
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ impl SummaryOptions {
     }
 }
 
-pub async fn execute_with_client(options: SummaryOptions, client: &SharedHttpClient) -> Result<()> {
+pub async fn execute_with_client(options: SummaryOptions, client: &Client) -> Result<()> {
     if options.execution.verbose {
         println!("Generating summaries...");
         println!("  Server: {}", options.execution.server);
@@ -79,10 +79,7 @@ pub async fn execute_with_client(options: SummaryOptions, client: &SharedHttpCli
         max_files: options.filters.max_files,
     };
 
-    match client
-        .post::<SummaryRequest, SummaryResponse>(cce_api::paths::SUMMARY, &request)
-        .await
-    {
+    match client.summary(&request).await {
         Ok(response) => {
             if response.success {
                 print_success(&format!(

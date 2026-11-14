@@ -31,7 +31,7 @@ pub struct AggregatedMetric {
 }
 
 /// Query parameters for metrics history
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Serialize, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct MetricsHistoryQuery {
     /// Start time (ISO 8601 format)
@@ -47,7 +47,7 @@ pub struct MetricsHistoryQuery {
 }
 
 /// Query parameters for metrics cleanup
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Serialize, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct MetricsCleanupQuery {
     /// Delete all records if true

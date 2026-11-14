@@ -4,19 +4,17 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::CliApi;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
-    DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterListResponse,
-    DeadLetterRetryRequest, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
-    ParseRequest, ParseResponse,
+    DeadLetterAcknowledgeRequest, DeadLetterRetryRequest, IncrementalIndexRequest, IndexRequest,
+    ParseRequest,
 };
-use cce_transport::SharedHttpClient;
+use cce_client::Client;
 
 /// Execute index commands through the client abstraction.
 pub async fn execute_with_client(
     cmd: &IndexCommands,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
@@ -71,7 +69,7 @@ pub async fn execute_with_client(
             if verbose {
                 println!("Indexing directory: {}", path);
             }
-            match client.index(request).await {
+            match client.index(&request).await {
                 Ok(response) => {
                     if response.success {
                         println!();
@@ -146,7 +144,7 @@ pub async fn execute_with_client(
 /// deployment.
 pub async fn execute_push_with_gateway(
     cmd: &IndexCommands,
-    gateway: &cce_gateway::GatewayClient,
+    gateway: &Client,
     verbose: bool,
 ) -> Result<()> {
     let IndexCommands::Run {
@@ -189,7 +187,7 @@ pub async fn execute_push_with_gateway(
 }
 
 async fn retry_dead_letter(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     files: Option<&str>,
     verbose: bool,
@@ -203,12 +201,7 @@ async fn retry_dead_letter(
             .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
             .unwrap_or_default(),
     };
-    let response: DeadLetterActionResponse = client
-        .post(
-            &cce_api::paths::project_dead_letters_retry(project_id),
-            &request,
-        )
-        .await?;
+    let response = client.retry_dead_letters(project_id, &request).await?;
 
     if response.success {
         print_success(&response.message);
@@ -219,17 +212,11 @@ async fn retry_dead_letter(
     Ok(())
 }
 
-async fn list_dead_letters(
-    client: &SharedHttpClient,
-    project_id: i64,
-    verbose: bool,
-) -> Result<()> {
+async fn list_dead_letters(client: &Client, project_id: i64, verbose: bool) -> Result<()> {
     if verbose {
         println!("Listing dead letters for project {}...", project_id);
     }
-    let response: DeadLetterListResponse = client
-        .get(&cce_api::paths::project_dead_letters(project_id))
-        .await?;
+    let response = client.dead_letters(project_id).await?;
     println!("  files={}", response.files.len());
     for file in &response.files {
         println!("  {} (version {})", file.file_path, file.version);
@@ -238,7 +225,7 @@ async fn list_dead_letters(
 }
 
 async fn acknowledge_dead_letter(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     file: &str,
     module: Option<&str>,
@@ -251,12 +238,7 @@ async fn acknowledge_dead_letter(
         file_path: file.to_string(),
         module: module.map(str::to_string),
     };
-    let response: DeadLetterActionResponse = client
-        .post(
-            &cce_api::paths::project_dead_letters_acknowledge(project_id),
-            &request,
-        )
-        .await?;
+    let response = client.acknowledge_dead_letter(project_id, &request).await?;
     if response.success {
         print_success(&response.message);
     } else {
@@ -266,7 +248,7 @@ async fn acknowledge_dead_letter(
 }
 
 async fn incremental_index(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     add: &Option<String>,
     remove: &Option<String>,
@@ -294,9 +276,7 @@ async fn incremental_index(
         println!("Executing incremental index...");
     }
 
-    let response: IncrementalIndexResponse = client
-        .post(cce_api::paths::INDEX_INCREMENTAL, &request)
-        .await?;
+    let response = client.incremental_index(&request).await?;
 
     if response.success {
         print_success("Incremental index completed");
@@ -324,7 +304,7 @@ async fn incremental_index(
     Ok(())
 }
 
-async fn parse_file(client: &SharedHttpClient, file: &str, verbose: bool) -> Result<()> {
+async fn parse_file(client: &Client, file: &str, verbose: bool) -> Result<()> {
     let request = ParseRequest {
         file_path: file.to_string(),
     };
@@ -333,7 +313,7 @@ async fn parse_file(client: &SharedHttpClient, file: &str, verbose: bool) -> Res
         println!("Parsing file: {}", file);
     }
 
-    let response: ParseResponse = client.post(cce_api::paths::PARSE, &request).await?;
+    let response = client.parse_file(&request).await?;
 
     if response.success {
         print_success(&format!("Parsed {} successfully", response.file_path));

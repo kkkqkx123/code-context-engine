@@ -1,10 +1,10 @@
 //! Common API response and error types shared between CLI and Server
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Common error response
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
     pub success: bool,
     pub error: ErrorDetail,
@@ -39,7 +39,7 @@ impl ErrorResponse {
 }
 
 /// Error detail structure
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,

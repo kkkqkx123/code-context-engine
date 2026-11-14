@@ -624,10 +624,10 @@ mod tests {
     fn create_test_config() -> AppConfig {
         let mut config = AppConfig::default();
 
-        // Use temp directory for sqlite to avoid polluting workspace
-        let temp_dir = std::env::temp_dir();
-        let db_path = temp_dir.join(format!("cce_test_engine_{}.db", std::process::id()));
-        config.database.sqlite.path = db_path.to_string_lossy().to_string();
+        // Each engine opens its own vector store and metadata database under
+        // the data dir, so parallel tests must not share one.
+        let data_dir = crate::test_support::unique_test_dir();
+        config.database.sqlite.path = data_dir.join("cce.db").to_string_lossy().to_string();
 
         // Add a mock provider
         let mut providers = HashMap::new();

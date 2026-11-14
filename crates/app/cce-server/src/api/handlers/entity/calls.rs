@@ -12,36 +12,9 @@ use cce_api::models::{
     FunctionCallsResponse, RelationFilterParams, error_codes,
 };
 
+use super::filter::apply_filters;
 use super::seed::resolve_symbol_seed;
 use crate::api::response::ApiResult;
-
-/// Apply the HTTP filter parameters onto query options.
-fn apply_filters(
-    filter: RelationFilterParams,
-    options: RelationQueryOptions,
-) -> RelationQueryOptions {
-    let mut options = options.with_exclude_tests(filter.exclude_tests.unwrap_or(false));
-    if let Some(prefix) = filter.directory_prefix {
-        options = options.with_directory_prefix(prefix);
-    }
-    if let Some(files) = filter.excluded_files {
-        options = options.with_excluded_files(files);
-    }
-    if let Some(domains) = filter.domains {
-        options = options.with_relation_domains(parse_domains(&domains));
-    }
-    options = options.with_include_external(filter.include_external);
-    options
-}
-
-/// Split a comma-separated relation-domain list into trimmed lowercase names.
-fn parse_domains(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(str::to_lowercase)
-        .collect()
-}
 
 fn params_to_options(params: CallChainQueryParams) -> RelationQueryOptions {
     apply_filters(
@@ -372,7 +345,7 @@ mod tests {
             limit: 50,
             exclude_tests: Some(true),
             directory_prefix: Some("src/flask".to_string()),
-            excluded_files: Some(vec!["src/flask/app.py".to_string()]),
+            excluded_files: Some("src/flask/app.py".to_string()),
             domains: Some("call".to_string()),
             include_external: false,
         };

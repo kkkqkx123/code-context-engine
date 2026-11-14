@@ -7,12 +7,10 @@ use colored::Colorize;
 
 use crate::output::{print_error, print_success};
 use cce_api::models::{
-    BatchFoldRequest, BatchFoldResponse, CompressApiResponse, CompressRequest, DiagnoseApiResponse,
-    DiagnoseRequest, FindReferencesRequest, FindReferencesResponse, FoldRequest, FoldResponse,
-    GetSymbolsRequest, GetSymbolsResponse, GotoDefinitionRequest, GotoDefinitionResponse,
-    KeywordSearchApiResponse, KeywordSearchRequest, KeywordTermOperator,
+    BatchFoldRequest, CompressRequest, DiagnoseRequest, FindReferencesRequest, FoldRequest,
+    GetSymbolsRequest, GotoDefinitionRequest, KeywordSearchRequest, KeywordTermOperator,
 };
-use cce_transport::SharedHttpClient;
+use cce_client::Client;
 
 pub(crate) struct LocationParams {
     project_id: i64,
@@ -23,11 +21,7 @@ pub(crate) struct LocationParams {
     verbose: bool,
 }
 
-pub async fn execute_with_client(
-    cmd: &ToolCommands,
-    client: &SharedHttpClient,
-    verbose: bool,
-) -> Result<()> {
+pub async fn execute_with_client(cmd: &ToolCommands, client: &Client, verbose: bool) -> Result<()> {
     match cmd {
         ToolCommands::Compress {
             file_path,
@@ -223,7 +217,7 @@ pub async fn execute_compress_with_client(
     file_path: &str,
     include_entities: bool,
     include_groups: bool,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     let request = CompressRequest {
@@ -236,9 +230,7 @@ pub async fn execute_compress_with_client(
         println!("Compressing code...");
     }
 
-    let response: CompressApiResponse = client
-        .post(cce_api::paths::TOOLS_COMPRESS, &request)
-        .await?;
+    let response = client.compress(&request).await?;
 
     match (response.success, response.result) {
         (true, Some(result)) => {
@@ -275,7 +267,7 @@ pub async fn execute_diagnose_with_client(
     language: Option<&str>,
     file_name: Option<&str>,
     include_ast: bool,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     let request = DiagnoseRequest {
@@ -289,9 +281,7 @@ pub async fn execute_diagnose_with_client(
         println!("Diagnosing code...");
     }
 
-    let response: DiagnoseApiResponse = client
-        .post(cce_api::paths::TOOLS_DIAGNOSE, &request)
-        .await?;
+    let response = client.diagnose(&request).await?;
 
     if let (true, Some(result)) = (response.success, response.result) {
         if result.diagnostics.is_empty() {
@@ -325,7 +315,7 @@ pub async fn execute_diagnose_with_client(
 pub async fn execute_get_symbols_with_client(
     project_id: i64,
     paths: &[String],
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     let request = GetSymbolsRequest {
@@ -337,7 +327,7 @@ pub async fn execute_get_symbols_with_client(
         println!("Getting symbols...");
     }
 
-    let response: GetSymbolsResponse = client.post(cce_api::paths::TOOLS_SYMBOLS, &request).await?;
+    let response = client.symbols(&request).await?;
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
@@ -386,7 +376,7 @@ pub async fn execute_get_symbols_with_client(
 }
 
 pub async fn execute_find_references_with_client(
-    client: &SharedHttpClient,
+    client: &Client,
     params: LocationParams,
     context_lines: Option<usize>,
     include_snippet: Option<bool>,
@@ -407,9 +397,7 @@ pub async fn execute_find_references_with_client(
         println!("Finding references...");
     }
 
-    let response: FindReferencesResponse = client
-        .post(cce_api::paths::TOOLS_REFERENCES, &request)
-        .await?;
+    let response = client.references(&request).await?;
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
@@ -454,7 +442,7 @@ pub async fn execute_find_references_with_client(
 }
 
 pub async fn execute_goto_definition_with_client(
-    client: &SharedHttpClient,
+    client: &Client,
     params: LocationParams,
     include_body: bool,
 ) -> Result<()> {
@@ -471,9 +459,7 @@ pub async fn execute_goto_definition_with_client(
         println!("Finding definition...");
     }
 
-    let response: GotoDefinitionResponse = client
-        .post(cce_api::paths::TOOLS_DEFINITION, &request)
-        .await?;
+    let response = client.definition(&request).await?;
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
@@ -508,7 +494,7 @@ pub async fn execute_goto_definition_with_client(
 }
 
 pub async fn execute_keyword_search_with_client(
-    client: &SharedHttpClient,
+    client: &Client,
     params: &KeywordSearchParams<'_>,
 ) -> Result<()> {
     let operator = match params.term_operator.map(str::to_ascii_lowercase).as_deref() {
@@ -528,9 +514,7 @@ pub async fn execute_keyword_search_with_client(
         println!("Keyword searching: {}", params.query);
     }
 
-    let response: KeywordSearchApiResponse = client
-        .post(cce_api::paths::TOOLS_KEYWORD_SEARCH, &request)
-        .await?;
+    let response = client.keyword_search(&request).await?;
 
     if let (true, Some(result)) = (response.success, response.result) {
         print_success(&format!("Found {} results", result.total));
@@ -566,7 +550,7 @@ pub async fn execute_fold_with_client(
     file_name: Option<&str>,
     max_tokens: Option<usize>,
     mode: Option<&str>,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
 ) -> Result<()> {
     let request = FoldRequest {
@@ -579,7 +563,7 @@ pub async fn execute_fold_with_client(
     if verbose {
         println!("Folding file...");
     }
-    let response: FoldResponse = client.post(cce_api::paths::TOOLS_FOLD, &request).await?;
+    let response = client.fold(&request).await?;
     if response.success {
         print_success("Fold completed");
         println!();
@@ -591,7 +575,7 @@ pub async fn execute_fold_with_client(
 }
 
 pub async fn execute_fold_batch_with_client(
-    client: &SharedHttpClient,
+    client: &Client,
     params: &FoldBatchCliParams<'_>,
     verbose: bool,
 ) -> Result<()> {
@@ -618,9 +602,7 @@ pub async fn execute_fold_batch_with_client(
     if verbose {
         println!("Folding {} files...", params.items.len());
     }
-    let response: BatchFoldResponse = client
-        .post(cce_api::paths::TOOLS_FOLD_BATCH, &request)
-        .await?;
+    let response = client.fold_batch(&request).await?;
     print_success(&format!("Folded {} files", response.results.len()));
     Ok(())
 }

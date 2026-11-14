@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 /// Config reload query parameters
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ConfigReloadQuery {
     /// Project ID to reload (required)

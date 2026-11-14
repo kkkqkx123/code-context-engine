@@ -113,7 +113,7 @@ pub struct RetryQueueClearResponse {
 }
 
 /// Retry queue query parameters
-#[derive(Debug, Deserialize, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct RetryQueueQuery {
     /// Optional project ID to scope retry-queue operations to one project.

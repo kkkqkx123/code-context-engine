@@ -201,7 +201,7 @@ mod tests {
 
     /// Validate query syntax and return detailed error information
     fn validate_query_syntax(query_name: &str, query_str: &str) -> Result<(), String> {
-        let lang: tree_sitter::Language = tree_sitter_groovy::language();
+        let lang: tree_sitter::Language = tree_sitter_groovy::LANGUAGE.into();
         match Query::new(&lang, query_str) {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("Query '{query_name}' syntax error: {e:?}")),

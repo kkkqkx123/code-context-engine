@@ -4,8 +4,8 @@
     "title": "CCE API",
     "description": "Code context engine: indexing, search, relations and tool endpoints",
     "license": {
-      "name": "GPL-3.0-only",
-      "identifier": "GPL-3.0-only"
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
     },
     "version": "1.0.0"
   },
@@ -1633,13 +1633,10 @@
           {
             "name": "excluded_files",
             "in": "query",
-            "description": "Exact file paths to exclude",
+            "description": "Comma-separated exact file paths to exclude",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -2001,7 +1998,7 @@
         "tags": [
           "Project"
         ],
-        "summary": "Handle read merged project config request",
+        "summary": "Handle read stored project profile request",
         "operationId": "handle_get_project_config",
         "parameters": [
           {
@@ -2448,13 +2445,10 @@
           {
             "name": "excluded_files",
             "in": "query",
-            "description": "Exact file paths to exclude",
+            "description": "Comma-separated exact file paths to exclude",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -2605,13 +2599,10 @@
           {
             "name": "excluded_files",
             "in": "query",
-            "description": "Exact file paths to exclude",
+            "description": "Comma-separated exact file paths to exclude",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -4145,7 +4136,7 @@
           "Project"
         ],
         "summary": "Handle typed project LLM update request.",
-        "description": "Only project-effective chat and rerank fields are accepted. The update is\nvalidated, stored in memory and component caches are cleared without\ninvalidating the registry entry.",
+        "description": "Only project-effective chat and rerank selections are accepted. The update\nis validated and persisted as part of the project profile document, so a\nrestart keeps the values. Provider connection details and per-model\ntuning stay global and are rejected here.",
         "operationId": "handle_update_project_llm_config",
         "parameters": [
           {
@@ -9266,6 +9257,11 @@
           "staged"
         ],
         "properties": {
+          "deduped_chunks": {
+            "type": "integer",
+            "description": "Chunks already staged before this batch and skipped without rewrite.\nReplays report here instead of double-counting staged work, so\ndelivered versus indexed progress stays observable.",
+            "minimum": 0
+          },
           "errors": {
             "type": "array",
             "items": {
@@ -10154,7 +10150,7 @@
       },
       "ProjectConfigGetResponse": {
         "type": "object",
-        "description": "Response for reading the merged project configuration",
+        "description": "Response for reading the stored project profile",
         "required": [
           "success",
           "project_id",
@@ -10163,7 +10159,7 @@
         ],
         "properties": {
           "config": {
-            "description": "Merged runtime configuration (global defaults plus project overrides)"
+            "description": "Stored project profile (ProjectAppConfig as JSON), not the merged\nruntime configuration. Combine with the global configuration to\nderive the effective values."
           },
           "config_version": {
             "type": "integer",
@@ -10214,7 +10210,7 @@
         ],
         "properties": {
           "config": {
-            "description": "Project-level configuration (partial config, free-form)"
+            "description": "Project profile document (ProjectAppConfig as JSON). Only\nproject-effective fields are accepted; global-only sections such as\n`server`, `database`, `logger`, `metrics`, `export`, `mcp`,\n`search`, `cache` or `symbol_resolution` are rejected."
           }
         }
       },
@@ -10227,6 +10223,12 @@
           "message"
         ],
         "properties": {
+          "config_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Combined profile/global version after the write. Advances when either\nthe profile or the global configuration changes. Observe the same\nvalue through GET.",
+            "minimum": 0
+          },
           "hot_reload_applied": {
             "type": "boolean"
           },
@@ -11386,11 +11388,16 @@
         "type": "object",
         "description": "Storage component status",
         "required": [
+          "backend",
           "connected",
           "item_count",
           "disk_usage_mb"
         ],
         "properties": {
+          "backend": {
+            "type": "string",
+            "description": "Active backend name (`local`, `qdrant`, `remote`, or `unconfigured`)"
+          },
           "connected": {
             "type": "boolean",
             "description": "Whether the storage is connected"
@@ -11519,7 +11526,7 @@
         "properties": {
           "query_type": {
             "type": "string",
-            "description": "Query type (vector, bm25, hybrid, summary)"
+            "description": "Query type (vector, bm25, hybrid)"
           },
           "text": {
             "type": "string",

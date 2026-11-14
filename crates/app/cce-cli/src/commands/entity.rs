@@ -6,15 +6,13 @@ use anyhow::Result;
 
 use crate::output::{print_error, print_output, print_success, truncate};
 use cce_api::models::{
-    CallChainResponse, CallPathResponse, ClassImplementationsResponse, ClassInheritanceResponse,
-    EntitySearchRequest, EntitySearchResponse, FunctionCallersResponse, FunctionCallsResponse,
-    FunctionDetailResponse,
+    CallChainDirectionParams, CallChainQueryParams, CallPathQuery, EntitySearchRequest,
 };
-use cce_transport::SharedHttpClient;
+use cce_client::Client;
 
 pub async fn execute_with_client(
     cmd: &EntityCommands,
-    client: &SharedHttpClient,
+    client: &Client,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
@@ -145,36 +143,37 @@ struct EntitySearchParams<'a> {
     kind: &'a Option<String>,
 }
 
-fn relation_filter_query(filter: &RelationFilterArgs) -> String {
-    let mut parts = vec![
-        format!("max_depth={}", filter.max_depth),
-        format!("limit={}", filter.limit),
-    ];
-    if let Some(offset) = filter.offset {
-        parts.push(format!("offset={offset}"));
+/// Wire parameters of the callee/caller queries.
+fn call_chain_params(filter: &RelationFilterArgs) -> CallChainQueryParams {
+    CallChainQueryParams {
+        max_depth: filter.max_depth,
+        offset: filter.offset,
+        limit: filter.limit,
+        exclude_tests: filter.exclude_tests,
+        directory_prefix: filter.directory_prefix.clone(),
+        excluded_files: filter.excluded_files.clone(),
+        domains: filter.domains.clone(),
+        include_external: filter.include_external.unwrap_or(true),
     }
-    if let Some(exclude_tests) = filter.exclude_tests {
-        parts.push(format!("exclude_tests={exclude_tests}"));
+}
+
+/// Wire parameters of the directional call-chain query.
+fn direction_params(filter: &RelationFilterArgs, direction: &str) -> CallChainDirectionParams {
+    CallChainDirectionParams {
+        direction: direction.to_string(),
+        max_depth: filter.max_depth,
+        offset: filter.offset,
+        limit: filter.limit,
+        exclude_tests: filter.exclude_tests,
+        directory_prefix: filter.directory_prefix.clone(),
+        excluded_files: filter.excluded_files.clone(),
+        domains: filter.domains.clone(),
+        include_external: filter.include_external.unwrap_or(true),
     }
-    if let Some(prefix) = &filter.directory_prefix {
-        parts.push(format!("directory_prefix={}", urlencoding::encode(prefix)));
-    }
-    if let Some(files) = &filter.excluded_files {
-        for file in files.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            parts.push(format!("excluded_files={}", urlencoding::encode(file)));
-        }
-    }
-    if let Some(domains) = &filter.domains {
-        parts.push(format!("domains={}", urlencoding::encode(domains)));
-    }
-    if let Some(include_external) = filter.include_external {
-        parts.push(format!("include_external={include_external}"));
-    }
-    parts.join("&")
 }
 
 async fn get_function(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     function_id: &str,
     verbose: bool,
@@ -183,13 +182,7 @@ async fn get_function(
         println!("Fetching function: {}", function_id);
     }
 
-    let path = cce_api::paths::FUNCTION_DETAIL_TEMPLATE
-        .replace(
-            cce_api::paths::PROJECT_ID_PLACEHOLDER,
-            &project_id.to_string(),
-        )
-        .replace("{id}", &urlencoding::encode(function_id));
-    let response: FunctionDetailResponse = client.get(&path).await?;
+    let response = client.function_detail(project_id, function_id).await?;
 
     if response.success {
         let func = &response.function;
@@ -227,7 +220,7 @@ async fn get_function(
 }
 
 async fn get_function_calls(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     function_id: &str,
     filter: &RelationFilterArgs,
@@ -237,14 +230,9 @@ async fn get_function_calls(
         println!("Fetching function calls: {}", function_id);
     }
 
-    let base = cce_api::paths::FUNCTION_CALLS_TEMPLATE
-        .replace(
-            cce_api::paths::PROJECT_ID_PLACEHOLDER,
-            &project_id.to_string(),
-        )
-        .replace("{id}", &urlencoding::encode(function_id));
-    let path = format!("{}?{}", base, relation_filter_query(filter));
-    let response: FunctionCallsResponse = client.get(&path).await?;
+    let response = client
+        .function_calls(project_id, function_id, &call_chain_params(filter))
+        .await?;
 
     if response.success {
         print_success(&format!(
@@ -273,7 +261,7 @@ async fn get_function_calls(
 }
 
 async fn get_function_callers(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     function_id: &str,
     filter: &RelationFilterArgs,
@@ -283,14 +271,9 @@ async fn get_function_callers(
         println!("Fetching function callers: {}", function_id);
     }
 
-    let base = cce_api::paths::FUNCTION_CALLERS_TEMPLATE
-        .replace(
-            cce_api::paths::PROJECT_ID_PLACEHOLDER,
-            &project_id.to_string(),
-        )
-        .replace("{id}", &urlencoding::encode(function_id));
-    let path = format!("{}?{}", base, relation_filter_query(filter));
-    let response: FunctionCallersResponse = client.get(&path).await?;
+    let response = client
+        .function_callers(project_id, function_id, &call_chain_params(filter))
+        .await?;
 
     if response.success {
         print_success(&format!(
@@ -319,7 +302,7 @@ async fn get_function_callers(
 }
 
 async fn get_call_chain(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     function_id: &str,
     direction: &str,
@@ -333,19 +316,13 @@ async fn get_call_chain(
         );
     }
 
-    let base = cce_api::paths::CALL_CHAIN_TEMPLATE
-        .replace(
-            cce_api::paths::PROJECT_ID_PLACEHOLDER,
-            &project_id.to_string(),
+    let response = client
+        .call_chain(
+            project_id,
+            function_id,
+            &direction_params(filter, direction),
         )
-        .replace("{id}", &urlencoding::encode(function_id));
-    let path = format!(
-        "{}?direction={}&{}",
-        base,
-        urlencoding::encode(direction),
-        relation_filter_query(filter)
-    );
-    let response: CallChainResponse = client.get(&path).await?;
+        .await?;
 
     if response.success {
         print_success(&format!(
@@ -380,7 +357,7 @@ async fn get_call_chain(
 }
 
 async fn get_call_path(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     from: &str,
     to: &str,
@@ -394,18 +371,12 @@ async fn get_call_path(
         );
     }
 
-    let base = cce_api::paths::CALL_PATH_TEMPLATE.replace(
-        cce_api::paths::PROJECT_ID_PLACEHOLDER,
-        &project_id.to_string(),
-    );
-    let path = format!(
-        "{}?start_id={}&end_id={}&max_depth={}",
-        base,
-        urlencoding::encode(from),
-        urlencoding::encode(to),
-        depth
-    );
-    let response: CallPathResponse = client.get(&path).await?;
+    let query = CallPathQuery {
+        start_id: from.to_string(),
+        end_id: to.to_string(),
+        max_depth: depth,
+    };
+    let response = client.call_path(project_id, &query).await?;
 
     if response.success {
         if response.path_found {
@@ -434,7 +405,7 @@ async fn get_call_path(
 }
 
 async fn get_class_inheritance(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     class_id: &str,
     verbose: bool,
@@ -443,13 +414,7 @@ async fn get_class_inheritance(
         println!("Fetching class inheritance: {}", class_id);
     }
 
-    let path = cce_api::paths::CLASS_INHERITANCE_TEMPLATE
-        .replace(
-            cce_api::paths::PROJECT_ID_PLACEHOLDER,
-            &project_id.to_string(),
-        )
-        .replace("{id}", &urlencoding::encode(class_id));
-    let response: ClassInheritanceResponse = client.get(&path).await?;
+    let response = client.class_inheritance(project_id, class_id).await?;
 
     if response.success {
         print_success(&format!("Class: {}", response.class_name));
@@ -490,7 +455,7 @@ async fn get_class_inheritance(
 }
 
 async fn get_class_implementations(
-    client: &SharedHttpClient,
+    client: &Client,
     project_id: i64,
     class_id: &str,
     verbose: bool,
@@ -499,13 +464,7 @@ async fn get_class_implementations(
         println!("Fetching class implementations: {}", class_id);
     }
 
-    let path = cce_api::paths::CLASS_IMPLEMENTATIONS_TEMPLATE
-        .replace(
-            cce_api::paths::PROJECT_ID_PLACEHOLDER,
-            &project_id.to_string(),
-        )
-        .replace("{id}", &urlencoding::encode(class_id));
-    let response: ClassImplementationsResponse = client.get(&path).await?;
+    let response = client.class_implementations(project_id, class_id).await?;
 
     if response.success {
         print_success(&format!("Class: {}", response.class_name));
@@ -544,7 +503,7 @@ async fn get_class_implementations(
 }
 
 async fn search_entities(
-    client: &SharedHttpClient,
+    client: &Client,
     search: &EntitySearchParams<'_>,
     verbose: bool,
     format: crate::cli::OutputFormat,
@@ -561,8 +520,7 @@ async fn search_entities(
         println!("Searching entities: {}", search.query);
     }
 
-    let response: EntitySearchResponse =
-        client.post(cce_api::paths::ENTITY_SEARCH, &request).await?;
+    let response = client.entity_search(&request).await?;
 
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);

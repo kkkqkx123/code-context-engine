@@ -142,8 +142,14 @@ struct AdmissionApiDoc;
 /// Assemble the full document: base paths plus gateway/admission paths in
 /// admission builds.
 fn build_api_doc() -> utoipa::openapi::OpenApi {
-    let mut doc = BaseApiDoc::openapi();
+    let doc = BaseApiDoc::openapi();
     #[cfg(feature = "admission")]
+    let doc = merge_admission(doc);
+    doc
+}
+
+#[cfg(feature = "admission")]
+fn merge_admission(mut doc: utoipa::openapi::OpenApi) -> utoipa::openapi::OpenApi {
     doc.merge(AdmissionApiDoc::openapi());
     doc
 }

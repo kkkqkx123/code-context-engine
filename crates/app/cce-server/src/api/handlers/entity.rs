@@ -10,6 +10,7 @@
 pub mod calls;
 pub mod classification;
 pub mod detail;
+pub mod filter;
 pub mod relation;
 pub mod seed;
 

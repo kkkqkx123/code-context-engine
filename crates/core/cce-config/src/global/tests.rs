@@ -128,7 +128,11 @@ fn test_validate_dependencies_no_warnings() {
 
 #[test]
 fn test_validate_dependencies_local_backend_qdrant_notice() {
-    let config = AppConfig::default();
+    let mut config = AppConfig::default();
+    // The indexer stores BM25 by default, so the backend has to be enabled to
+    // keep this case focused on the local-backend notice; enabling it is what
+    // dependency resolution would do anyway.
+    config.database.bm25.enabled = true;
     assert!(config.database.is_local_vector());
 
     let warnings = config.validate_dependencies();

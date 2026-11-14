@@ -24,7 +24,8 @@ use std::fmt;
 ///
 /// // Check capabilities
 /// assert!(caps.has_vectors());
-/// assert!(!caps.has_relations());
+/// assert!(caps.has_bm25());
+/// assert!(caps.has_relations());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IndexCapabilities {

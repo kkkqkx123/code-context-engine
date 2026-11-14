@@ -176,7 +176,7 @@ pub fn get_tree_sitter_language(lang: &Language) -> Option<TsLanguage> {
         Language::Php => tree_sitter_php::LANGUAGE_PHP.into(),
         Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
         Language::Scala => tree_sitter_scala::LANGUAGE.into(),
-        Language::Groovy => tree_sitter_groovy::language(),
+        Language::Groovy => tree_sitter_groovy::LANGUAGE.into(),
         Language::Dart => tree_sitter_dart::LANGUAGE.into(),
 
         // Shell/Scripting languages
