@@ -192,7 +192,7 @@ impl OperationCoordinator {
 
         info!("Starting coordinator initialization with tracking");
 
-        // Phase 1: Loading Persisted Operations
+        // Load persisted operations
         final_phase = InitializationPhase::LoadingPersisted;
         match self.queue.load_persisted_active().await {
             Ok(Some(active)) => {
@@ -231,7 +231,7 @@ impl OperationCoordinator {
             });
         }
 
-        // Phase 2: Cleaning Stale Operations
+        // Drop stale operations
         final_phase = InitializationPhase::CleaningStale;
         match self
             .queue
@@ -276,7 +276,7 @@ impl OperationCoordinator {
             });
         }
 
-        // Phase 3: Recovering Unfinished Operations
+        // Recover unfinished operations
         final_phase = InitializationPhase::RecoveringUnfinished;
         match self.recover_unfinished_operations().await {
             Ok(count) => {

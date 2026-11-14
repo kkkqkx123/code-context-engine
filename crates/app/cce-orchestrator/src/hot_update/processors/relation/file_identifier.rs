@@ -1,14 +1,8 @@
-//! Relation index update processor
+//! Project file identification for the relation processor.
 //!
-//! This module handles updates to the relation index during hot updates.
-//! It also persists relation data to SQLite for fast cold start recovery.
-//!
-//! # Phase 3: Dependency Propagation
-//!
-//! This processor implements dependency propagation for hot updates:
-//! 1. When a file changes, find all files that depend on it
-//! 2. Collect all affected files (changed + dependents)
-//! 3. Process files in topological order (dependencies first)
+//! Resolves the project's own file set, computes the stable symbol
+//! fingerprint for a scope, and decides when a scope is too large for an
+//! incremental candidate.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

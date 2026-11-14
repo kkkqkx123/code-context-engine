@@ -329,7 +329,7 @@ fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
     let mut best: HashMap<String, SearchResult> = HashMap::new();
     let mut unkeyed = Vec::new();
     for item in results {
-        let Some(key) = crate::query::retrieval::post_processing::fusion::unified_dedup_key(&item)
+        let Some(key) = crate::query::retrieval::primitives::fusion::unified_dedup_key(&item)
         else {
             unkeyed.push(item);
             continue;

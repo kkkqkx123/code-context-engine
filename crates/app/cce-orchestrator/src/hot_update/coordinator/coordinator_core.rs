@@ -817,7 +817,7 @@ impl HotUpdateCoordinator {
                     continue;
                 }
 
-                // Phase 2: run the operation without the coordinator lock.
+                // Run the operation without holding the coordinator lock.
                 let operation = coordinator.lock().await.operation.clone();
                 let runtime = operation.lock().await;
                 let mut ctx = match runtime.begin_operation(OperationType::HotUpdate).await {

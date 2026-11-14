@@ -8,7 +8,7 @@
 
 ## 概述
 
-Code Context Engine 提供了一组 RESTful API，用于代码索引、搜索、查询和管理。API 服务器基于 Axum 框架实现，所有业务逻辑位于 orchestrator 层。
+Code Context Engine 提供了一组 RESTful API，用于代码索引、搜索、查询和管理。API 服务器基于 Axum 框架实现。归属分三段：handler 只做线参数校验与响应映射，跨传输共用的用例在 `cce-server-shared` 的应用服务层，索引与查询的流程编排在 `cce-orchestrator`。
 
 ## 基础信息
 

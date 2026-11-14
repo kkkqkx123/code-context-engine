@@ -1,14 +1,8 @@
-//! Relation index update processor
+//! External package discovery for the relation processor.
 //!
-//! This module handles updates to the relation index during hot updates.
-//! It also persists relation data to SQLite for fast cold start recovery.
-//!
-//! # Phase 3: Dependency Propagation
-//!
-//! This processor implements dependency propagation for hot updates:
-//! 1. When a file changes, find all files that depend on it
-//! 2. Collect all affected files (changed + dependents)
-//! 3. Process files in topological order (dependencies first)
+//! Collects the package names declared by each language's manifest so
+//! unresolved imports can be attributed to external dependencies instead of
+//! being reported as missing local symbols.
 
 use std::collections::{HashMap, HashSet};
 

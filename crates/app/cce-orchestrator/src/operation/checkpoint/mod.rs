@@ -795,7 +795,7 @@ mod tests {
             .await
             .expect("batch checkpoint created");
 
-        // Phase 1: parse checkpoint write (INSERT branch).
+        // Parse-checkpoint write path.
         let mut record = manager
             .create_file_checkpoint(operation_id, 0, "src/lib.rs")
             .await
@@ -811,7 +811,7 @@ mod tests {
             .await
             .expect("parse checkpoint saved");
 
-        // Phase 2: summary attach (COALESCE UPDATE branch).
+        // Summary attach path.
         let entries = [(
             "src/lib.rs".to_string(),
             cce_parser::summary::FileSummary::new("src/lib.rs").with_summary("entry"),

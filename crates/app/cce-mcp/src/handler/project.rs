@@ -8,7 +8,7 @@ use cce_orchestrator::IndexOptions;
 use cce_server_shared::context::SharedContext;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -53,30 +53,10 @@ pub struct ProjectArgs {
 
 /// Run the list projects tool call.
 pub async fn list_projects(state: &Arc<SharedContext>) -> Result<CallToolResult, rmcp::ErrorData> {
-    let Some(store) = state.engine.metadata_store() else {
-        return Ok(CallToolResult::error(vec![ContentBlock::text(
-            "metadata store is not configured; cannot list projects",
-        )]));
-    };
-    match store
-        .as_ref()
-        .with_transaction(|tx| cce_storage_metadb_sqlite::ProjectRepository::get_all(tx))
-    {
-        Ok(records) => {
-            let items: Vec<Value> = records
-                .iter()
-                .map(|record| {
-                    json!({
-                        "id": record.id,
-                        "name": record.name,
-                        "root_path": record.root_path,
-                    })
-                })
-                .collect();
-            Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({ "projects": items }).to_string(),
-            )]))
-        }
+    match cce_server_shared::services::project::list_projects(state) {
+        Ok(projects) => Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({ "projects": projects }).to_string(),
+        )])),
         Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
             "list_projects failed: {error}"
         ))])),

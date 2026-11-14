@@ -4,7 +4,6 @@
 //! and file watching. All interaction modes (CLI, HTTP, embedded library) should
 //! use this facade rather than assembling individual components manually.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -53,24 +52,6 @@ pub enum EngineError {
     Recovery(String),
 }
 
-/// Assembly target selecting which backends a build initializes.
-///
-/// Full keeps existing behavior for servers and local indexing. Retrieval
-/// keeps vector, fulltext, embedder, and metadata while skipping background
-/// aggregation. GraphOnly keeps metadata and relation dependencies while
-/// skipping aggregation and background probes; vector, fulltext, and
-/// embedder still construct locally but no background work starts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AssemblyProfile {
-    /// Server and local indexing behavior.
-    #[default]
-    Full,
-    /// Retrieval-only single tests without background aggregation.
-    Retrieval,
-    /// Graph-only single tests without aggregation or probes.
-    GraphOnly,
-}
-
 /// Code Context Engine - High-level facade
 ///
 /// Provides indexing, searching, and file watching capabilities through
@@ -81,9 +62,6 @@ pub struct CodeContextEngine {
     vector: VectorStore,
     fulltext: FulltextStore,
     embedder: Arc<OpenAICompatibleProvider>,
-
-    /// Assembly target this engine was built for.
-    assembly: AssemblyProfile,
 
     /// SQLite metadata store for persistent storage
     metadata_store: Option<Arc<SqliteClient>>,
@@ -158,11 +136,6 @@ impl CodeContextEngine {
         EngineBuilder::new()
     }
 
-    /// Assembly target this engine was built for.
-    pub fn assembly_profile(&self) -> AssemblyProfile {
-        self.assembly
-    }
-
     /// Get (or lazily create) the shared query result cache for a project.
     ///
     /// The returned clone shares the underlying store with every other
@@ -187,56 +160,12 @@ impl CodeContextEngine {
 
     /// Create engine from an already-initialized AppConfig
     pub async fn from_config(config: AppConfig) -> Result<Self, EngineError> {
-        // The passed config always drives this engine instance. The global
-        // singleton is only seeded when empty so unrelated readers keep a
-        // stable view; an existing global is never overwritten here.
-        if !Settings::is_initialized() {
-            Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))?;
-        } else {
-            tracing::warn!(
-                "Settings already initialized; from_config uses the passed config for this engine without overwriting the global"
-            );
-        }
-
-        Self::init_components(config).await
-    }
-
-    /// Create engine from a config file path
-    pub async fn from_config_file(path: &Path) -> Result<Self, EngineError> {
-        if !Settings::is_initialized() {
-            Settings::init_from_file(Some(path)).map_err(|e| EngineError::Config(e.to_string()))?;
-
-            let config = Settings::global()
-                .map_err(|e| EngineError::Config(e.to_string()))?
-                .clone();
-            return Self::init_components(config).await;
-        }
-
-        tracing::warn!(
-            path = %path.display(),
-            "Settings already initialized; from_config_file loads the file for this engine only"
-        );
-        let config = cce_config::ConfigLoader::new()
-            .with_path(path)
-            .load()
-            .map_err(|e| EngineError::Config(e.to_string()))?;
+        seed_settings(&config)?;
         Self::init_components(config).await
     }
 
     /// Initialize all components from config
-    async fn init_components(config: AppConfig) -> Result<Self, EngineError> {
-        Self::init_components_with_profile(config, AssemblyProfile::Full).await
-    }
-
-    /// Initialize components for one assembly target.
-    ///
-    /// Non-full profiles skip background aggregation and probe setup so
-    /// retrieval-only and graph-only tests assemble without background work.
-    /// Backend handles still construct so request paths keep one shape.
-    async fn init_components_with_profile(
-        mut config: AppConfig,
-        profile: AssemblyProfile,
-    ) -> Result<Self, EngineError> {
+    async fn init_components(mut config: AppConfig) -> Result<Self, EngineError> {
         // Resolve configuration dependencies (auto-enable required features)
         config.resolve_dependencies();
 
@@ -328,12 +257,8 @@ impl CodeContextEngine {
         let llm_health_metrics =
             cce_metrics::LlmHealthMetrics::new(&metrics_registry, &llm_provider_label);
 
-        // Create metrics aggregator (optional, can be disabled via config).
-        // Non-full assembly targets skip background aggregation entirely so
-        // retrieval-only and graph-only tests assemble without background work.
-        let metrics_aggregator = if config.metrics.aggregation.enabled
-            && matches!(profile, AssemblyProfile::Full)
-        {
+        // Create the metrics aggregator when aggregation is enabled.
+        let metrics_aggregator = if config.metrics.aggregation.enabled {
             let global = &config.metrics.aggregation;
             let agg_config = AggregationConfig {
                 interval_secs: global.interval_secs,
@@ -373,7 +298,6 @@ impl CodeContextEngine {
             vector,
             fulltext: fulltext_store,
             embedder,
-            assembly: profile,
             metadata_store,
             relation_store: relation_store_for_engine,
             orchestrator_cache: ProjectCache::new(),
@@ -398,129 +322,46 @@ impl CodeContextEngine {
     }
 }
 
-/// Engine builder for step-by-step configuration
+/// Engine builder for step-by-step configuration.
 pub struct EngineBuilder {
     config: Option<AppConfig>,
-    config_path: Option<std::path::PathBuf>,
-    qdrant_url: Option<String>,
-    bm25_url: Option<String>,
-    workspace: Option<String>,
-    profile: AssemblyProfile,
 }
 
 impl EngineBuilder {
-    /// Create a new engine builder
+    /// Create a new engine builder.
     pub fn new() -> Self {
-        Self {
-            config: None,
-            config_path: None,
-            qdrant_url: None,
-            bm25_url: None,
-            workspace: None,
-            profile: AssemblyProfile::Full,
-        }
+        Self { config: None }
     }
 
-    /// Set application config directly
+    /// Set the application config this engine assembles from.
     pub fn config(mut self, config: AppConfig) -> Self {
         self.config = Some(config);
         self
     }
 
-    /// Set config from file path
-    pub fn config_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.config_path = Some(path.into());
-        self
-    }
-
-    /// Override Qdrant URL
-    pub fn qdrant_url(mut self, url: impl Into<String>) -> Self {
-        self.qdrant_url = Some(url.into());
-        self
-    }
-
-    /// Override BM25 URL
-    pub fn bm25_url(mut self, url: impl Into<String>) -> Self {
-        self.bm25_url = Some(url.into());
-        self
-    }
-
-    /// Set workspace path (affects Qdrant collection naming)
-    pub fn workspace(mut self, path: impl Into<String>) -> Self {
-        self.workspace = Some(path.into());
-        self
-    }
-
-    /// Select the assembly target. Defaults to full server behavior.
-    pub fn profile(mut self, profile: AssemblyProfile) -> Self {
-        self.profile = profile;
-        self
-    }
-
-    /// Assemble for retrieval-only tests without background aggregation.
-    pub fn retrieval_only(mut self) -> Self {
-        self.profile = AssemblyProfile::Retrieval;
-        self
-    }
-
-    /// Assemble for graph-only tests without aggregation or probes.
-    pub fn graph_only(mut self) -> Self {
-        self.profile = AssemblyProfile::GraphOnly;
-        self
-    }
-
-    /// Build the engine
+    /// Build the engine from the supplied config.
     pub async fn build(self) -> Result<CodeContextEngine, EngineError> {
-        // The resolved config drives this engine instance only. Overrides
-        // below are per-engine and intentionally not written back to the
-        // global singleton.
-        let config = if let Some(config) = self.config {
-            if !Settings::is_initialized() {
-                Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))?;
-            } else {
-                tracing::warn!(
-                    "Settings already initialized; EngineBuilder uses the supplied config for this engine only"
-                );
-            }
-            config
-        } else if let Some(ref path) = self.config_path {
-            if !Settings::is_initialized() {
-                Settings::init_from_file(Some(path.as_path()))
-                    .map_err(|e| EngineError::Config(e.to_string()))?;
-                Settings::global()
-                    .map_err(|e| EngineError::Config(e.to_string()))?
-                    .clone()
-            } else {
-                tracing::warn!(
-                    path = %path.display(),
-                    "Settings already initialized; EngineBuilder loads the file for this engine only"
-                );
-                cce_config::ConfigLoader::new()
-                    .with_path(path.as_path())
-                    .load()
-                    .map_err(|e| EngineError::Config(e.to_string()))?
-            }
-        } else {
-            // Use default config
-            let config = AppConfig::default();
-            if !Settings::is_initialized() {
-                Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))?;
-            }
-            config
-        };
-
-        // Apply URL overrides
-        let mut effective_config = config;
-        if let Some(qdrant_url) = self.qdrant_url {
-            effective_config.database.vector_backend = cce_config::modules::VectorBackend::Qdrant;
-            effective_config.database.qdrant.url = qdrant_url;
-        }
-        if let Some(bm25_url) = self.bm25_url {
-            effective_config.database.bm25.index_path = Some(bm25_url);
-        }
-
-        CodeContextEngine::init_components_with_profile(effective_config, self.profile).await
+        let config = self.config.ok_or_else(|| {
+            EngineError::Config("engine builder requires an explicit config".to_string())
+        })?;
+        seed_settings(&config)?;
+        CodeContextEngine::init_components(config).await
     }
+}
+
+/// Seed the process-wide settings when empty.
+///
+/// The supplied config always drives the engine being built; an already
+/// initialized global is left untouched so unrelated readers keep a stable
+/// view.
+fn seed_settings(config: &AppConfig) -> Result<(), EngineError> {
+    if Settings::is_initialized() {
+        tracing::warn!(
+            "Settings already initialized; the supplied config applies to this engine only"
+        );
+        return Ok(());
+    }
+    Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))
 }
 
 impl Default for EngineBuilder {

@@ -1,4 +1,8 @@
-//! Post-processing modules for retrieval results.
+//! Result-shaping primitives shared by the retrieval strategies.
+//!
+//! Entity enrichment, hybrid fusion and path glob filtering are used after
+//! recall by every strategy; they are pure functions over result sets and
+//! hold no query state.
 
 pub mod entity_mapper;
 pub mod fusion;

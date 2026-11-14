@@ -1,60 +1,27 @@
-//! Update state tracking for lightweight eventual consistency (FILE-LEVEL ABSTRACTIONS)
+//! File-level update state tracking.
 //!
-//! # Module Responsibility
+//! Records, per file and per downstream module (relation, summary, embedding,
+//! BM25, export), whether that module's output is current, and carries the
+//! independent retry/backoff and dead-letter state for modules that failed
+//! permanently. The per-file version guard keeps an older update from
+//! overwriting a newer one.
 //!
-//! This module provides **file-level** abstractions for **detailed progress tracking**:
-//! - Defines file-level states for all operations (Full, Hot, Incremental)
-//! - Tracks per-module status (Relation, Summary, Embedding, Bm25, Export)
-//! - Implements independent module retries with exponential backoff
-//! - Supports dead-letter queue for permanently failed modules
-//! - Enforces version control (prevents old updates from overwriting new)
+//! Operation-level concerns (scheduling, the single active operation slot,
+//! checkpoint recovery) live in [`crate::operation`]. This module answers
+//! "what is the state of this file?", never "may this operation run?".
 //!
-//! # Key Difference from operation
-//!
-//! **index_state module** (this file):
-//! - ✓ File-level tracking: "What's the status of this file?"
-//! - ✓ Module independence: Each module has separate state and retries
-//! - ✓ Version control: Prevents concurrent update conflicts
-//! - ✓ Eventual consistency: Partial failures still allow queries
-//! - ✓ Used by: UpdateProcessor, module processors
-//! - ✓ Persistence: In-memory with DB sync for failures
-//!
-//! **operation module** (see `operation/context.rs`):
-//! - ✓ Operation-level management: "Can I run this operation?"
-//! - ✓ Global constraints: Only one active operation
-//! - ✓ Lifecycle management: Queued → Active → Completed
-//! - ✓ Coarse-grained: Progress is "X% of all files done"
-//! - ✓ Used by: OperationCoordinator, OperationQueue
-//! - ✓ Persistence: Checkpoint manager for recovery
-//!
-//! # When to Use
-//!
-//! Use **index_state** types when:
-//! - You need to check if a specific file/module is ready
-//! - You need to update module status individually
-//! - You need version control for the file
-//! - You need to determine if a file is queryable
-//!
-//! Use **operation** types when:
-//! - You need to check if an operation can be scheduled
-//! - You need to persist operation state across crashes
-//! - You need global constraints (prevent concurrent full-index)
-//!
-//! # Version Control Example
-//!
-//! ```text
-//! File version = 1: Relation ✓, Summary ✓, Embedding ✗, Bm25 ✓, Export ✓
-//! File version = 2: Relation ✗ (old update, ignored), Summary ✓, ...
-//!
-//! → Version 2's failure is recorded but doesn't affect version 1's state
-//! → Query can use version 1 (partially complete but consistent)
-//! ```
+//! Layout: this file holds the state types and the retry policy; the
+//! `tracker` module holds the in-memory tracker and its durable projection.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+
+mod tracker;
+
+pub use tracker::UpdateStateTracker;
 
 use crate::hot_update::FileChangeType;
 

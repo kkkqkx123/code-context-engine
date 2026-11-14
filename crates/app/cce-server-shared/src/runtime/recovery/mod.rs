@@ -355,7 +355,7 @@ impl StartupRecoveryCoordinator {
             ..Default::default()
         };
 
-        // Phase 1: Load project metadata
+        // Load project metadata
         let meta = ProjectMeta::load(self.manager.sqlite(), project_id)?;
         debug!(
             project_id = project_id,
@@ -365,7 +365,7 @@ impl StartupRecoveryCoordinator {
             "Loaded project metadata"
         );
 
-        // Phase 2: Classify files
+        // Classify files
         let classifications = self.manager.classify_files(project_id, &meta)?;
         result.files_classified = classifications.len();
 
@@ -395,14 +395,14 @@ impl StartupRecoveryCoordinator {
             "File classification completed"
         );
 
-        // Phase 3: Process modified files
+        // Process modified files
         if !reparse_files.is_empty() {
             result.files_reparsed = self
                 .process_reparse_files(project_id, reparse_files, orchestrator.clone())
                 .await?;
         }
 
-        // Phase 4: Process incomplete files
+        // Process incomplete files
         if !resync_files.is_empty() {
             result.files_resynced = self
                 .process_resync_files(project_id, resync_files, orchestrator.clone())
@@ -415,7 +415,7 @@ impl StartupRecoveryCoordinator {
                 .await?;
         }
 
-        // Phase 5: Collect relation index info
+        // Collect relation index info
         let relation_info = self.manager.collect_relation_info(project_id, &meta)?;
         result.entity_count = relation_info.entity_count;
         result.relation_count = relation_info.relation_count;

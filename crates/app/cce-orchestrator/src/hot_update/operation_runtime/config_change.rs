@@ -1,13 +1,13 @@
-//! Hot-update operation runtime.
+//! Configuration-change handling inside a hot-update operation.
 //!
-//! The background worker previously held the entire
-//! `Arc<Mutex<HotUpdateCoordinator>>` while running a complete operation
-//! (parse + embed + publish), blocking watch-status/stop-watch/mode-switch
-//! APIs for the whole operation duration. The operation-critical mutable
-//! state lives in this sub-component with its own mutex: the worker locks
-//! only the runtime while an operation runs, leaving the coordinator free
-//! for event accumulation, storm detection and configuration handling
-//! (those paths already run on cloned components and never contend here).
+//! A config file change can invalidate previously produced text and chunks,
+//! so this path re-runs the stages whose inputs the new configuration
+//! changes while reusing the parse results that are still valid.
+//!
+//! The operation-critical mutable state of a hot update lives here behind its
+//! own mutex. The background worker locks only this runtime while an
+//! operation runs, so the coordinator stays available for event
+//! accumulation, storm detection and configuration handling.
 
 use std::path::Path;
 

@@ -29,9 +29,8 @@ cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transf
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
 cce-config = { version = "0.1.0", path = "../../core/cce-config" }
 cce-logging = { version = "0.1.0", path = "../../core/cce-logging" }
-cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
-zstd = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+zstd = { workspace = true }

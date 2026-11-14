@@ -27,10 +27,18 @@ fn handler_factory(
 
 /// Initialize the shared engine state from an already-resolved configuration.
 ///
-/// Convenience for callers (e.g. the CLI) that only have an `AppConfig`.
+/// The engine goes through the shared lifecycle bootstrap, so an MCP process
+/// runs the same background tasks and startup recovery as the HTTP server.
 pub async fn build_state(config: cce_config::AppConfig) -> anyhow::Result<Arc<SharedContext>> {
     let engine = cce_server_shared::engine::CodeContextEngine::from_config(config).await?;
-    Ok(Arc::new(SharedContext::from_engine(&engine, None).await))
+    let cce_server_shared::runtime::Bootstrapped {
+        engine,
+        qdrant_control,
+        ..
+    } = cce_server_shared::runtime::bootstrap_engine(engine).await?;
+    Ok(Arc::new(
+        SharedContext::from_engine(engine.as_ref(), qdrant_control).await,
+    ))
 }
 
 /// Serve MCP over stdio, building the state from `config`.

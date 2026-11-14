@@ -62,8 +62,8 @@ pub async fn handle_project_index(
     // The effective scan parameters are decided inside the engine from the
     // merged registry configuration. Only the root path is passed here; scan
     // lists stay empty so the engine fills them from the effective config.
-    // The display view from `record_to_config` is intentionally not used:
-    // it reports registered values for presentation and must not drive
+    // The display view from `project_config_from_record` is intentionally not
+    // used: it reports registered values for presentation and must not drive
     // indexing behavior.
     let index_options = cce_orchestrator::IndexOptions::new(&record.root_path)
         .with_extensions(Vec::new())

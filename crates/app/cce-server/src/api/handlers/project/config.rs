@@ -20,6 +20,7 @@ use cce_config::global::AppConfig;
 use cce_config::project_registry::RegistryError;
 use cce_config::validation::Validate;
 use cce_llm::LlmClient;
+use cce_server_shared::services::project::reload_project_after_profile_change;
 
 /// Top-level keys that belong to the global configuration and must never be
 /// accepted as part of a project profile update.
@@ -143,41 +144,10 @@ pub async fn handle_update_project_config(
         }
     };
 
-    // 2. Clear stale component caches so orchestrators, searchers and
-    // coordinators are rebuilt from the freshly stored profile on next use.
-    // The registry entry repopulated by update_profile survives this.
-    state
-        .engine
-        .clear_project_component_caches(project_id)
-        .await;
+    // Rebuild per-project components from the stored profile and let the
+    // hot-update coordinator pick up the new configuration.
+    let hot_reload_success = reload_project_after_profile_change(&state, project_id).await;
 
-    // 3. Notify HotUpdateCoordinator to reload (if exists)
-    let mut hot_reload_success = true;
-    let engine = &state.engine;
-    match engine.get_hot_update_coordinator(project_id).await {
-        Ok(coordinator) => {
-            let mut coord = coordinator.lock().await;
-            if let Err(e) = coord.reload_project_config().await {
-                tracing::error!(
-                    project_id,
-                    error = %e,
-                    "Failed to reload HotUpdateCoordinator config after update"
-                );
-                hot_reload_success = false;
-                // Don't return error - main config was updated successfully
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                project_id,
-                error = %e,
-                "HotUpdateCoordinator not available, config updated but hot reload skipped"
-            );
-            hot_reload_success = false;
-        }
-    }
-
-    // 4. Return success response with hot reload status
     ApiResult::Success(ProjectConfigUpdateResponse {
         success: true,
         hot_reload_applied: hot_reload_success,
@@ -660,33 +630,7 @@ pub async fn handle_update_project_llm_config(
         }
     };
 
-    state
-        .engine
-        .clear_project_component_caches(project_id)
-        .await;
-
-    let mut hot_reload_applied = true;
-    match state.engine.get_hot_update_coordinator(project_id).await {
-        Ok(coordinator) => {
-            let mut coord = coordinator.lock().await;
-            if let Err(e) = coord.reload_project_config().await {
-                tracing::warn!(
-                    project_id,
-                    error = %e,
-                    "Hot-update reload failed after LLM config update"
-                );
-                hot_reload_applied = false;
-            }
-        }
-        Err(e) => {
-            tracing::debug!(
-                project_id,
-                error = %e,
-                "HotUpdateCoordinator not available after LLM config update"
-            );
-            hot_reload_applied = false;
-        }
-    }
+    let hot_reload_applied = reload_project_after_profile_change(&state, project_id).await;
 
     ApiResult::Success(ProjectLlmUpdateResponse {
         success: true,

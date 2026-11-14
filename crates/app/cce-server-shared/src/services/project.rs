@@ -1,14 +1,21 @@
-//! Shared project-creation orchestration for local and HTTP transports.
+//! Shared project use cases for the HTTP and MCP transports.
+//!
+//! Creation validates the requested root and persists the initial profile;
+//! reads project the stored rows onto the wire contract; profile changes
+//! invalidate the per-project components and ask the hot-update coordinator
+//! to reload so both transports observe the same behavior.
 
 use cce_api::models::{
-    CreateProjectRequest, SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, SUPPLY_MODE_LOCAL,
+    CreateProjectRequest, ProjectConfig, SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, SUPPLY_MODE_LOCAL,
 };
 use cce_config::ProjectAppConfig;
 use cce_storage_metadb_sqlite::{
-    NewProjectRecord, ProjectRepository, SqliteClient, generate_project_name,
+    NewProjectRecord, ProjectRecord, ProjectRepository, SqliteClient, generate_project_name,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use crate::context::SharedContext;
 
 /// Result of a successful project creation.
 #[derive(Debug, Clone)]
@@ -151,4 +158,146 @@ pub fn create_project(
         respect_gitignore: request.respect_gitignore,
         ignore_patterns: request.ignore_patterns.clone(),
     })
+}
+
+/// Failure of a project read or reload request.
+#[derive(Debug)]
+pub enum ProjectServiceError {
+    /// No metadata store is configured for this engine.
+    MetadataUnavailable,
+    /// The project row does not exist.
+    NotFound(i64),
+    /// Reading or writing the project row failed.
+    Storage(String),
+}
+
+impl std::fmt::Display for ProjectServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProjectServiceError::MetadataUnavailable => {
+                write!(f, "metadata store not initialized")
+            }
+            ProjectServiceError::NotFound(id) => write!(f, "project {id} not found"),
+            ProjectServiceError::Storage(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for ProjectServiceError {}
+
+/// Project every stored project row onto the wire view.
+pub fn list_projects(state: &SharedContext) -> Result<Vec<ProjectConfig>, ProjectServiceError> {
+    let store = state
+        .engine
+        .metadata_store()
+        .ok_or(ProjectServiceError::MetadataUnavailable)?;
+    let records = store
+        .as_ref()
+        .with_transaction(|tx| ProjectRepository::get_all(tx))
+        .map_err(|e| ProjectServiceError::Storage(format!("Failed to query projects: {e}")))?;
+    Ok(records.iter().map(project_config_from_record).collect())
+}
+
+/// Project one stored project row onto the wire view.
+pub fn get_project(
+    state: &SharedContext,
+    project_id: i64,
+) -> Result<ProjectConfig, ProjectServiceError> {
+    let store = state
+        .engine
+        .metadata_store()
+        .ok_or(ProjectServiceError::MetadataUnavailable)?;
+    let record = store
+        .as_ref()
+        .with_transaction(|tx| ProjectRepository::get_by_id(tx, project_id))
+        .map_err(|e| ProjectServiceError::Storage(format!("Failed to query project: {e}")))?
+        .ok_or(ProjectServiceError::NotFound(project_id))?;
+    Ok(project_config_from_record(&record))
+}
+
+/// Apply the side effects of a stored profile change.
+///
+/// Drops the per-project component caches so orchestrators, searchers and
+/// coordinators rebuild from the stored profile, then asks the hot-update
+/// coordinator to reload. Returns whether the hot reload took effect; the
+/// stored profile is authoritative either way.
+pub async fn reload_project_after_profile_change(state: &SharedContext, project_id: i64) -> bool {
+    state
+        .engine
+        .clear_project_component_caches(project_id)
+        .await;
+    match state.engine.get_hot_update_coordinator(project_id).await {
+        Ok(coordinator) => {
+            let mut coordinator = coordinator.lock().await;
+            match coordinator.reload_project_config().await {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::warn!(
+                        project_id,
+                        error = %e,
+                        "Hot-update reload failed after profile change"
+                    );
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            tracing::debug!(
+                project_id,
+                error = %e,
+                "Hot-update coordinator unavailable; profile changes apply on next start"
+            );
+            false
+        }
+    }
+}
+
+/// Convert a stored project row into the wire view.
+///
+/// This is a display and request-prefill view only. The profile document is
+/// the single source of truth for scan lists. A section absent from the
+/// profile is reported as empty so callers can tell that no explicit value
+/// was registered. Effective indexing values always come from the merged
+/// registry configuration, not from this view.
+pub fn project_config_from_record(record: &ProjectRecord) -> ProjectConfig {
+    let profile = ProjectAppConfig::from_json_str(&record.profile_json).ok();
+    let (extensions, exclude_dirs, respect_gitignore, ignore_patterns) = match profile {
+        Some(profile) => (
+            profile
+                .orchestrator
+                .as_ref()
+                .and_then(|orchestrator| orchestrator.indexer.as_ref())
+                .and_then(|indexer| indexer.extensions.clone())
+                .unwrap_or_default(),
+            profile
+                .orchestrator
+                .as_ref()
+                .and_then(|orchestrator| orchestrator.indexer.as_ref())
+                .and_then(|indexer| indexer.exclude_dirs.clone())
+                .unwrap_or_default(),
+            profile
+                .scanner
+                .as_ref()
+                .and_then(|scanner| scanner.respect_gitignore)
+                .unwrap_or(true),
+            profile
+                .scanner
+                .as_ref()
+                .and_then(|scanner| scanner.gitignore_patterns.clone())
+                .unwrap_or_default(),
+        ),
+        None => (Vec::new(), Vec::new(), true, Vec::new()),
+    };
+
+    ProjectConfig {
+        id: record.id.to_string(),
+        name: record.name.clone(),
+        root_path: record.root_path.clone(),
+        extensions,
+        exclude_dirs,
+        respect_gitignore,
+        ignore_patterns,
+        created_at: record.created_at.to_string(),
+        last_indexed: record.last_indexed.clone(),
+    }
 }

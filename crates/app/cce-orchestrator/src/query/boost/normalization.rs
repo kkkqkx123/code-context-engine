@@ -8,7 +8,7 @@
 
 pub use cce_config::modules::search::NormalizationStrategy;
 
-use crate::query::retrieval::post_processing::fusion::minmax_normalize as fusion_minmax;
+use crate::query::retrieval::primitives::fusion::minmax_normalize as fusion_minmax;
 
 /// Normalize scores using the specified strategy
 pub fn normalize_scores(

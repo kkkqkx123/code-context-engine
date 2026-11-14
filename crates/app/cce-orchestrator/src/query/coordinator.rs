@@ -699,8 +699,7 @@ impl QueryCoordinator {
                 let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
                 let mut unkeyed: Vec<crate::query::types::SearchResult> = Vec::new();
                 for item in all_results {
-                    let Some(key) =
-                        crate::query::retrieval::post_processing::unified_dedup_key(&item)
+                    let Some(key) = crate::query::retrieval::primitives::unified_dedup_key(&item)
                     else {
                         unkeyed.push(item);
                         continue;

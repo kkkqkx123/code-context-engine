@@ -4,12 +4,14 @@
 //! - **context**: Operation context and type definitions
 //! - **queue**: Operation queue and priority management
 //! - **checkpoint**: Checkpoint persistence and progress tracking
-//!   - **module_retry**: Module-level retry management with exponential backoff
-//!   - **file_diff**: File difference tracking for incremental updates
+//!   - **payload**: Versioned checkpoint payload encoding
+//! - **file_diff**: File difference tracking for incremental updates
 //! - **recovery**: Recovery from interrupted operations
 //! - **coordinator**: Central operation coordinator
+//! - **queue**: Serialized active/pending operation slots
 //! - **state**: Operation execution state tracking
-//! - **events**: Operation event system for real-time monitoring
+//! - **events** / **event_bus**: Operation event definitions and dispatch
+//! - **listener_priority**: Ordering of event listeners
 //! - **error_context**: Enhanced error diagnostics
 
 pub mod checkpoint;

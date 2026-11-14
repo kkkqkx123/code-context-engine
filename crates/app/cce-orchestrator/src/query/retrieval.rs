@@ -14,7 +14,7 @@
 //!     ├── dense.rs      # DenseStrategy - orchestrates core + embedder
 //!     └── strategy_enum.rs  # RecallAlgorithm enum and factory
 //!
-//! post_processing/   # Result processing and enhancement
+//! primitives/        # Filter, fusion and enrichment primitives
 //!     ├── fusion.rs         # Hybrid recall fusion
 //!     ├── glob_filter.rs    # Path-based filtering
 //!     └── entity_mapper.rs  # Entity enrichment from SQLite
@@ -36,7 +36,7 @@
 //!   fusion rather than consensus boosting, preserving score magnitude information.
 
 pub mod core;
-pub mod post_processing;
+pub mod primitives;
 pub mod strategies;
 
 // Re-export commonly used types from core for backward compatibility
@@ -44,4 +44,4 @@ pub use core::{DenseRetrieval, FilterOptions};
 
 pub use strategies::{RecallAlgorithm, RetrievalStrategy};
 
-pub use post_processing::{GlobFilter, HybridFusionConfig, fuse_hybrid_results, minmax_normalize};
+pub use primitives::{GlobFilter, HybridFusionConfig, fuse_hybrid_results, minmax_normalize};

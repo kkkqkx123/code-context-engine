@@ -24,7 +24,7 @@
 
 BM25 与向量路径之间的块级对齐在一般情况下不可解：BM25 按索引词条数切分，向量按 token 数切分，同一实体可能一侧产生 2 块、另一侧 3 块，二者之间没有确定性映射。
 
-实体级对齐绕开了这个问题：每条路径为同一对齐键贡献其最优块，融合在键粒度上合并分数。键推导的单一事实来源是 `cce_types::alignment_key`，融合层在 `query/retrieval/post_processing/fusion/aligner.rs`（crates/app/cce-orchestrator）中封装为 `alignment_key()` 并复用。
+实体级对齐绕开了这个问题：每条路径为同一对齐键贡献其最优块，融合在键粒度上合并分数。键推导的单一事实来源是 `cce_types::alignment_key`，融合层在 `query/retrieval/primitives/fusion/aligner.rs`（crates/app/cce-orchestrator）中封装为 `alignment_key()` 并复用。
 
 ## Entity 与 Segment
 
@@ -86,7 +86,7 @@ fused = (alpha * norm_v + beta * norm_bm25) / (alpha + beta)
 
 ## 多实体展开
 
-单个块可能包含多个实体（如含方法的类）。融合前这类块会被展开，使每个实体获得同分的独立条目，从而实现实体级对齐。实现已迁移至 `query/retrieval/post_processing/fusion/aligner.rs` 的 `expand_multi_entity_results`；`searcher_core.rs` 保留 `pub use` re-export 以维持历史导入路径。Searcher 在调用融合前对两条路径的结果执行展开。
+单个块可能包含多个实体（如含方法的类）。融合前这类块会被展开，使每个实体获得同分的独立条目，从而实现实体级对齐。实现已迁移至 `query/retrieval/primitives/fusion/aligner.rs` 的 `expand_multi_entity_results`；`searcher_core.rs` 保留 `pub use` re-export 以维持历史导入路径。Searcher 在调用融合前对两条路径的结果执行展开。
 
 ## 聚合检索去重
 

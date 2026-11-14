@@ -10,7 +10,10 @@ pub mod search;
 pub mod watch;
 
 pub use index::build_index_options;
-pub use project::{CreatedProject, ProjectCreateError, create_project};
+pub use project::{
+    CreatedProject, ProjectCreateError, ProjectServiceError, create_project, get_project,
+    list_projects, project_config_from_record, reload_project_after_profile_change,
+};
 pub use watch::{
     WatchStartError, WatchStatusError, WatchStopError, watch_start, watch_status, watch_stop,
 };

@@ -1,14 +1,14 @@
 //! Relation index update processor
 //!
-//! This module handles updates to the relation index during hot updates.
-//! It also persists relation data to SQLite for fast cold start recovery.
+//! This module holds the processor state and the per-file relation update
+//! entry: it reparses changed files, resolves their relations, and keeps the
+//! persisted relation rows in step with the in-memory index.
 //!
-//! # Phase 3: Dependency Propagation
+//! ## Dependency propagation
 //!
-//! This processor implements dependency propagation for hot updates:
-//! 1. When a file changes, find all files that depend on it
-//! 2. Collect all affected files (changed + dependents)
-//! 3. Process files in topological order (dependencies first)
+//! When enabled, a changed file also pulls in the files that depend on it:
+//! dependents are collected, then processed in topological order so a
+//! dependency is always updated before its dependents.
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
@@ -47,7 +47,7 @@ pub struct RelationUpdateProcessor {
     pub(crate) publisher: Option<Arc<dyn RelationSnapshotPublisher>>,
     /// Whether this processor is enabled
     pub(crate) enabled: bool,
-    /// Whether to enable dependency propagation (Phase 3)
+    /// Whether a changed file also pulls in the files that depend on it
     pub(crate) dependency_propagation_enabled: bool,
     /// Maximum depth for dependency propagation (0 = unlimited)
     pub(crate) max_propagation_depth: usize,

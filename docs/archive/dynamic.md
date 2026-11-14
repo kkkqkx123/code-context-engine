@@ -157,7 +157,7 @@ dynamic dispatch remains for LLM chat.
 **Status:** Resolved — dynamic dispatch removed; filtered out of this list.
 
 ### FusionAlgorithmImpl — Hybrid Fusion Algorithm Dispatch
-**File:** `crates/app/cce-orchestrator/src/query/retrieval/post_processing/fusion/merger.rs`
+**File:** `crates/app/cce-orchestrator/src/query/retrieval/primitives/fusion/merger.rs`
 
 ```rust
 pub trait FusionAlgorithmImpl {

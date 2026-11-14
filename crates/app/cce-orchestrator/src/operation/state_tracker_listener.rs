@@ -12,8 +12,8 @@ use std::sync::Arc;
 use super::event_bus::{EventListener, EventType};
 use super::events::OperationEvent;
 use super::listener_priority;
+use crate::index_state::UpdateStateTracker;
 use crate::index_state::{ModuleType, TrackerFailure};
-use crate::index_state_tracker::UpdateStateTracker;
 
 /// StateTracker adapter for event-driven architecture
 ///

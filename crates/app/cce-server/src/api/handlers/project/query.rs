@@ -4,11 +4,25 @@
 
 use axum::extract::{Path, State};
 
-use super::management::record_to_config;
 use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
 use cce_api::models::{ErrorResponse, ProjectDetailResponse, ProjectListResponse};
-use cce_storage_metadb_sqlite::ProjectRepository;
+use cce_server_shared::services::project::{ProjectServiceError, get_project, list_projects};
+
+/// Map a project service failure onto the HTTP error shape.
+fn project_error(error: ProjectServiceError) -> ErrorResponse {
+    match error {
+        ProjectServiceError::MetadataUnavailable => {
+            ErrorResponse::new(error_codes::STORAGE_ERROR, "Metadata store not initialized")
+        }
+        ProjectServiceError::NotFound(_) => {
+            ErrorResponse::new(error_codes::ENTITY_NOT_FOUND, "Project does not exist")
+        }
+        ProjectServiceError::Storage(message) => {
+            ErrorResponse::new(error_codes::STORAGE_ERROR, message)
+        }
+    }
+}
 
 /// Handle list all projects request
 #[utoipa::path(
@@ -23,33 +37,10 @@ use cce_storage_metadb_sqlite::ProjectRepository;
 pub async fn handle_list_projects(
     State(state): State<cce_server_shared::context::SharedContext>,
 ) -> ApiResult<ProjectListResponse> {
-    // Check if metadata store is available
-    let metadata_store = match state.engine.metadata_store() {
-        Some(s) => s,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                "Metadata store not initialized",
-            ));
-        }
+    let projects = match list_projects(&state) {
+        Ok(projects) => projects,
+        Err(error) => return ApiResult::Error(project_error(error)),
     };
-
-    // Get all projects
-    let records = match metadata_store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::get_all(tx))
-    {
-        Ok(r) => r,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to query project: {}", e),
-            ));
-        }
-    };
-
-    // Convert to ProjectConfig
-    let projects: Vec<_> = records.iter().map(record_to_config).collect();
 
     let total = projects.len();
 
@@ -75,38 +66,10 @@ pub async fn handle_get_project(
     State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectDetailResponse> {
-    // Check if metadata store is available
-    let metadata_store = match state.engine.metadata_store() {
-        Some(s) => s,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                "Metadata store not initialized",
-            ));
-        }
+    let project = match get_project(&state, id) {
+        Ok(project) => project,
+        Err(error) => return ApiResult::Error(project_error(error)),
     };
-
-    let record = match metadata_store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::get_by_id(tx, id))
-    {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::ENTITY_NOT_FOUND,
-                "Project does not exist",
-            ));
-        }
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to query project: {}", e),
-            ));
-        }
-    };
-
-    // Convert to ProjectConfig
-    let project = record_to_config(&record);
 
     ApiResult::Success(ProjectDetailResponse {
         success: true,

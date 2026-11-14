@@ -11,7 +11,7 @@
 
 - `strategies/`：策略枚举与具体策略（`dense.rs`、`bm25.rs`、`strategy_enum.rs`）。
 - `core/`：底层无状态检索实现，直接对接存储后端（`core.rs:1-5`）。`core/dense.rs` 提供 `DenseRetrieval`，`core/vector.rs` 提供 `FilterOptions`。
-- `post_processing/fusion/`：融合层，负责将多条召回路径的结果合并为最终候选。
+- `primitives/fusion/`：融合层，负责将多条召回路径的结果合并为最终候选。
 
 ## 2. 策略枚举与执行入口
 
@@ -38,7 +38,7 @@
 
 存储后端不解析 glob 模式，因此当查询带有 include/exclude glob 模式时，策略按 `GLOB_OVER_FETCH_FACTOR = 3` 超取（至少 `top_k + 20`），本地过滤后再截断回 `top_k`（`dense.rs:63-73`，常量定义于 `dense.rs:119-123`）。内容类型排除是已建索引的标记，由存储侧下推执行，不需要超取（`dense.rs:64-66`）。
 
-本地过滤由 `apply_strategy_filters` 完成（`dense.rs:130-148`）：复用 `post_processing::GlobFilter` 做 glob 过滤，保持原有排序并截断到 limit。
+本地过滤由 `apply_strategy_filters` 完成（`dense.rs:130-148`）：复用 `primitives::GlobFilter` 做 glob 过滤，保持原有排序并截断到 limit。
 
 ## 4. BM25 策略（关键词检索）
 
@@ -66,7 +66,7 @@
 
 ## 5. 与融合层（fusion）的关系
 
-**hybrid 不是独立的第三种策略**。策略层只提供 dense 与 bm25 两条独立召回路径；"hybrid" 是融合层对这两路结果的对齐合并（见 `post_processing/fusion.rs:1-11` 的模块文档）：
+**hybrid 不是独立的第三种策略**。策略层只提供 dense 与 bm25 两条独立召回路径；"hybrid" 是融合层对这两路结果的对齐合并（见 `primitives/fusion.rs:1-11` 的模块文档）：
 
 - 融合在对齐键（alignment key）级别进行：优先 entity id，其次 segment id，再次 chunk id。
 - 融合算法由配置 `[search.fusion]` 中的 `RecallFusionAlgorithm` 决定：归一化加权求和（默认）、RRF（倒数排名融合）或权重感知 Borda 计数。
@@ -88,7 +88,7 @@ RetrievalStrategy (enum, static dispatch)
    │                 └─> DenseRetrieval (core) ──> VectorStore.search_dense
    └── Bm25Strategy  ───────────────────────────> FulltextStore.search
         │
-   post_processing::GlobFilter（本地 glob / 阈值 / 前缀过滤）
+   primitives::GlobFilter（本地 glob / 阈值 / 前缀过滤）
         │
    fusion::fuse_hybrid_results（hybrid 模式下合并两路）
 ```

@@ -1,13 +1,13 @@
-//! Hot-update operation runtime.
+//! Durable state transitions of a hot-update operation.
 //!
-//! The background worker previously held the entire
-//! `Arc<Mutex<HotUpdateCoordinator>>` while running a complete operation
-//! (parse + embed + publish), blocking watch-status/stop-watch/mode-switch
-//! APIs for the whole operation duration. The operation-critical mutable
-//! state lives in this sub-component with its own mutex: the worker locks
-//! only the runtime while an operation runs, leaving the coordinator free
-//! for event accumulation, storm detection and configuration handling
-//! (those paths already run on cloned components and never contend here).
+//! Advances the per-file chunk rows, the index manifest and the operation
+//! checkpoint as the operation completes its stages, so a crash leaves a
+//! resumable snapshot rather than a half-applied batch.
+//!
+//! The operation-critical mutable state of a hot update lives here behind its
+//! own mutex. The background worker locks only this runtime while an
+//! operation runs, so the coordinator stays available for event
+//! accumulation, storm detection and configuration handling.
 
 use std::path::{Path, PathBuf};
 

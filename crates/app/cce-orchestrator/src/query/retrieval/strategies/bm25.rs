@@ -164,7 +164,7 @@ fn apply_bm25_strategy_filters(
     options: &QueryOptions,
     limit: usize,
 ) -> Vec<SearchResult> {
-    use crate::query::retrieval::post_processing::GlobFilter;
+    use crate::query::retrieval::primitives::GlobFilter;
     // Recall-side cost valve in the raw term-weight domain: candidates
     // below the floor never reach fusion. Disabled at the default 0.0.
     let floor = options.config.bm25.term_weight_threshold;

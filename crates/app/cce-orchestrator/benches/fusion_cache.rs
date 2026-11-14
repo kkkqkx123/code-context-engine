@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use cce_orchestrator::query::cache::{CacheConfig, QueryCache};
 use cce_orchestrator::query::filter::QueryFilter;
-use cce_orchestrator::query::retrieval::post_processing::fusion::{
+use cce_orchestrator::query::retrieval::primitives::fusion::{
     HybridFusionConfig, compute_alignment_coverage, expand_multi_entity_results,
     fuse_hybrid_results,
 };

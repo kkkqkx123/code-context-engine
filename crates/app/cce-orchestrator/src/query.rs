@@ -13,7 +13,7 @@
 //!     │   ├── Retrieval Strategies (retrieval/strategies: Dense, Bm25, Summary)
 //!     │   │   └── core/ = stateless storage access (Qdrant), strategies = orchestration
 //!     │   │
-//!     │   ├── Hybrid Fusion (retrieval/post_processing/fusion)
+//!     │   ├── Hybrid Fusion (retrieval/primitives/fusion)
 //!     │   │   └── entity-level alignment, selectable fusion algorithms
 //!     │   │       (config.search.fusion.algorithm)
 //!     │   │

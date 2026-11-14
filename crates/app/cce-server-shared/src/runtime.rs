@@ -1,3 +1,4 @@
+pub mod bootstrap;
 pub mod gc_worker;
 pub mod recovery;
 pub mod relation_publisher;
@@ -6,6 +7,7 @@ mod relation_publisher_tests;
 pub mod relation_runtime;
 pub mod startup;
 
+pub use bootstrap::{Bootstrapped, bootstrap_engine};
 pub use gc_worker::{GenerationGcWorker, GenerationGcWorkerConfig};
 pub use recovery::{
     FileClassification, FileState, ProjectMeta, RecoveryResult, StartupRecoveryCoordinator,

@@ -108,7 +108,7 @@ BM25 召回侧同样应用过滤：构造 `cce_storage_common::FulltextSearchOpt
 
 ## 5. Glob 过滤的位置与实现
 
-**文件**：`crates/app/cce-orchestrator/src/query/retrieval/post_processing/glob_filter.rs`
+**文件**：`crates/app/cce-orchestrator/src/query/retrieval/primitives/glob_filter.rs`
 
 `GlobFilter` 使用 `globset::GlobSet` 把所有模式编译为单个 DFA，对结果 `file_path` 执行匹配：
 

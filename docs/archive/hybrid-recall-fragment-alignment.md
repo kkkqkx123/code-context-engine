@@ -2,7 +2,7 @@
 
 ## 背景
 
-Hybrid 召回（`HybridRecall`）为默认召回方式：vector（Qdrant）与 BM25（tantivy）两条路并行召回，在实体级对齐键（代码块 `entity_id`、文档块 `segment_id`）上做 min-max 归一化 + 加权融合（`crates/cce_orchestrator/src/query/retrieval/post_processing/fusion.rs`）。
+Hybrid 召回（`HybridRecall`）为默认召回方式：vector（Qdrant）与 BM25（tantivy）两条路并行召回，在实体级对齐键（代码块 `entity_id`、文档块 `segment_id`）上做 min-max 归一化 + 加权融合（`crates/cce_orchestrator/src/query/retrieval/primitives/fusion.rs`）。
 
 针对"融合结果只保留 vector 路最佳分块、BM25 命中片段的内容被丢弃"的顾虑，曾评估一组片段级改进方案：
 
@@ -37,7 +37,7 @@ Hybrid 召回（`HybridRecall`）为默认召回方式：vector（Qdrant）与 B
 
 涉及代码位置：
 
-- 融合实现：`crates/cce_orchestrator/src/query/retrieval/post_processing/fusion.rs`
+- 融合实现：`crates/cce_orchestrator/src/query/retrieval/primitives/fusion.rs`
 - 多实体展开：`crates/cce_orchestrator/src/query/searcher.rs`（`expand_multi_entity_results`）
 - 碎片源覆盖：`crates/cce_parser/src/ast_to_nl/chunker/{chunk_builder.rs, source_coverage.rs, segment_limit.rs}`
 - 索引侧对齐字段写入：`crates/cce_orchestrator/src/index/storage_coordinator.rs`

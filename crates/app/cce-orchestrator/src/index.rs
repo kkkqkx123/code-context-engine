@@ -7,10 +7,15 @@
 //!
 //! - `options`: Indexing configuration options
 //! - `result`: Indexing result types
+//! - `file_indexer`: Deterministic file ordering and checkpoint-backed scanning
 //! - `file_processor`: File parsing and processing logic
 //! - `storage_coordinator`: Multi-backend storage coordination
 //! - `orchestrator`: Main indexing orchestrator
-//! - `resolution_pipeline`: Virtual relation resolution pipeline (Phase 2)
+//! - `vector_store`: Backend enums for vector, fulltext and relation storage
+//! - `relation_build_spool` / `export_spool`: On-disk staging for large builds
+//! - `relation_base_cache`: Materialized relation base reuse across publications
+//! - `relation_publisher`: Publication boundary implemented by the server
+//! - `resolution_pipeline`: Relation resolution pipeline
 
 mod export_spool;
 mod file_indexer;

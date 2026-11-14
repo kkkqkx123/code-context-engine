@@ -161,7 +161,7 @@ pub fn rank_file_paths(
 ) -> crate::query::error::Result<Vec<FileHit>> {
     let pattern = checked_query(query, limit)?;
     // Index rows already passed generation filtering; the query-side path
-    // 判定 still applies so both branches hide the same files. Ignore rules
+    // The same decision applies so both branches hide the same files. Ignore rules
     // are a live-filesystem concept and do not apply here.
     let candidates: Vec<String> = paths
         .iter()

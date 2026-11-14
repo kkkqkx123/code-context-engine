@@ -4,7 +4,7 @@
 //! ensuring that entity_id and segment_id are correctly propagated through
 //! the pipeline and that fusion correctly matches results across paths.
 
-use cce_orchestrator::query::retrieval::post_processing::fusion::{
+use cce_orchestrator::query::retrieval::primitives::fusion::{
     HybridFusionConfig, compute_alignment_coverage, fuse_hybrid_results,
 };
 use cce_orchestrator::query::types::SearchResult;

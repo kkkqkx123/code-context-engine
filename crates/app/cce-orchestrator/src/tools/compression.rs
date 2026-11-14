@@ -15,7 +15,7 @@ pub use self::types::{
     CompressionResponse, Result,
 };
 
-use crate::index_state_tracker::UpdateStateTracker;
+use crate::index_state::UpdateStateTracker;
 use cce_config::NestProcessorConfig;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::grouper::types::EntityGroup;

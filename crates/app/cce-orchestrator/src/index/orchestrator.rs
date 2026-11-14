@@ -62,7 +62,7 @@ use cce_types::OutputMode;
 
 use super::super::CheckpointManager;
 use super::super::error::OrchestratorError;
-use super::super::index_state_tracker::UpdateStateTracker;
+use super::super::index_state::UpdateStateTracker;
 use super::export_spool::ExportSpool;
 use super::file_indexer::FileIndexer;
 use super::file_processor::FileProcessor;
@@ -279,13 +279,13 @@ impl IndexOrchestrator {
         self
     }
 
-    /// Set fulltext backend via enum dispatch (phase-2 entry point).
+    /// Set the fulltext backend through the backend enum.
     pub fn with_fulltext_store(mut self, store: crate::index::vector_store::FulltextStore) -> Self {
         self.storage = self.storage.with_fulltext_store(store);
         self
     }
 
-    /// Set relation backend via enum dispatch (phase-2 entry point).
+    /// Set the relation backend through the backend enum.
     pub fn with_relation_store(
         mut self,
         store: crate::index::vector_store::RelationStore,

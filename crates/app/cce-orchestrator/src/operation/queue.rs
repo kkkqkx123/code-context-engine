@@ -245,7 +245,7 @@ impl OperationQueue {
     /// locks are released; if it fails, the in-memory reservation is rolled
     /// back so the operation is neither lost nor left permanently active.
     pub async fn dequeue(&self) -> Result<Option<PendingOperation>, StorageError> {
-        // Phase 1: check the active slot and pop the next pending operation.
+        // Claim the active slot and take the next pending operation.
         // The active slot is reserved in the same critical section so two
         // concurrent dequeues cannot both proceed.
         let next_op = {
@@ -281,7 +281,7 @@ impl OperationQueue {
             "Dequeueing operation from queue"
         );
 
-        // Phase 2: persist the active flag without holding either queue lock.
+        // Persist the active flag without holding either queue lock.
         // A failure rolls back the in-memory reservation made above.
         let persist_result: Result<(), StorageError> = (|| {
             let conn = self.db.write_connection()?;

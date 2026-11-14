@@ -24,13 +24,11 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "si
 axum = { workspace = true, features = ["macros"] }
 cce-admission = { version = "0.1.0", path = "../cce-admission", optional = true }
 base64 = { version = "0.22", optional = true }
-zstd = { version = "0.13", optional = true }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
 cce-logging = { version = "0.1.0", path = "../../core/cce-logging" }
 cce-config = { version = "0.1.0", path = "../../core/cce-config" }
 cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
-cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
 cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
 cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
@@ -38,19 +36,13 @@ cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
 cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
 cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
-cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage-vector-qdrant" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-server-shared = { version = "0.1.0", path = "../cce-server-shared" }
-async-trait = { workspace = true }
-globset = { workspace = true }
-moka = { workspace = true }
 rusqlite = { workspace = true }
 chrono = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -62,9 +54,9 @@ harness = false
 
 [features]
 default = []
-# Remote hosting shape: admission middleware, gateway ingest entries, and
-# their transport helpers. The default build excludes all of them.
-admission = ["dep:cce-admission", "dep:base64", "dep:zstd"]
+# Remote hosting shape: admission middleware and gateway ingest entries. The
+# default build excludes both.
+admission = ["dep:cce-admission", "dep:base64"]
 # Lua/native plugin overrides for BM25/embedding generation and file
 # filtering (`.cce/plugins.json`). Opt-in: the scripting runtime (mlua,
 # libloading) is excluded from the default build and test closure.

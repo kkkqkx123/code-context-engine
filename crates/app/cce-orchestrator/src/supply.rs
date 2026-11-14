@@ -14,7 +14,7 @@ use cce_scanner::FileContentPayload;
 pub enum IngestSupplyMode {
     /// Stage under the project mirror, then index from disk.
     Mirror,
-    /// Consume ready payloads directly, bypassing mirror落盘.
+    /// Consume ready payloads directly, bypassing the mirror stage.
     Direct,
 }
 

@@ -219,7 +219,7 @@ impl ExpansionPathFilter {
             }
         }
         if !self.include_patterns.is_empty() || !self.exclude_patterns.is_empty() {
-            let filter = crate::query::retrieval::post_processing::GlobFilter::new();
+            let filter = crate::query::retrieval::primitives::GlobFilter::new();
             let probe = crate::query::types::SearchResult {
                 file_path: normalized.clone(),
                 ..Default::default()

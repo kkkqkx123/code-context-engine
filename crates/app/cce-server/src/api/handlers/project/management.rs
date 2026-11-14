@@ -13,6 +13,9 @@ use cce_api::models::{
     CreateProjectRequest, ErrorResponse, ProjectConfig, ProjectDeleteResponse,
     ProjectDetailResponse, UpdateProjectRequest,
 };
+use cce_server_shared::services::project::{
+    project_config_from_record, reload_project_after_profile_change,
+};
 use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 /// Handle create project request
@@ -254,12 +257,12 @@ pub async fn handle_update_project(
             format!("Failed to update project: {}", e),
         ));
     }
-    let _ = state.engine.clear_project_component_caches(id).await;
     let _ = state
         .engine
         .project_registry()
         .invalidate_cache(Some(id))
         .await;
+    reload_project_after_profile_change(&state, id).await;
     if let Some(supply_mode) = request.supply_mode.as_deref() {
         let normalized = supply_mode.trim().to_lowercase();
         if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
@@ -300,7 +303,7 @@ pub async fn handle_update_project(
     };
 
     // Convert to ProjectConfig
-    let project = record_to_config(&record);
+    let project = project_config_from_record(&record);
 
     ApiResult::Success(ProjectDetailResponse {
         success: true,
@@ -379,58 +382,4 @@ pub async fn handle_delete_project(
         message: "Project deleted successfully".to_string(),
         project_id: id,
     })
-}
-
-/// Convert ProjectRecord to ProjectConfig
-///
-/// This is a display and request-prefill view only. The profile document is
-/// the single source of truth for scan lists. A section absent from the
-/// profile is reported as empty so callers can tell that no explicit value
-/// was registered. Effective indexing values always come from the merged
-/// registry configuration, not from this view.
-pub(crate) fn record_to_config(
-    record: &cce_storage_metadb_sqlite::ProjectRecord,
-) -> cce_api::models::ProjectConfig {
-    use cce_api::models::ProjectConfig;
-
-    let profile = cce_config::ProjectAppConfig::from_json_str(&record.profile_json).ok();
-    let (extensions, exclude_dirs, respect_gitignore, ignore_patterns) = match profile {
-        Some(profile) => (
-            profile
-                .orchestrator
-                .as_ref()
-                .and_then(|orchestrator| orchestrator.indexer.as_ref())
-                .and_then(|indexer| indexer.extensions.clone())
-                .unwrap_or_default(),
-            profile
-                .orchestrator
-                .as_ref()
-                .and_then(|orchestrator| orchestrator.indexer.as_ref())
-                .and_then(|indexer| indexer.exclude_dirs.clone())
-                .unwrap_or_default(),
-            profile
-                .scanner
-                .as_ref()
-                .and_then(|scanner| scanner.respect_gitignore)
-                .unwrap_or(true),
-            profile
-                .scanner
-                .as_ref()
-                .and_then(|scanner| scanner.gitignore_patterns.clone())
-                .unwrap_or_default(),
-        ),
-        None => (Vec::new(), Vec::new(), true, Vec::new()),
-    };
-
-    ProjectConfig {
-        id: record.id.to_string(),
-        name: record.name.clone(),
-        root_path: record.root_path.clone(),
-        extensions,
-        exclude_dirs,
-        respect_gitignore,
-        ignore_patterns,
-        created_at: record.created_at.to_string(),
-        last_indexed: record.last_indexed.clone(),
-    }
 }

@@ -55,7 +55,7 @@ impl super::CodeContextEngine {
         self.fulltext.clone()
     }
 
-    /// Get the fulltext backend enum (phase-2 branch accessor).
+    /// Get the fulltext backend enum.
     pub fn fulltext_store(&self) -> FulltextStore {
         self.fulltext.clone()
     }

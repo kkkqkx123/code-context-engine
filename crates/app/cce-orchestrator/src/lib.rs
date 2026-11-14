@@ -5,8 +5,9 @@
 //! - **query**: Search and retrieval orchestration
 //! - **hot_update**: File watching and incremental update
 //! - **tools**: AST diagnosis, compression, symbol lookup
-//! - **index_state**: Index state tracking
-//! - **checkpoint**: Unified progress and checkpoint management for resumable operations
+//! - **index_state**: File-level update state and its tracker
+//! - **operation**: Operation scheduling, checkpoints and recovery
+//! - **export**: Natural-language document export
 
 pub mod export;
 pub mod export_processor;
@@ -15,7 +16,6 @@ pub mod operation;
 pub mod hot_update;
 pub mod index;
 pub mod index_state;
-pub mod index_state_tracker;
 pub mod query;
 pub mod supply;
 pub mod tools;
@@ -57,8 +57,6 @@ pub use index_state::{
     IndexPhase, IndexStateQuery, IndexStateReport, MAX_RETRY_COUNT, ModuleType, ModuleUpdateRecord,
     ModuleUpdateState, StateTrackerError, calculate_retry_delay,
 };
-
-pub use index_state_tracker::UpdateStateTracker;
 
 pub use tools::{
     AstDiagnosis, BatchCompressionRequest, BatchCompressionResponse, CompressionError,

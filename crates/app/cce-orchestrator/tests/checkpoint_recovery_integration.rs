@@ -1,11 +1,11 @@
 //! Checkpoint recovery integration tests
 //!
 //! Verifies checkpoint lifecycle and recovery semantics:
-//! - Phase 2.1: Checkpoint created before parsing covers the parsing window
-//! - Phase 2.2: Checkpoint write failures propagate as fatal errors
-//! - Phase 2.3: Batch checkpoint module flags update atomically with progression
+//! - A checkpoint created before parsing covers the parsing window
+//! - Checkpoint write failures propagate as fatal errors
+//! - Batch checkpoint module flags update atomically with progression
 //! - FK enforcement: checkpoint → checkpoint_batch → checkpoint_file ordering
-//! - Phase 5/12: Work unit checkpoint lifecycle and crash recovery
+//! - Work unit checkpoint lifecycle and crash recovery
 
 use cce_orchestrator::hot_update::progress::{
     MODULE_BM25, MODULE_EMBEDDING, persist_module_progress, read_module_progress,
@@ -80,7 +80,7 @@ fn test_checkpoint_fk_enforces_write_order() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2.1: Checkpoint covers the parsing window
+// A checkpoint written before parsing covers the parsing window
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -112,7 +112,7 @@ fn test_early_checkpoint_exists_before_parsing() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2.3: Batch checkpoint module flags update
+// Batch checkpoint module flags update atomically
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -212,7 +212,7 @@ fn test_update_current_batch_index_progression() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5/12: Work unit checkpoint lifecycle and crash recovery
+// Work unit checkpoint lifecycle and crash recovery
 // ---------------------------------------------------------------------------
 
 fn create_work_unit(

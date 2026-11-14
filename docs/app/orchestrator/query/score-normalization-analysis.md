@@ -14,7 +14,7 @@
 
 ### 当前方案：路径内 Min-Max 归一化（WeightedMinMaxFuser，默认算法）
 
-融合层实现在 `crates/app/cce-orchestrator/src/query/retrieval/post_processing/fusion/merger.rs` 的 `WeightedMinMaxFuser`。每条路径在对齐键粒度独立归一化到 [0, 1]，随后做**带归一除法**的加权和（约 343 行附近）：
+融合层实现在 `crates/app/cce-orchestrator/src/query/retrieval/primitives/fusion/merger.rs` 的 `WeightedMinMaxFuser`。每条路径在对齐键粒度独立归一化到 [0, 1]，随后做**带归一除法**的加权和（约 343 行附近）：
 
 ```text
 fused_score = (alpha * norm_vector + beta * norm_bm25) / (alpha + beta)

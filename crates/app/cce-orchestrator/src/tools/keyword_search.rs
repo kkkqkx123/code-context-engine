@@ -33,7 +33,7 @@ use std::sync::Arc;
 use crate::index::vector_store::{FulltextStore, RelationStore};
 use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
 
-use crate::query::retrieval::post_processing::{
+use crate::query::retrieval::primitives::{
     get_chunk_records_from_store, resolve_project_root_from_store,
 };
 use crate::tools::common::read_snippets_batch;

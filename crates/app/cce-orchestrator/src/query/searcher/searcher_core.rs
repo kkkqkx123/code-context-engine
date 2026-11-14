@@ -78,9 +78,9 @@ pub struct Searcher {
 ///
 /// Results with 0 or 1 entity_ids are passed through unchanged.
 ///
-/// Defined in `post_processing::fusion` (fusion enforces the expansion contract
+/// Defined in `primitives::fusion` (fusion enforces the expansion contract
 /// itself); re-exported here to keep the historical import path stable.
-pub use crate::query::retrieval::post_processing::fusion::expand_multi_entity_results;
+pub use crate::query::retrieval::primitives::fusion::expand_multi_entity_results;
 
 impl Searcher {
     /// Create a new searcher builder with a required project scope
@@ -288,7 +288,7 @@ impl Searcher {
         vector_weight: f32,
         bm25_weight: f32,
     ) -> Result<Vec<SearchResult>> {
-        use crate::query::retrieval::post_processing::{
+        use crate::query::retrieval::primitives::{
             HybridFusionConfig, fuse_hybrid_results_with_stats,
         };
         use crate::query::retrieval::strategies::RecallAlgorithm;
@@ -484,7 +484,7 @@ impl Searcher {
         query_filter: &QueryFilter,
         max_content_tokens: usize,
     ) {
-        use crate::query::retrieval::post_processing::{
+        use crate::query::retrieval::primitives::{
             enrich_results as enrich_results_batch, get_chunk_records_from_store,
             resolve_project_root_from_store,
         };
@@ -493,7 +493,7 @@ impl Searcher {
             return;
         }
         let Some(store) = &self.relation else {
-            crate::query::retrieval::post_processing::downgrade_empty_bodies(results);
+            crate::query::retrieval::primitives::downgrade_empty_bodies(results);
             return;
         };
         let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
@@ -501,12 +501,12 @@ impl Searcher {
             match get_chunk_records_from_store(store, &point_ids, project_id, query_filter).await {
                 Ok(Some(records)) => records,
                 Ok(None) => {
-                    crate::query::retrieval::post_processing::downgrade_empty_bodies(results);
+                    crate::query::retrieval::primitives::downgrade_empty_bodies(results);
                     return;
                 }
                 Err(e) => {
                     tracing::warn!("Chunk enrichment failed: {e}");
-                    crate::query::retrieval::post_processing::downgrade_empty_bodies(results);
+                    crate::query::retrieval::primitives::downgrade_empty_bodies(results);
                     return;
                 }
             };

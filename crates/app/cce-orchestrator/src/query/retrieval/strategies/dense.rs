@@ -132,7 +132,7 @@ fn apply_strategy_filters(
     options: &QueryOptions,
     limit: usize,
 ) -> Vec<crate::query::types::SearchResult> {
-    use crate::query::retrieval::post_processing::GlobFilter;
+    use crate::query::retrieval::primitives::GlobFilter;
     let filter = GlobFilter::new();
     let filtered = filter
         .apply(
