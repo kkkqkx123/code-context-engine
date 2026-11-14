@@ -40,7 +40,6 @@ use cce_types::{FileCategory, PointKind, TestSource, normalize_project_path};
 pub mod fulltext;
 pub mod ids;
 pub mod metadb;
-pub mod process;
 pub mod source;
 
 pub use fulltext::{
@@ -48,7 +47,6 @@ pub use fulltext::{
     TermOperator, assert_fulltext_storage,
 };
 pub use metadb::{MetadataStorage, assert_metadata_storage};
-pub use process::QdrantProcessStatus;
 
 /// Search filter options for vector retrieval.
 ///

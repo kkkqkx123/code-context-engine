@@ -128,6 +128,14 @@ fn write_failure(
 }
 
 impl ClientError {
+    /// Whether repeating the same call later may succeed without changes.
+    ///
+    /// This restates the classification: only calls without a usable answer
+    /// qualify. Callers still own retry timing and limits.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, ClientError::Unavailable { .. })
+    }
+
     /// Response status when the failure carried one.
     pub fn status(&self) -> Option<u16> {
         match self {
@@ -292,5 +300,40 @@ mod tests {
     fn empty_error_body_reports_absence() {
         let error = ClientError::from_failure(ApiMethod::Delete, "/api/index", 500, "   ");
         assert!(error.to_string().contains("empty response body"));
+    }
+
+    #[test]
+    fn only_calls_without_usable_answer_are_retryable() {
+        let unavailable = ClientError::from_failure(
+            ApiMethod::Get,
+            "/api/health",
+            503,
+            &body("SERVICE_UNAVAILABLE", "backend down"),
+        );
+        assert!(unavailable.is_retryable());
+
+        let unauthorized =
+            ClientError::from_failure(ApiMethod::Get, "/api/health", 401, &body("DENIED", "no"));
+        assert!(!unauthorized.is_retryable());
+
+        let rejected = ClientError::from_failure(
+            ApiMethod::Get,
+            "/api/project/7",
+            404,
+            &body("ENTITY_NOT_FOUND", "no such project"),
+        );
+        assert!(!rejected.is_retryable());
+
+        let config = ClientError::Config {
+            detail: "bad url".to_string(),
+        };
+        assert!(!config.is_retryable());
+
+        let protocol = ClientError::Protocol {
+            method: ApiMethod::Get,
+            path: "/api/health".to_string(),
+            detail: "bad shape".to_string(),
+        };
+        assert!(!protocol.is_retryable());
     }
 }

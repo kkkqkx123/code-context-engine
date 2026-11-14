@@ -105,6 +105,7 @@ async fn post_sends_the_wire_body_to_the_contract_path() {
     let requests = stub.requests();
     assert_eq!(requests[0].method, "POST");
     assert_eq!(requests[0].target, "/api/index");
+    assert_eq!(requests[0].user_agent.as_deref(), Some("cce-client"));
     let body: serde_json::Value =
         serde_json::from_str(&requests[0].body).expect("index body is JSON");
     assert_eq!(body["project_id"], 9);

@@ -101,6 +101,8 @@ impl Client {
             ),
         })?;
         let http = reqwest::Client::builder()
+            // Fixed identity for server-side diagnostics; never carries semantics.
+            .user_agent("cce-client")
             .build()
             .map_err(|source| ClientError::Config {
                 detail: format!("HTTP stack could not be initialized: {source}"),
@@ -434,6 +436,13 @@ mod tests {
                 .long_task_budget(),
             LONG_TASK_BUDGET
         );
+    }
+
+    #[test]
+    fn client_shares_across_tasks_and_apps() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Client>();
+        assert_send_sync::<ClientConfig>();
     }
 
     #[test]

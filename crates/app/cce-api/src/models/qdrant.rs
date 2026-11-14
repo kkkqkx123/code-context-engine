@@ -3,7 +3,35 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-pub use cce_storage_common::QdrantProcessStatus;
+/// Lifecycle status of the managed Qdrant subprocess.
+///
+/// This lives in the wire contract so every remote consumer sees the same
+/// shape the backend owns, without pulling in storage machinery.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(tag = "type", content = "message")]
+pub enum QdrantProcessStatus {
+    Idle,
+    Starting,
+    Running,
+    Stopping,
+    Crashed,
+    Stopped,
+    Failed(String),
+}
+
+impl std::fmt::Display for QdrantProcessStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QdrantProcessStatus::Idle => write!(f, "Idle"),
+            QdrantProcessStatus::Starting => write!(f, "Starting"),
+            QdrantProcessStatus::Running => write!(f, "Running"),
+            QdrantProcessStatus::Stopping => write!(f, "Stopping"),
+            QdrantProcessStatus::Crashed => write!(f, "Crashed"),
+            QdrantProcessStatus::Stopped => write!(f, "Stopped"),
+            QdrantProcessStatus::Failed(message) => write!(f, "Failed: {message}"),
+        }
+    }
+}
 
 /// Qdrant process status response
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

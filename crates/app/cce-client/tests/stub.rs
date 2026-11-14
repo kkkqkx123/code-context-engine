@@ -13,6 +13,7 @@ pub struct Recorded {
     pub method: String,
     pub target: String,
     pub authorization: Option<String>,
+    pub user_agent: Option<String>,
     pub body: String,
 }
 
@@ -82,6 +83,7 @@ impl Stub {
                 let target = parts.next().unwrap_or_default().to_string();
                 let mut content_length = 0usize;
                 let mut authorization = None;
+                let mut user_agent = None;
                 loop {
                     let mut line = String::new();
                     if reader.read_line(&mut line).is_err() {
@@ -98,6 +100,9 @@ impl Stub {
                         if name.trim().eq_ignore_ascii_case("authorization") {
                             authorization = Some(value.trim().to_string());
                         }
+                        if name.trim().eq_ignore_ascii_case("user-agent") {
+                            user_agent = Some(value.trim().to_string());
+                        }
                     }
                 }
                 let mut body = vec![0u8; content_length];
@@ -108,6 +113,7 @@ impl Stub {
                     method,
                     target,
                     authorization,
+                    user_agent,
                     body: String::from_utf8_lossy(&body).into_owned(),
                 });
 
