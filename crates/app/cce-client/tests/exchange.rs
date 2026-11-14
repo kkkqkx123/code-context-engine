@@ -6,7 +6,7 @@
 use cce_api::models::{EgoQuery, IndexRequest};
 use cce_client::{Client, ClientError};
 
-#[path = "stub/mod.rs"]
+#[path = "stub.rs"]
 mod stub;
 
 use stub::{Reply, Stub};
