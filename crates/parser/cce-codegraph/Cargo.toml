@@ -54,6 +54,7 @@ cce-parser-core = { version = "0.1.0", path = "../cce-parser-core" }
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
+cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
 cce-parser = { version = "0.1.0", path = "../cce-parser" }
 cce-parser-core = { version = "0.1.0", path = "../cce-parser-core" }
 cce-plugin-runtime = { version = "0.1.0", path = "../../app/cce-plugin-runtime" }

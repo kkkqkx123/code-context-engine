@@ -13,11 +13,10 @@
 //! `benches/results/layered_chain.tsv`.
 
 use std::collections::HashSet;
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+
+use cce_bench_kit::bench_ms;
 
 use cce_codegraph::index::{
     IndexBuilder, LayeredSnapshotIndex, RelationDeltaOps, RelationIndex, RelationSnapshotIndex,
@@ -134,15 +133,6 @@ fn build_index(file_count: usize, changed: Option<usize>) -> RelationIndex {
     builder.build()
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("layered_chain benchmark ({FILE_COUNT} files, chain 1..={MAX_CHAIN})");
     println!(
@@ -154,17 +144,11 @@ fn main() {
         "", "(ms)", "(ms)", "(ms)", ""
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/layered_chain.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# chain\tview_ms\tlookup_ms\tfingerprint_ms\tshould_compact"
-        );
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "layered_chain.tsv",
+        "# chain\tview_ms\tlookup_ms\tfingerprint_ms\tshould_compact",
+    );
 
     let base = build_index(FILE_COUNT, None);
     let base_snapshot = Arc::new(RelationSnapshotIndex::from_index_shared(&base));
@@ -199,11 +183,9 @@ fn main() {
         println!(
             "{chain:<8} {view_ms:>12.3} {lookup_ms:>12.4} {fingerprint_ms:>14.2} {compact:>10}"
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "{chain}\t{view_ms:.3}\t{lookup_ms:.4}\t{fingerprint_ms:.2}\t{compact}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "{chain}\t{view_ms:.3}\t{lookup_ms:.4}\t{fingerprint_ms:.2}\t{compact}"
+        );
     }
 }

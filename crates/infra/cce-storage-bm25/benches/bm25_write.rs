@@ -16,9 +16,7 @@
 //! complete inside the sandbox, so reduced-scale reruns stay comparable.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -121,7 +119,7 @@ fn query_jitter(manager: &IndexManager, schema: &cce_storage_bm25::IndexSchema) 
 /// Append one measured scenario to the results file next to this bench.
 #[allow(clippy::too_many_arguments)]
 fn record_row(
-    out: &mut Option<std::fs::File>,
+    out: &mut std::fs::File,
     scenario: &str,
     total_ms: f64,
     commits: usize,
@@ -130,14 +128,12 @@ fn record_row(
     p99_ms: Option<f64>,
     segments: usize,
 ) {
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "{scenario}\t{total_ms:.1}\t{commits}\t{docs_per_sec:.0}\t{}\t{}\t{segments}",
-            p50_ms.map_or_else(String::new, |v| format!("{v:.2}")),
-            p99_ms.map_or_else(String::new, |v| format!("{v:.2}")),
-        );
-    }
+    let _ = writeln!(
+        out,
+        "{scenario}\t{total_ms:.1}\t{commits}\t{docs_per_sec:.0}\t{}\t{}\t{segments}",
+        p50_ms.map_or_else(String::new, |v| format!("{v:.2}")),
+        p99_ms.map_or_else(String::new, |v| format!("{v:.2}")),
+    );
 }
 
 /// Wait until background segment merging stops shrinking the index, so the
@@ -167,20 +163,14 @@ fn main() {
         "scenario", "total_ms", "commits", "docs/s", "segments"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/bm25_write.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# scenario\ttotal_ms\tcommits\tdocs_per_sec\tp50_ms\tp99_ms\tsegments"
-        );
-        // The document count varies per run (`CCE_BENCH_BM25_DOCS`, default
-        // 20_000); rows below are meaningless without it, so record it.
-        let _ = writeln!(f, "# docs {n}");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "bm25_write.tsv",
+        "# scenario\ttotal_ms\tcommits\tdocs_per_sec\tp50_ms\tp99_ms\tsegments",
+    );
+    // The document count varies per run (`CCE_BENCH_BM25_DOCS`, default
+    // 20_000); rows below are meaningless without it, so record it.
+    let _ = writeln!(out, "# docs {n}");
 
     for per_commit in [1usize, 10, 50] {
         let dir = TempDir::new().expect("tempdir");

@@ -119,12 +119,11 @@ impl QueryCoordinatorBuilder {
         }
     }
 
-    /// Attach the local relation database.
+    /// Attach the relation backend via enum dispatch.
     ///
-    /// Local-only port: FTS5 entity search runs inside the embedded branch.
-    /// The handle is also forwarded to the searcher through the backend enum.
-    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
-        let store = RelationStore::local(sqlite);
+    /// Reads go through the relation contract; the handle is also forwarded
+    /// to the searcher through the backend enum.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
         self.relation = Some(store.clone());
         if let Some(builder) = self.searcher_builder.take() {
             self.searcher_builder = Some(builder.with_relation_store(store));
@@ -304,14 +303,6 @@ impl QueryCoordinator {
     /// on one retry path with the background retry processor.
     pub fn with_retry_queue(mut self, queue: Arc<RetryQueue>) -> Self {
         self.retry_queue = queue;
-        self
-    }
-
-    /// Attach the local relation database for FTS5 entity search.
-    ///
-    /// Local-only port: FTS5 entity search runs inside the embedded branch.
-    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
-        self.relation = Some(RelationStore::local(sqlite));
         self
     }
 

@@ -16,7 +16,6 @@
 //! `benches/results/hot_update_scaling.tsv` for trend tracking.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -165,18 +164,9 @@ fn main() {
         "", "(ms)", "(ms)", "(ms)", "(ms)"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/hot_update_scaling.tsv"),
-        )
-        .ok();
+    let mut out = cce_bench_kit::open_report(env!("CARGO_MANIFEST_DIR"), "hot_update_scaling.tsv");
     let mut write_row = |row: &str| {
-        if let Some(file) = out.as_mut() {
-            let _ = writeln!(file, "{row}");
-        }
+        let _ = writeln!(out, "{row}");
     };
     write_row("# files\tbuild_ms\tview_ms\tcompute_delta_ms\tapply_delta_ms");
 

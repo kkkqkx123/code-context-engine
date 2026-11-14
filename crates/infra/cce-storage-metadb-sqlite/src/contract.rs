@@ -9,10 +9,12 @@ use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDel
 use crate::SqliteClient;
 
 pub use cce_storage_common::metadb::{
-    AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, EntityDetailMapping,
-    EntityRecord, FileCheckpointRecord, FileRecord, GenerationOverride, OverrideDisposition,
-    ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord, RelationStorage,
-    WorkUnitCheckpointRecord, WorkUnitStatus, assert_relation_storage,
+    AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
+    ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileCheckpointRecord,
+    FileEnsureEntry, FileHashEntry, FileRecord, GenerationGcPlan, GenerationOverride,
+    IndexStateProjection, OverrideDisposition, ProjectIndexManifest, ProjectIndexManifestState,
+    ProjectRecord, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
+    assert_relation_storage, validate_checkpoint,
 };
 
 pub use crate::repo::{

@@ -12,25 +12,15 @@
 //! Results are printed to stdout and appended to
 //! `benches/results/inline_embedded.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::Instant;
 
+use cce_bench_kit::bench_ms;
 use cce_config::AstToNlConfig;
 use cce_parser::ast_to_nl::{AstToNlConverter, ChunkingConfig, ConversionRequest, GroupChunker};
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::parser::ParseCoordinator;
 use cce_types::OutputMode;
-
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
 
 fn rust_src(fns: usize) -> String {
     let mut s = String::new();
@@ -76,19 +66,14 @@ fn main() {
     println!("inline_embedded benchmark (debug, synthetic inputs)");
     println!("{:<30} {:>12} {:>12}", "case", "ms", "extra");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/inline_embedded.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# case\tms\textra");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "inline_embedded.tsv",
+        "# case\tms\textra",
+    );
     let mut row = |label: &str, ms: f64, extra: &str| {
         println!("{label:<30} {ms:>12.2} {extra:>12}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{label}\t{ms:.2}\t{extra}");
-        }
+        let _ = writeln!(out, "{label}\t{ms:.2}\t{extra}");
     };
 
     // Cold (fresh coordinator: grammar plus query init) versus warm

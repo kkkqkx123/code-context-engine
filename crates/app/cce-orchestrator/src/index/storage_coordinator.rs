@@ -29,7 +29,7 @@ use crate::CheckpointManager;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_common::RelationStorage;
 use cce_storage_vector_qdrant::QdrantClient;
 use cce_types::StorageError;
 
@@ -52,7 +52,7 @@ pub struct StorageCoordinator {
     vector: Option<VectorStore>,
     fulltext: Option<FulltextStore>,
     embedder: Option<Arc<OpenAICompatibleProvider>>,
-    metadata_store: Option<Arc<SqliteClient>>,
+    metadata_store: Option<RelationStore>,
     project_group_id: String,
     project_id: i64,
     /// Current epoch for version-aware storage
@@ -160,26 +160,20 @@ impl StorageCoordinator {
         self.embedding_stage_timeout_secs = secs;
     }
 
-    /// Set metadata store (local-only port).
+    /// Set metadata store through the backend enum.
     ///
-    /// Direct handle for write paths that require embedded-branch
-    /// capabilities such as explicit transactions and repositories.
-    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+    /// All metadata reads and writes go through the relation contract, so
+    /// both branches share one path and branch selection stays inside the
+    /// enum.
+    pub fn with_metadata_store(mut self, store: RelationStore) -> Self {
         self.metadata_store = Some(store);
         self
     }
 
     /// Set relation backend via enum dispatch.
-    ///
-    /// The metadata write path uses embedded-branch capabilities (explicit
-    /// transactions, repositories), which the only supported branch provides.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Result<Self, StorageError> {
-        match store {
-            RelationStore::Local(client) => {
-                self.metadata_store = Some(client);
-                Ok(self)
-            }
-        }
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.metadata_store = Some(store);
+        self
     }
 
     /// Relation backend name for logging.
@@ -247,12 +241,20 @@ impl StorageCoordinator {
     /// files (inheritance is a manifest link, not a copy), so regeneration
     /// sweeps must target the active generation. Returns `None` when the
     /// project was never indexed.
-    pub(crate) fn active_data_epoch(&self) -> Result<Option<i64>, OrchestratorError> {
-        let Some(client) = self.metadata_store.clone() else {
+    pub(crate) async fn active_data_epoch(&self) -> Result<Option<i64>, OrchestratorError> {
+        let Some(store) = self.metadata_store.clone() else {
             return Ok(None);
         };
-        cce_storage_metadb_sqlite::cache::FileHashCache::new(client, self.project_id)
-            .active_epoch()
+        if let Some(manifest) = store
+            .manifest_active(self.project_id)
+            .await
+            .map_err(OrchestratorError::Storage)?
+        {
+            return Ok(Some(manifest.data_epoch));
+        }
+        store
+            .project_meta_get_int_optional(self.project_id, "active_epoch")
+            .await
             .map_err(OrchestratorError::Storage)
     }
 
@@ -262,10 +264,10 @@ impl StorageCoordinator {
     /// without a surrounding candidate-epoch switch — call this before
     /// storing. Returns the aligned epoch, or `None` when the project was
     /// never indexed.
-    pub(crate) fn align_epoch_to_active_generation(
+    pub(crate) async fn align_epoch_to_active_generation(
         &mut self,
     ) -> Result<Option<i64>, OrchestratorError> {
-        let epoch = self.active_data_epoch()?;
+        let epoch = self.active_data_epoch().await?;
         if let Some(epoch) = epoch {
             self.epoch.store(epoch, Ordering::Release);
         }
@@ -341,16 +343,14 @@ impl StorageCoordinator {
         self.embedder.as_ref()
     }
 
-    /// Get the configured SQLite metadata store, if any.
-    pub fn metadata_client(&self) -> Option<&Arc<SqliteClient>> {
+    /// Get the configured metadata store, if any.
+    pub fn metadata_store(&self) -> Option<&RelationStore> {
         self.metadata_store.as_ref()
     }
 
     /// Get the relation backend enum wrapping the configured store.
     pub fn relation_store(&self) -> Option<RelationStore> {
-        self.metadata_store
-            .as_ref()
-            .map(|store| RelationStore::local(store.clone()))
+        self.metadata_store.clone()
     }
 
     /// Get the configured fulltext backend, if any.

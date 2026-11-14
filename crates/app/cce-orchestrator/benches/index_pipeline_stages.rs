@@ -42,9 +42,7 @@ fn make_metadata() -> Arc<SqliteClient> {
 
 /// Materialize the synthetic project to a fresh temp dir and return its root.
 fn materialize() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("cce_pipe_bench_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("root dir");
+    let root = cce_bench_kit::fresh_temp_dir("cce_pipe_bench");
     let project = SyntheticProject::generate(SIZE, DEFAULT_LANG_DIST);
     let file_count = project.files.len();
     project.materialize(&root).expect("materialize");
@@ -92,17 +90,11 @@ fn main() {
         .build()
         .expect("runtime");
 
-    let mut out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/index_pipeline_stages.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# tier\tfiles\tms\tfiles_per_sec\tbytes_written");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "index_pipeline_stages.tsv",
+        "# tier\tfiles\tms\tfiles_per_sec\tbytes_written",
+    );
 
     // Warm-up so tree-sitter grammars and sqlite pages are steady-state.
     let _ = rt.block_on(run_once(&root, metadata.clone()));
@@ -116,9 +108,7 @@ fn main() {
         "end_to_end ({:?}): {indexed} files in {ms:8.1} ms -> {rate:8.1} files/s",
         SIZE
     );
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "{}\t{indexed}\t{ms:.1}\t{rate:.1}\t0", SIZE.label());
-    }
+    let _ = writeln!(out, "{}\t{indexed}\t{ms:.1}\t{rate:.1}\t0", SIZE.label());
 
     // Criterion timing for the end-to-end pass (modest sampling to bound cost).
     // Each iteration gets a fresh in-memory metadata store: reusing the

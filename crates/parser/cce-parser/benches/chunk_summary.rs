@@ -11,11 +11,10 @@
 //! Results are printed to stdout and appended to
 //! `benches/results/chunk_summary.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Instant;
 
+use cce_bench_kit::bench_ms;
 use cce_config::AstToNlConfig;
 use cce_parser::ast_to_nl::{AstToNlConverter, ChunkingConfig, ConversionRequest, GroupChunker};
 use cce_parser::grouper::PreprocessingPipeline;
@@ -53,15 +52,6 @@ fn over_limit_body() -> (&'static str, String) {
     ("src/giant.rs", s)
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("chunk_summary benchmark (debug, synthetic inputs)");
     println!(
@@ -69,14 +59,11 @@ fn main() {
         "sample", "summary", "reuse", "chunk", "groups"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/chunk_summary.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# sample\tsummary_ms\treuse_ms\tchunk_ms\tgroups");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "chunk_summary.tsv",
+        "# sample\tsummary_ms\treuse_ms\tchunk_ms\tgroups",
+    );
 
     let samples = vec![long_group(), nested_group(), over_limit_body()];
     for (path, content) in &samples {
@@ -125,11 +112,9 @@ fn main() {
         println!(
             "{label:<14} {summary_ms:>12.2} {reuse_ms:>12.2} {chunk_ms:>12.2} {group_count:>10}"
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "{label}\t{summary_ms:.2}\t{reuse_ms:.2}\t{chunk_ms:.2}\t{group_count}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "{label}\t{summary_ms:.2}\t{reuse_ms:.2}\t{chunk_ms:.2}\t{group_count}"
+        );
     }
 }

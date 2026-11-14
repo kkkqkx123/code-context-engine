@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
-use cce_storage_metadb_sqlite::{ChunkRepository, EntityDetailMappingRepository};
+use cce_storage_common::RelationStorage;
+use cce_storage_common::source::read_source_lines;
 use cce_types::{Entity, EntityId};
 
 use crate::index::vector_store::RelationStore;
+use crate::query::filter::load_active_query_filter_from_store;
 use crate::tools::symbol_lookup_types::{
     DefinitionCode, DefinitionLocation, GotoDefinitionRequest, GotoDefinitionResponse,
     SymbolLookupError,
@@ -36,17 +38,17 @@ impl GotoDefinitionTool {
         }
     }
 
-    /// Attach the local relation database for chunk content lookup.
+    /// Attach the relation backend for chunk content lookup.
     ///
-    /// Local-only port: body and mapping reads stay on the embedded branch
-    /// until the contract carries the operations they need.
-    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
-        self.relation = Some(RelationStore::local(sqlite));
+    /// Reads go through the relation contract, so both branches share one
+    /// read path and branch selection stays inside the enum.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.relation = Some(store);
         self
     }
 
     /// Find the definition of a symbol
-    pub fn goto_definition(
+    pub async fn goto_definition(
         &self,
         request: GotoDefinitionRequest,
     ) -> Result<GotoDefinitionResponse, SymbolLookupError> {
@@ -54,10 +56,10 @@ impl GotoDefinitionTool {
 
         let definitions = self.find_definitions(symbol_id)?;
 
-        let definition_codes = definitions
-            .into_iter()
-            .map(|def| self.get_definition_code(def, request.include_body))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut definition_codes = Vec::with_capacity(definitions.len());
+        for def in definitions {
+            definition_codes.push(self.get_definition_code(def, request.include_body).await?);
+        }
 
         Ok(GotoDefinitionResponse {
             symbol: request.symbol,
@@ -141,7 +143,7 @@ impl GotoDefinitionTool {
     }
 
     /// Get definition code
-    fn get_definition_code(
+    async fn get_definition_code(
         &self,
         location: DefinitionLocation,
         include_body: bool,
@@ -153,6 +155,7 @@ impl GotoDefinitionTool {
 
         let code = if include_body {
             self.get_body_from_chunks(location.entity_id)
+                .await
                 .unwrap_or_else(|| entity.signature.clone())
         } else {
             entity.signature.clone()
@@ -167,45 +170,46 @@ impl GotoDefinitionTool {
         })
     }
 
-    /// Get entity body from SQLite chunks by EntityId.
+    /// Get entity body from relation-store chunks by EntityId.
     ///
     /// Resolves the mapping and chunks with two-stage epoch resolution
     /// ("own first, miss → parent") so inherited generations stay readable.
-    fn get_body_from_chunks(&self, entity_id: EntityId) -> Option<String> {
+    async fn get_body_from_chunks(&self, entity_id: EntityId) -> Option<String> {
         let project_id = self.project_id;
-        let conn = crate::tools::common::get_read_connection(&self.relation).ok()?;
+        let store = self.relation.as_ref()?;
 
-        let view = crate::query::filter::load_active_query_filter(&conn, project_id).ok()?;
+        let view = load_active_query_filter_from_store(store, project_id)
+            .await
+            .ok()?;
 
-        let resolve_mapping = |epoch: i64| {
-            EntityDetailMappingRepository::get_by_entity_id_at_epoch(
-                &conn,
-                entity_id.0 as i64,
-                project_id,
-                epoch,
-            )
-            .ok()
-            .flatten()
-        };
         // Two-stage resolution: an own-generation miss falls back to the
         // inherited parent epoch (the own generation always wins because it
         // is probed first).
-        let (mapping, chunk_epoch) = match resolve_mapping(view.epoch_value()) {
-            Some(mapping) => (mapping, view.epoch_value()),
-            None => {
-                let parent_epoch = view.parent_epoch()?;
-                let mapping = resolve_mapping(parent_epoch)?;
-                (mapping, parent_epoch)
-            }
-        };
+        let (mapping, chunk_epoch) =
+            match store
+                .mappings_by_entity(project_id, entity_id.0 as i64, view.epoch_value())
+                .await
+                .ok()?
+            {
+                Some(mapping) => (mapping, view.epoch_value()),
+                None => {
+                    let parent_epoch = view.parent_epoch()?;
+                    let mapping = store
+                        .mappings_by_entity(project_id, entity_id.0 as i64, parent_epoch)
+                        .await
+                        .ok()??;
+                    (mapping, parent_epoch)
+                }
+            };
         let chunk_ids = mapping.get_qdrant_point_ids();
         if chunk_ids.is_empty() {
             return None;
         }
 
-        let chunks =
-            ChunkRepository::get_by_chunk_ids(&conn, &chunk_ids, project_id, Some(chunk_epoch))
-                .ok()?;
+        let mut chunks = store
+            .chunks_by_ids(project_id, &chunk_ids, &[chunk_epoch])
+            .await
+            .ok()?;
         // Parent hits of overridden files stay hidden.
         if Some(chunk_epoch) == view.parent_epoch()
             && let Some(first) = chunks.first()
@@ -216,14 +220,13 @@ impl GotoDefinitionTool {
         {
             return None;
         }
-        let mut sorted = chunks;
-        sorted.sort_by_key(|c| c.start_line);
-        let (first, last) = (sorted.first()?, sorted.last()?);
+        chunks.sort_by_key(|c| c.start_line);
+        let (first, last) = (chunks.first()?, chunks.last()?);
         // The body is lazy-loaded from the source file; chunk rows no longer
         // persist raw code.
-        let project_root =
-            cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
-        Some(cce_storage_metadb_sqlite::source_reader::read_source_lines(
+        let project_root = crate::tools::common::resolve_project_root(&self.relation, project_id)
+            .await?;
+        Some(read_source_lines(
             Some(project_root.as_path()),
             &first.file_path,
             first.start_line.max(0) as u32,

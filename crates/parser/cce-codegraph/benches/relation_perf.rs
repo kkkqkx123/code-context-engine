@@ -11,11 +11,10 @@
 //! `benches/results/relation_perf.tsv`.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+
+use cce_bench_kit::bench_ms;
 
 use cce_codegraph::index::{
     IndexBuilder, LayeredSnapshotIndex, RelationDeltaOps, RelationIndex, RelationSnapshotIndex,
@@ -176,32 +175,18 @@ fn build_fanout(leaf_count: usize) -> RelationIndex {
     builder.build()
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("relation_perf benchmark (debug, synthetic chain graphs)");
     println!("{:<28} {:>12}", "case", "ms");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/relation_perf.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# case\tms");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "relation_perf.tsv",
+        "# case\tms",
+    );
     let mut row = |label: &str, ms: f64| {
         println!("{label:<28} {ms:>12.2}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{label}\t{ms:.2}");
-        }
+        let _ = writeln!(out, "{label}\t{ms:.2}");
     };
 
     // Scoped vs full diff on a mid-size project.

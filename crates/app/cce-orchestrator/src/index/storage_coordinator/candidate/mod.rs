@@ -9,7 +9,7 @@
 //! exclusively in generation GC; when the inheritance chain would grow past
 //! depth 2, the active generation is compacted (materialized) first.
 
-use cce_storage_metadb_sqlite::GenerationOverrideRepository;
+use cce_storage_common::RelationStorage;
 
 use crate::error::OrchestratorError;
 
@@ -19,96 +19,54 @@ mod lifecycle;
 mod prepare;
 
 impl StorageCoordinator {
-    /// Transaction-scoped variant: drop every candidate-generation row from
-    /// the data tables.
+    /// Clear every candidate-generation row plus its override registrations.
     ///
     /// Idempotent: used when a fresh candidate reuses an epoch number left
     /// behind by an interrupted run, and by the failure path so the number
     /// becomes safe to reuse.
-    pub(crate) fn clear_candidate_rows_tx(
-        tx: &rusqlite::Transaction<'_>,
-        project_id: i64,
+    pub(crate) async fn cleanup_failed_candidate(
+        &self,
         epoch: i64,
-    ) -> Result<(), cce_types::StorageError> {
-        for (table, sql) in [
-            (
-                "entity_detail_mappings",
-                "DELETE FROM entity_detail_mappings WHERE project_id = ?1 AND epoch = ?2",
-            ),
-            (
-                "chunks",
-                "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2",
-            ),
-            (
-                "entities",
-                "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2",
-            ),
-            (
-                "files",
-                "DELETE FROM files WHERE project_id = ?1 AND epoch = ?2",
-            ),
-        ] {
-            tx.execute(sql, rusqlite::params![project_id, epoch])
-                .map_err(|error| {
-                    cce_types::StorageError::delete(
-                        table,
-                        format!("failed to clear candidate generation: {error}"),
-                    )
-                })?;
-        }
-        Ok(())
-    }
-
-    /// Clear every candidate-generation row from the five data tables plus
-    /// its override registrations.
-    ///
-    /// Idempotent: used when a fresh candidate reuses an epoch number left
-    /// behind by an interrupted run, and by the failure path so the number
-    /// becomes safe to reuse.
-    pub(crate) fn cleanup_failed_candidate(&self, epoch: i64) -> Result<(), OrchestratorError> {
-        let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) else {
+    ) -> Result<(), OrchestratorError> {
+        let Some(store) = self.metadata_store.as_ref() else {
             return Ok(());
         };
-        client
-            .with_transaction(|tx| {
-                Self::clear_candidate_rows_tx(tx, self.project_id, epoch)?;
-                GenerationOverrideRepository::clear_generation(tx, self.project_id, epoch)
-            })
+        store
+            .candidate_clear_epoch(self.project_id, epoch)
+            .await
+            .map(|_| ())
             .map_err(OrchestratorError::Storage)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
+    use std::path::Path;
+
     use super::super::StorageCoordinator;
-    use cce_storage_metadb_sqlite::{
-        NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
-    };
-    use std::sync::Arc;
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
 
     #[tokio::test]
     async fn changed_and_deleted_files_register_generation_overrides() {
-        use cce_storage_metadb_sqlite::{
-            GenerationOverride, GenerationOverrideRepository, OverrideDisposition,
-        };
-        use std::path::Path;
-
-        let database = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
-        let client = database.as_ref().clone();
-        client
-            .with_transaction(|tx| {
-                ProjectRepository::insert(
-                    tx,
-                    &NewProjectRecord::new("test".to_string(), "/tmp/test".to_string()),
-                )?;
-                ProjectIndexManifestRepository::activate(tx, 1, 1, 0, "initial", None)?;
-                Ok(())
-            })
-            .expect("initial generation should be created");
+        let database = RelationStore::in_memory().expect("in-memory store");
+        block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
+        block_on(database.manifest_begin_building(1, 1, "initial", None))
+            .expect("initial manifest should be created");
+        block_on(database.manifest_activate(1, 1, 0, "initial", None))
+            .expect("initial generation should be activated");
 
         let storage = StorageCoordinator::new(1)
             .expect("valid project ID")
-            .with_metadata_store(database)
+            .with_metadata_store(database.clone())
             .with_epoch(1);
         storage
             .begin_hot_update_candidate("hot-operation", false)
@@ -137,7 +95,7 @@ mod tests {
             .register_deleted_files(&[Path::new("src/batch_a.rs"), Path::new("src/batch_b.rs")])
             .await
             .expect("batch deletion should register deleted");
-        let standalone = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let standalone = RelationStore::in_memory().expect("in-memory store");
         let without_candidate = StorageCoordinator::new(1)
             .expect("valid project ID")
             .with_metadata_store(standalone)
@@ -153,40 +111,31 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let conn = client.read_connection().expect("connection should open");
-        let overrides = GenerationOverrideRepository::list_for_generation(&conn, 1, 2)
+        let overrides = block_on(database.overrides_for_generation(1, 2))
             .expect("overrides should list");
         assert_eq!(
-            overrides,
+            overrides
+                .into_iter()
+                .map(|entry| entry.file_path)
+                .collect::<Vec<_>>(),
             vec![
-                GenerationOverride {
-                    file_path: "src/batch_a.rs".to_string(),
-                    disposition: OverrideDisposition::Deleted,
-                },
-                GenerationOverride {
-                    file_path: "src/batch_b.rs".to_string(),
-                    disposition: OverrideDisposition::Deleted,
-                },
-                GenerationOverride {
-                    file_path: "src/changed.rs".to_string(),
-                    disposition: OverrideDisposition::Deleted,
-                },
-                GenerationOverride {
-                    file_path: "src/gone.rs".to_string(),
-                    disposition: OverrideDisposition::Deleted,
-                },
+                "src/batch_a.rs".to_string(),
+                "src/batch_b.rs".to_string(),
+                "src/changed.rs".to_string(),
+                "src/gone.rs".to_string(),
             ]
         );
 
         // The failure path clears the registrations so the epoch number can
         // be reused safely.
-        drop(conn);
         storage
             .fail_hot_update_candidate("hot-operation", "test failure")
+            .await
             .expect("candidate should fail cleanly");
-        let conn = client.read_connection().expect("connection should open");
         assert!(
-            GenerationOverrideRepository::list_for_generation(&conn, 1, 2)
+            database
+                .overrides_for_generation(1, 2)
+                .await
                 .expect("overrides should list")
                 .is_empty()
         );

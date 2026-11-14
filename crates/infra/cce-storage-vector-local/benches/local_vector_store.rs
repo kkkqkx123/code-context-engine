@@ -30,7 +30,6 @@
 //! NOTE: this bench writes a real on-disk mmap index; sizes are bounded and the
 //! directory is created under the system temp dir.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -103,23 +102,6 @@ fn make_points(n: usize) -> Vec<VectorPoint> {
     (0..n).map(make_point).collect()
 }
 
-/// Open the results TSV for appending, creating `benches/results` on demand.
-///
-/// The directory is not part of the worktree, so a first run used to lose every
-/// measurement: `open(...).ok()` failed silently and each row was guarded by
-/// `if let Some(f)`. Failing loudly is the point — a bench that cannot record
-/// its own output is broken.
-fn results_tsv(name: &str) -> std::fs::File {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results");
-    std::fs::create_dir_all(&dir).expect("create benches/results");
-    let path = dir.join(name);
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
-}
-
 /// Owned scratch directory under the crate's `target/` tree, removed on drop.
 ///
 /// The default system temp dir is tmpfs on this box, so a multi-hundred-megabyte
@@ -165,10 +147,10 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("rt");
     println!("local_vector_store benchmark (dim={DIM}, microbatch={MICROBATCH})");
 
-    let mut out = results_tsv("local_vector_store.tsv");
-    let _ = writeln!(
-        out,
-        "# scenario\tvectors\ttotal_ms\tpts_per_sec\tbatch_p50_ms\tbatch_p99_ms"
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "local_vector_store.tsv",
+        "# scenario\tvectors\ttotal_ms\tpts_per_sec\tbatch_p50_ms\tbatch_p99_ms",
     );
 
     for target in scales() {

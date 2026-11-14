@@ -20,7 +20,6 @@
 //! Baseline numbers are appended to `benches/results/embedding_scheduling.tsv`.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -92,20 +91,11 @@ fn main() {
     let batches = make_batches();
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
 
-    let mut out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/embedding_scheduling.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# scenario\tbatches\tbatch_size\tdelay_ms\tconcurrency\tms\tbatches_per_sec"
-        );
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "embedding_scheduling.tsv",
+        "# scenario\tbatches\tbatch_size\tdelay_ms\tconcurrency\tms\tbatches_per_sec",
+    );
 
     // --- serial ---
     let serial_ms = {
@@ -118,12 +108,10 @@ fn main() {
     println!(
         "serial     : {BATCHES} batches x {BATCH_SIZE} texts, {DELAY_MS}ms delay -> {serial_ms:8.1} ms ({serial_rate:8.1} batches/s)"
     );
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "serial\t{BATCHES}\t{BATCH_SIZE}\t{DELAY_MS}\t1\t{serial_ms:.1}\t{serial_rate:.1}"
-        );
-    }
+    let _ = writeln!(
+        out,
+        "serial\t{BATCHES}\t{BATCH_SIZE}\t{DELAY_MS}\t1\t{serial_ms:.1}\t{serial_rate:.1}"
+    );
 
     // --- concurrent ---
     let concurrent_ms = {
@@ -136,12 +124,10 @@ fn main() {
     println!(
         "concurrent : {BATCHES} batches x {BATCH_SIZE} texts, {DELAY_MS}ms delay, K={CONCURRENCY} -> {concurrent_ms:8.1} ms ({concurrent_rate:8.1} batches/s)"
     );
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "concurrent\t{BATCHES}\t{BATCH_SIZE}\t{DELAY_MS}\t{CONCURRENCY}\t{concurrent_ms:.1}\t{concurrent_rate:.1}"
-        );
-    }
+    let _ = writeln!(
+        out,
+        "concurrent\t{BATCHES}\t{BATCH_SIZE}\t{DELAY_MS}\t{CONCURRENCY}\t{concurrent_ms:.1}\t{concurrent_rate:.1}"
+    );
 
     let speedup = serial_ms / concurrent_ms.max(0.001);
     println!("speedup (concurrent/serial): {speedup:.2}x");

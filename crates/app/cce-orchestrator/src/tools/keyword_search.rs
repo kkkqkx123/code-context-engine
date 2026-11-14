@@ -28,9 +28,9 @@
 mod types;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::index::vector_store::{FulltextStore, RelationStore};
+use cce_storage_common::RelationStorage;
 use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
 
 use crate::query::retrieval::primitives::{
@@ -66,15 +66,6 @@ impl KeywordSearchTool {
             fulltext,
             relation: None,
         }
-    }
-
-    /// Attach the local relation database for chunk content lookup.
-    ///
-    /// Local-only port: callers holding the backend enum attach it directly
-    /// through [`Self::with_relation_store`].
-    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
-        self.relation = Some(RelationStore::local(sqlite));
-        self
     }
 
     /// Attach the relation backend via enum dispatch.

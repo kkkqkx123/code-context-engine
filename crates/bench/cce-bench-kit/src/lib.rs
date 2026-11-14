@@ -1,16 +1,17 @@
 //! Shared benchmark support for code-context-engine performance benchmarks.
 //!
-//! Provides a deterministic synthetic project generator and the fixed scale
-//! tiers (small / medium / large) so every benchmark (T-1 .. T-10) speaks the
-//! same scale vocabulary. See `docs/benchmark/design.md` §5 for the conventions.
+//! Provides the fixed scale tiers so every benchmark speaks the same scale
+//! vocabulary, plus a deterministic synthetic project generator, timing and
+//! report helpers, and small on-disk fixtures.
 //!
-//! The generator is dependency-free (std only): it produces plain file paths,
-//! languages and content. Each benchmark converts the synthetic project into
-//! the typed inputs its crate needs, keeping this crate cheap to compile and
-//! a single source of truth for tier sizes.
+//! Everything here is dependency-free (std only): the generator produces plain
+//! file paths, languages and content, and each benchmark converts the synthetic
+//! project into the typed inputs its crate needs. This keeps the crate cheap
+//! to compile and a single source of truth for tier sizes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// Fixed scale tiers aligned with the e2e fixture tiers.
 ///
@@ -114,8 +115,8 @@ fn pick_language<'a>(state: u64, dist: &'a [(&'a str, f64)]) -> &'a str {
 
 /// Generate deterministic, syntactically-plausible source content for a file.
 ///
-/// Content is valid enough for tree-sitter to parse (so T-1/T-3/T-9 exercise
-/// the real parse + chunk path) while remaining cheap to produce. The number
+/// Content parses with a real grammar (so file-based benchmarks exercise the
+/// real parse and chunk path) while remaining cheap to produce. The number
 /// of emitted functions scales with the file index so per-file entity density
 /// stays roughly constant across the project.
 pub fn gen_content(file_index: usize, language: &str) -> String {
@@ -182,7 +183,7 @@ impl SyntheticProject {
     /// Materialize the project under `root`. Returns `root` for chaining.
     ///
     /// Intended to run once (via `std::sync::OnceLock`) before the timed
-    /// criterion loop; re-materializing on every iteration would dominate the
+    /// loop; re-materializing on every iteration would dominate the
     /// measurement.
     pub fn materialize(&self, root: &Path) -> std::io::Result<PathBuf> {
         for f in &self.files {
@@ -194,4 +195,84 @@ impl SyntheticProject {
         }
         Ok(root.to_path_buf())
     }
+}
+
+/// Mean milliseconds per call: warms `f` once, then averages `iters` runs.
+///
+/// Every benchmark measures steady-state cost, so the single warmup call
+/// keeps cold caches out of the reported number.
+pub fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
+    f();
+    let start = Instant::now();
+    for _ in 0..iters {
+        f();
+    }
+    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
+}
+
+/// Report file path for the calling crate: `<manifest>/benches/results/<name>`.
+///
+/// Takes the caller's `env!("CARGO_MANIFEST_DIR")` because the macro would
+/// otherwise resolve to this crate's own manifest directory.
+pub fn results_path(manifest_dir: &str, file_name: &str) -> PathBuf {
+    PathBuf::from(manifest_dir)
+        .join("benches/results")
+        .join(file_name)
+}
+
+/// Opens a report file for appending, creating the parent directory first.
+///
+/// Fails loudly when the file cannot be opened: a benchmark that cannot
+/// record its own output is broken, and silently dropping rows hides that.
+pub fn open_report(manifest_dir: &str, file_name: &str) -> fs::File {
+    let path = results_path(manifest_dir, file_name);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create benches/results");
+    }
+    match fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(file) => file,
+        Err(e) => panic!("open {}: {e}", path.display()),
+    }
+}
+
+/// Opens a report file and records the header line before any rows.
+pub fn open_report_with_header(manifest_dir: &str, file_name: &str, header: &str) -> fs::File {
+    let mut file = open_report(manifest_dir, file_name);
+    use std::io::Write as _;
+    match writeln!(file, "{header}") {
+        Ok(()) => file,
+        Err(e) => panic!("write report header {header:?}: {e}"),
+    }
+}
+
+/// Single-function Rust stub shared by the small scanner fixtures.
+///
+/// Matches the historical per-file shape those benchmarks always used, so
+/// adopting it keeps old and new baseline numbers comparable.
+pub fn rust_single_fn(index: usize) -> String {
+    format!("pub fn func_{index}(x: u64) -> u64 {{ x * 2 + {index} }}\n")
+}
+
+/// Writes `count` single-function files under `root/src/mod_XXX/`.
+///
+/// Covers the small fixture scale (a few hundred files). Larger scales use
+/// [`SyntheticProject`] instead.
+pub fn write_simple_tree(root: &Path, count: usize) -> std::io::Result<()> {
+    for i in 0..count {
+        let dir = root.join(format!("src/mod_{:03}", i % 10));
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join(format!("file_{i:04}.rs")), rust_single_fn(i))?;
+    }
+    Ok(())
+}
+
+/// Fresh process-scoped scratch directory under the system temp directory.
+///
+/// Any previous run with the same process id is cleared first, then the
+/// directory is created eagerly so callers never handle creation errors.
+pub fn fresh_temp_dir(prefix: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("{prefix}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("create bench temp dir");
+    dir
 }

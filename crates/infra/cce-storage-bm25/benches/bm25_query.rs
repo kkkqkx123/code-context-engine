@@ -10,10 +10,10 @@
 //! `benches/results/bm25_query.tsv`.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::Instant;
+
+use cce_bench_kit::bench_ms;
 
 use cce_storage_bm25::{Bm25Retrieval, IndexManager, batch_add_documents};
 use cce_storage_common::FulltextSearchOptions;
@@ -65,32 +65,18 @@ fn opts(limit: usize, offset: usize) -> FulltextSearchOptions {
     }
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("bm25_query benchmark (debug, 200 local docs)");
     println!("{:<22} {:>12} {:>12}", "case", "ms", "hits");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/bm25_query.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# case\tms\thits");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "bm25_query.tsv",
+        "# case\tms\thits",
+    );
     let mut row = |label: &str, ms: f64, hits: usize| {
         println!("{label:<22} {ms:>12.2} {hits:>12}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{label}\t{ms:.2}\t{hits}");
-        }
+        let _ = writeln!(out, "{label}\t{ms:.2}\t{hits}");
     };
 
     let tmp = tempfile::tempdir().expect("tempdir");

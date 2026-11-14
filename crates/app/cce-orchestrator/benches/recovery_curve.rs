@@ -14,9 +14,8 @@
 //! `benches/results/recovery_curve.tsv`.
 
 use std::fs;
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use cce_orchestrator::index::FileIndexer;
@@ -25,18 +24,6 @@ use cce_storage_metadb_sqlite::BatchCheckpointRecord;
 
 const FILE_COUNT: usize = 300;
 const BATCH_SIZE: usize = 50;
-
-fn write_files(root: &Path, count: usize) {
-    for i in 0..count {
-        let dir = root.join(format!("src/mod_{:03}", i % 10));
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join(format!("file_{i:04}.rs")),
-            format!("pub fn func_{i}(x: u64) -> u64 {{ x * 2 + {i} }}\n"),
-        )
-        .expect("write file");
-    }
-}
 
 fn scan_options(root: &Path) -> ScanOptions {
     ScanOptions {
@@ -84,19 +71,14 @@ fn main() {
     println!("recovery_curve benchmark (debug, {FILE_COUNT} files, batch {BATCH_SIZE})");
     println!("{:<34} {:>12} {:>10}", "case", "ms", "outcome");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/recovery_curve.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# case\tms\toutcome");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "recovery_curve.tsv",
+        "# case\tms\toutcome",
+    );
     let mut row = |label: &str, ms: f64, outcome: &str| {
         println!("{label:<34} {ms:>12.2} {outcome:>10}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{label}\t{ms:.2}\t{outcome}");
-        }
+        let _ = writeln!(out, "{label}\t{ms:.2}\t{outcome}");
     };
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -106,7 +88,7 @@ fn main() {
     let _ = FSScanner::new();
 
     let tmp = tempfile::tempdir().expect("tempdir");
-    write_files(tmp.path(), FILE_COUNT);
+    cce_bench_kit::write_simple_tree(tmp.path(), FILE_COUNT).expect("write fixture");
     let opts = scan_options(tmp.path());
 
     // Fixed cost of a fresh start: scan, deterministic sort, file-list hash.

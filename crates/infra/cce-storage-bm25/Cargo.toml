@@ -32,6 +32,7 @@ aho-corasick = "1.1"
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
+cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
 
 [[bench]]
 name = "bm25_query"

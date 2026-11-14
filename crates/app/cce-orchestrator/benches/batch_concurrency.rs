@@ -17,9 +17,7 @@
 //! Results are printed to stdout and appended to
 //! `benches/results/batch_concurrency.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use cce_config::AstToNlConfig;
@@ -133,16 +131,11 @@ fn main() {
         "batch", "workers", "ms", "files/sec", "chunks"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/batch_concurrency.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# batch\tworkers\tms\tfiles_per_sec\tchunks");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "batch_concurrency.tsv",
+        "# batch\tworkers\tms\tfiles_per_sec\tchunks",
+    );
 
     let files: Vec<(String, String)> = (0..FILE_COUNT).map(make_file).collect();
 
@@ -157,19 +150,15 @@ fn main() {
             let (ms, chunks) = run_sweep(&files, batch_size, workers);
             let rate = FILE_COUNT as f64 / (ms / 1000.0);
             println!("{batch_size:<10} {workers:<12} {ms:>12.2} {rate:>12.1} {chunks:>12}");
-            if let Some(f) = out.as_mut() {
-                let _ = writeln!(f, "{batch_size}\t{workers}\t{ms:.2}\t{rate:.1}\t{chunks}");
-            }
+            let _ = writeln!(out, "{batch_size}\t{workers}\t{ms:.2}\t{rate:.1}\t{chunks}");
         }
     }
     let base_rate = FILE_COUNT as f64 / (base_ms / 1000.0);
     println!(
         "baseline sequential: {base_ms:.2} ms ({base_rate:.1} files/sec, {base_chunks} chunks)"
     );
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# baseline\t1\t{base_ms:.2}\t{base_rate:.1}\t{base_chunks}"
-        );
-    }
+    let _ = writeln!(
+        out,
+        "# baseline\t1\t{base_ms:.2}\t{base_rate:.1}\t{base_chunks}"
+    );
 }

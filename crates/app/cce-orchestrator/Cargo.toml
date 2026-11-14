@@ -20,7 +20,7 @@ cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
 cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
 cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage-vector-qdrant" }
 cce-storage-vector-local = { version = "0.1.0", path = "../../infra/cce-storage-vector-local" }
-cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
+cce-storage-metadb = { version = "0.1.0", path = "../../infra/cce-storage-metadb" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
@@ -53,7 +53,6 @@ globset = { workspace = true }
 moka = { workspace = true }
 tantivy = { workspace = true }
 tree-sitter = { workspace = true }
-rusqlite = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

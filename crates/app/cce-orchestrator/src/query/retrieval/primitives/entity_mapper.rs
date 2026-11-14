@@ -6,8 +6,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use rusqlite::Connection;
-
 use crate::index::vector_store::RelationStore;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
@@ -16,90 +14,9 @@ use crate::query::types::content_reference::{
     ContentState, DowngradeReason, file_level_reference, reference_content,
 };
 use cce_storage_common::RelationStorage;
-use cce_storage_metadb_sqlite::repo::ChunkRepository;
-use cce_storage_metadb_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
-use cce_storage_metadb_sqlite::types::ChunkRecord;
+use cce_storage_common::metadb::ChunkRecord;
+use cce_storage_common::source::{SourceFileCache, read_source_lines_cached};
 use cce_utils::token_estimation::estimate_tokens;
-
-/// Fetch chunk records by chunk IDs, resolving the full epoch view.
-///
-/// Two-stage resolution ("own first, miss → parent"): chunk IDs missing from
-/// the own generation are re-queried against the inherited parent epoch, and
-/// parent hits belonging to overridden files (replaced/deleted) are dropped so
-/// only the visible view is returned.
-///
-/// Returns a map of chunk_id -> ChunkRecord.
-pub fn get_chunk_records(
-    conn: &Connection,
-    chunk_ids: &[String],
-    project_id: i64,
-    query_filter: &QueryFilter,
-) -> Result<Option<HashMap<String, ChunkRecord>>> {
-    if chunk_ids.is_empty() {
-        return Ok(Some(HashMap::new()));
-    }
-
-    match resolve_chunk_records(conn, chunk_ids, project_id, query_filter) {
-        Ok(records) => Ok(Some(records)),
-        Err(e) => {
-            tracing::warn!("Failed to fetch chunks from SQLite: {}", e);
-            Ok(None)
-        }
-    }
-}
-
-fn resolve_chunk_records(
-    conn: &Connection,
-    chunk_ids: &[String],
-    project_id: i64,
-    query_filter: &QueryFilter,
-) -> std::result::Result<HashMap<String, ChunkRecord>, cce_types::StorageError> {
-    let own_records = ChunkRepository::get_by_chunk_ids(
-        conn,
-        chunk_ids,
-        project_id,
-        Some(query_filter.epoch_value()),
-    )?;
-    let mut records: HashMap<String, ChunkRecord> = own_records
-        .into_iter()
-        .map(|chunk| (chunk.chunk_id.clone(), chunk))
-        .collect();
-
-    let Some(parent_epoch) = query_filter.parent_epoch() else {
-        return Ok(records);
-    };
-    let missing: Vec<String> = chunk_ids
-        .iter()
-        .filter(|id| !records.contains_key(*id))
-        .cloned()
-        .collect();
-    if missing.is_empty() {
-        return Ok(records);
-    }
-
-    let excluded: Option<HashSet<&str>> = if query_filter.excluded_files().is_empty() {
-        None
-    } else {
-        Some(
-            query_filter
-                .excluded_files()
-                .iter()
-                .map(String::as_str)
-                .collect(),
-        )
-    };
-    let parent_records =
-        ChunkRepository::get_by_chunk_ids(conn, &missing, project_id, Some(parent_epoch))?;
-    for chunk in parent_records {
-        if let Some(ref excluded) = excluded
-            && excluded.contains(chunk.file_path.as_str())
-        {
-            continue;
-        }
-        records.entry(chunk.chunk_id.clone()).or_insert(chunk);
-    }
-    Ok(records)
-}
 
 /// Fetch chunk records by chunk IDs through the backend-neutral
 /// [`RelationStorage`] contract, resolving the full epoch view.
@@ -515,7 +432,7 @@ fn choose_entity_name(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_metadb_sqlite::{ChunkRepository, SqliteClient};
+    use cce_storage_metadb::RelationStore;
     use cce_types::EntityId;
 
     fn chunk_record(entity_ids: &[i64]) -> ChunkRecord {
@@ -534,45 +451,36 @@ mod tests {
     /// - `chunk_parent` exists only in the parent epoch (4)
     /// - `chunk_excluded` exists only in the parent epoch but belongs to an
     ///   overridden file, so it must never surface
-    fn seed_two_generations() -> SqliteClient {
-        let client = SqliteClient::in_memory().expect("in-memory database");
+    async fn seed_two_generations() -> RelationStore {
+        let store = RelationStore::in_memory().expect("in-memory store");
+        store
+            .ensure_project(1, "/tmp/test")
+            .await
+            .expect("project should be ensured");
         let chunk = |id: &str, path: &str, epoch: i64| {
             ChunkRecord::new(id.to_string(), path.to_string(), "code".to_string(), 1, 2)
                 .with_epoch(epoch)
                 .with_project_id(1)
         };
-        client
-            .with_transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO projects (id, name, root_path, config_file_path, created_at, updated_at)
-                     VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
-                    [],
-                )
-                .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert("projects", error.to_string()))?;
-                ChunkRepository::insert_batch(
-                    tx,
-                    &[
-                        chunk("chunk_own", "src/new.rs", 5),
-                        chunk("chunk_parent", "src/old.rs", 4),
-                        chunk("chunk_excluded", "gone.rs", 4),
-                    ],
-                )
-                .map(|_| ())
-            })
+        store
+            .chunks_upsert(&[
+                chunk("chunk_own", "src/new.rs", 5),
+                chunk("chunk_parent", "src/old.rs", 4),
+                chunk("chunk_excluded", "gone.rs", 4),
+            ])
+            .await
             .expect("chunks should be inserted");
-        client
+        store
     }
 
-    #[test]
-    fn get_chunk_records_resolves_parent_misses_and_drops_overridden_files() {
-        let client = seed_two_generations();
-        let conn = client.read_connection().expect("connection should open");
+    #[tokio::test]
+    async fn get_chunk_records_resolves_parent_misses_and_drops_overridden_files() {
+        let store = seed_two_generations().await;
         let view =
             QueryFilter::inherited(5, Some(4), vec!["gone.rs".to_string()]).expect("valid view");
 
-        let records = get_chunk_records(
-            &conn,
+        let records = get_chunk_records_from_store(
+            &store,
             &[
                 "chunk_own".to_string(),
                 "chunk_parent".to_string(),
@@ -581,6 +489,7 @@ mod tests {
             1,
             &view,
         )
+        .await
         .expect("lookup should succeed")
         .expect("record map should be present");
 
@@ -595,13 +504,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn get_chunk_records_full_generation_ignores_other_epochs() {
-        let client = seed_two_generations();
-        let conn = client.read_connection().expect("connection should open");
+    #[tokio::test]
+    async fn get_chunk_records_full_generation_ignores_other_epochs() {
+        let store = seed_two_generations().await;
         let view = QueryFilter::new(5).expect("full view");
 
-        let records = get_chunk_records(&conn, &["chunk_parent".to_string()], 1, &view)
+        let records = get_chunk_records_from_store(&store, &["chunk_parent".to_string()], 1, &view)
+            .await
             .expect("lookup should succeed")
             .expect("record map should be present");
         assert!(

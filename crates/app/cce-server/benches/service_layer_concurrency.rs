@@ -12,7 +12,6 @@
 //! Baseline numbers are appended to `benches/results/service_layer_concurrency.tsv`.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use axum::Json;
@@ -70,17 +69,11 @@ fn main() {
         let state = env.state.clone();
         println!("seeded + indexed project {project_id}; running concurrent searches");
 
-        let mut out = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("benches/results/service_layer_concurrency.tsv"),
-            )
-            .ok();
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "# concurrency\trequests\tms\treq_per_sec");
-        }
+        let mut out = cce_bench_kit::open_report_with_header(
+            env!("CARGO_MANIFEST_DIR"),
+            "service_layer_concurrency.tsv",
+            "# concurrency\trequests\tms\treq_per_sec",
+        );
 
         for k in [1usize, 16, 64] {
             let t = Instant::now();
@@ -88,9 +81,7 @@ fn main() {
             let ms = t.elapsed().as_secs_f64() * 1000.0;
             let rate = done as f64 / (ms / 1000.0);
             println!("concurrency={k:<3} : {done} searches in {ms:8.1} ms -> {rate:8.1} req/s");
-            if let Some(f) = out.as_mut() {
-                let _ = writeln!(f, "{k}\t{done}\t{ms:.1}\t{rate:.1}");
-            }
+            let _ = writeln!(out, "{k}\t{done}\t{ms:.1}\t{rate:.1}");
         }
 
         (state, project_id)

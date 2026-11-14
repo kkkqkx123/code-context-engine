@@ -19,10 +19,10 @@
 //! Run: `cargo run -p cce-codegraph --bench finalize_relation`
 //! Baseline numbers are appended to `benches/results/finalize_relation.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use cce_bench_kit::bench_ms;
 
 use cce_codegraph::index::{IndexBuilder, RelationIndex};
 use cce_types::entity::ParseStatus;
@@ -128,29 +128,15 @@ fn build_index(file_count: usize) -> RelationIndex {
     builder.build()
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("finalize_relation benchmark (relation finalize / P-5 full-replay cost)");
     println!("{:<16} {:<22} {:>12}", "entities", "strategy", "ms");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/finalize_relation.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# entities\tstrategy\tchanged_files\tms");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "finalize_relation.tsv",
+        "# entities\tstrategy\tchanged_files\tms",
+    );
 
     for entities in [1_000usize, 10_000, 100_000] {
         let file_count = entities / FUNCTIONS_PER_FILE;
@@ -164,9 +150,7 @@ fn main() {
             "{:<16} {:<22} {:>12.2}",
             entities, "full_rebuild(O(N))", full_ms
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{entities}\tfull_rebuild\t{file_count}\t{full_ms:.2}");
-        }
+        let _ = writeln!(out, "{entities}\tfull_rebuild\t{file_count}\t{full_ms:.2}");
 
         // Memory materialization paid on every full rebuild.
         let clone_ms = bench_ms(3, || {
@@ -176,12 +160,10 @@ fn main() {
             "{:<16} {:<22} {:>12.2}",
             entities, "memory_materialize", clone_ms
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "{entities}\tmemory_materialize\t{file_count}\t{clone_ms:.2}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "{entities}\tmemory_materialize\t{file_count}\t{clone_ms:.2}"
+        );
         drop(index);
     }
 

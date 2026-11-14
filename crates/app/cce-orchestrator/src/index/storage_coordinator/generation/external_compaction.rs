@@ -6,6 +6,7 @@
 //! truth.
 
 use cce_storage_common::FulltextStorage;
+use cce_storage_common::RelationStorage;
 use std::collections::HashMap;
 
 use cce_storage_common::FulltextDocument;
@@ -91,7 +92,7 @@ impl StorageCoordinator {
             // above carries neither. Reconstruct them from SQLite, which
             // remains the single source of truth: chunk docs from
             // `chunks.content` / `chunks.bm25_keywords`.
-            let clone_content = self.load_bm25_clone_content(source_epoch)?;
+            let clone_content = self.load_bm25_clone_content(source_epoch).await?;
             let cloned: Vec<_> = documents
                 .into_iter()
                 .filter(|document| {
@@ -143,48 +144,31 @@ impl StorageCoordinator {
     /// Load the content needed to clone the active BM25 generation into a
     /// candidate epoch. Because content and keywords are index-only fields in
     /// tantivy, the snapshot cannot copy them; chunk text/keywords are
-    /// reconstructed from SQLite.
-    fn load_bm25_clone_content(&self, epoch: i64) -> Result<Bm25CloneContent, OrchestratorError> {
+    /// reconstructed from the relation store.
+    async fn load_bm25_clone_content(
+        &self,
+        epoch: i64,
+    ) -> Result<Bm25CloneContent, OrchestratorError> {
         let mut chunk_content: HashMap<String, String> = HashMap::new();
         let mut chunk_keywords: HashMap<String, String> = HashMap::new();
-        let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) else {
+        let Some(store) = self.metadata_store.as_ref() else {
             return Ok(Bm25CloneContent {
                 chunk_by_id: chunk_content,
                 keywords_by_id: chunk_keywords,
             });
         };
-        client
-            .with_transaction(|tx| {
-                {
-                    let mut stmt = tx
-                        .prepare(
-                            "SELECT chunk_id, content, bm25_keywords FROM chunks
-                             WHERE project_id = ?1 AND epoch = ?2",
-                        )
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                    let rows = stmt
-                        .query_map(rusqlite::params![self.project_id, epoch], |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, String>(1)?,
-                                row.get::<_, String>(2)?,
-                            ))
-                        })
-                        .map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                    for row in rows {
-                        let (chunk_id, content, keywords) =
-                            row.map_err(|error| cce_types::StorageError::query(error.to_string()))?;
-                        if !content.is_empty() {
-                            chunk_content.insert(chunk_id.clone(), content);
-                        }
-                        if !keywords.is_empty() {
-                            chunk_keywords.insert(chunk_id, keywords);
-                        }
-                    }
-                }
-                Ok(())
-            })
+        let entries = store
+            .chunks_content_by_epoch(self.project_id, epoch)
+            .await
             .map_err(OrchestratorError::Storage)?;
+        for entry in entries {
+            if !entry.content.is_empty() {
+                chunk_content.insert(entry.chunk_id.clone(), entry.content);
+            }
+            if !entry.bm25_keywords.is_empty() {
+                chunk_keywords.insert(entry.chunk_id, entry.bm25_keywords);
+            }
+        }
         Ok(Bm25CloneContent {
             chunk_by_id: chunk_content,
             keywords_by_id: chunk_keywords,
@@ -194,47 +178,39 @@ impl StorageCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use cce_storage_metadb_sqlite::{
-        ChunkRecord, ChunkRepository, FileRepository, NewProjectRecord, ProjectRepository,
-        SqliteClient,
-    };
+    use cce_storage_common::metadb::{ChunkRecord, FileRecord};
+    use cce_storage_common::RelationStorage;
+    use cce_storage_metadb::RelationStore;
 
     use super::super::StorageCoordinator;
 
     #[test]
     fn load_bm25_clone_content_reconstructs_chunk_text() {
-        let database = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
-        let client = database.as_ref().clone();
-        client
-            .with_transaction(|tx| {
-                ProjectRepository::insert(
-                    tx,
-                    &NewProjectRecord::new("test".to_string(), "/tmp/test".to_string()),
-                )
-                .map(|_| ())
-            })
-            .expect("project should be inserted");
+        let database = RelationStore::in_memory().expect("in-memory store");
+        let block_on = |future| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("test runtime")
+                .block_on(future)
+        };
+        block_on(database.ensure_project(1, "/tmp/test")).expect("project should be ensured");
 
-        client
-            .with_transaction(|tx| {
-                FileRepository::insert(
-                    tx,
-                    &cce_storage_metadb_sqlite::FileRecord {
-                        id: 0,
-                        path: "src/lib.rs".to_string(),
-                        language: "rust".to_string(),
-                        category: cce_types::FileCategory::Code.as_u8(),
-                        last_modified: 1,
-                        created_at: 1,
-                        project_id: 1,
-                        content_hash: None,
-                    },
-                )
-                .map(|_| ())
-            })
-            .expect("file should be inserted");
+        block_on(database.files_upsert(
+            1,
+            3,
+            &[FileRecord {
+                id: 0,
+                path: "src/lib.rs".to_string(),
+                language: "rust".to_string(),
+                category: cce_types::FileCategory::Code.as_u8(),
+                last_modified: 1,
+                created_at: 1,
+                project_id: 1,
+                content_hash: None,
+            }],
+        ))
+        .expect("file should be inserted");
 
         let chunk = ChunkRecord::new(
             "group_1_bm25_0".to_string(),
@@ -246,16 +222,13 @@ mod tests {
         .with_entity_ids(&[10, 20])
         .with_epoch(3)
         .with_project_id(1);
-        client
-            .with_transaction(|tx| ChunkRepository::insert_batch(tx, &[chunk]))
-            .expect("chunk should be inserted");
+        block_on(database.chunks_upsert(&[chunk])).expect("chunk should be inserted");
 
         let storage = StorageCoordinator::new(1)
             .expect("valid project ID")
             .with_metadata_store(database);
-        let clone_content = storage
-            .load_bm25_clone_content(3)
-            .expect("content should load from SQLite");
+        let clone_content = block_on(storage.load_bm25_clone_content(3))
+            .expect("content should load from the relation store");
 
         assert_eq!(
             clone_content

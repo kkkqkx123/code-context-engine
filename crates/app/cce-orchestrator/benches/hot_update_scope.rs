@@ -13,11 +13,10 @@
 //! `benches/results/hot_update_scope.tsv`.
 
 use std::collections::HashSet;
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+
+use cce_bench_kit::bench_ms;
 
 use cce_codegraph::index::{
     IndexBuilder, LayeredSnapshotIndex, RelationDeltaOps, RelationIndex, RelationSnapshotIndex,
@@ -133,34 +132,18 @@ fn build_index(file_count: usize, changed: Option<usize>) -> RelationIndex {
     builder.build()
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("hot_update_scope benchmark ({FILE_COUNT} files)");
     println!("{:<22} {:>12} {:>12}", "case", "ms", "detail");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/hot_update_scope.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# case\tms\tdetail");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "hot_update_scope.tsv",
+        "# case\tms\tdetail",
+    );
     let mut row = |label: &str, ms: f64, detail: &str| {
         println!("{label:<22} {ms:>12.3} {detail:>12}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{label}\t{ms:.3}\t{detail}");
-        }
+        let _ = writeln!(out, "{label}\t{ms:.3}\t{detail}");
     };
 
     let base = build_index(FILE_COUNT, None);

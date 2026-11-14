@@ -18,9 +18,7 @@
 //!
 //! Manual timings are appended to `benches/results/snapshot_cost.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cce_codegraph::index::{IndexBuilder, RelationIndex, RelationSnapshotIndex};
@@ -130,14 +128,11 @@ fn main() {
     println!("snapshot_cost benchmark (codegraph relation snapshot publish cost)");
     println!("{:<10} {:<22} {:>12}", "entities", "publish_form", "ms");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/snapshot_cost.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# entities\tpublish_form\tms");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "snapshot_cost.tsv",
+        "# entities\tpublish_form\tms",
+    );
 
     for entities in [1_000usize, 10_000, 100_000] {
         // Build (once) and keep alive for the duration of the run.
@@ -154,9 +149,7 @@ fn main() {
             "{:<10} {:<22} {:>12.3}",
             entities, "from_index_shared(O1)", shared_ms
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{entities}\tfrom_index_shared\t{shared_ms:.3}");
-        }
+        let _ = writeln!(out, "{entities}\tfrom_index_shared\t{shared_ms:.3}");
 
         // O(N) full deep clone publish.
         let t = Instant::now();
@@ -165,9 +158,7 @@ fn main() {
         }
         let full_ms = t.elapsed().as_secs_f64() * 1000.0 / 5.0;
         println!("{:<10} {:<22} {:>12.3}", "", "from_index(ON)", full_ms);
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{entities}\tfrom_index\t{full_ms:.3}");
-        }
+        let _ = writeln!(out, "{entities}\tfrom_index\t{full_ms:.3}");
 
         // Suppress unused warnings for the helper signature.
         let _ = file_count;

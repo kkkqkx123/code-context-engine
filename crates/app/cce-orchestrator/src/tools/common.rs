@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cce_codegraph::index::{LayeredSnapshotIndex, SnapshotFileQueryOps};
-use cce_storage_metadb_sqlite::source_reader;
-use cce_storage_metadb_sqlite::types::ChunkRecord;
+use cce_storage_common::metadb::ChunkRecord;
+use cce_storage_common::source;
 use cce_types::Entity;
 
 use crate::index::vector_store::RelationStore;
@@ -33,7 +33,7 @@ pub(crate) fn read_snippets_batch(
 
     for (file_path, group) in file_groups {
         // Read the full file once, then extract line ranges
-        let content = source_reader::read_source_lines(project_root, &file_path, 0, u32::MAX);
+        let content = source::read_source_lines(project_root, &file_path, 0, u32::MAX);
         let lines: Vec<&str> = content.lines().collect();
 
         for (chunk_id, chunk) in group {
@@ -51,22 +51,24 @@ pub(crate) fn read_snippets_batch(
     snippets
 }
 
-/// Get a read connection from the local relation branch with consistent error
-/// handling.
+/// Resolve the project root directory through the relation contract.
 ///
-/// The single fenced downcast for the synchronous symbol tools: snippet and
-/// mapping reads stay on the embedded branch until the contract carries the
-/// operations they need.
-pub(crate) fn get_read_connection(
+/// Query contexts only know `project_id`; chunk file paths are stored
+/// relative to the project root, so the root is recovered from the project
+/// registry. Returns `None` when the relation handle is missing or the
+/// project row carries no root path.
+pub(crate) async fn resolve_project_root(
     relation: &Option<RelationStore>,
-) -> Result<parking_lot::MutexGuard<'_, rusqlite::Connection>, String> {
-    let client = relation
-        .as_ref()
-        .and_then(RelationStore::as_local)
-        .ok_or("local relation database not configured")?;
-    client
-        .read_connection()
-        .map_err(|e| format!("Failed to get read connection: {e}"))
+    project_id: i64,
+) -> Option<std::path::PathBuf> {
+    use cce_storage_common::RelationStorage;
+
+    relation
+        .as_ref()?
+        .project_record(project_id)
+        .await
+        .ok()?
+        .map(|record| std::path::PathBuf::from(record.root_path))
 }
 
 /// Get entities by file path from the snapshot index.

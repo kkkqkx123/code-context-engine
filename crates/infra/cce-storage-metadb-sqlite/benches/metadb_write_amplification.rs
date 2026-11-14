@@ -12,7 +12,6 @@
 //! Baseline numbers are appended to `benches/results/metadb_write_amplification.tsv`.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -242,20 +241,11 @@ fn main() {
     let d = dataset();
 
     // Human-readable baseline (single timed pass) + TSV append.
-    let mut out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/metadb_write_amplification.tsv"),
-        )
-        .ok();
-    let _ = out.as_mut().map(|f| {
-        let _ = writeln!(
-            f,
-            "# scenario\trows\trows_per_sec\ttxns\ttxns_per_sec\twrite_ms"
-        );
-    });
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "metadb_write_amplification.tsv",
+        "# scenario\trows\trows_per_sec\ttxns\ttxns_per_sec\twrite_ms",
+    );
 
     // --- row-by-row vs batch ---
     let client = setup_client();
@@ -264,13 +254,11 @@ fn main() {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let rps = rows as f64 / t.elapsed().as_secs_f64();
     println!("row_by_row        : {rows} rows in {ms:8.1} ms -> {rps:12.0} rows/s");
-    let _ = out.as_mut().map(|f| {
-        let _ = writeln!(
-            f,
-            "row_by_row\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}",
-            3.0 / t.elapsed().as_secs_f64()
-        );
-    });
+    let _ = writeln!(
+        out,
+        "row_by_row\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}",
+        3.0 / t.elapsed().as_secs_f64()
+    );
 
     let client = setup_client();
     let t = Instant::now();
@@ -278,13 +266,11 @@ fn main() {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let rps = rows as f64 / t.elapsed().as_secs_f64();
     println!("batch_prepared   : {rows} rows in {ms:8.1} ms -> {rps:12.0} rows/s");
-    let _ = out.as_mut().map(|f| {
-        let _ = writeln!(
-            f,
-            "batch_prepared\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}",
-            3.0 / t.elapsed().as_secs_f64()
-        );
-    });
+    let _ = writeln!(
+        out,
+        "batch_prepared\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}",
+        3.0 / t.elapsed().as_secs_f64()
+    );
 
     // --- checkpoint per-unit vs merged ---
     let units = 1_000;
@@ -294,9 +280,7 @@ fn main() {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let tps = txns as f64 / t.elapsed().as_secs_f64();
     println!("checkpoint_per_unit: {txns} txns in {ms:8.1} ms -> {tps:10.0} txns/s (fsyncs)");
-    let _ = out.as_mut().map(|f| {
-        let _ = writeln!(f, "checkpoint_per_unit\t0\t0\t{txns}\t{tps:.0}\t{ms:.1}");
-    });
+    let _ = writeln!(out, "checkpoint_per_unit\t0\t0\t{txns}\t{tps:.0}\t{ms:.1}");
 
     let client = setup_client();
     let t = Instant::now();
@@ -304,9 +288,7 @@ fn main() {
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let tps = txns as f64 / t.elapsed().as_secs_f64();
     println!("checkpoint_merged  : {txns} txns in {ms:8.1} ms -> {tps:10.0} txns/s (fsyncs)");
-    let _ = out.as_mut().map(|f| {
-        let _ = writeln!(f, "checkpoint_merged\t0\t0\t{txns}\t{tps:.0}\t{ms:.1}");
-    });
+    let _ = writeln!(out, "checkpoint_merged\t0\t0\t{txns}\t{tps:.0}\t{ms:.1}");
 
     // --- criterion timing for the two main paths ---
     let mut criterion = criterion::Criterion::default()

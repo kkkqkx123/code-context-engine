@@ -11,9 +11,7 @@
 //! Results are printed to stdout and appended to
 //! `benches/results/storage_txn.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use cce_storage_metadb_sqlite::{
@@ -52,14 +50,11 @@ fn main() {
         "write_batch", "total(ms)", "per_txn(ms)", "txns"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/storage_txn.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# write_batch\ttotal_ms\tper_txn_ms\ttxns");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "storage_txn.tsv",
+        "# write_batch\ttotal_ms\tper_txn_ms\ttxns",
+    );
 
     let chunks: Vec<ChunkRecord> = (0..TOTAL_CHUNKS).map(make_chunk).collect();
 
@@ -78,9 +73,7 @@ fn main() {
         let total_ms = write_batch_size(&client, &chunks, batch);
         let per_txn = total_ms / txns as f64;
         println!("{batch:<16} {total_ms:>12.2} {per_txn:>12.3} {txns:>12}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{batch}\t{total_ms:.2}\t{per_txn:.3}\t{txns}");
-        }
+        let _ = writeln!(out, "{batch}\t{total_ms:.2}\t{per_txn:.3}\t{txns}");
 
         // Read-back tail: one batched lookup over the whole population
         // versus a per-row loop over the first 200 ids.
@@ -98,11 +91,9 @@ fn main() {
         println!(
             "  read-back: batched x{TOTAL_CHUNKS} {batched_ms:.2} ms vs per-row loop x200 {loop_ms:.2} ms"
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "# batch{batch} readback batched_ms={batched_ms:.2} loop200_ms={loop_ms:.2}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "# batch{batch} readback batched_ms={batched_ms:.2} loop200_ms={loop_ms:.2}"
+        );
     }
 }

@@ -30,10 +30,7 @@
 //! - Qdrant strategy: should/must_not combination in the payload filter
 //! - SQLite queries: two-stage "own first, miss → parent" resolution
 
-use rusqlite::Connection;
-
 use cce_storage_common::{RelationStorage, SearchFilter};
-use cce_storage_metadb_sqlite::{GenerationOverrideRepository, ProjectIndexManifestRepository};
 
 use crate::index::vector_store::RelationStore;
 use crate::query::error::{QueryError, Result};
@@ -173,44 +170,6 @@ impl Default for QueryFilter {
     }
 }
 
-/// Derive the [`QueryFilter`] of the active publication from SQLite.
-///
-/// Reads the active manifest together with its inheritance link and the
-/// generation overrides of its own epoch. Projects never published through a
-/// manifest fall back to the legacy `project_meta.active_epoch` key with a
-/// full-generation view.
-///
-/// The view is recomputed on every call by design: readers must trust the
-/// manifest, and keeping no process-local cache guarantees an adoption or
-/// rollback becomes visible to the very next query.
-pub(crate) fn load_active_query_filter(conn: &Connection, project_id: i64) -> Result<QueryFilter> {
-    if let Some(manifest) =
-        ProjectIndexManifestRepository::get_active(conn, project_id).map_err(|error| {
-            QueryError::storage(&format!("Failed to read active index manifest: {error}"))
-        })?
-    {
-        let excluded_files = GenerationOverrideRepository::list_for_generation(
-            conn,
-            project_id,
-            manifest.data_epoch,
-        )
-        .map_err(|error| {
-            QueryError::storage(&format!("Failed to read generation overrides: {error}"))
-        })?
-        .into_iter()
-        .map(|override_entry| override_entry.file_path)
-        .collect();
-        return QueryFilter::inherited(
-            manifest.data_epoch,
-            manifest.parent_data_epoch,
-            excluded_files,
-        )
-        .map_err(|error| QueryError::config(&format!("Invalid epoch view: {error}")));
-    }
-    let epoch = read_legacy_active_epoch(conn, project_id)?;
-    QueryFilter::new(epoch).map_err(|error| QueryError::config(&format!("Invalid epoch: {error}")))
-}
-
 /// Derive the [`QueryFilter`] of the active publication through the
 /// backend-neutral [`RelationStorage`] contract.
 ///
@@ -247,43 +206,18 @@ pub(crate) async fn load_active_query_filter_from_store(
         )
         .map_err(|error| QueryError::config(&format!("Invalid epoch view: {error}")));
     }
-    let Some(client) = store.as_local() else {
-        return Err(QueryError::config(&format!(
-            "project {project_id} has no active publication on the remote relation branch"
-        )));
-    };
-    // read-only connection — the legacy fallback is queried on every search
-    // request and must not contend with the write lock.
-    let conn = client.read_connection().map_err(|error| {
-        QueryError::storage(&format!("Failed to get SQLite connection: {error}"))
-    })?;
-    let epoch = read_legacy_active_epoch(&conn, project_id)?;
+    // Projects never published through a manifest fall back to the legacy
+    // `project_meta.active_epoch` key with a full-generation view; a missing
+    // row is the legitimate default 0, while an unparseable stored value is
+    // propagated instead of silently downgrading to epoch 0.
+    let epoch = store
+        .project_meta_get_int_optional(project_id, "active_epoch")
+        .await
+        .map_err(|error| {
+            QueryError::storage(&format!("Failed to read active_epoch for project {project_id}: {error}"))
+        })?
+        .unwrap_or(0);
     QueryFilter::new(epoch).map_err(|error| QueryError::config(&format!("Invalid epoch: {error}")))
-}
-
-/// Read the legacy `project_meta.active_epoch` fallback.
-///
-/// Only a missing row is treated as the default epoch 0 (the meta key was
-/// never written). Missing table, locked DB, I/O or unparseable stored values
-/// are real failures and are propagated instead of silently downgrading to
-/// epoch 0 — otherwise every storage backend would quietly query stale data.
-pub(crate) fn read_legacy_active_epoch(conn: &Connection, project_id: i64) -> Result<i64> {
-    match conn.query_row(
-        "SELECT value FROM project_meta
-         WHERE project_id = ?1 AND key = 'active_epoch'",
-        rusqlite::params![project_id],
-        |row| row.get::<_, String>(0),
-    ) {
-        Ok(value) => value.parse().map_err(|_| {
-            QueryError::invalid(&format!(
-                "project_meta active_epoch for project {project_id} is not a valid integer: {value}"
-            ))
-        }),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
-        Err(e) => Err(QueryError::storage(&format!(
-            "Failed to read active_epoch for project {project_id}: {e}"
-        ))),
-    }
 }
 
 #[cfg(test)]

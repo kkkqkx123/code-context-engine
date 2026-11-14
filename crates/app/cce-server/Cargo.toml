@@ -43,6 +43,7 @@ chrono = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
+cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
 
 [[bench]]
 name = "service_layer_concurrency"

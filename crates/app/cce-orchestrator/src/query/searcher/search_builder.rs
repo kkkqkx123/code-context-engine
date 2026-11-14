@@ -55,16 +55,6 @@ impl SearcherBuilder {
         }
     }
 
-    /// Attach the local relation database for chunk content lookup.
-    ///
-    /// Local-only port: the embedded branch owns per-project database files,
-    /// so only a local handle can be attached here. Callers holding the
-    /// backend enum use [`Self::with_relation_store`] instead.
-    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
-        self.relation = Some(RelationStore::local(sqlite));
-        self
-    }
-
     /// Enable the relation backend via enum dispatch.
     ///
     /// Reads go through the relation contract, so both branches share one

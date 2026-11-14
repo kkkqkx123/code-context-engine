@@ -10,11 +10,10 @@
 //! Results are printed to stdout and appended to
 //! `benches/results/checkpoint_codec.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Instant;
 
+use cce_bench_kit::bench_ms;
 use cce_orchestrator::hot_update::FileChangeType;
 use cce_orchestrator::operation::checkpoint::{
     ParsedCheckpointEnvelope, ParsedCheckpointPayload, SummaryCheckpointPayload,
@@ -50,15 +49,6 @@ fn payload_for(path: &str, content: &str) -> ParsedCheckpointPayload {
     )))
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("checkpoint_codec benchmark (debug, real ParsedFile payloads)");
     println!(
@@ -66,19 +56,11 @@ fn main() {
         "sample", "encode", "decode", "bytes", "ratio%"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/checkpoint_codec.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# sample\tencode_ms\tdecode_ms\tbytes\tjson_bytes\tratio_pct"
-        );
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "checkpoint_codec.tsv",
+        "# sample\tencode_ms\tdecode_ms\tbytes\tjson_bytes\tratio_pct",
+    );
 
     for (path, content) in [rust_small(), rust_large()] {
         let payload = payload_for(path, &content);
@@ -104,12 +86,10 @@ fn main() {
             .to_string_lossy()
             .into_owned();
         println!("{label:<12} {encode_ms:>12.2} {decode_ms:>12.2} {bytes:>14} {ratio:>12.1}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "{label}\t{encode_ms:.2}\t{decode_ms:.2}\t{bytes}\t{json_len}\t{ratio:.1}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "{label}\t{encode_ms:.2}\t{decode_ms:.2}\t{bytes}\t{json_len}\t{ratio:.1}"
+        );
 
         // Tombstone contrast: Deleted carries no source, must stay ~free.
         let tombstone = ParsedCheckpointPayload::Deleted;
@@ -118,9 +98,7 @@ fn main() {
             let _ = decode_parsed_checkpoint(&b);
         });
         println!("deleted      {tomb_ms:>12.2}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "deleted-{label}\t{tomb_ms:.2}\t0\t0\t0\t0");
-        }
+        let _ = writeln!(out, "deleted-{label}\t{tomb_ms:.2}\t0\t0\t0\t0");
 
         // Summary second-write contrast: the dedicated small payload against
         // the source-bearing parse blob above. Recovery replays the summary
@@ -145,12 +123,10 @@ fn main() {
             "summary-{label:<4} {summary_encode_ms:>12.2} {summary_decode_ms:>12.2} {summary_bytes:>14} {:>12.1}",
             summary_bytes as f64 / summary_json as f64 * 100.0,
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "summary-{label}\t{summary_encode_ms:.2}\t{summary_decode_ms:.2}\t{summary_bytes}\t{summary_json}\t0"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "summary-{label}\t{summary_encode_ms:.2}\t{summary_decode_ms:.2}\t{summary_bytes}\t{summary_json}\t0"
+        );
 
         // Decode-versus-reparse contrast: recovery either decodes the stored
         // blob or pays a full re-parse. The gap bounds the acceptable
@@ -160,8 +136,6 @@ fn main() {
             let _ = coord.parse(path, &content).expect("reparse");
         });
         println!("reparse-{label:<4} {reparse_ms:>12.2}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "reparse-{label}\t{reparse_ms:.2}\t0\t0\t0\t0");
-        }
+        let _ = writeln!(out, "reparse-{label}\t{reparse_ms:.2}\t0\t0\t0\t0");
     }
 }

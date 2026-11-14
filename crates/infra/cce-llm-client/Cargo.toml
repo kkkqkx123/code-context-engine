@@ -29,6 +29,7 @@ futures = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
+cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
 futures = { workspace = true }
 llm-suite-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-embedding", features = ["mock"] }
 llm-suite-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-rerank", features = ["mock"] }

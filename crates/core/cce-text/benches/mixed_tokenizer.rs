@@ -8,11 +8,9 @@
 //! Results are printed to stdout and appended to
 //! `benches/results/mixed_tokenizer.tsv`.
 
-use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
-use std::time::Instant;
 
+use cce_bench_kit::bench_ms;
 use cce_text::{Bm25TextCleaner, MixedTokenizer};
 
 fn chinese_dense() -> String {
@@ -42,15 +40,6 @@ fn identifier_long() -> String {
     "calculateTotalAmountWithDiscountAndTaxForUserSessionManagerFactoryProviderImpl ".repeat(2000)
 }
 
-fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
-    f();
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    start.elapsed().as_secs_f64() * 1000.0 / iters as f64
-}
-
 fn main() {
     println!("mixed_tokenizer benchmark (debug, small inputs)");
     println!(
@@ -58,14 +47,11 @@ fn main() {
         "sample", "tokenize", "offsets", "clean"
     );
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/mixed_tokenizer.tsv"))
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# sample\ttokenize_ms\toffsets_ms\tclean_ms\ttokens");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "mixed_tokenizer.tsv",
+        "# sample\ttokenize_ms\toffsets_ms\tclean_ms\ttokens",
+    );
 
     let tokenizer = MixedTokenizer::new();
     let cleaner = Bm25TextCleaner::new();
@@ -89,9 +75,7 @@ fn main() {
             let _ = cleaner.clean(text);
         });
         println!("{label:<12} {t1:>12.2} {t2:>12.2} {t3:>12.2}");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{label}\t{t1:.2}\t{t2:.2}\t{t3:.2}\t{tokens}");
-        }
+        let _ = writeln!(out, "{label}\t{t1:.2}\t{t2:.2}\t{t3:.2}\t{tokens}");
     }
     println!("truncated_inputs: {}", cce_text::truncated_input_count());
 }

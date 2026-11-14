@@ -9,8 +9,10 @@ use std::sync::Arc;
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
 use cce_codegraph::query::QueryCache;
-use cce_storage_metadb_sqlite::repo::EntityRepository;
+use cce_storage_common::RelationStorage;
 use cce_types::{Entity, EntityId};
+
+use crate::query::filter::load_active_query_filter_from_store;
 use parking_lot::RwLock;
 
 use crate::index::vector_store::RelationStore;
@@ -69,21 +71,21 @@ impl FindReferencesTool {
         self
     }
 
-    /// Attach the local relation database for snippet lookup.
+    /// Attach the relation backend for snippet lookup.
     ///
-    /// Local-only port: snippet and FTS5 fallback reads stay on the embedded
-    /// branch until the contract carries the operations they need.
-    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
-        self.relation = Some(RelationStore::local(sqlite));
+    /// Reads go through the relation contract, so both branches share one
+    /// read path and branch selection stays inside the enum.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.relation = Some(store);
         self
     }
 
     /// Find all references to a symbol (unified query path).
     ///
-    /// Prioritizes the in-memory snapshot; SQLite is only used for snippet
-    /// extraction, not for reference resolution. This follows the unified
-    /// query path described in the performance optimization plan.
-    pub fn find_references(
+    /// Prioritizes the in-memory snapshot; the relation store is only used
+    /// for snippet extraction, not for reference resolution. This follows
+    /// the unified query path described in the performance optimization plan.
+    pub async fn find_references(
         &self,
         request: FindReferencesRequest,
     ) -> Result<FindReferencesResponse, SymbolLookupError> {
@@ -92,7 +94,9 @@ impl FindReferencesTool {
         // Check cache first
         let cache_key = target_id;
         if let Some(cached) = self.cache.write().get_callers(cache_key).cloned() {
-            let references = self.get_reference_locations(cached, target_id, &request)?;
+            let references = self
+                .get_reference_locations(cached, target_id, &request)
+                .await?;
             let grouped = self.group_by_file(references);
             return Ok(FindReferencesResponse {
                 symbol: request.symbol,
@@ -105,7 +109,9 @@ impl FindReferencesTool {
         let callers = self.index.get_callers_by_callee_entity(target_id);
         self.cache.write().put_callers(cache_key, callers.clone());
 
-        let references = self.get_reference_locations(callers, target_id, &request)?;
+        let references = self
+            .get_reference_locations(callers, target_id, &request)
+            .await?;
 
         let grouped = self.group_by_file(references);
 
@@ -117,12 +123,12 @@ impl FindReferencesTool {
         })
     }
 
-    /// Resolve symbol by name (unified path: snapshot first, SQLite fallback).
-    pub fn resolve_symbol_by_name(
+    /// Resolve symbol by name (unified path: snapshot first, store fallback).
+    pub async fn resolve_symbol_by_name(
         &self,
         symbol_name: &str,
         project_id: i64,
-        sqlite_conn: &rusqlite::Connection,
+        store: &RelationStore,
     ) -> Result<EntityId, SymbolLookupError> {
         // Unified path: try snapshot name index first (O(1) without DB).
         let ids = self.index.get_function_ids_by_name(symbol_name);
@@ -130,44 +136,30 @@ impl FindReferencesTool {
             return Ok(first);
         }
 
-        let view = crate::query::filter::load_active_query_filter(sqlite_conn, project_id)
+        let view = load_active_query_filter_from_store(store, project_id)
+            .await
             .map_err(|e| SymbolLookupError::Internal(e.to_string()))?;
-        let mut entities = EntityRepository::search_fts_at_epoch(
-            sqlite_conn,
-            symbol_name,
-            project_id,
-            1,
-            view.epoch_value(),
-        )
-        .map_err(|e| SymbolLookupError::Internal(format!("FTS5 search failed: {}", e)))?;
+        let mut entities = store
+            .entities_search_fts(project_id, symbol_name, 1, view.epoch_value(), &[])
+            .await
+            .map_err(|e| SymbolLookupError::Internal(format!("FTS5 search failed: {e}")))?;
 
         // Two-stage resolution: an empty own generation falls back to the
-        // inherited parent epoch; parent hits for overridden files are dropped.
+        // inherited parent epoch; the branch drops parent hits of
+        // overridden files so only the visible view is returned.
         if entities.is_empty()
             && let Some(parent_epoch) = view.parent_epoch()
         {
-            entities = EntityRepository::search_fts_at_epoch(
-                sqlite_conn,
-                symbol_name,
-                project_id,
-                1,
-                parent_epoch,
-            )
-            .map_err(|e| SymbolLookupError::Internal(format!("FTS5 search failed: {}", e)))?;
-            if !view.excluded_files().is_empty() {
-                let excluded: std::collections::HashSet<&str> =
-                    view.excluded_files().iter().map(String::as_str).collect();
-                entities.retain(|entity| {
-                    sqlite_conn
-                        .query_row(
-                            "SELECT path FROM files WHERE id = ?1",
-                            rusqlite::params![entity.file_id],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .map(|path| !excluded.contains(path.as_str()))
-                        .unwrap_or(true)
-                });
-            }
+            entities = store
+                .entities_search_fts(
+                    project_id,
+                    symbol_name,
+                    1,
+                    parent_epoch,
+                    view.excluded_files(),
+                )
+                .await
+                .map_err(|e| SymbolLookupError::Internal(format!("FTS5 search failed: {e}")))?;
         }
 
         if let Some(entity) = entities.first() {
@@ -241,7 +233,7 @@ impl FindReferencesTool {
     }
 
     /// Get reference locations from callers
-    fn get_reference_locations(
+    async fn get_reference_locations(
         &self,
         callers: Vec<EntityId>,
         target_id: EntityId,
@@ -266,7 +258,7 @@ impl FindReferencesTool {
                         let snippet = if include_snippet {
                             let ctx = context_lines.unwrap_or(0);
                             let call_line = relation.span.start_position.row + 1;
-                            self.extract_snippet(&path, call_line, ctx)
+                            self.extract_snippet(&path, call_line, ctx).await
                         } else {
                             None
                         };
@@ -309,14 +301,14 @@ impl FindReferencesTool {
         Ok(locations)
     }
 
-    /// Extract code snippet centered on a call line from SQLite chunk storage
-    fn extract_snippet(
+    /// Extract code snippet centered on a call line from source storage
+    async fn extract_snippet(
         &self,
         path: &str,
         call_line: usize,
         context_lines: usize,
     ) -> Option<String> {
-        let content = self.get_file_content_from_chunks(path)?;
+        let content = self.get_file_content_from_chunks(path).await?;
 
         let lines: Vec<&str> = content.lines().collect();
         if lines.is_empty() || call_line == 0 || call_line > lines.len() {
@@ -331,12 +323,11 @@ impl FindReferencesTool {
     }
 
     /// Read file content from disk (chunk rows no longer persist raw code)
-    fn get_file_content_from_chunks(&self, path: &str) -> Option<String> {
+    async fn get_file_content_from_chunks(&self, path: &str) -> Option<String> {
         let project_id = self.project_id;
-        let conn = crate::tools::common::get_read_connection(&self.relation).ok()?;
         let project_root =
-            cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
-        let content = cce_storage_metadb_sqlite::source_reader::read_source_lines(
+            crate::tools::common::resolve_project_root(&self.relation, project_id).await?;
+        let content = cce_storage_common::source::read_source_lines(
             Some(project_root.as_path()),
             path,
             0,

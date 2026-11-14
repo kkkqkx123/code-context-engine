@@ -18,7 +18,6 @@
 //! Baseline numbers are appended to `benches/results/chunker_concurrency.tsv`.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -40,9 +39,7 @@ struct Fixture {
 /// point at the real on-disk files (so `process_file_complete` exercises the
 /// full read -> parse -> chunk path).
 fn fixture() -> Fixture {
-    let root = std::env::temp_dir().join(format!("cce_chunk_bench_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("root dir");
+    let root = cce_bench_kit::fresh_temp_dir("cce_chunk_bench");
     let project = SyntheticProject::generate(SIZE, DEFAULT_LANG_DIST);
     project.materialize(&root).expect("materialize");
 
@@ -135,17 +132,11 @@ fn main() {
         .build()
         .expect("runtime");
 
-    let mut out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/chunker_concurrency.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# scenario\tconcurrency\tfiles\tms\tfiles_per_sec");
-    }
+    let mut out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "chunker_concurrency.tsv",
+        "# scenario\tconcurrency\tfiles\tms\tfiles_per_sec",
+    );
 
     // One warm-up so tree-sitter grammars and query caches are steady-state.
     rt.block_on(run_bounded(&fp, entries, bounded));
@@ -174,9 +165,7 @@ fn main() {
         let rate = N as f64 / (ms / 1000.0);
         println!("{name:<12} (k={k:<3}) : {N} files in {ms:8.1} ms -> {rate:8.1} files/s");
         timings.push((name, k, ms));
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{name}\t{k}\t{N}\t{ms:.1}\t{rate:.1}");
-        }
+        let _ = writeln!(out, "{name}\t{k}\t{N}\t{ms:.1}\t{rate:.1}");
     }
 
     // Relative speedup of parallel over serial tracks executor governance:
