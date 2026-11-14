@@ -7,19 +7,14 @@
 
 use axum::{extract::Query, extract::State};
 use serde_json::json;
-use std::path::PathBuf;
-use std::sync::Arc;
 
-use cce_config::{
-    AppConfig, ConfigWarning, DependencyParams, RelationConfig, Settings, validate_all_dependencies,
-};
-use cce_orchestrator::hot_update::processors::ProcessorCollection;
-use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
+use cce_config::{AppConfig, ConfigWarning, DependencyParams, Settings, validate_all_dependencies};
 
 use cce_api::models::{
     ConfigInfoResponse, ConfigReloadQuery, ConfigReloadResponse, ConfigValidateResponse,
     ConfigWarningInfo, ErrorResponse, error_codes,
 };
+use cce_server_shared::services::config;
 
 use crate::api::response::ApiResult;
 
@@ -48,183 +43,32 @@ pub async fn handle_config_reload(
     // changes fail closed; safe sections advance the global version so the
     // project registry invalidates cached effective configurations.
     let Some(project_id) = query.project_id else {
-        match Settings::reload_safe_from_file(None) {
-            Ok(version) => {
-                state.engine.clear_all_component_caches().await;
-                let _ = state.engine.project_registry().invalidate_cache(None).await;
-                state.invalidate_relation_searcher_all().await;
-                return ApiResult::Success(ConfigReloadResponse {
-                    success: true,
-                    message: format!(
-                        "Global configuration reloaded (version {version}); project caches invalidated by global version"
-                    ),
-                });
-            }
-            Err(error) => {
-                return ApiResult::Error(ErrorResponse::with_details(
-                    error_codes::INVALID_REQUEST,
-                    "Global reload refused; restart required for dangerous sections",
-                    error.to_string(),
-                ));
-            }
-        }
+        return match config::reload_global(&state).await {
+            Ok(version) => ApiResult::Success(ConfigReloadResponse {
+                success: true,
+                message: format!(
+                    "Global configuration reloaded (version {version}); project caches invalidated by global version"
+                ),
+            }),
+            Err(error) => ApiResult::Error(ErrorResponse::with_details(
+                error_codes::INVALID_REQUEST,
+                "Global reload refused; restart required for dangerous sections",
+                error,
+            )),
+        };
     };
 
-    // Use engine to reload project config (clears all component caches)
-    let engine = &state.engine;
-    if let Err(e) = engine.reload_project_config(project_id).await {
-        return ApiResult::Error(ErrorResponse::with_details(
+    match config::reload_project(&state, project_id).await {
+        Ok(()) => ApiResult::Success(ConfigReloadResponse {
+            success: true,
+            message: format!("Configuration reloaded for project {project_id}"),
+        }),
+        Err(error) => ApiResult::Error(ErrorResponse::with_details(
             error_codes::INTERNAL_ERROR,
             "Failed to reload project config",
-            e.to_string(),
-        ));
+            error,
+        )),
     }
-    state.invalidate_relation_searcher(project_id).await;
-
-    // Attempt hot-update coordinator reload if available
-    match engine.get_hot_update_coordinator(project_id).await {
-        Ok(coordinator) => {
-            let coord = coordinator.lock().await;
-            let relation_config = match engine.project_registry().get_or_load(project_id).await {
-                Ok(entry) => entry.config.relation.clone(),
-                Err(error) => {
-                    tracing::warn!(
-                        project_id,
-                        error = %error,
-                        "Using default relation configuration during config reload"
-                    );
-                    RelationConfig::default()
-                }
-            };
-            let project_root = coord
-                .watched_dirs()
-                .first()
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("."));
-            let project_group_id = cce_storage_common::generate_project_group_id(
-                project_id,
-                &project_root.to_string_lossy(),
-            );
-
-            let factory = ProcessorFactory::new();
-            let relation_publisher = match engine.get_relation_snapshot_publisher(project_id).await
-            {
-                Ok(publisher) => Some(publisher),
-                Err(error) => {
-                    tracing::warn!(
-                        project_id,
-                        error = %error,
-                        "Relation processor will remain unavailable during config reload"
-                    );
-                    None
-                }
-            };
-            // Build the processor set from the project configuration so export
-            // and summary processors are reflected in the reloaded processors
-            // (export gated on `export.enabled`, summary generation on
-            // `store_summaries`).
-            let project_config = match engine.project_registry().get_or_load(project_id).await {
-                Ok(entry) => entry.config.clone(),
-                Err(error) => {
-                    tracing::warn!(
-                        project_id,
-                        error = %error,
-                        "Using default configuration during config reload"
-                    );
-                    cce_config::AppConfig::default()
-                }
-            };
-            let mut processor_config = ProcessorConfig::new();
-            processor_config.enable_export = project_config.export.enabled;
-            processor_config.enable_summary = project_config.orchestrator.indexer.store_summaries;
-            processor_config.export_config = if project_config.export.enabled {
-                Some(cce_orchestrator::ExportConfig::from_module_config(
-                    &project_config.export,
-                    project_root.clone(),
-                    project_id,
-                ))
-            } else {
-                None
-            };
-            // The summary generator follows the project summary config (same as
-            // the full-index path) so hot-update summaries stay consistent.
-            let summary_generator: Option<Arc<dyn cce_parser::summary::SummaryGenerator>> =
-                processor_config.enable_summary.then(|| {
-                    let generator: Arc<dyn cce_parser::summary::SummaryGenerator> =
-                        Arc::new(cce_parser::summary::RuleBasedGenerator::with_config(
-                            project_config.summary.clone(),
-                        ));
-                    generator
-                });
-            let processors_result = factory.create_all_processors(
-                Some(state.engine.vector_clone()),
-                Some(state.engine.fulltext_clone()),
-                state
-                    .engine
-                    .metadata_store_clone()
-                    .as_ref()
-                    .and_then(|client| client.for_project(project_id).ok())
-                    .or_else(|| state.engine.metadata_store_clone()),
-                Some(state.engine.embedder_clone()),
-                Some(project_group_id),
-                project_id,
-                relation_publisher,
-                &relation_config,
-                coord.checkpoint_manager().await,
-                summary_generator,
-                Some(&project_config.ast_to_nl),
-                &project_config.grouper,
-                &project_config.license_header,
-                Some(&project_config.summary),
-                &processor_config,
-                engine.get_plugin_registry(project_id).await,
-                None,
-                Some(cce_metrics::HotUpdateStorageMetrics::new(
-                    state.engine.metrics_registry(),
-                    project_id,
-                )),
-            );
-            let (processors, _storage_coordinator) = match processors_result {
-                Ok(value) => value,
-                Err(error) => {
-                    tracing::warn!(
-                        project_id,
-                        error = %error,
-                        "Failed to rebuild processors during config reload; keeping the previous set"
-                    );
-                    return ApiResult::Success(ConfigReloadResponse {
-                        success: true,
-                        message: format!(
-                            "Configuration reloaded for project {} (processors kept unchanged)",
-                            project_id
-                        ),
-                    });
-                }
-            };
-            let processor_refs: Vec<
-                &dyn cce_orchestrator::hot_update::processors::UpdateProcessor,
-            > = processors.enabled_processors();
-            if let Err(e) = coord.process_pending_config_changes(&processor_refs).await {
-                tracing::warn!(
-                    project_id,
-                    error = %e,
-                    "Hot-update config reload failed (non-critical)"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                project_id,
-                error = %e,
-                "HotUpdateCoordinator not available, config cache cleared but runtime not hot-reloaded"
-            );
-        }
-    }
-
-    ApiResult::Success(ConfigReloadResponse {
-        success: true,
-        message: format!("Configuration reloaded for project {}", project_id),
-    })
 }
 
 /// GET /api/config

@@ -19,7 +19,6 @@ use cce_api::models::{
     IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
-use cce_codegraph::index::{SnapshotEntityQueryOps, SnapshotFileQueryOps};
 use cce_server_shared::maintenance::ProjectIndexMaintenanceService;
 use cce_storage_common::{FulltextStorage, VectorStorage};
 
@@ -286,8 +285,12 @@ pub async fn handle_delete_entity(
     let group_id = resolve_group_id(&state, project_id).await;
 
     // Step 1: Get entity file path from the published snapshot (read-only).
-    let entity_file_path =
-        resolve_entity_file_path(&state, project_id, cce_types::EntityId(entity_id)).await;
+    let entity_file_path = cce_server_shared::services::relation::entity_file_path(
+        &state,
+        project_id,
+        cce_types::EntityId(entity_id),
+    )
+    .await;
 
     // Step 2: Remove from vector store
     let mut vectors_deleted = 0usize;
@@ -451,7 +454,8 @@ pub async fn handle_batch_delete(
     for entity_id in &request.entity_ids {
         let eid = cce_types::EntityId(*entity_id);
 
-        let file_path = resolve_entity_file_path(&state, project_id, eid).await;
+        let file_path =
+            cce_server_shared::services::relation::entity_file_path(&state, project_id, eid).await;
 
         if let Some(ref fp) = file_path {
             {
@@ -545,7 +549,9 @@ pub async fn handle_index_stats(
 
     // Get statistics from the published relation snapshot (read-only).
     let (total_entities, total_relations) =
-        read_published_relation_counts(&state, project_id).await;
+        cce_server_shared::services::relation::published_relation_counts(&state, project_id)
+            .await
+            .unwrap_or((0, 0));
 
     // Resolve vector group ID
     let group_id = resolve_group_id(&state, project_id).await;
@@ -734,76 +740,13 @@ pub(crate) async fn resolve_group_id(
     }
 }
 
-/// Read entity/relation counts from the published snapshot or runtime.
-///
-/// Prefers the orchestrator's last published snapshot, falling back to the
-/// process-local relation runtime. Returns zeros when neither is available.
-async fn read_published_relation_counts(
-    state: &cce_server_shared::context::SharedContext,
-    project_id: i64,
-) -> (usize, usize) {
-    if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-        let orchestrator = orchestrator.lock().await;
-        if let Some(snapshot) = orchestrator.get_published_relation_snapshot() {
-            return (
-                snapshot.function_count(),
-                snapshot.resolved_relation_count(),
-            );
-        }
-    }
-    if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await {
-        if let Some(snapshot) = runtime.get_snapshot().await {
-            return (snapshot.entity_count(), snapshot.relation_count());
-        }
-    }
-    (0, 0)
-}
-
-/// Resolve an entity's file path through the published snapshot or runtime.
-async fn resolve_entity_file_path(
-    state: &cce_server_shared::context::SharedContext,
-    project_id: i64,
-    entity_id: cce_types::EntityId,
-) -> Option<String> {
-    if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-        let orchestrator = orchestrator.lock().await;
-        if let Some(snapshot) = orchestrator.get_published_relation_snapshot()
-            && let Some(path) = snapshot.get_file_path_by_entity(entity_id)
-        {
-            return Some(path);
-        }
-    }
-    if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await {
-        if let Some(snapshot) = runtime.get_snapshot().await {
-            return snapshot.index.get_file_path_by_entity(entity_id);
-        }
-    }
-    None
-}
-
 /// Estimate a file's relation count from the published snapshot for delete responses.
 async fn estimate_file_relation_count(
     state: &cce_server_shared::context::SharedContext,
     project_id: i64,
     file_path: &str,
 ) -> usize {
-    if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-        let orchestrator = orchestrator.lock().await;
-        if let Some(snapshot) = orchestrator.get_published_relation_snapshot() {
-            let relations = snapshot.get_resolved_relations_by_file(file_path);
-            if !relations.is_empty() {
-                return relations.iter().map(|(_, edges)| edges.len()).sum();
-            }
-            return 0;
-        }
-    }
-    if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await {
-        if let Some(snapshot) = runtime.get_snapshot().await {
-            let relations = snapshot.index.get_resolved_relations_by_file(file_path);
-            if !relations.is_empty() {
-                return relations.iter().map(|(_, edges)| edges.len()).sum();
-            }
-        }
-    }
-    0
+    cce_server_shared::services::relation::file_relation_count(state, project_id, file_path)
+        .await
+        .unwrap_or(0)
 }

@@ -14,9 +14,25 @@ use axum::{Json, extract::State};
 use super::{
     find_refs_result_from_orch, get_symbols_result_from_orch, goto_definition_result_from_orch,
 };
-use cce_orchestrator::{FindReferencesTool, GetSymbolsTool, GotoDefinitionTool};
+use cce_server_shared::services::tools;
+use cce_server_shared::services::tools::ToolAnswer;
 
 use crate::api::SharedContext;
+
+/// Map a tool answer onto one of the wire response envelopes.
+pub(crate) fn answer_fields<T, U>(
+    answer: ToolAnswer<T>,
+    map: impl FnOnce(T) -> U,
+) -> (bool, Option<U>, Option<String>, Option<serde_json::Value>) {
+    let ToolAnswer {
+        result,
+        relation_info,
+    } = answer;
+    match result {
+        Ok(value) => (true, Some(map(value)), None, relation_info),
+        Err(error) => (false, None, Some(error), relation_info),
+    }
+}
 
 // ============================================================================
 // Find References
@@ -38,87 +54,27 @@ pub async fn handle_find_references(
     State(state): State<SharedContext>,
     Json(request): Json<cce_api::models::FindReferencesRequest>,
 ) -> Json<cce_api::models::FindReferencesResponse> {
-    // Validate project_id
-    if request.project_id <= 0 {
-        return Json(cce_api::models::FindReferencesResponse {
-            success: false,
-            result: None,
-            error: Some("Invalid project_id".to_string()),
-            relation_info: None,
-        });
-    }
-
-    // Get relation runtime for this project
-    let runtime = match state.engine.get_relation_runtime(request.project_id).await {
-        Ok(rt) => rt,
-        Err(e) => {
-            return Json(cce_api::models::FindReferencesResponse {
-                success: false,
-                result: None,
-                error: Some(format!("Failed to get relation runtime: {}", e)),
-                relation_info: None,
-            });
-        }
-    };
-
-    // Check if runtime can serve queries
-    if !runtime.can_serve_queries().await {
-        let info = runtime.get_capability_info().await;
-        return Json(cce_api::models::FindReferencesResponse {
-            success: false,
-            result: None,
-            error: Some(format!("Relation index not available: {:?}", info.state)),
-            relation_info: Some(info.to_json_map()),
-        });
-    }
-
-    // Get snapshot
-    let snapshot = match runtime.get_snapshot().await {
-        Some(s) => s,
-        None => {
-            return Json(cce_api::models::FindReferencesResponse {
-                success: false,
-                result: None,
-                error: Some("No relation snapshot available".to_string()),
-                relation_info: None,
-            });
-        }
-    };
-
-    // Zero-copy: the tool shares the published snapshot's maps.
-    let index = snapshot.index.clone();
-    let mut tool = FindReferencesTool::new(index, request.project_id);
-    if let Some(sqlite) = state.engine.metadata_store().map(|c| c.as_ref())
-        && let Ok(project) = sqlite.for_project(request.project_id)
-    {
-        tool = tool.with_sqlite(project);
-    }
-    let req = cce_orchestrator::FindReferencesRequest {
-        path: request.path,
-        line: request.line,
-        column: request.column,
-        symbol: request.symbol,
-        context_lines: request.context_lines,
-        include_snippet: request.include_snippet,
-        include_entity_info: request.include_entity_info,
-    };
-
-    let capability_info = runtime.get_capability_info().await;
-
-    match tool.find_references(req) {
-        Ok(response) => Json(cce_api::models::FindReferencesResponse {
-            success: true,
-            result: Some(find_refs_result_from_orch(response)),
-            error: None,
-            relation_info: Some(capability_info.to_json_map()),
-        }),
-        Err(e) => Json(cce_api::models::FindReferencesResponse {
-            success: false,
-            result: None,
-            error: Some(e.to_string()),
-            relation_info: Some(capability_info.to_json_map()),
-        }),
-    }
+    let answer = tools::find_references(
+        &state,
+        request.project_id,
+        cce_orchestrator::FindReferencesRequest {
+            path: request.path,
+            line: request.line,
+            column: request.column,
+            symbol: request.symbol,
+            context_lines: request.context_lines,
+            include_snippet: request.include_snippet,
+            include_entity_info: request.include_entity_info,
+        },
+    )
+    .await;
+    let (success, result, error, relation_info) = answer_fields(answer, find_refs_result_from_orch);
+    Json(cce_api::models::FindReferencesResponse {
+        success,
+        result,
+        error,
+        relation_info,
+    })
 }
 
 // ============================================================================
@@ -141,76 +97,22 @@ pub async fn handle_get_symbols(
     State(state): State<SharedContext>,
     Json(request): Json<cce_api::models::GetSymbolsRequest>,
 ) -> Json<cce_api::models::GetSymbolsResponse> {
-    // Validate project_id
-    if request.project_id <= 0 {
-        return Json(cce_api::models::GetSymbolsResponse {
-            success: false,
-            result: None,
-            error: Some("Invalid project_id".to_string()),
-            relation_info: None,
-        });
-    }
-
-    // Get relation runtime for this project
-    let runtime = match state.engine.get_relation_runtime(request.project_id).await {
-        Ok(rt) => rt,
-        Err(e) => {
-            return Json(cce_api::models::GetSymbolsResponse {
-                success: false,
-                result: None,
-                error: Some(format!("Failed to get relation runtime: {}", e)),
-                relation_info: None,
-            });
-        }
-    };
-
-    // Check if runtime can serve queries
-    if !runtime.can_serve_queries().await {
-        let info = runtime.get_capability_info().await;
-        return Json(cce_api::models::GetSymbolsResponse {
-            success: false,
-            result: None,
-            error: Some(format!("Relation index not available: {:?}", info.state)),
-            relation_info: Some(info.to_json_map()),
-        });
-    }
-
-    // Get snapshot
-    let snapshot = match runtime.get_snapshot().await {
-        Some(s) => s,
-        None => {
-            return Json(cce_api::models::GetSymbolsResponse {
-                success: false,
-                result: None,
-                error: Some("No relation snapshot available".to_string()),
-                relation_info: None,
-            });
-        }
-    };
-
-    // Zero-copy: the tool shares the published snapshot's maps.
-    let index = snapshot.index.clone();
-    let tool = GetSymbolsTool::new(index);
-    let req = cce_orchestrator::GetSymbolsRequest {
-        paths: request.paths,
-    };
-
-    let capability_info = runtime.get_capability_info().await;
-
-    match tool.get_symbols(req) {
-        Ok(response) => Json(cce_api::models::GetSymbolsResponse {
-            success: true,
-            result: Some(get_symbols_result_from_orch(response)),
-            error: None,
-            relation_info: Some(capability_info.to_json_map()),
-        }),
-        Err(e) => Json(cce_api::models::GetSymbolsResponse {
-            success: false,
-            result: None,
-            error: Some(e.to_string()),
-            relation_info: Some(capability_info.to_json_map()),
-        }),
-    }
+    let answer = tools::get_symbols(
+        &state,
+        request.project_id,
+        cce_orchestrator::GetSymbolsRequest {
+            paths: request.paths,
+        },
+    )
+    .await;
+    let (success, result, error, relation_info) =
+        answer_fields(answer, get_symbols_result_from_orch);
+    Json(cce_api::models::GetSymbolsResponse {
+        success,
+        result,
+        error,
+        relation_info,
+    })
 }
 
 // ============================================================================
@@ -233,83 +135,24 @@ pub async fn handle_goto_definition(
     State(state): State<SharedContext>,
     Json(request): Json<cce_api::models::GotoDefinitionRequest>,
 ) -> Json<cce_api::models::GotoDefinitionResponse> {
-    // Validate project_id
-    if request.project_id <= 0 {
-        return Json(cce_api::models::GotoDefinitionResponse {
-            success: false,
-            result: None,
-            error: Some("Invalid project_id".to_string()),
-            relation_info: None,
-        });
-    }
-
-    // Get relation runtime for this project
-    let runtime = match state.engine.get_relation_runtime(request.project_id).await {
-        Ok(rt) => rt,
-        Err(e) => {
-            return Json(cce_api::models::GotoDefinitionResponse {
-                success: false,
-                result: None,
-                error: Some(format!("Failed to get relation runtime: {}", e)),
-                relation_info: None,
-            });
-        }
-    };
-
-    // Check if runtime can serve queries
-    if !runtime.can_serve_queries().await {
-        let info = runtime.get_capability_info().await;
-        return Json(cce_api::models::GotoDefinitionResponse {
-            success: false,
-            result: None,
-            error: Some(format!("Relation index not available: {:?}", info.state)),
-            relation_info: Some(info.to_json_map()),
-        });
-    }
-
-    // Get snapshot
-    let snapshot = match runtime.get_snapshot().await {
-        Some(s) => s,
-        None => {
-            return Json(cce_api::models::GotoDefinitionResponse {
-                success: false,
-                result: None,
-                error: Some("No relation snapshot available".to_string()),
-                relation_info: None,
-            });
-        }
-    };
-
-    // Zero-copy: the tool shares the published snapshot's maps.
-    let index = snapshot.index.clone();
-    let mut tool = GotoDefinitionTool::new(index, request.project_id);
-    if let Some(sqlite) = state.engine.metadata_store().map(|c| c.as_ref())
-        && let Ok(project) = sqlite.for_project(request.project_id)
-    {
-        tool = tool.with_sqlite(project);
-    }
-    let req = cce_orchestrator::GotoDefinitionRequest {
-        path: request.path,
-        line: request.line,
-        column: request.column,
-        symbol: request.symbol,
-        include_body: request.include_body,
-    };
-
-    let capability_info = runtime.get_capability_info().await;
-
-    match tool.goto_definition(req) {
-        Ok(response) => Json(cce_api::models::GotoDefinitionResponse {
-            success: true,
-            result: Some(goto_definition_result_from_orch(response)),
-            error: None,
-            relation_info: Some(capability_info.to_json_map()),
-        }),
-        Err(e) => Json(cce_api::models::GotoDefinitionResponse {
-            success: false,
-            result: None,
-            error: Some(e.to_string()),
-            relation_info: Some(capability_info.to_json_map()),
-        }),
-    }
+    let answer = tools::goto_definition(
+        &state,
+        request.project_id,
+        cce_orchestrator::GotoDefinitionRequest {
+            path: request.path,
+            line: request.line,
+            column: request.column,
+            symbol: request.symbol,
+            include_body: request.include_body,
+        },
+    )
+    .await;
+    let (success, result, error, relation_info) =
+        answer_fields(answer, goto_definition_result_from_orch);
+    Json(cce_api::models::GotoDefinitionResponse {
+        success,
+        result,
+        error,
+        relation_info,
+    })
 }

@@ -7,10 +7,9 @@
 use axum::Json;
 
 use cce_api::models::{DiagnoseApiResponse, DiagnoseRequest};
-use cce_orchestrator::{AstDiagnosis, DiagnosisRequest};
-use cce_types::language::Language;
+use cce_server_shared::services::tools::{self, DiagnosisSpec};
 
-use super::diagnose_result_from_orch;
+use super::diagnose_result_from_view;
 
 /// Handle AST diagnosis
 ///
@@ -25,64 +24,22 @@ use super::diagnose_result_from_orch;
     )
 )]
 pub async fn handle_diagnose(Json(request): Json<DiagnoseRequest>) -> Json<DiagnoseApiResponse> {
-    let mut diagnosis = AstDiagnosis::new();
-
-    let mut req = DiagnosisRequest::new(&request.code);
-
-    if let Some(lang) = &request.language {
-        if let Ok(l) = parse_language(lang) {
-            req = req.with_language(l);
-        }
-    }
-
-    if let Some(file_name) = &request.file_name {
-        req = req.with_file_name(file_name);
-    }
-
-    req = req.with_ast(request.include_ast);
-
-    match diagnosis.diagnose(req) {
-        Ok(response) => Json(DiagnoseApiResponse {
+    let spec = DiagnosisSpec {
+        code: request.code,
+        language: request.language,
+        file_name: request.file_name,
+        include_ast: request.include_ast,
+    };
+    match tools::diagnose(spec) {
+        Ok(view) => Json(DiagnoseApiResponse {
             success: true,
-            result: Some(diagnose_result_from_orch(response)),
+            result: Some(diagnose_result_from_view(view)),
             error: None,
         }),
-        Err(e) => Json(DiagnoseApiResponse {
+        Err(error) => Json(DiagnoseApiResponse {
             success: false,
             result: None,
-            error: Some(e.to_string()),
+            error: Some(error.to_string()),
         }),
-    }
-}
-
-/// Parse language string to Language enum
-fn parse_language(s: &str) -> Result<Language, ()> {
-    match s.to_lowercase().as_str() {
-        "rust" => Ok(Language::Rust),
-        "python" | "py" => Ok(Language::Python),
-        "javascript" | "js" => Ok(Language::JavaScript),
-        "typescript" | "ts" => Ok(Language::TypeScript),
-        "c" => Ok(Language::C),
-        "cpp" | "c++" => Ok(Language::Cpp),
-        "csharp" | "c#" => Ok(Language::CSharp),
-        "go" => Ok(Language::Go),
-        "java" => Ok(Language::Java),
-        "kotlin" | "kt" => Ok(Language::Kotlin),
-        "groovy" => Ok(Language::Groovy),
-        "ruby" | "rb" => Ok(Language::Ruby),
-        "php" => Ok(Language::Php),
-        "json" => Ok(Language::Json),
-        "yaml" | "yml" => Ok(Language::Yaml),
-        "toml" => Ok(Language::Toml),
-        "xml" => Ok(Language::Xml),
-        "html" => Ok(Language::Html),
-        "css" => Ok(Language::Css),
-        "scss" | "sass" => Ok(Language::Scss),
-        "less" => Ok(Language::Less),
-        "vue" => Ok(Language::Vue),
-        "svelte" => Ok(Language::Svelte),
-        "jsx" => Ok(Language::Jsx),
-        "tsx" => Ok(Language::Tsx),
-        _ => Err(()),
     }
 }

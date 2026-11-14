@@ -71,7 +71,7 @@ This repository benchmarks the **wrapper layer** only:
 
 ## 5. Shared support crate
 
-`crates/app/cce-bench-kit` provides the deterministic generator:
+`crates/bench/cce-bench-kit` provides the deterministic generator:
 
 - `ProjectSize::{Small, Medium, Large}` with `file_count()` / `entity_count()`.
 - `SyntheticProject::generate(size, dist)` / `materialize(root)` — `dist` is a

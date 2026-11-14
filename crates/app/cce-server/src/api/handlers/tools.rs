@@ -65,73 +65,53 @@ pub(crate) fn keyword_result_from_orch(
     }
 }
 
-fn position_from_orch(value: cce_types::position::Position) -> cce_api::models::PositionInfo {
-    let cce_types::position::Position { row, column } = value;
-    cce_api::models::PositionInfo { row, column }
+fn position_from_view(
+    value: cce_server_shared::services::tools::PositionView,
+) -> cce_api::models::PositionInfo {
+    cce_api::models::PositionInfo {
+        row: value.row,
+        column: value.column,
+    }
 }
 
-fn span_from_orch(value: cce_types::position::Span) -> cce_api::models::SpanInfo {
-    let cce_types::position::Span {
-        start_byte,
-        end_byte,
-        start_position,
-        end_position,
-    } = value;
+fn span_from_view(
+    value: cce_server_shared::services::tools::SpanView,
+) -> cce_api::models::SpanInfo {
     cce_api::models::SpanInfo {
-        start_byte,
-        end_byte,
-        start_position: position_from_orch(start_position),
-        end_position: position_from_orch(end_position),
+        start_byte: value.start_byte,
+        end_byte: value.end_byte,
+        start_position: position_from_view(value.start),
+        end_position: position_from_view(value.end),
     }
 }
 
-fn ast_node_from_orch(
-    value: cce_parser::parser::ast_parser::AstNode,
+fn ast_node_from_view(
+    value: cce_server_shared::services::tools::AstNodeView,
 ) -> cce_api::models::AstNodeInfo {
-    let cce_parser::parser::ast_parser::AstNode {
-        kind,
-        text,
-        span,
-        children,
-    } = value;
     cce_api::models::AstNodeInfo {
-        kind,
-        text,
-        span: span_from_orch(span),
-        children: children.into_iter().map(ast_node_from_orch).collect(),
+        kind: value.kind,
+        text: value.text,
+        span: span_from_view(value.span),
+        children: value.children.into_iter().map(ast_node_from_view).collect(),
     }
 }
 
-pub(crate) fn diagnose_result_from_orch(
-    response: cce_orchestrator::DiagnosisResponse,
+pub(crate) fn diagnose_result_from_view(
+    view: cce_server_shared::services::tools::DiagnosisView,
 ) -> cce_api::models::DiagnoseResult {
-    let cce_orchestrator::DiagnosisResponse {
-        language,
-        is_valid,
-        ast,
-        diagnostics,
-    } = response;
     cce_api::models::DiagnoseResult {
-        language,
-        is_valid,
-        ast: ast.map(ast_node_from_orch),
-        diagnostics: diagnostics
+        language: view.language,
+        is_valid: view.is_valid,
+        ast: view.ast.map(ast_node_from_view),
+        diagnostics: view
+            .diagnostics
             .into_iter()
-            .map(|entry| {
-                let cce_orchestrator::Diagnostic {
-                    kind,
-                    position,
-                    span,
-                    message,
-                    precision,
-                } = entry;
-                cce_api::models::DiagnosticEntry {
-                    kind: format!("{kind:?}"),
-                    position: position_from_orch(position),
-                    span: span.map(span_from_orch),
-                    message,
-                    precision: format!("{precision:?}"),
-                }
+            .map(|entry| cce_api::models::DiagnosticEntry {
+                kind: entry.kind,
+                position: position_from_view(entry.position),
+                span: entry.span.map(span_from_view),
+                message: entry.message,
+                precision: entry.precision,
             })
             .collect(),
     }

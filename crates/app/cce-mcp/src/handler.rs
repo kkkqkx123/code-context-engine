@@ -307,21 +307,16 @@ mod tests {
     /// same traversal.
     #[test]
     fn direction_spellings_agree_across_transports() {
+        use cce_server_shared::services::relation::CallDirection;
+        assert_eq!(CallDirection::parse("down"), Some(CallDirection::Forward));
         assert_eq!(
-            support::canonical_call_direction(Some("down")),
-            ("forward", false)
+            CallDirection::parse("forward"),
+            Some(CallDirection::Forward)
         );
+        assert_eq!(CallDirection::parse("up"), Some(CallDirection::Backward));
         assert_eq!(
-            support::canonical_call_direction(Some("forward")),
-            ("forward", false)
-        );
-        assert_eq!(
-            support::canonical_call_direction(Some("up")),
-            ("backward", true)
-        );
-        assert_eq!(
-            support::canonical_call_direction(Some("backward")),
-            ("backward", true)
+            CallDirection::parse("backward"),
+            Some(CallDirection::Backward)
         );
     }
 }

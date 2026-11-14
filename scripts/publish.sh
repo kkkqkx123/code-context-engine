@@ -25,7 +25,7 @@ fi
 CRATES=(
     "crates/core/cce-metrics"
     "crates/core/cce-utils"
-    "crates/app/cce-bench-kit"
+    "crates/bench/cce-bench-kit"
     "crates/app/cce-api"
     "crates/app/cce-admission"
     "crates/infra/cce-circuit-breaker"

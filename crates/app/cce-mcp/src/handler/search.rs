@@ -4,12 +4,11 @@
 //! orchestrator keyword tool, so MCP and the HTTP surface observe the same
 //! runtime parameters and item shapes.
 
-use cce_api::models::KeywordTermOperator;
-use cce_orchestrator::KeywordSearchTool;
 use cce_server_shared::context::SharedContext;
 use cce_server_shared::services::search::{
     FileSearchSpec, SearchService, SharedQueryFields, SingleQuerySpec,
 };
+use cce_server_shared::services::tools::{self, KeywordOperator, KeywordSpec};
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -277,50 +276,28 @@ pub async fn keyword_search(
     state: &Arc<SharedContext>,
     args: KeywordSearchArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    let Some(sqlite) = state.engine.metadata_store_clone() else {
-        return Ok(CallToolResult::error(vec![ContentBlock::text(
-            "metadata store is not configured; keyword search unavailable",
-        )]));
-    };
-    let tool = KeywordSearchTool::new(state.engine.fulltext_clone()).with_sqlite(sqlite);
-    let term_operator = match args.term_operator.as_deref().map(str::to_ascii_lowercase) {
-        Some(operator) if operator == "and" => KeywordTermOperator::And,
-        _ => KeywordTermOperator::Or,
-    };
-    let request = cce_orchestrator::KeywordSearchRequest {
+    let spec = KeywordSpec {
         query: args.query.clone(),
         top_n: args.top_n.unwrap_or(10),
         project_id: args.project_id,
         epoch: None,
         offset: args.offset.unwrap_or(0),
-        term_operator: match term_operator {
-            KeywordTermOperator::Or => cce_storage_bm25::TermOperator::Or,
-            KeywordTermOperator::And => cce_storage_bm25::TermOperator::And,
-        },
+        operator: KeywordOperator::parse(args.term_operator.as_deref()),
     };
-    match tool.search(request).await {
+    match tools::keyword_search(state, spec).await {
         Ok(response) => {
             let results: Vec<Value> = response
                 .results
                 .iter()
                 .map(|item| {
-                    let api_item = cce_api::models::KeywordSearchItem {
-                        chunk_id: item.chunk_id.clone(),
-                        score: item.score,
-                        file_path: item.file_path.clone(),
-                        title: item.title.clone(),
-                        snippet: item.snippet.clone(),
-                        start_line: item.start_line,
-                        end_line: item.end_line,
-                    };
                     json!({
-                        "chunk_id": api_item.chunk_id,
-                        "score": api_item.score,
-                        "file_path": api_item.file_path,
-                        "title": api_item.title,
-                        "snippet": api_item.snippet,
-                        "start_line": api_item.start_line,
-                        "end_line": api_item.end_line,
+                        "chunk_id": item.chunk_id,
+                        "score": item.score,
+                        "file_path": item.file_path,
+                        "title": item.title,
+                        "snippet": item.snippet,
+                        "start_line": item.start_line,
+                        "end_line": item.end_line,
                     })
                 })
                 .collect();

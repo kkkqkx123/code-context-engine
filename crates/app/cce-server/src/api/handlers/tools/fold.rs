@@ -1,8 +1,7 @@
 //! Stateless file fold handler
 //!
-//! Exposes the orchestrator fold tool over HTTP. The handler borrows the
-//! shared parse coordinator, maps caller language names, and always returns
-//! the fold shape: degenerate inputs degrade instead of erroring.
+//! Exposes the shared fold service over HTTP. The handler only maps the wire
+//! payload onto the service spec and the result back onto the response shape.
 
 use axum::Json;
 
@@ -10,11 +9,7 @@ use cce_api::models::{
     BatchFoldRequest, BatchFoldResponse, BatchFoldResultItem, BatchFoldStats, ErrorResponse,
     FoldRequest, FoldResponse, error_codes,
 };
-use cce_orchestrator::{
-    FileFoldBatchItem, FileFoldBatchRequest, FileFoldMode, FileFoldRequest, FileFoldTool,
-};
-use cce_parser::parser::ParseCoordinator;
-use cce_types::language::Language;
+use cce_server_shared::services::tools::{self, FoldBatchItemSpec, FoldBatchSpec, FoldSpec};
 
 use crate::api::response::ApiResult;
 
@@ -31,29 +26,13 @@ use crate::api::response::ApiResult;
     )
 )]
 pub async fn handle_fold(Json(request): Json<FoldRequest>) -> Json<FoldResponse> {
-    let language = request.language.as_deref().and_then(Language::from_name);
-    let mode = request
-        .mode
-        .as_deref()
-        .map(|name| FileFoldMode::parse(Some(name)));
-
-    let mut tool_request = FileFoldRequest::new(request.text);
-    if let Some(resolved) = language {
-        tool_request = tool_request.with_language(resolved);
-    }
-    if let Some(file_name) = request.file_name {
-        tool_request = tool_request.with_file_name(file_name);
-    }
-    if let Some(max_tokens) = request.max_tokens {
-        tool_request = tool_request.with_max_tokens(max_tokens);
-    }
-    if let Some(parsed_mode) = mode {
-        tool_request = tool_request.with_mode(parsed_mode);
-    }
-
-    let mut coordinator = ParseCoordinator::new();
-    let folded = FileFoldTool::fold(&mut coordinator, tool_request);
-
+    let folded = tools::fold(FoldSpec {
+        text: request.text,
+        language: request.language,
+        file_name: request.file_name,
+        max_tokens: request.max_tokens,
+        mode: request.mode,
+    });
     Json(FoldResponse {
         success: true,
         folded_text: folded.folded_text,
@@ -82,46 +61,25 @@ pub async fn handle_fold(Json(request): Json<FoldRequest>) -> Json<FoldResponse>
 pub async fn handle_fold_batch(
     Json(request): Json<BatchFoldRequest>,
 ) -> ApiResult<BatchFoldResponse> {
-    let mut tool_request = FileFoldBatchRequest::new(
-        request
+    let spec = FoldBatchSpec {
+        items: request
             .items
             .into_iter()
-            .map(|item| {
-                let mut entry = FileFoldBatchItem::new(item.id, item.text);
-                if let Some(name) = item.language.as_deref()
-                    && let Some(language) = Language::from_name(name)
-                {
-                    entry = entry.with_language(language);
-                }
-                if let Some(file_name) = item.file_name {
-                    entry = entry.with_file_name(file_name);
-                }
-                if let Some(max_tokens) = item.max_tokens {
-                    entry = entry.with_max_tokens(max_tokens);
-                }
-                if let Some(name) = item.mode.as_deref() {
-                    entry = entry.with_mode(FileFoldMode::parse(Some(name)));
-                }
-                entry
+            .map(|item| FoldBatchItemSpec {
+                id: item.id,
+                text: item.text,
+                language: item.language,
+                file_name: item.file_name,
+                max_tokens: item.max_tokens,
+                mode: item.mode,
             })
             .collect(),
-    );
-    if let Some(name) = request.language.as_deref()
-        && let Some(language) = Language::from_name(name)
-    {
-        tool_request = tool_request.with_language(language);
-    }
-    if let Some(max_tokens) = request.max_tokens {
-        tool_request = tool_request.with_max_tokens(max_tokens);
-    }
-    if let Some(name) = request.mode.as_deref() {
-        tool_request = tool_request.with_mode(FileFoldMode::parse(Some(name)));
-    }
-    if let Some(max_concurrency) = request.max_concurrency {
-        tool_request = tool_request.with_max_concurrency(max_concurrency);
-    }
-
-    match FileFoldTool::fold_batch(tool_request) {
+        language: request.language,
+        max_tokens: request.max_tokens,
+        mode: request.mode,
+        max_concurrency: request.max_concurrency,
+    };
+    match tools::fold_batch(spec) {
         Ok(folded) => ApiResult::Success(BatchFoldResponse {
             results: folded
                 .results
@@ -143,9 +101,9 @@ pub async fn handle_fold_batch(
                 structure_known_count: folded.stats.structure_known_count,
             },
         }),
-        Err(e) => ApiResult::Error(ErrorResponse::new(
+        Err(error) => ApiResult::Error(ErrorResponse::new(
             error_codes::INVALID_REQUEST,
-            e.to_string(),
+            error.to_string(),
         )),
     }
 }

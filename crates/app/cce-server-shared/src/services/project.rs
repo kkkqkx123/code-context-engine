@@ -9,6 +9,10 @@ use cce_api::models::{
     CreateProjectRequest, ProjectConfig, SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, SUPPLY_MODE_LOCAL,
 };
 use cce_config::ProjectAppConfig;
+use cce_config::Settings;
+use cce_config::project_registry::RegistryError;
+use cce_config::validation::Validate;
+use cce_llm::LlmClient;
 use cce_storage_metadb_sqlite::{
     NewProjectRecord, ProjectRecord, ProjectRepository, SqliteClient, generate_project_name,
 };
@@ -160,13 +164,17 @@ pub fn create_project(
     })
 }
 
-/// Failure of a project read or reload request.
+/// Failure of a project read, write or reload request.
 #[derive(Debug)]
 pub enum ProjectServiceError {
     /// No metadata store is configured for this engine.
     MetadataUnavailable,
     /// The project row does not exist.
     NotFound(i64),
+    /// The requested value is not acceptable.
+    Invalid(String),
+    /// The requested value conflicts with stored state.
+    Conflict(String),
     /// Reading or writing the project row failed.
     Storage(String),
 }
@@ -178,8 +186,31 @@ impl std::fmt::Display for ProjectServiceError {
                 write!(f, "metadata store not initialized")
             }
             ProjectServiceError::NotFound(id) => write!(f, "project {id} not found"),
+            ProjectServiceError::Invalid(message) => write!(f, "{message}"),
+            ProjectServiceError::Conflict(message) => write!(f, "{message}"),
             ProjectServiceError::Storage(message) => write!(f, "{message}"),
         }
+    }
+}
+
+/// Translate one registry failure into the service error contract.
+pub fn registry_error(error: RegistryError) -> ProjectServiceError {
+    match error {
+        RegistryError::ProjectNotFound(id) => ProjectServiceError::NotFound(id),
+        RegistryError::PathNotFound(path) => {
+            ProjectServiceError::Invalid(format!("Path does not exist: {path}"))
+        }
+        RegistryError::DuplicatePath(path) => {
+            ProjectServiceError::Conflict(format!("Path already registered: {path}"))
+        }
+        RegistryError::Validation(message) | RegistryError::Configuration(message) => {
+            ProjectServiceError::Invalid(message)
+        }
+        RegistryError::Serialization(message) | RegistryError::Deserialization(message) => {
+            ProjectServiceError::Invalid(format!("Invalid configuration format: {message}"))
+        }
+        RegistryError::Io(error) => ProjectServiceError::Storage(error.to_string()),
+        RegistryError::Database(error) => ProjectServiceError::Storage(error),
     }
 }
 
@@ -299,5 +330,288 @@ pub fn project_config_from_record(record: &ProjectRecord) -> ProjectConfig {
         ignore_patterns,
         created_at: record.created_at.to_string(),
         last_indexed: record.last_indexed.clone(),
+    }
+}
+
+/// Top-level keys that belong to the global configuration and must never be
+/// accepted as part of a project profile update.
+const FORBIDDEN_PROFILE_KEYS: &[&str] = &[
+    "server",
+    "database",
+    "logger",
+    "metrics",
+    "export",
+    "mcp",
+    "search",
+    "cache",
+    "symbol_resolution",
+];
+
+/// Outcome of a stored profile write.
+#[derive(Debug, Clone)]
+pub struct ProfileUpdateOutcome {
+    pub config_version: u64,
+    /// Whether the hot-update coordinator picked up the new profile.
+    pub hot_reload_applied: bool,
+}
+
+/// Read the stored profile document and its combined version.
+pub async fn read_project_profile(
+    state: &SharedContext,
+    project_id: i64,
+) -> Result<(serde_json::Value, u64), ProjectServiceError> {
+    let registry = state.engine.project_registry();
+    let (profile, version) = registry
+        .get_profile(project_id)
+        .await
+        .map_err(registry_error)?;
+    Ok((serde_json::to_value(&profile).unwrap_or_default(), version))
+}
+
+/// Validate and persist a project profile document, then apply its side
+/// effects.
+///
+/// Global-only top-level keys are rejected before deserialization so a caller
+/// cannot smuggle a global section into the project profile.
+pub async fn update_project_profile(
+    state: &SharedContext,
+    project_id: i64,
+    document: serde_json::Value,
+) -> Result<ProfileUpdateOutcome, ProjectServiceError> {
+    if let Some(forbidden) = document.as_object().and_then(|object| {
+        FORBIDDEN_PROFILE_KEYS
+            .iter()
+            .find(|key| object.contains_key(**key))
+    }) {
+        return Err(ProjectServiceError::Invalid(format!(
+            "Field '{forbidden}' belongs to global configuration and cannot be set per project"
+        )));
+    }
+    let profile = serde_json::from_value::<ProjectAppConfig>(document).map_err(|error| {
+        ProjectServiceError::Invalid(format!("Invalid project profile format: {error}"))
+    })?;
+    profile.validate_structured().map_err(|error| {
+        ProjectServiceError::Invalid(format!("Configuration validation failed: {error}"))
+    })?;
+    // The write bumps `profile_version` atomically and invalidates the cached
+    // effective configuration.
+    let registry = state.engine.project_registry();
+    let version = registry
+        .update_profile(project_id, profile)
+        .await
+        .map_err(registry_error)?;
+    let hot_reload_applied = reload_project_after_profile_change(state, project_id).await;
+    Ok(ProfileUpdateOutcome {
+        config_version: version,
+        hot_reload_applied,
+    })
+}
+
+/// Project LLM selections accepted by the typed update endpoint.
+#[derive(Debug, Clone, Default)]
+pub struct ProjectLlmUpdateSpec {
+    pub default_chat: Option<String>,
+    pub default_rerank: Option<String>,
+    pub rerank_enabled: Option<bool>,
+    pub rerank_max_candidates: Option<usize>,
+    /// Whether the caller tried to patch global chat model parameters.
+    pub chat_model_params_present: bool,
+}
+
+/// Persist project LLM selections into the project profile.
+///
+/// Only project-effective chat and rerank selections are accepted; provider
+/// connection details and per-model tuning stay global.
+pub async fn update_project_llm(
+    state: &SharedContext,
+    project_id: i64,
+    spec: ProjectLlmUpdateSpec,
+) -> Result<ProfileUpdateOutcome, ProjectServiceError> {
+    if spec.chat_model_params_present {
+        return Err(ProjectServiceError::Invalid(
+            "chat_model_params belongs to the global model registry; change it in the server configuration file"
+                .to_string(),
+        ));
+    }
+    if let Some(max_candidates) = spec.rerank_max_candidates
+        && !(1..=1000).contains(&max_candidates)
+    {
+        return Err(ProjectServiceError::Invalid(
+            "rerank_max_candidates must be within 1..=1000".to_string(),
+        ));
+    }
+    let global = Settings::global().map_err(|error| {
+        ProjectServiceError::Storage(format!("Failed to load global config: {error}"))
+    })?;
+    if let Some(ref default_chat) = spec.default_chat
+        && !global.llm.chat_models.contains_key(default_chat)
+    {
+        return Err(ProjectServiceError::Invalid(format!(
+            "Unknown chat model '{default_chat}'"
+        )));
+    }
+    if let Some(ref default_rerank) = spec.default_rerank
+        && !global.llm.rerank_models.contains_key(default_rerank)
+    {
+        return Err(ProjectServiceError::Invalid(format!(
+            "Unknown rerank model '{default_rerank}'"
+        )));
+    }
+
+    let registry = state.engine.project_registry();
+    let (mut profile, _) = registry
+        .get_profile(project_id)
+        .await
+        .map_err(registry_error)?;
+    let mut llm = profile.llm.take().unwrap_or_default();
+    if spec.default_chat.is_some() {
+        llm.chat_model = spec.default_chat;
+    }
+    if spec.default_rerank.is_some() {
+        llm.rerank_model = spec.default_rerank;
+    }
+    if let Some(enabled) = spec.rerank_enabled {
+        llm.enable_rerank = Some(enabled);
+    }
+    if let Some(max_candidates) = spec.rerank_max_candidates {
+        llm.rerank_max_candidates = Some(max_candidates);
+    }
+    profile.llm = Some(llm);
+    let version = registry
+        .update_profile(project_id, profile)
+        .await
+        .map_err(registry_error)?;
+    let hot_reload_applied = reload_project_after_profile_change(state, project_id).await;
+    Ok(ProfileUpdateOutcome {
+        config_version: version,
+        hot_reload_applied,
+    })
+}
+
+/// Service probed for LLM connectivity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmProbeService {
+    Embedding,
+    Chat,
+}
+
+impl LlmProbeService {
+    /// Parse a probe service label, case-insensitively.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "embedding" => Some(Self::Embedding),
+            "chat" => Some(Self::Chat),
+            _ => None,
+        }
+    }
+
+    /// Canonical label of the service.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Embedding => "embedding",
+            Self::Chat => "chat",
+        }
+    }
+}
+
+/// Result of an LLM connectivity probe.
+#[derive(Debug, Clone)]
+pub struct LlmProbeOutcome {
+    pub success: bool,
+    pub service: LlmProbeService,
+    pub model_key: String,
+    pub latency_ms: u64,
+    pub dimension: Option<usize>,
+    pub message: String,
+}
+
+/// Probe a configured model using the stored project configuration and discard
+/// all transient client state afterwards.
+pub async fn probe_project_llm(
+    state: &SharedContext,
+    project_id: i64,
+    service: LlmProbeService,
+    model_key: &str,
+) -> Result<LlmProbeOutcome, ProjectServiceError> {
+    let model_key = model_key.trim().to_string();
+    if model_key.is_empty() {
+        return Err(ProjectServiceError::Invalid(
+            "model_key must not be empty".to_string(),
+        ));
+    }
+    let project_config = state
+        .engine
+        .project_registry()
+        .get_or_load(project_id)
+        .await
+        .map_err(registry_error)?
+        .config
+        .clone();
+    match service {
+        LlmProbeService::Embedding => {
+            if !project_config.llm.embedding_models.contains_key(&model_key) {
+                return Err(ProjectServiceError::Invalid(format!(
+                    "Unknown embedding model '{model_key}'"
+                )));
+            }
+            let probe =
+                cce_llm_client::OpenAICompatibleProvider::from_model(&project_config, &model_key)
+                    .map_err(|error| {
+                    ProjectServiceError::Invalid(format!(
+                        "Failed to resolve embedding model '{model_key}': {error}"
+                    ))
+                })?;
+            let started = std::time::Instant::now();
+            let (success, dimension, message) =
+                match probe.embed_one("cce connectivity probe").await {
+                    Ok(vector) => {
+                        let dimension = vector.len();
+                        (
+                            true,
+                            Some(dimension),
+                            format!("Embedding probe succeeded with {dimension} dimensions"),
+                        )
+                    }
+                    Err(error) => (false, None, format!("Embedding probe failed: {error}")),
+                };
+            Ok(LlmProbeOutcome {
+                success,
+                service,
+                model_key,
+                latency_ms: started.elapsed().as_millis() as u64,
+                dimension,
+                message,
+            })
+        }
+        LlmProbeService::Chat => {
+            if !project_config.llm.chat_models.contains_key(&model_key) {
+                return Err(ProjectServiceError::Invalid(format!(
+                    "Unknown chat model '{model_key}'"
+                )));
+            }
+            let handle = cce_llm_client::factory::build_chat_client(&project_config, &model_key)
+                .map_err(|error| {
+                    ProjectServiceError::Invalid(format!(
+                        "Failed to resolve chat model '{model_key}': {error}"
+                    ))
+                })?;
+            let started = std::time::Instant::now();
+            let messages = vec![cce_llm::Message::user("Reply with ok.")];
+            let (success, message) = match handle.client.chat(&messages, &handle.config).await {
+                Ok(result) => (
+                    true,
+                    format!("Chat probe succeeded ({} chars)", result.content.len()),
+                ),
+                Err(error) => (false, format!("Chat probe failed: {error}")),
+            };
+            Ok(LlmProbeOutcome {
+                success,
+                service,
+                model_key,
+                latency_ms: started.elapsed().as_millis() as u64,
+                dimension: None,
+                message,
+            })
+        }
     }
 }

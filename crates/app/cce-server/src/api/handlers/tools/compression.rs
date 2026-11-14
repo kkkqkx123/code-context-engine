@@ -9,7 +9,7 @@ use cce_api::models::{
     BatchCompressFailure, BatchCompressRequest, BatchCompressResponse, BatchCompressSuccess,
     CompressApiResponse, CompressRequest, CompressResult,
 };
-use cce_orchestrator::{BatchCompressionRequest, CompressionRequest, CompressionRetrieval};
+use cce_server_shared::services::tools::{self, BatchCompressSpec, CompressSpec};
 
 fn to_compress_result(response: cce_orchestrator::CompressionResponse) -> CompressResult {
     CompressResult {
@@ -36,24 +36,21 @@ fn to_compress_result(response: cce_orchestrator::CompressionResponse) -> Compre
     )
 )]
 pub async fn handle_compress(Json(request): Json<CompressRequest>) -> Json<CompressApiResponse> {
-    let retrieval = CompressionRetrieval::new();
-
-    let req = CompressionRequest {
+    let spec = CompressSpec {
         file_path: request.file_path,
         include_entities: request.include_entities,
         include_groups: request.include_groups,
     };
-
-    match retrieval.compress(req).await {
+    match tools::compress(spec).await {
         Ok(response) => Json(CompressApiResponse {
             success: true,
             result: Some(to_compress_result(response)),
             error: None,
         }),
-        Err(e) => Json(CompressApiResponse {
+        Err(error) => Json(CompressApiResponse {
             success: false,
             result: None,
-            error: Some(e.to_string()),
+            error: Some(error.to_string()),
         }),
     }
 }
@@ -73,16 +70,13 @@ pub async fn handle_compress(Json(request): Json<CompressRequest>) -> Json<Compr
 pub async fn handle_compress_batch(
     Json(request): Json<BatchCompressRequest>,
 ) -> Json<BatchCompressResponse> {
-    let retrieval = CompressionRetrieval::new();
-
-    let req = BatchCompressionRequest {
+    let result = tools::compress_batch(BatchCompressSpec {
         file_paths: request.file_paths,
         include_entities: request.include_entities.unwrap_or(false),
         include_groups: request.include_groups.unwrap_or(false),
         max_concurrency: request.max_concurrency,
-    };
-
-    let result = retrieval.compress_batch(req).await;
+    })
+    .await;
 
     Json(BatchCompressResponse {
         successes: result

@@ -3,13 +3,11 @@
 //! Provides single file parsing functionality.
 
 use axum::Json;
-use std::path::Path;
 
 use cce_api::models::{
     EntityInfo, ErrorResponse, ParseRequest, ParseResponse, RelationInfo, error_codes,
 };
-
-use cce_parser::parser::ParseCoordinator;
+use cce_server_shared::services::tools;
 
 use crate::api::response::ApiResult;
 
@@ -28,90 +26,45 @@ pub type ParseApiResponse = ApiResult<ParseResponse>;
     )
 )]
 pub async fn handle_parse(Json(request): Json<ParseRequest>) -> ParseApiResponse {
-    let start = std::time::Instant::now();
-
-    // Validate file path
-    if request.file_path.trim().is_empty() {
-        return ParseApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "File path cannot be empty",
-        ));
-    }
-
-    // Read file content with automatic encoding detection
-    let (content, detected_encoding) =
-        match cce_utils::file::read_file_to_utf8_with_encoding_async(Path::new(&request.file_path))
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                return ParseApiResponse::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    format!("Unable to read file: {}", e),
-                ));
-            }
-        };
-
-    // Parse file
-    let mut parser = ParseCoordinator::new();
-    let parsed = match parser.parse(&request.file_path, &content) {
+    let parsed = match tools::parse_file(&request.file_path).await {
         Ok(parsed) => parsed,
-        Err(e) => {
+        Err(error) => {
             return ParseApiResponse::Error(ErrorResponse::new(
-                error_codes::PARSE_ERROR,
-                e.to_string(),
+                error_codes::INVALID_REQUEST,
+                error.to_string(),
             ));
         }
     };
-
-    // Convert entities
-    let entities: Vec<EntityInfo> = parsed
-        .entities
-        .iter()
-        .map(|entity| EntityInfo {
-            id: entity.id.0,
-            kind: format!("{:?}", entity.kind),
-            name: entity.name.clone(),
-            signature: Some(entity.signature.clone()),
-            start_line: entity.span.start_position.row as u32 + 1,
-            end_line: entity.span.end_position.row as u32 + 1,
-            doc_comment: entity.doc_comment.clone(),
-        })
-        .collect();
-
-    // Build entity name -> id map for intra-file resolution
-    let entity_by_name: std::collections::HashMap<&str, u64> = parsed
-        .entities
-        .iter()
-        .map(|e| (e.name.as_str(), e.id.0))
-        .collect();
-
-    // Convert relations (callee_id resolved for intra-file calls)
-    let relations: Vec<RelationInfo> = parsed
-        .raw_relations
-        .iter()
-        .map(|relation| RelationInfo {
-            caller_id: relation.src.0,
-            callee_id: entity_by_name
-                .get(relation.dst_name.as_str())
-                .copied()
-                .unwrap_or(0),
-            relation_type: relation.relation_type.to_string(),
-            line: relation.span.start_position.row as u32 + 1,
-        })
-        .collect();
-
-    let response = ParseResponse {
+    ParseApiResponse::Success(ParseResponse {
         success: true,
-        file_path: request.file_path,
-        language: format!("{}", parsed.language),
-        encoding: detected_encoding,
-        entities,
-        relations,
-        elapsed_ms: start.elapsed().as_millis() as u64,
-    };
-
-    ParseApiResponse::Success(response)
+        file_path: parsed.file_path,
+        language: parsed.language,
+        encoding: parsed.encoding,
+        entities: parsed
+            .entities
+            .into_iter()
+            .map(|entity| EntityInfo {
+                id: entity.id,
+                kind: entity.kind,
+                name: entity.name,
+                signature: Some(entity.signature),
+                start_line: entity.start_line,
+                end_line: entity.end_line,
+                doc_comment: entity.doc_comment,
+            })
+            .collect(),
+        relations: parsed
+            .relations
+            .into_iter()
+            .map(|relation| RelationInfo {
+                caller_id: relation.caller_id,
+                callee_id: relation.callee_id,
+                relation_type: relation.relation_type,
+                line: relation.line,
+            })
+            .collect(),
+        elapsed_ms: parsed.elapsed_ms,
+    })
 }
 
 #[cfg(test)]

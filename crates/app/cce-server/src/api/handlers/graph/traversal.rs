@@ -6,16 +6,20 @@ use cce_api::models::{
     ComponentsQuery, EgoQuery, ErrorResponse, ExportQuery, GraphComponentsResponse, GraphPathQuery,
     GraphPathResponse, GraphSubgraphResponse, SubgraphQuery, error_codes,
 };
-use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
-use cce_orchestrator::query::GraphService;
+use cce_server_shared::services::graph::{self, GraphDirectionSpec, GraphView};
 
-use crate::api::handlers::entity::seed::resolve_symbol_seed;
-use crate::api::response::ApiResult;
+use crate::api::response::{ApiResult, relation_error};
 
-use super::{
-    convert_paged_subgraph, convert_subgraph, graph_context, parse_direction, parse_graph_filter,
-    parse_graph_pagination, relation_max_depth, stale_relation_info,
-};
+use super::{convert_graph, parse_graph_filter, parse_graph_pagination};
+
+fn parse_direction(raw: &str) -> Result<GraphDirectionSpec, ErrorResponse> {
+    GraphDirectionSpec::parse(raw).ok_or_else(|| {
+        ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "direction must be one of in, out, or both".to_string(),
+        )
+    })
+}
 
 /// Handle ego neighborhood request.
 #[utoipa::path(
@@ -34,58 +38,51 @@ pub async fn handle_graph_ego(
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<EgoQuery>,
 ) -> ApiResult<GraphSubgraphResponse> {
-    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
-        Ok(ctx) => ctx,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let max_depth = match relation_max_depth(&state, project_id).await {
-        Ok(depth) => depth,
-        Err(e) => return ApiResult::Error(e),
-    };
     let direction = match parse_direction(&params.direction) {
         Ok(direction) => direction,
-        Err(e) => return ApiResult::Error(e),
+        Err(error) => return ApiResult::Error(error),
     };
-    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.entity_id) {
-        Ok(id) => id,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let service = GraphService::new(searcher);
     let filter = parse_graph_filter(
         &params.domains,
         &params.relation_types,
         params.include_external,
     );
-    let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
-    let graph = match service.ego_graph_with_options(
-        entity_id,
-        params.depth.min(max_depth),
+    let page = parse_graph_pagination(params.offset, params.limit.max(1));
+    let graph = match graph::ego(
+        &state,
+        project_id,
+        &params.entity_id,
+        params.depth,
         direction,
         &filter,
-        pagination,
-    ) {
+        page,
+    )
+    .await
+    {
         Ok(graph) => graph,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                e.to_string(),
-            ));
-        }
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-    let (nodes, edges) = match convert_paged_subgraph(&graph) {
-        Ok(v) => v,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
-    ApiResult::Success(GraphSubgraphResponse {
-        success: true,
-        relation_epoch: snapshot.relation_epoch,
+    let GraphView {
         nodes,
         edges,
-        total_nodes: graph.total_nodes,
-        total_edges: graph.total_edges,
+        total_nodes,
+        total_edges,
+        stamp,
+    } = graph;
+    let truncated = total_nodes > nodes.len() || total_edges > edges.len();
+    let (nodes, edges) = match convert_graph(nodes, edges) {
+        Ok(pair) => pair,
+        Err(error) => return ApiResult::Error(error),
+    };
+    ApiResult::Success(GraphSubgraphResponse {
+        success: true,
+        relation_epoch: stamp.relation_epoch,
+        nodes,
+        edges,
+        total_nodes,
+        total_edges,
         truncated,
-        relation_info: stale_relation_info(&runtime).await,
+        relation_info: stamp.stale,
     })
 }
 
@@ -106,56 +103,37 @@ pub async fn handle_graph_path(
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<GraphPathQuery>,
 ) -> ApiResult<GraphPathResponse> {
-    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
-        Ok(ctx) => ctx,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let max_depth = match relation_max_depth(&state, project_id).await {
-        Ok(depth) => depth,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let start = match resolve_symbol_seed(snapshot.index.as_ref(), &params.start) {
-        Ok(id) => id,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let end = match resolve_symbol_seed(snapshot.index.as_ref(), &params.end) {
-        Ok(id) => id,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let service = GraphService::new(searcher);
     let filter = parse_graph_filter(
         &params.domains,
         &params.relation_types,
         params.include_external,
     );
-    let path = match service.shortest_path_with_options(
-        start,
-        end,
-        params.max_depth.min(max_depth),
+    let path = match graph::path(
+        &state,
+        project_id,
+        &params.start,
+        &params.end,
+        params.max_depth,
         &filter,
-    ) {
+    )
+    .await
+    {
         Ok(path) => path,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                e.to_string(),
-            ));
-        }
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-    let (nodes, edges) = match path.as_ref() {
-        Some(p) => match convert_subgraph(p) {
-            Ok(v) => v,
-            Err(e) => return ApiResult::Error(e),
-        },
-        None => Default::default(),
+    let found = path.found;
+    let found_stamp = path.stamp;
+    let (nodes, edges) = match convert_graph(path.nodes, path.edges) {
+        Ok(pair) => pair,
+        Err(error) => return ApiResult::Error(error),
     };
     ApiResult::Success(GraphPathResponse {
         success: true,
-        relation_epoch: snapshot.relation_epoch,
-        path_found: path.is_some(),
+        relation_epoch: found_stamp.relation_epoch,
+        path_found: found,
         nodes,
         edges,
-        relation_info: stale_relation_info(&runtime).await,
+        relation_info: found_stamp.stale,
     })
 }
 
@@ -176,61 +154,44 @@ pub async fn handle_graph_subgraph(
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<SubgraphQuery>,
 ) -> ApiResult<GraphSubgraphResponse> {
-    const MAX_IDS: usize = 200;
-    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
-        Ok(ctx) => ctx,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let raw_ids: Vec<String> = params
+    let seeds: Vec<String> = params
         .ids
         .split(',')
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string)
         .collect();
-    if raw_ids.is_empty() || raw_ids.len() > MAX_IDS {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            format!("ids must list 1-{MAX_IDS} stable symbol IDs"),
-        ));
-    }
-    let mut entity_ids = Vec::with_capacity(raw_ids.len());
-    for raw in &raw_ids {
-        match resolve_symbol_seed(snapshot.index.as_ref(), raw) {
-            Ok(id) => entity_ids.push(id),
-            Err(e) => return ApiResult::Error(e),
-        }
-    }
-    let service = GraphService::new(searcher);
     let filter = parse_graph_filter(
         &params.domains,
         &params.relation_types,
         params.include_external,
     );
-    let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
-    let graph = match service.subgraph_with_options(&entity_ids, &filter, pagination) {
+    let page = parse_graph_pagination(params.offset, params.limit.max(1));
+    let graph = match graph::subgraph(&state, project_id, &seeds, &filter, page).await {
         Ok(graph) => graph,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                e.to_string(),
-            ));
-        }
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-    let (nodes, edges) = match convert_paged_subgraph(&graph) {
-        Ok(v) => v,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
-    ApiResult::Success(GraphSubgraphResponse {
-        success: true,
-        relation_epoch: snapshot.relation_epoch,
+    let GraphView {
         nodes,
         edges,
-        total_nodes: graph.total_nodes,
-        total_edges: graph.total_edges,
+        total_nodes,
+        total_edges,
+        stamp,
+    } = graph;
+    let truncated = total_nodes > nodes.len() || total_edges > edges.len();
+    let (nodes, edges) = match convert_graph(nodes, edges) {
+        Ok(pair) => pair,
+        Err(error) => return ApiResult::Error(error),
+    };
+    ApiResult::Success(GraphSubgraphResponse {
+        success: true,
+        relation_epoch: stamp.relation_epoch,
+        nodes,
+        edges,
+        total_nodes,
+        total_edges,
         truncated,
-        relation_info: stale_relation_info(&runtime).await,
+        relation_info: stamp.stale,
     })
 }
 
@@ -251,55 +212,22 @@ pub async fn handle_graph_components(
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<ComponentsQuery>,
 ) -> ApiResult<GraphComponentsResponse> {
-    const MAX_COMPONENTS: usize = 5_000;
-    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
-        Ok(ctx) => ctx,
-        Err(e) => return ApiResult::Error(e),
-    };
-    if params.limit == 0 || params.limit > MAX_COMPONENTS {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            format!("limit must be within 1-{MAX_COMPONENTS}"),
-        ));
-    }
-    let service = GraphService::new(searcher);
     let filter = parse_graph_filter(
         &params.domains,
         &params.relation_types,
         params.include_external,
     );
-    let pagination = parse_graph_pagination(params.offset, params.limit);
-    let paged = match service.connected_components_with_options(&filter, pagination) {
+    let page = parse_graph_pagination(params.offset, params.limit);
+    let paged = match graph::components(&state, project_id, &filter, page).await {
         Ok(paged) => paged,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                e.to_string(),
-            ));
-        }
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-    let groups = paged
-        .components
-        .into_iter()
-        .map(|group| {
-            group
-                .into_iter()
-                .map(|id| {
-                    snapshot
-                        .index
-                        .get_symbol_key_by_entity_id(id)
-                        .map(|key| key.stable_id().0)
-                        .unwrap_or_else(|| format!("entity:{}", id.0))
-                })
-                .collect()
-        })
-        .collect();
     ApiResult::Success(GraphComponentsResponse {
         success: true,
-        relation_epoch: snapshot.relation_epoch,
-        components: groups,
+        relation_epoch: paged.stamp.relation_epoch,
+        components: paged.components,
         total_components: paged.total_components,
-        relation_info: stale_relation_info(&runtime).await,
+        relation_info: paged.stamp.stale,
     })
 }
 
@@ -320,46 +248,36 @@ pub async fn handle_graph_export(
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<ExportQuery>,
 ) -> ApiResult<GraphSubgraphResponse> {
-    const MAX_EXPORT_NODES: usize = 10_000;
-    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
-        Ok(ctx) => ctx,
-        Err(e) => return ApiResult::Error(e),
-    };
-    if params.limit == 0 || params.limit > MAX_EXPORT_NODES {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            format!("limit must be within 1-{MAX_EXPORT_NODES}"),
-        ));
-    }
-    let service = GraphService::new(searcher);
     let filter = parse_graph_filter(
         &params.domains,
         &params.relation_types,
         params.include_external,
     );
-    let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
-    let graph = match service.export_full_with_options(params.limit, &filter, pagination) {
+    let page = parse_graph_pagination(params.offset, params.limit.max(1));
+    let graph = match graph::export(&state, project_id, params.limit, &filter, page).await {
         Ok(graph) => graph,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                e.to_string(),
-            ));
-        }
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-    let (nodes, edges) = match convert_paged_subgraph(&graph) {
-        Ok(v) => v,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
-    ApiResult::Success(GraphSubgraphResponse {
-        success: true,
-        relation_epoch: snapshot.relation_epoch,
+    let GraphView {
         nodes,
         edges,
-        total_nodes: graph.total_nodes,
-        total_edges: graph.total_edges,
+        total_nodes,
+        total_edges,
+        stamp,
+    } = graph;
+    let truncated = total_nodes > nodes.len() || total_edges > edges.len();
+    let (nodes, edges) = match convert_graph(nodes, edges) {
+        Ok(pair) => pair,
+        Err(error) => return ApiResult::Error(error),
+    };
+    ApiResult::Success(GraphSubgraphResponse {
+        success: true,
+        relation_epoch: stamp.relation_epoch,
+        nodes,
+        edges,
+        total_nodes,
+        total_edges,
         truncated,
-        relation_info: stale_relation_info(&runtime).await,
+        relation_info: stamp.stale,
     })
 }

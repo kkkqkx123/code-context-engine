@@ -31,13 +31,9 @@ cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
 cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
-cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
-cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
 cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
-cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
-cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-server-shared = { version = "0.1.0", path = "../cce-server-shared" }

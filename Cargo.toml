@@ -43,8 +43,9 @@ members = [
     "crates/app/cce-e2e-tests",
     "crates/app/cce-cli",
     "crates/app/cce-gateway",
-    "crates/app/cce-bench-kit",
     "crates/app/cce-plugin-sdk",
+    # benchmark support
+    "crates/bench/cce-bench-kit",
     # vendored tree-sitter grammars (git submodules)
     "crates/tree-sitter/tree-sitter-svelte",
     "crates/tree-sitter/tree-sitter-vue",

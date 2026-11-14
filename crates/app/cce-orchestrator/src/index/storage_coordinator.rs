@@ -171,19 +171,14 @@ impl StorageCoordinator {
 
     /// Set relation backend via enum dispatch.
     ///
-    /// Only the local branch is accepted here: the metadata write path
-    /// uses local-only capabilities (explicit transactions, repositories),
-    /// so a remote branch fails fast instead of degrading to
-    /// index-without-metadata.
+    /// The metadata write path uses embedded-branch capabilities (explicit
+    /// transactions, repositories), which the only supported branch provides.
     pub fn with_relation_store(mut self, store: RelationStore) -> Result<Self, StorageError> {
         match store {
             RelationStore::Local(client) => {
                 self.metadata_store = Some(client);
                 Ok(self)
             }
-            RelationStore::Remote(_) => Err(StorageError::validation(
-                "remote relation branch is not wired into the write path; pass the local branch",
-            )),
         }
     }
 

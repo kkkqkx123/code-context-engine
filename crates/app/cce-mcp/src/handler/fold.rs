@@ -81,29 +81,31 @@ fn fold_payload(id: Option<&str>, folded: &cce_orchestrator::FileFoldResponse) -
     payload
 }
 
+/// Serialize one batch fold outcome with the shared payload field names.
+fn batch_payload(id: &str, folded: &cce_orchestrator::FileFoldBatchItemResponse) -> Value {
+    json!({
+        "id": id,
+        "folded_text": folded.folded_text,
+        "language": folded.language,
+        "structure_known": folded.structure_known,
+        "original_tokens": folded.original_tokens,
+        "folded_tokens": folded.folded_tokens,
+        "kept_sections": folded.kept_sections,
+        "dropped_sections": folded.dropped_sections,
+    })
+}
+
 /// Run the single fold tool call.
 pub async fn fold(args: FoldArgs) -> Result<CallToolResult, rmcp::ErrorData> {
-    use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
-    use cce_types::language::Language;
+    use cce_server_shared::services::tools::{self, FoldSpec};
 
-    let mut request = FileFoldRequest::new(args.text);
-    if let Some(name) = args.language.as_deref()
-        && let Some(language) = Language::from_name(name)
-    {
-        request = request.with_language(language);
-    }
-    if let Some(file_name) = args.file_name.clone() {
-        request = request.with_file_name(file_name);
-    }
-    if let Some(max_tokens) = args.max_tokens {
-        request = request.with_max_tokens(max_tokens);
-    }
-    if let Some(mode) = args.mode.as_deref() {
-        request = request.with_mode(FileFoldMode::parse(Some(mode)));
-    }
-
-    let mut coordinator = cce_parser::parser::ParseCoordinator::new();
-    let folded = FileFoldTool::fold(&mut coordinator, request);
+    let folded = tools::fold(FoldSpec {
+        text: args.text,
+        language: args.language,
+        file_name: args.file_name,
+        max_tokens: args.max_tokens,
+        mode: args.mode,
+    });
     Ok(CallToolResult::success(vec![ContentBlock::text(
         fold_payload(None, &folded).to_string(),
     )]))
@@ -111,35 +113,46 @@ pub async fn fold(args: FoldArgs) -> Result<CallToolResult, rmcp::ErrorData> {
 
 /// Run the batch fold tool call.
 pub async fn fold_batch(args: FoldBatchArgs) -> Result<CallToolResult, rmcp::ErrorData> {
-    use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
-    use cce_types::language::Language;
+    use cce_server_shared::services::tools::{self, FoldBatchItemSpec, FoldBatchSpec};
 
-    let mut coordinator = cce_parser::parser::ParseCoordinator::new();
-    let mut results = Vec::with_capacity(args.items.len());
-    for item in &args.items {
-        let mut request = FileFoldRequest::new(item.text.clone());
-        let language = item.language.as_deref().or(args.language.as_deref());
-        if let Some(name) = language
-            && let Some(parsed) = Language::from_name(name)
-        {
-            request = request.with_language(parsed);
-        }
-        if let Some(file_name) = item.file_name.clone() {
-            request = request.with_file_name(file_name);
-        }
-        if let Some(max_tokens) = item.max_tokens.or(args.max_tokens) {
-            request = request.with_max_tokens(max_tokens);
-        }
-        let mode = item.mode.as_deref().or(args.mode.as_deref());
-        if mode.is_some() {
-            request = request.with_mode(FileFoldMode::parse(mode));
-        }
-        let folded = FileFoldTool::fold(&mut coordinator, request);
-        results.push(fold_payload(Some(&item.id), &folded));
+    let spec = FoldBatchSpec {
+        items: args
+            .items
+            .iter()
+            .map(|item| FoldBatchItemSpec {
+                id: item.id.clone(),
+                text: item.text.clone(),
+                language: item.language.clone(),
+                file_name: item.file_name.clone(),
+                max_tokens: item.max_tokens,
+                mode: item.mode.clone(),
+            })
+            .collect(),
+        language: args.language.clone(),
+        max_tokens: args.max_tokens,
+        mode: args.mode.clone(),
+        max_concurrency: None,
+    };
+    match tools::fold_batch(spec) {
+        Ok(folded) => Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({
+                "results": folded
+                    .results
+                    .iter()
+                    .map(|entry| batch_payload(&entry.id, entry))
+                    .collect::<Vec<_>>(),
+                "stats": {
+                    "total_original_tokens": folded.stats.total_original_tokens,
+                    "total_folded_tokens": folded.stats.total_folded_tokens,
+                    "structure_known_count": folded.stats.structure_known_count,
+                },
+            })
+            .to_string(),
+        )])),
+        Err(error) => Ok(super::support::tool_failure(format!(
+            "fold_batch failed: {error}"
+        ))),
     }
-    Ok(CallToolResult::success(vec![ContentBlock::text(
-        json!({ "results": results }).to_string(),
-    )]))
 }
 
 #[cfg(test)]

@@ -5,23 +5,18 @@ use cce_storage_common::metadb::{
     EntityRecord, FileCheckpointRecord, FileRecord, GenerationOverride, ProjectIndexManifest,
     ProjectRecord, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
-use cce_storage_metadb_pg::PostgresClient;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_types::StorageError;
 
 /// Relation backend holding one concrete implementation.
 ///
-/// Local is the embedded SQLite branch (per-project database files) and the
-/// only supported branch; the remote PostgreSQL client is forward
-/// scaffolding and assembly rejects it at startup until the remote paths
-/// are wired. Path rules, cache eviction, capacity stats, and the
-/// project-delete two-step semantics stay inside the local client.
+/// The embedded SQLite branch (per-project database files) is the only
+/// supported metadata backend. Path rules, cache eviction, capacity stats and
+/// the project-delete two-step semantics stay inside the client.
 #[derive(Clone)]
 pub enum RelationStore {
     /// Embedded SQLite repositories.
     Local(Arc<SqliteClient>),
-    /// External PostgreSQL service.
-    Remote(Arc<PostgresClient>),
 }
 
 impl RelationStore {
@@ -30,26 +25,15 @@ impl RelationStore {
         Self::Local(client)
     }
 
-    /// Wrap a remote PostgreSQL client.
-    pub fn remote(client: Arc<PostgresClient>) -> Self {
-        Self::Remote(client)
-    }
-
     /// Whether this is the embedded backend.
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local(_))
     }
 
-    /// Whether this is the remote backend.
-    pub fn is_remote(&self) -> bool {
-        matches!(self, Self::Remote(_))
-    }
-
-    /// Backend name for logging (`local` or `remote`).
+    /// Backend name for logging.
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Local(_) => "local",
-            Self::Remote(_) => "remote",
         }
     }
 
@@ -57,15 +41,6 @@ impl RelationStore {
     pub fn as_local(&self) -> Option<&Arc<SqliteClient>> {
         match self {
             Self::Local(client) => Some(client),
-            _ => None,
-        }
-    }
-
-    /// Borrow the remote client when this is the remote branch.
-    pub fn as_remote(&self) -> Option<&Arc<PostgresClient>> {
-        match self {
-            Self::Remote(client) => Some(client),
-            _ => None,
         }
     }
 
@@ -73,34 +48,22 @@ impl RelationStore {
     pub fn into_local(self) -> Option<Arc<SqliteClient>> {
         match self {
             Self::Local(client) => Some(client),
-            _ => None,
-        }
-    }
-
-    /// Unwrap into the remote handle when this is the remote branch.
-    pub fn into_remote(self) -> Option<Arc<PostgresClient>> {
-        match self {
-            Self::Remote(client) => Some(client),
-            _ => None,
         }
     }
 
     /// Open the per-project scoped handle.
     ///
-    /// The local branch opens the per-project database file; the remote
-    /// branch carries project filtering per query, so scoping is a clone.
+    /// The local branch opens the per-project database file.
     pub fn for_project(&self, project_id: i64) -> Result<Self, StorageError> {
         match self {
             Self::Local(client) => Ok(Self::Local(client.for_project(project_id)?)),
-            Self::Remote(client) => Ok(Self::Remote(client.clone())),
         }
     }
 
     /// Build the store from the resolved database configuration.
     ///
-    /// The remote branch is rejected at startup: only the local backend is
-    /// supported, and refusing here keeps a remote selection from failing
-    /// halfway through indexing or search.
+    /// Only the local backend is supported; refusing a remote selection here
+    /// keeps it from failing halfway through indexing or search.
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
@@ -122,7 +85,6 @@ impl std::fmt::Debug for RelationStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local(_) => write!(f, "RelationStore::Local(..)"),
-            Self::Remote(_) => write!(f, "RelationStore::Remote(..)"),
         }
     }
 }
@@ -131,7 +93,6 @@ macro_rules! dispatch_relation {
     ($self:expr, $method:ident ($($arg:expr),*)) => {
         match $self {
             Self::Local(client) => RelationStorage::$method(client.as_ref(), $($arg),*).await,
-            Self::Remote(client) => RelationStorage::$method(client.as_ref(), $($arg),*).await,
         }
     };
 }
@@ -601,14 +562,12 @@ impl RelationStorage for RelationStore {
     fn backend_name(&self) -> &'static str {
         match self {
             Self::Local(client) => RelationStorage::backend_name(client.as_ref()),
-            Self::Remote(client) => RelationStorage::backend_name(client.as_ref()),
         }
     }
 
     fn is_per_project_db(&self) -> bool {
         match self {
             Self::Local(client) => RelationStorage::is_per_project_db(client.as_ref()),
-            Self::Remote(client) => RelationStorage::is_per_project_db(client.as_ref()),
         }
     }
 }
@@ -685,13 +644,11 @@ mod tests {
     }
 
     #[test]
-    fn relation_store_remote_branch_rejected_at_startup() {
-        let mut database = cce_config::global::DatabaseConfig {
+    fn relation_store_rejects_remote_backend_selection() {
+        let database = cce_config::global::DatabaseConfig {
             relation_backend: cce_config::modules::RelationBackend::Remote,
             ..cce_config::global::DatabaseConfig::default()
         };
-        assert!(RelationStore::from_database_config(&database).is_err());
-        database.relation_remote.url = Some("postgres://localhost:5432/cce".to_string());
         let err = RelationStore::from_database_config(&database)
             .expect_err("remote branch must fail at startup");
         assert!(

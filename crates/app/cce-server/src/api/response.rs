@@ -7,6 +7,7 @@
 
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use cce_api::models::{ErrorResponse, error_codes};
+use cce_server_shared::services::relation::RelationServiceError;
 use serde::Serialize;
 
 /// Unified API result: either an error payload or a success payload.
@@ -31,6 +32,38 @@ impl<T: Serialize> IntoResponse for ApiResult<T> {
             }
             ApiResult::Success(resp) => (StatusCode::OK, Json(resp)).into_response(),
         }
+    }
+}
+
+/// Map a relation service failure onto the HTTP error contract.
+///
+/// Availability stays a transport concern: the service reports the runtime
+/// state, the HTTP surface renders it as `503`.
+pub fn relation_error(error: RelationServiceError) -> ErrorResponse {
+    match error {
+        RelationServiceError::InvalidInput(message) => {
+            ErrorResponse::new(error_codes::INVALID_REQUEST, message)
+        }
+        RelationServiceError::Project(message) | RelationServiceError::Execution(message) => {
+            ErrorResponse::new(error_codes::INTERNAL_ERROR, message)
+        }
+        RelationServiceError::UnknownSeed(seed) => ErrorResponse::with_details(
+            error_codes::ENTITY_NOT_FOUND,
+            format!("Unknown symbol seed: {seed}"),
+            "Seed must be a stable symbol ID (sym_…), 'path/to/file#name', '#name', or a bare symbol name.",
+        ),
+        RelationServiceError::AmbiguousSeed { seed, candidates } => ErrorResponse::with_details(
+            error_codes::AMBIGUOUS_SYMBOL,
+            format!(
+                "Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs",
+                candidates.len()
+            ),
+            serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string()),
+        ),
+        RelationServiceError::Unavailable { state, epoch } => ErrorResponse::new(
+            error_codes::SERVICE_UNAVAILABLE,
+            format!("Relation index not available: {state:?}, epoch: {epoch}"),
+        ),
     }
 }
 

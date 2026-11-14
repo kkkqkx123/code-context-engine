@@ -1,16 +1,17 @@
 //! Entity relation tools (callees, callers, call chain) for the MCP surface.
 //!
-//! All three tools operate on the shared relation runtime through the same
-//! call-domain filter: only call edges qualify, and unresolved external
-//! targets are excluded.
+//! All three tools delegate to the shared relation service, so the call-domain
+//! filter, seed resolution and pagination are the same ones the HTTP surface
+//! uses.
 
 use cce_server_shared::context::SharedContext;
+use cce_server_shared::services::relation::{self, CallDirection, RelationFilterSpec};
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use super::support::{call_domain_relation_options, canonical_call_direction, resolve_stable_id};
+use super::support::{tool_error, tool_failure};
 
 /// Arguments identifying an entity by ID.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -35,8 +36,7 @@ pub struct CallChainArgs {
     /// Stable symbol ID (for example `sym_…`).
     pub entity_id: String,
     /// Traversal direction: "forward"/"down" (callees, default) or
-    /// "backward"/"up" (callers). The HTTP surface uses down/up while MCP
-    /// historically used forward/backward; all four spellings are accepted.
+    /// "backward"/"up"/"callers" (callers).
     #[serde(default)]
     pub direction: Option<String>,
     /// Maximum traversal depth (default 3).
@@ -55,42 +55,36 @@ pub async fn entity_callees(
     state: &Arc<SharedContext>,
     args: EntityArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    let searcher = match state.get_relation_searcher(args.project_id).await {
-        Ok(searcher) => searcher,
-        Err(error) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "relation runtime unavailable: {error}"
-            ))]));
-        }
+    let options = RelationFilterSpec::default().apply(
+        relation::call_domain_options()
+            .with_offset(args.offset.unwrap_or(0))
+            .with_limit(args.limit.unwrap_or(20)),
+    );
+    let edges = match relation::callees(state, args.project_id, &args.entity_id, &options).await {
+        Ok(edges) => edges,
+        Err(error) => return tool_error("callees", error),
     };
-    let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
-        Some(id) => id,
-        None => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "unknown stable symbol ID: {}",
-                args.entity_id
-            ))]));
-        }
-    };
-    let options = call_domain_relation_options()
-        .with_offset(args.offset.unwrap_or(0))
-        .with_limit(args.limit.unwrap_or(20));
-    let callees = searcher.get_callees_paginated(entity_id, &options);
-    let items: Vec<Value> = callees
+    let items: Vec<Value> = edges
+        .items
         .iter()
-        .map(|relation| {
+        .map(|edge| {
             json!({
-                "caller": relation.caller.to_string(),
-                "callee_id": relation.callee_id.map(|id| id.to_string()),
-                "callee_name": relation.callee_name,
-                "relation_type": relation.relation_type.to_string(),
-                "is_external": relation.is_external,
-                "start_line": relation.span.start_position.row,
+                "caller": edge.caller.stable_id,
+                "callee_id": edge.callee.as_ref().map(|entity| entity.stable_id.clone()),
+                "callee_name": edge.target_name,
+                "relation_type": edge.relation_type,
+                "is_external": edge.is_external,
+                "start_line": edge.start_line,
             })
         })
         .collect();
     Ok(CallToolResult::success(vec![ContentBlock::text(
-        json!({ "entity_id": args.entity_id, "callees": items }).to_string(),
+        json!({
+            "entity_id": args.entity_id,
+            "total": edges.total,
+            "callees": items,
+        })
+        .to_string(),
     )]))
 }
 
@@ -99,39 +93,34 @@ pub async fn entity_callers(
     state: &Arc<SharedContext>,
     args: EntityArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    let searcher = match state.get_relation_searcher(args.project_id).await {
-        Ok(searcher) => searcher,
-        Err(error) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "relation runtime unavailable: {error}"
-            ))]));
-        }
+    let options = RelationFilterSpec::default().apply(
+        relation::call_domain_options()
+            .with_offset(args.offset.unwrap_or(0))
+            .with_limit(args.limit.unwrap_or(20)),
+    );
+    let edges = match relation::callers(state, args.project_id, &args.entity_id, &options).await {
+        Ok(edges) => edges,
+        Err(error) => return tool_error("callers", error),
     };
-    let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
-        Some(id) => id,
-        None => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "unknown stable symbol ID: {}",
-                args.entity_id
-            ))]));
-        }
-    };
-    let options = call_domain_relation_options()
-        .with_offset(args.offset.unwrap_or(0))
-        .with_limit(args.limit.unwrap_or(20));
-    let callers = searcher.get_callers_paginated(entity_id, &options);
-    let items: Vec<Value> = callers
+    let items: Vec<Value> = edges
+        .items
         .iter()
-        .map(|relation| {
+        .map(|edge| {
             json!({
-                "caller": relation.caller.to_string(),
-                "relation_type": relation.relation_type.to_string(),
-                "is_external": relation.is_external,
+                "caller": edge.caller.stable_id,
+                "caller_name": edge.caller.name,
+                "relation_type": edge.relation_type,
+                "is_external": edge.is_external,
             })
         })
         .collect();
     Ok(CallToolResult::success(vec![ContentBlock::text(
-        json!({ "entity_id": args.entity_id, "callers": items }).to_string(),
+        json!({
+            "entity_id": args.entity_id,
+            "total": edges.total,
+            "callers": items,
+        })
+        .to_string(),
     )]))
 }
 
@@ -140,64 +129,56 @@ pub async fn call_chain(
     state: &Arc<SharedContext>,
     args: CallChainArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
-    let searcher = match state.get_relation_searcher(args.project_id).await {
-        Ok(searcher) => searcher,
-        Err(error) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "relation runtime unavailable: {error}"
-            ))]));
-        }
-    };
-    let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
-        Some(id) => id,
-        None => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "unknown stable symbol ID: {}",
-                args.entity_id
-            ))]));
-        }
+    let direction = match args.direction.as_deref() {
+        None => CallDirection::Forward,
+        Some(raw) => match CallDirection::parse(raw) {
+            Some(direction) => direction,
+            None => {
+                return Ok(tool_failure(format!(
+                    "call_chain failed: direction must be one of down, forward, up, or backward, got '{raw}'"
+                )));
+            }
+        },
     };
     let max_depth = args.max_depth.unwrap_or(3);
-    let options = call_domain_relation_options()
-        .with_max_depth(max_depth)
-        .with_offset(args.offset.unwrap_or(0))
-        .with_limit(args.limit.unwrap_or(usize::MAX));
-    let (canonical, backward) = canonical_call_direction(args.direction.as_deref());
-    let result = if backward {
-        searcher.query_backward_paginated(entity_id, &options)
-    } else {
-        searcher.query_forward_paginated(entity_id, &options)
-    };
-    match result {
-        Ok(nodes) => {
-            let items: Vec<Value> = nodes
-                .iter()
-                .map(|node| {
-                    json!({
-                        "function_id": node.function_id.to_string(),
-                        "function_name": node.function_name,
-                        "file_path": node.file_path,
-                        "depth": node.depth,
-                        "relation_type": node.relation_type.to_string(),
-                        "call_line": node.call_line,
-                    })
-                })
-                .collect();
-            Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({
-                    "entity_id": args.entity_id,
-                    "direction": canonical,
-                    "max_depth": max_depth,
-                    "offset": args.offset.unwrap_or(0),
-                    "nodes": items,
-                })
-                .to_string(),
-            )]))
-        }
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "call_chain failed: {error}"
-        ))])),
-    }
+    let options = RelationFilterSpec::default().apply(
+        relation::call_domain_options()
+            .with_max_depth(max_depth)
+            .with_offset(args.offset.unwrap_or(0))
+            .with_limit(args.limit.unwrap_or(usize::MAX)),
+    );
+    let page =
+        match relation::call_chain(state, args.project_id, &args.entity_id, direction, options)
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => return tool_error("call_chain", error),
+        };
+    let items: Vec<Value> = page
+        .items
+        .iter()
+        .map(|node| {
+            json!({
+                "function_id": node.entity.stable_id,
+                "function_name": node.entity.name,
+                "file_path": node.entity.file_path,
+                "depth": node.depth,
+                "relation_type": node.relation_type,
+                "call_line": node.call_line,
+            })
+        })
+        .collect();
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        json!({
+            "entity_id": args.entity_id,
+            "direction": direction.label(),
+            "max_depth": max_depth,
+            "offset": args.offset.unwrap_or(0),
+            "total": page.total,
+            "nodes": items,
+        })
+        .to_string(),
+    )]))
 }
 
 #[cfg(test)]
@@ -205,29 +186,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn call_direction_canonicalizes_all_spellings() {
-        assert_eq!(canonical_call_direction(None), ("forward", false));
-        assert_eq!(
-            canonical_call_direction(Some("forward")),
-            ("forward", false)
-        );
-        assert_eq!(canonical_call_direction(Some("down")), ("forward", false));
-        assert_eq!(
-            canonical_call_direction(Some("backward")),
-            ("backward", true)
-        );
-        assert_eq!(canonical_call_direction(Some("up")), ("backward", true));
-        assert_eq!(
-            canonical_call_direction(Some("callers")),
-            ("backward", true)
-        );
-        assert_eq!(
-            canonical_call_direction(Some("FORWARD")),
-            ("forward", false)
-        );
-        assert_eq!(
-            canonical_call_direction(Some("sideways")),
-            ("forward", false)
-        );
+    fn call_chain_args_default_to_forward_depth_three() {
+        let args: CallChainArgs =
+            serde_json::from_value(serde_json::json!({"project_id": 1, "entity_id": "sym_a"}))
+                .expect("minimal args deserialize");
+        assert!(args.direction.is_none());
+        assert_eq!(args.max_depth.unwrap_or(3), 3);
     }
 }

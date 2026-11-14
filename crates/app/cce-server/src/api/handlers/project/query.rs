@@ -18,6 +18,12 @@ fn project_error(error: ProjectServiceError) -> ErrorResponse {
         ProjectServiceError::NotFound(_) => {
             ErrorResponse::new(error_codes::ENTITY_NOT_FOUND, "Project does not exist")
         }
+        ProjectServiceError::Invalid(message) => {
+            ErrorResponse::new(error_codes::INVALID_INPUT, message)
+        }
+        ProjectServiceError::Conflict(message) => {
+            ErrorResponse::new(error_codes::CONFLICT, message)
+        }
         ProjectServiceError::Storage(message) => {
             ErrorResponse::new(error_codes::STORAGE_ERROR, message)
         }

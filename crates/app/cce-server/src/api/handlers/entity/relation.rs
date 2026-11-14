@@ -1,94 +1,31 @@
 //! Relation handlers
 //!
 //! Provides call chain queries, call path finding, and inheritance relations.
+//! Every handler decodes its wire parameters and maps the shared relation
+//! service result onto the response shape.
 
 use axum::extract::{Path, Query as QueryParams, State};
-use std::sync::Arc;
-
-use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
-use cce_orchestrator::query::{RelationQueryOptions, RelationSearcher};
-use cce_types::EntityId;
 
 use cce_api::models::{
     CallChainDirectionParams, CallChainNode, CallChainResponse, CallPathQuery, CallPathResponse,
-    ClassImplementationsResponse, ClassInheritanceResponse, ErrorResponse, error_codes,
+    ClassImplementationsResponse, ClassInheritanceResponse, ClassRelation, ErrorResponse,
+    InterfaceRelation, RelationFilterParams, error_codes,
 };
+use cce_server_shared::services::relation::{self, CallDirection, ChainNode};
 
-use super::filter::apply_filters;
-use super::seed::{resolve_symbol_seed, stable_id};
-use crate::api::response::ApiResult;
+use crate::api::response::{ApiResult, relation_error};
 
-/// Helper: get relation snapshot for a project
-pub(crate) async fn get_snapshot(
-    state: &cce_server_shared::context::SharedContext,
-    project_id: i64,
-) -> Result<Arc<cce_server_shared::runtime::PublishedSnapshot>, ErrorResponse> {
-    if project_id <= 0 {
-        return Err(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Invalid project_id".to_string(),
-        ));
+use super::calls::params_to_options;
+
+fn chain_node(node: ChainNode) -> CallChainNode {
+    CallChainNode {
+        function_id: node.entity.stable_id,
+        function_name: node.entity.name,
+        file_path: node.entity.file_path,
+        depth: node.depth,
+        relation_type: node.relation_type,
+        call_line: node.call_line,
     }
-
-    let runtime = match state.engine.get_relation_runtime(project_id).await {
-        Ok(rt) => rt,
-        Err(e) => {
-            return Err(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation runtime: {}", e),
-            ));
-        }
-    };
-
-    if !runtime.can_serve_queries().await {
-        let info = runtime.get_capability_info().await;
-        return Err(ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            format!(
-                "Relation index not available: {:?}, epoch: {}",
-                info.state, info.relation_epoch
-            ),
-        ));
-    }
-
-    match runtime.get_snapshot().await {
-        Some(s) => Ok(s),
-        None => Err(ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            "No relation snapshot available".to_string(),
-        )),
-    }
-}
-
-/// Return the relation capability info as a JSON map when the served
-/// snapshot is stale (runtime degraded or updating); `None` when the
-/// snapshot is fresh. Lets the API layer hint that the answered data may
-/// lag the latest published epoch.
-async fn stale_relation_info(
-    state: &cce_server_shared::context::SharedContext,
-    project_id: i64,
-) -> Option<serde_json::Value> {
-    let runtime = state.engine.get_relation_runtime(project_id).await.ok()?;
-    let info = runtime.get_capability_info().await;
-    info.stale.then(|| info.to_json_map())
-}
-
-async fn relation_query_config(
-    state: &cce_server_shared::context::SharedContext,
-    project_id: i64,
-) -> Result<cce_config::RelationConfig, ErrorResponse> {
-    state
-        .engine
-        .project_registry()
-        .get_or_load(project_id)
-        .await
-        .map(|entry| entry.config.relation.clone())
-        .map_err(|error| {
-            ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to load relation configuration: {error}"),
-            )
-        })
 }
 
 /// Handle call chain request
@@ -108,96 +45,36 @@ pub async fn handle_call_chain(
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainDirectionParams>,
 ) -> ApiResult<CallChainResponse> {
-    let snapshot = match get_snapshot(&state, project_id).await {
-        Ok(s) => s,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let relation_config = match relation_query_config(&state, project_id).await {
-        Ok(config) => config,
-        Err(error) => return ApiResult::Error(error),
-    };
-    if !relation_config.index.resolve_call_chains {
+    let Some(direction) = CallDirection::parse(&params.direction) else {
         return ApiResult::Error(ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            "Call chain resolution is disabled for this project".to_string(),
+            error_codes::INVALID_REQUEST,
+            "direction must be one of down, forward, up, or backward".to_string(),
         ));
-    }
-    let max_depth = params.max_depth.min(relation_config.max_call_depth);
-
-    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
     };
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation searcher: {}", e),
-            ));
-        }
-    };
-    let direction = params.direction.to_lowercase();
-    let options = apply_filters(
-        cce_api::models::RelationFilterParams {
+    let options = params_to_options(
+        RelationFilterParams {
             exclude_tests: params.exclude_tests,
             directory_prefix: params.directory_prefix,
             excluded_files: params.excluded_files,
             domains: params.domains,
             include_external: params.include_external,
         },
-        RelationQueryOptions::new()
-            .with_max_depth(max_depth)
-            .with_offset(params.offset.unwrap_or(0))
-            .with_limit(params.limit),
+        params.max_depth,
+        params.offset,
+        params.limit,
     );
-    let nodes_result = match direction.as_str() {
-        "down" | "forward" => searcher.query_forward_paginated(entity_id, &options),
-        "up" | "backward" => searcher.query_backward_paginated(entity_id, &options),
-        _ => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "direction must be one of down, forward, up, or backward".to_string(),
-            ));
-        }
-    };
-    let call_chain: Vec<CallChainNode> = match nodes_result {
-        Ok(nodes) => nodes
-            .into_iter()
-            .map(|node| CallChainNode {
-                function_id: stable_id(searcher.query().index(), node.function_id)
-                    .unwrap_or_else(|| format!("entity:{}", node.function_id.0)),
-                function_name: node.function_name,
-                file_path: node.file_path,
-                depth: node.depth,
-                relation_type: node.relation_type.to_string(),
-                call_line: node.call_line,
-            })
-            .collect(),
-        Err(error) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                error.to_string(),
-            ));
-        }
-    };
-    let function_name = searcher
-        .query()
-        .index()
-        .get_function_by_entity_id(entity_id)
-        .map(|entity| entity.name.clone())
-        .unwrap_or_default();
-    let response = CallChainResponse {
-        success: true,
-        relation_epoch: snapshot.relation_epoch,
-        function_id: id,
-        function_name,
-        direction: params.direction,
-        call_chain,
-        relation_info: stale_relation_info(&state, project_id).await,
-    };
-
-    ApiResult::Success(response)
+    match relation::call_chain(&state, project_id, &id, direction, options).await {
+        Ok(page) => ApiResult::Success(CallChainResponse {
+            success: true,
+            relation_epoch: page.stamp.relation_epoch,
+            function_id: id,
+            function_name: page.function.name,
+            direction: params.direction,
+            call_chain: page.items.into_iter().map(chain_node).collect(),
+            relation_info: page.stamp.stale,
+        }),
+        Err(error) => ApiResult::Error(relation_error(error)),
+    }
 }
 
 /// Handle call path request
@@ -217,85 +94,33 @@ pub async fn handle_call_path(
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<CallPathQuery>,
 ) -> ApiResult<CallPathResponse> {
-    let snapshot = match get_snapshot(&state, project_id).await {
-        Ok(s) => s,
-        Err(e) => return ApiResult::Error(e),
-    };
-    let relation_config = match relation_query_config(&state, project_id).await {
-        Ok(config) => config,
-        Err(error) => return ApiResult::Error(error),
-    };
-    if !relation_config.index.resolve_call_chains {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            "Call chain resolution is disabled for this project".to_string(),
-        ));
-    }
-
-    let max_depth = params.max_depth.min(relation_config.max_call_depth);
-    let start_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.start_id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
-    };
-    let end_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.end_id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
-    };
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation searcher: {}", e),
-            ));
-        }
-    };
-    let options = cce_orchestrator::query::PathQueryOptions::new().with_max_depth(max_depth);
-
-    match searcher.find_path(start_id, end_id, &options) {
-        Ok(Some(path)) => {
-            let call_chain_nodes: Vec<CallChainNode> = path
-                .into_iter()
-                .map(|node| CallChainNode {
-                    function_id: stable_id(snapshot.index.as_ref(), node.function_id)
-                        .unwrap_or_else(|| format!("entity:{}", node.function_id.0)),
-                    function_name: node.function_name,
-                    file_path: node.file_path,
-                    depth: node.depth,
-                    relation_type: node.relation_type.to_string(),
-                    call_line: node.call_line,
-                })
-                .collect();
-
-            let response = CallPathResponse {
+    match relation::call_path(
+        &state,
+        project_id,
+        &params.start_id,
+        &params.end_id,
+        params.max_depth,
+    )
+    .await
+    {
+        Ok(result) => {
+            let path = result
+                .path
+                .map(|nodes| nodes.into_iter().map(chain_node).collect());
+            let path_found = path.is_some();
+            let path_length = path.as_ref().map(Vec::len).unwrap_or_default();
+            ApiResult::Success(CallPathResponse {
                 success: true,
-                relation_epoch: snapshot.relation_epoch,
-                start_function_id: params.start_id.clone(),
-                end_function_id: params.end_id.clone(),
-                path_found: true,
-                path: call_chain_nodes.clone(),
-                path_length: call_chain_nodes.len(),
-                relation_info: stale_relation_info(&state, project_id).await,
-            };
-            ApiResult::Success(response)
-        }
-        Ok(None) => {
-            let response = CallPathResponse {
-                success: true,
-                relation_epoch: snapshot.relation_epoch,
+                relation_epoch: result.stamp.relation_epoch,
                 start_function_id: params.start_id,
                 end_function_id: params.end_id,
-                path_found: false,
-                path: Vec::new(),
-                path_length: 0,
-                relation_info: stale_relation_info(&state, project_id).await,
-            };
-            ApiResult::Success(response)
+                path_found,
+                path: path.unwrap_or_default(),
+                path_length,
+                relation_info: result.stamp.stale,
+            })
         }
-        Err(e) => ApiResult::Error(ErrorResponse::new(
-            error_codes::INTERNAL_ERROR,
-            e.to_string(),
-        )),
+        Err(error) => ApiResult::Error(relation_error(error)),
     }
 }
 
@@ -315,69 +140,36 @@ pub async fn handle_class_inheritance(
     State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
 ) -> ApiResult<ClassInheritanceResponse> {
-    let snapshot = match get_snapshot(&state, project_id).await {
-        Ok(s) => s,
-        Err(e) => return ApiResult::Error(e),
-    };
-
-    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
-    };
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation searcher: {}", e),
-            ));
-        }
-    };
-    // Transitive closure, so a client sees the whole hierarchy rather than
-    // only the immediate parents and children.
-    let tree = searcher.get_inheritance_tree(entity_id, RelationSearcher::INHERITANCE_MAX_DEPTH);
-    let index = searcher.query().index();
-    let describe = |id: EntityId, depth: usize| {
-        let (class_name, file_path) = index
-            .get_function_by_entity_id(id)
-            .map(|entity| {
-                let path = index
-                    .get_file_path_by_entity(id)
-                    .unwrap_or_else(|| "Unknown".to_string());
-                (entity.name.clone(), path)
-            })
-            .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-
-        cce_api::models::ClassRelation {
-            class_id: stable_id(index, id).unwrap_or_else(|| format!("entity:{}", id.0)),
-            class_name,
-            file_path,
-            depth,
-        }
-    };
-
-    let response = ClassInheritanceResponse {
-        success: true,
-        relation_epoch: snapshot.relation_epoch,
-        class_id: id,
-        class_name: index
-            .get_function_by_entity_id(entity_id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string()),
-        base_classes: tree
-            .ancestors
-            .iter()
-            .map(|(id, depth)| describe(*id, *depth))
-            .collect(),
-        derived_classes: tree
-            .descendants
-            .iter()
-            .map(|(id, depth)| describe(*id, *depth))
-            .collect(),
-        relation_info: stale_relation_info(&state, project_id).await,
-    };
-
-    ApiResult::Success(response)
+    match relation::class_hierarchy(&state, project_id, &id).await {
+        Ok(hierarchy) => ApiResult::Success(ClassInheritanceResponse {
+            success: true,
+            relation_epoch: hierarchy.stamp.relation_epoch,
+            class_id: id,
+            class_name: hierarchy.class.name,
+            base_classes: hierarchy
+                .ancestors
+                .into_iter()
+                .map(|(entity, depth)| ClassRelation {
+                    class_id: entity.stable_id,
+                    class_name: entity.name,
+                    file_path: entity.file_path,
+                    depth,
+                })
+                .collect(),
+            derived_classes: hierarchy
+                .descendants
+                .into_iter()
+                .map(|(entity, depth)| ClassRelation {
+                    class_id: entity.stable_id,
+                    class_name: entity.name,
+                    file_path: entity.file_path,
+                    depth,
+                })
+                .collect(),
+            relation_info: hierarchy.stamp.stale,
+        }),
+        Err(error) => ApiResult::Error(relation_error(error)),
+    }
 }
 
 /// Handle class implementations request
@@ -396,90 +188,56 @@ pub async fn handle_class_implementations(
     State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
 ) -> ApiResult<ClassImplementationsResponse> {
-    let snapshot = match get_snapshot(&state, project_id).await {
-        Ok(s) => s,
-        Err(e) => return ApiResult::Error(e),
-    };
-
-    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
-    };
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation searcher: {}", e),
-            ));
-        }
-    };
-    let implemented_interfaces = searcher.get_implemented_interfaces(entity_id);
-    let implementing_classes = searcher.get_implementing_classes(entity_id);
-
-    let response = ClassImplementationsResponse {
-        success: true,
-        relation_epoch: snapshot.relation_epoch,
-        class_id: id,
-        class_name: searcher
-            .query()
-            .index()
-            .get_function_by_entity_id(entity_id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string()),
-        implemented_interfaces: implemented_interfaces
-            .into_iter()
-            .map(|id| {
-                let (interface_name, file_path) = searcher
-                    .query()
-                    .index()
-                    .get_function_by_entity_id(id)
-                    .map(|entity| {
-                        let path = searcher
-                            .query()
-                            .index()
-                            .get_file_path_by_entity(id)
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        (entity.name.clone(), path)
-                    })
-                    .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-
-                cce_api::models::InterfaceRelation {
-                    interface_id: stable_id(searcher.query().index(), id)
-                        .unwrap_or_else(|| format!("entity:{}", id.0)),
-                    interface_name,
-                    file_path,
-                }
-            })
-            .collect(),
-        implementing_classes: implementing_classes
-            .into_iter()
-            .map(|id| {
-                let (class_name, file_path) = searcher
-                    .query()
-                    .index()
-                    .get_function_by_entity_id(id)
-                    .map(|entity| {
-                        let path = searcher
-                            .query()
-                            .index()
-                            .get_file_path_by_entity(id)
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        (entity.name.clone(), path)
-                    })
-                    .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-
-                cce_api::models::ClassRelation {
-                    class_id: stable_id(searcher.query().index(), id)
-                        .unwrap_or_else(|| format!("entity:{}", id.0)),
-                    class_name,
-                    file_path,
+    match relation::class_implementations(&state, project_id, &id).await {
+        Ok(relations) => ApiResult::Success(ClassImplementationsResponse {
+            success: true,
+            relation_epoch: relations.stamp.relation_epoch,
+            class_id: id,
+            class_name: relations.class.name,
+            implemented_interfaces: relations
+                .interfaces
+                .into_iter()
+                .map(|entity| InterfaceRelation {
+                    interface_id: entity.stable_id,
+                    interface_name: entity.name,
+                    file_path: entity.file_path,
+                })
+                .collect(),
+            implementing_classes: relations
+                .implementors
+                .into_iter()
+                .map(|entity| ClassRelation {
+                    class_id: entity.stable_id,
+                    class_name: entity.name,
+                    file_path: entity.file_path,
                     depth: 0,
-                }
-            })
-            .collect(),
-        relation_info: stale_relation_info(&state, project_id).await,
-    };
+                })
+                .collect(),
+            relation_info: relations.stamp.stale,
+        }),
+        Err(error) => ApiResult::Error(relation_error(error)),
+    }
+}
 
-    ApiResult::Success(response)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_nodes_carry_stable_identities() {
+        let node = ChainNode {
+            entity: relation::EntityRef {
+                stable_id: "sym_a".to_string(),
+                name: "a".to_string(),
+                file_path: "src/a.rs".to_string(),
+            },
+            depth: 2,
+            relation_type: "call".to_string(),
+            call_line: Some(7),
+        };
+        let mapped = chain_node(node);
+        assert_eq!(mapped.function_id, "sym_a");
+        assert_eq!(mapped.file_path, "src/a.rs");
+        assert_eq!(mapped.call_line, Some(7));
+    }
 }

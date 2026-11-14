@@ -1,6 +1,13 @@
 //! CCE CLI - Command Line Interface for Code Context Engine
 //!
-//! A standalone CLI client that communicates with the CCE server via HTTP API.
+//! Two responsibilities live side by side here:
+//!
+//! - **HTTP client**: a standalone CLI that talks to a running CCE server
+//!   through the API client crate.
+//! - **Local operations entrypoint**: process supervision for the server
+//!   binary and the embedded gateway. This is a controlled local-deployment
+//!   exception, not a place to add business logic; domain behavior belongs to
+//!   the shared application services.
 
 mod cli;
 mod commands;

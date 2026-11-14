@@ -1,46 +1,81 @@
 //! Function calls handlers
 //!
-//! Provides function callees and callers query functionality.
+//! Provides function callees and callers query functionality. Both handlers
+//! decode the wire parameters, delegate to the shared relation service, and map
+//! the neutral edge list onto the response shape.
 
 use axum::extract::{Path, Query as QueryParams, State};
-
-use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
-use cce_orchestrator::query::RelationQueryOptions;
 
 use cce_api::models::{
     CallChainNode, CallChainQueryParams, ErrorResponse, FunctionCallersResponse,
     FunctionCallsResponse, RelationFilterParams, error_codes,
 };
+use cce_server_shared::services::relation::{
+    self, CallEdge, CallEdges, RelationFilterSpec, RelationStamp,
+};
 
-use super::filter::apply_filters;
-use super::seed::resolve_symbol_seed;
-use crate::api::response::ApiResult;
+use crate::api::response::{ApiResult, relation_error};
 
-fn params_to_options(params: CallChainQueryParams) -> RelationQueryOptions {
-    apply_filters(
-        RelationFilterParams {
-            exclude_tests: params.exclude_tests,
-            directory_prefix: params.directory_prefix,
-            excluded_files: params.excluded_files,
-            domains: params.domains,
-            include_external: params.include_external,
-        },
-        RelationQueryOptions::new()
-            .with_max_depth(params.max_depth)
-            .with_offset(params.offset.unwrap_or(0))
-            .with_limit(params.limit),
+/// Translate the wire filter and pagination parameters into query options.
+pub(super) fn params_to_options(
+    filter: RelationFilterParams,
+    max_depth: usize,
+    offset: Option<usize>,
+    limit: usize,
+) -> cce_orchestrator::query::RelationQueryOptions {
+    RelationFilterSpec {
+        exclude_tests: filter.exclude_tests.unwrap_or(false),
+        directory_prefix: filter.directory_prefix,
+        excluded_files: filter.excluded_files,
+        domains: filter.domains,
+        include_external: filter.include_external,
+    }
+    .apply(
+        cce_orchestrator::query::RelationQueryOptions::new()
+            .with_max_depth(max_depth)
+            .with_offset(offset.unwrap_or(0))
+            .with_limit(limit),
     )
 }
 
-/// Return the relation capability info as a JSON map when the served
-/// snapshot is stale (runtime degraded or updating); `None` when the
-/// snapshot is fresh. Lets the API layer hint that the answered data may
-/// lag the latest published epoch.
-async fn stale_relation_info(
-    runtime: &cce_server_shared::runtime::RelationRuntime,
-) -> Option<serde_json::Value> {
-    let info = runtime.get_capability_info().await;
-    info.stale.then(|| info.to_json_map())
+/// Describe the edge endpoint a listing is about: the callee for callees, the
+/// caller for callers.
+fn edge_node(edge: &CallEdge, callers: bool) -> CallChainNode {
+    let primary = if callers {
+        Some(&edge.caller)
+    } else {
+        edge.callee.as_ref()
+    };
+    match primary {
+        Some(entity) => CallChainNode {
+            function_id: entity.stable_id.clone(),
+            function_name: entity.name.clone(),
+            file_path: entity.file_path.clone(),
+            depth: 0,
+            relation_type: edge.relation_type.clone(),
+            call_line: None,
+        },
+        None => CallChainNode {
+            function_id: format!("external:{}", edge.target_name),
+            function_name: edge.target_name.clone(),
+            file_path: "Unknown".to_string(),
+            depth: 0,
+            relation_type: edge.relation_type.clone(),
+            call_line: None,
+        },
+    }
+}
+
+fn stamp_fields(stamp: RelationStamp) -> (i64, Option<serde_json::Value>) {
+    (stamp.relation_epoch, stamp.stale)
+}
+
+/// Invalid project id shared by the entity handlers.
+fn invalid_project() -> ErrorResponse {
+    ErrorResponse::new(
+        error_codes::INVALID_REQUEST,
+        "Invalid project_id".to_string(),
+    )
 }
 
 /// Handle function calls request (get callees)
@@ -60,138 +95,40 @@ pub async fn handle_function_calls(
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainQueryParams>,
 ) -> ApiResult<FunctionCallsResponse> {
-    // Validate project_id
     if project_id <= 0 {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Invalid project_id".to_string(),
-        ));
+        return ApiResult::Error(invalid_project());
     }
-
-    let options: RelationQueryOptions = params_to_options(params);
-
-    // Get relation runtime for this project
-    let runtime = match state.engine.get_relation_runtime(project_id).await {
-        Ok(rt) => rt,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation runtime: {}", e),
-            ));
-        }
+    let options = params_to_options(
+        RelationFilterParams {
+            exclude_tests: params.exclude_tests,
+            directory_prefix: params.directory_prefix,
+            excluded_files: params.excluded_files,
+            domains: params.domains,
+            include_external: params.include_external,
+        },
+        params.max_depth,
+        params.offset,
+        params.limit,
+    );
+    let CallEdges {
+        subject,
+        total,
+        items,
+        stamp,
+    } = match relation::callees(&state, project_id, &id, &options).await {
+        Ok(edges) => edges,
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-
-    // Check if runtime can serve queries
-    if !runtime.can_serve_queries().await {
-        let info = runtime.get_capability_info().await;
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            format!(
-                "Relation index not available: {:?}, epoch: {}",
-                info.state, info.relation_epoch
-            ),
-        ));
-    }
-
-    // Get snapshot for epoch / symbol lookup
-    let snapshot = match runtime.get_snapshot().await {
-        Some(s) => s,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::SERVICE_UNAVAILABLE,
-                "No relation snapshot available".to_string(),
-            ));
-        }
-    };
-
-    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
-    };
-
-    // Use cached RelationSearcher (LRU) instead of per-request CallChainQuery
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation searcher: {}", e),
-            ));
-        }
-    };
-    let filtered_callees: Vec<cce_types::ResolvedRelation> =
-        searcher.filter_callees(entity_id, &options);
-    // Total after filtering, before pagination
-    let total = filtered_callees.len();
-    let resolved_callees: Vec<cce_types::ResolvedRelation> = filtered_callees
-        .into_iter()
-        .skip(options.offset)
-        .take(options.limit)
-        .collect();
-    // Convert ResolvedRelation to CallChainNode
-    let callees: Vec<CallChainNode> = resolved_callees
-        .into_iter()
-        .map(|r| {
-            // Try to get callee info from relation index
-            let (function_name, file_path) = if let Some(callee_id) = r.callee_id {
-                searcher
-                    .query()
-                    .index()
-                    .get_function_by_entity_id(callee_id)
-                    .map(|entity| {
-                        let path = searcher
-                            .query()
-                            .index()
-                            .get_file_path_by_entity(callee_id)
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        (entity.name.clone(), path)
-                    })
-                    .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()))
-            } else {
-                ("Unknown".to_string(), "Unknown".to_string())
-            };
-
-            CallChainNode {
-                function_id: r
-                    .callee_id
-                    .and_then(|callee_id| {
-                        searcher
-                            .query()
-                            .index()
-                            .get_symbol_key_by_entity_id(callee_id)
-                    })
-                    .map(|key| key.stable_id().0)
-                    .unwrap_or_else(|| {
-                        format!("entity:{}", r.callee_id.map(|id| id.0).unwrap_or(0))
-                    }),
-                function_name,
-                file_path,
-                depth: 0,
-                relation_type: r.relation_type.to_string(),
-                call_line: None,
-            }
-        })
-        .collect();
-
-    // Get caller function name
-    let function_name = searcher
-        .query()
-        .index()
-        .get_function_by_entity_id(entity_id)
-        .map(|entity| entity.name.clone())
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    let response = FunctionCallsResponse {
+    let (relation_epoch, relation_info) = stamp_fields(stamp);
+    ApiResult::Success(FunctionCallsResponse {
         success: true,
-        relation_epoch: snapshot.relation_epoch,
+        relation_epoch,
         function_id: id,
-        function_name,
-        callees,
+        function_name: subject.name,
+        callees: items.iter().map(|edge| edge_node(edge, false)).collect(),
         total_callees: total,
-        relation_info: stale_relation_info(&runtime).await,
-    };
-
-    ApiResult::Success(response)
+        relation_info,
+    })
 }
 
 /// Handle function callers request
@@ -211,135 +148,48 @@ pub async fn handle_function_callers(
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainQueryParams>,
 ) -> ApiResult<FunctionCallersResponse> {
-    // Validate project_id
     if project_id <= 0 {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Invalid project_id".to_string(),
-        ));
+        return ApiResult::Error(invalid_project());
     }
-
-    let options: RelationQueryOptions = params_to_options(params);
-
-    // Get relation runtime for this project
-    let runtime = match state.engine.get_relation_runtime(project_id).await {
-        Ok(rt) => rt,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation runtime: {}", e),
-            ));
-        }
+    let options = params_to_options(
+        RelationFilterParams {
+            exclude_tests: params.exclude_tests,
+            directory_prefix: params.directory_prefix,
+            excluded_files: params.excluded_files,
+            domains: params.domains,
+            include_external: params.include_external,
+        },
+        params.max_depth,
+        params.offset,
+        params.limit,
+    );
+    let CallEdges {
+        subject,
+        total,
+        items,
+        stamp,
+    } = match relation::callers(&state, project_id, &id, &options).await {
+        Ok(edges) => edges,
+        Err(error) => return ApiResult::Error(relation_error(error)),
     };
-
-    // Check if runtime can serve queries
-    if !runtime.can_serve_queries().await {
-        let info = runtime.get_capability_info().await;
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            format!(
-                "Relation index not available: {:?}, epoch: {}",
-                info.state, info.relation_epoch
-            ),
-        ));
-    }
-
-    // Get snapshot for stable-id lookup and epoch
-    let snapshot = match runtime.get_snapshot().await {
-        Some(s) => s,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::SERVICE_UNAVAILABLE,
-                "No relation snapshot available".to_string(),
-            ));
-        }
-    };
-
-    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
-        Ok(eid) => eid,
-        Err(error) => return ApiResult::Error(error),
-    };
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to get relation searcher: {}", e),
-            ));
-        }
-    };
-    let caller_edges: Vec<cce_types::ResolvedRelation> =
-        searcher.filter_callers(entity_id, &options);
-    let total_callers = caller_edges.len();
-    let resolved_callers: Vec<cce_types::ResolvedRelation> = caller_edges
-        .into_iter()
-        .skip(options.offset)
-        .take(options.limit)
-        .collect();
-
-    // Convert ResolvedRelation to CallChainNode
-    let callers: Vec<CallChainNode> = resolved_callers
-        .into_iter()
-        .map(|relation| {
-            let caller_id = relation.caller;
-            let (function_name, file_path) = searcher
-                .query()
-                .index()
-                .get_function_by_entity_id(caller_id)
-                .map(|entity| {
-                    let path = searcher
-                        .query()
-                        .index()
-                        .get_file_path_by_entity(caller_id)
-                        .unwrap_or_else(|| "Unknown".to_string());
-                    (entity.name.clone(), path)
-                })
-                .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-
-            CallChainNode {
-                function_id: searcher
-                    .query()
-                    .index()
-                    .get_symbol_key_by_entity_id(caller_id)
-                    .map(|key| key.stable_id().0)
-                    .unwrap_or_else(|| format!("entity:{}", caller_id.0)),
-                function_name,
-                file_path,
-                depth: 0,
-                relation_type: relation.relation_type.to_string(),
-                call_line: None,
-            }
-        })
-        .collect();
-
-    // Get callee function name
-    let function_name = searcher
-        .query()
-        .index()
-        .get_function_by_entity_id(entity_id)
-        .map(|entity| entity.name.clone())
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    let response = FunctionCallersResponse {
+    let (relation_epoch, relation_info) = stamp_fields(stamp);
+    ApiResult::Success(FunctionCallersResponse {
         success: true,
-        relation_epoch: snapshot.relation_epoch,
+        relation_epoch,
         function_id: id,
-        function_name,
-        callers,
-        total_callers,
-        relation_info: stale_relation_info(&runtime).await,
-    };
-
-    ApiResult::Success(response)
+        function_name: subject.name,
+        callers: items.iter().map(|edge| edge_node(edge, true)).collect(),
+        total_callers: total,
+        relation_info,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_params_to_options() {
-        let params = CallChainQueryParams {
+    fn params() -> CallChainQueryParams {
+        CallChainQueryParams {
             max_depth: 5,
             offset: Some(10),
             limit: 50,
@@ -348,8 +198,24 @@ mod tests {
             excluded_files: Some("src/flask/app.py".to_string()),
             domains: Some("call".to_string()),
             include_external: false,
-        };
-        let opts: RelationQueryOptions = params_to_options(params);
+        }
+    }
+
+    #[test]
+    fn test_params_to_options() {
+        let params = params();
+        let opts = params_to_options(
+            RelationFilterParams {
+                exclude_tests: params.exclude_tests,
+                directory_prefix: params.directory_prefix,
+                excluded_files: params.excluded_files,
+                domains: params.domains,
+                include_external: params.include_external,
+            },
+            params.max_depth,
+            params.offset,
+            params.limit,
+        );
         assert_eq!(opts.max_depth, 5);
         assert_eq!(opts.offset, 10);
         assert_eq!(opts.limit, 50);

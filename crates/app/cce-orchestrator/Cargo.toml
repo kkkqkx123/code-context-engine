@@ -22,7 +22,6 @@ cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage
 cce-storage-vector-local = { version = "0.1.0", path = "../../infra/cce-storage-vector-local" }
 cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
-cce-storage-metadb-pg = { version = "0.1.0", path = "../../infra/cce-storage-metadb-pg" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-circuit-breaker = { version = "0.1.0", path = "../../infra/cce-circuit-breaker" }
@@ -59,7 +58,7 @@ rusqlite = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
-cce-bench-kit = { version = "0.1.0", path = "../cce-bench-kit" }
+cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
 tracing-subscriber = { workspace = true }
 llm-suite-embedding = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-embedding", features = ["mock"] }
 
