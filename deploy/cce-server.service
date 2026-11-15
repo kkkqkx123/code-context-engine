@@ -1,0 +1,19 @@
+[Unit]
+Description=Code Context Engine server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@DATA_DIR@
+Environment=CCE_CONFIG=@CONFIG@
+EnvironmentFile=-@ENV_FILE@
+ExecStart=@BIN@/cce
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=10s
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=@TARGET@
