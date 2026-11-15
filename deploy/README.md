@@ -18,6 +18,10 @@
 | `configs/config.remote.example.toml` | 远程/admission 示例 |
 | `configs/.env.example` | 环境变量模板 |
 
+## 示例工程配置
+
+`deploy/.cce/` 提供项目级配置与插件的演示模板（`.cce.example.toml`、`.cce.minimal.toml`、`plugins.json`、`plugins/*.lua`），用于初始化新项目的 `.cce` 目录；运行时数据不由仓库提交。
+
 ## 构建
 
 ```bash

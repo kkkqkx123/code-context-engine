@@ -304,10 +304,10 @@ mod tests {
         // default, so a sample that omits a field would break the loader.
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let samples = [
-            "config.toml",
-            "config.example.toml",
-            ".cce/.cce.example.toml",
-            ".cce/.cce.minimal.toml",
+            "deploy/configs/config.example.toml",
+            "deploy/configs/config.minimal.toml",
+            "deploy/.cce/.cce.example.toml",
+            "deploy/.cce/.cce.minimal.toml",
         ];
         for sample in samples {
             let path = repo_root.join(sample);
