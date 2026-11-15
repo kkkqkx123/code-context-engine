@@ -803,6 +803,35 @@ fn test_frontend_enabled_with_empty_dir_fails_validation() {
 }
 
 #[test]
+fn test_frontend_index_must_stay_inside_static_dir() {
+    for bad in ["/etc/passwd", "../escape.html", "..", "sub/../escape.html"] {
+        let mut config = AppConfig::default();
+        config.server.frontend.enabled = true;
+        config.server.frontend.index = bad.to_string();
+        let err = config
+            .validate_structured()
+            .expect_err("escaping index must fail");
+        assert!(
+            err.to_string().contains("server.frontend.index"),
+            "bad index '{bad}' must be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_frontend_resolve_validated_rejects_escaping_index() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("index.html"), "<html/>").expect("index fixture");
+    let frontend = FrontendConfig {
+        enabled: true,
+        dir: dir.path().to_string_lossy().into_owned(),
+        index: "../escape.html".to_string(),
+        ..FrontendConfig::default()
+    };
+    assert!(frontend.resolve_validated().is_err());
+}
+
+#[test]
 fn test_frontend_resolve_dir_prefers_absolute() {
     let frontend = FrontendConfig {
         dir: "/srv/cce/web".to_string(),

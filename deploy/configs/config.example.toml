@@ -11,7 +11,9 @@ port = 9000
 # Disabled by default; enable to serve the frontend static directory
 # (`frontend/build` output) alongside the API. A relative dir resolves
 # against the server executable's directory (`cce` next to `web/`).
-# Env overrides: CCE_SERVER_FRONTEND_ENABLED=1, CCE_SERVER_FRONTEND_DIR=/srv/cce/web
+# Env overrides: CCE_SERVER_FRONTEND_ENABLED=1, CCE_SERVER_FRONTEND_DIR=/srv/cce/web,
+# CCE_SERVER_FRONTEND_INDEX=index.html, CCE_SERVER_FRONTEND_FALLBACK=true,
+# CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS=31556952
 # [server.frontend]
 # enabled = false
 # dir = "web"

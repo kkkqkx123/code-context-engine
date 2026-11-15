@@ -86,6 +86,13 @@ async fn single_host_serves_pages_beside_api() {
 
     let response = app
         .clone()
+        .oneshot(request(Method::POST, "/api/no-such-route"))
+        .await
+        .expect("unknown api write method");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let response = app
+        .clone()
         .oneshot(request(Method::POST, "/dashboard"))
         .await
         .expect("non-read method");

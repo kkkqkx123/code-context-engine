@@ -24,6 +24,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "si
 axum = { workspace = true, features = ["macros"] }
 tower = { workspace = true }
 tower-http = { workspace = true }
+percent-encoding = { workspace = true }
 cce-admission = { version = "0.1.0", path = "../cce-admission", optional = true }
 base64 = { version = "0.22", optional = true }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }

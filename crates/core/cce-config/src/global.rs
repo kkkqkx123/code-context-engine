@@ -391,36 +391,88 @@ impl Default for FrontendConfig {
 
 impl FrontendConfig {
     /// Resolve the static directory against the server executable's
-    /// directory. Falls back to the process working directory when the
-    /// executable path is unavailable.
+    /// directory. Relative paths follow this single base; the executable
+    /// path is always available for a normally launched server.
     pub fn resolve_dir(&self) -> std::path::PathBuf {
         let raw = std::path::PathBuf::from(self.dir.trim());
         if raw.is_absolute() {
             return raw;
         }
-        let base = std::env::current_exe()
+        Self::exe_base().map(|base| base.join(&raw)).unwrap_or(raw)
+    }
+
+    /// Directory holding the server executable for relative static dirs.
+    fn exe_base() -> Option<std::path::PathBuf> {
+        std::env::current_exe()
             .ok()
             .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        base.join(raw)
+    }
+
+    /// Check the fallback page name stays inside the static directory.
+    ///
+    /// Only relative paths without parent references are accepted, so
+    /// joining the name onto the static directory can never escape it.
+    fn validated_index_name(&self) -> Result<&str, String> {
+        let name = self.index.trim();
+        if name.is_empty() {
+            return Err("server.frontend.index must not be empty".to_string());
+        }
+        let path = std::path::Path::new(name);
+        let escapes = path.is_absolute()
+            || path.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::Prefix(_)
+                        | std::path::Component::RootDir
+                        | std::path::Component::ParentDir
+                )
+            });
+        if escapes {
+            return Err(format!(
+                "server.frontend.index '{name}' must be a relative path inside the static directory"
+            ));
+        }
+        Ok(name)
     }
 
     /// Validate the static directory for serving.
     ///
-    /// Returns the resolved directory when it exists and holds the
-    /// fallback page; otherwise explains which path is unusable.
+    /// Returns the resolved directory when it exists, is readable, and
+    /// holds the fallback page; otherwise explains which path is unusable.
+    /// A relative directory without a resolvable executable base is
+    /// rejected instead of silently falling back to another base.
     pub fn resolve_validated(&self) -> Result<std::path::PathBuf, String> {
-        let dir = self.resolve_dir();
+        let raw = std::path::PathBuf::from(self.dir.trim());
+        let dir = if raw.is_absolute() {
+            raw
+        } else {
+            match Self::exe_base() {
+                Some(base) => base.join(&raw),
+                None => {
+                    return Err(format!(
+                        "cannot resolve relative static directory '{}': executable path is unavailable",
+                        self.dir.trim()
+                    ));
+                }
+            }
+        };
         if !dir.is_dir() {
             return Err(format!("static directory is not usable: {}", dir.display()));
         }
-        if self.fallback && !dir.join(self.index.trim()).is_file() {
+        if std::fs::read_dir(&dir).is_err() {
             return Err(format!(
-                "fallback page '{}' is missing in static directory {}",
-                self.index.trim(),
+                "static directory is not readable: {}",
                 dir.display()
             ));
+        }
+        if self.fallback {
+            let index = self.validated_index_name()?;
+            if !dir.join(index).is_file() {
+                return Err(format!(
+                    "fallback page '{index}' is missing in static directory {}",
+                    dir.display()
+                ));
+            }
         }
         Ok(dir)
     }
@@ -475,10 +527,12 @@ impl Validate for ServerConfig {
                     "must not be empty when frontend hosting is enabled",
                 ));
             }
-            if self.frontend.fallback && self.frontend.index.trim().is_empty() {
+            if self.frontend.fallback
+                && let Err(reason) = self.frontend.validated_index_name()
+            {
                 errors.push(ConfigValidationError::invalid_field(
                     "server.frontend.index",
-                    "must not be empty when SPA fallback is enabled",
+                    reason,
                 ));
             }
         }

@@ -380,7 +380,7 @@ pub(crate) fn api_routes() -> Router<SharedContext> {
 /// misconfigured static directory fails router construction so the server
 /// refuses to start instead of serving a half-broken page. The metrics
 /// layer stays outermost so it also observes static traffic; static paths
-/// normalize to the shared unmatched bucket instead of per-file labels.
+/// normalize to the dedicated static bucket instead of per-file labels.
 pub fn create_router(state: SharedContext) -> anyhow::Result<Router> {
     let server = cce_config::Settings::server()
         .map_err(|e| anyhow::anyhow!("Failed to load server config: {e}"))?;
@@ -396,7 +396,8 @@ pub fn create_router_with_frontend(
     frontend: &cce_config::FrontendConfig,
 ) -> anyhow::Result<Router> {
     // Create HTTP metrics wrapper for middleware. The metrics layer stays
-    // outermost so it also observes static traffic on the merged router.
+    // outermost so it also observes static traffic on the merged router;
+    // static paths land in the dedicated static bucket.
     let http_metrics = HttpMetrics::new(state.engine.metrics_registry());
 
     let mut router = api_routes();

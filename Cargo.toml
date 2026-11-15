@@ -109,6 +109,7 @@ axum = { version = "0.8.8", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util"] }
 tower-service = "0.3"
 tower-http = { version = "0.6", features = ["fs"] }
+percent-encoding = "2"
 
 # Tree-sitter
 tree-sitter = "0.26"

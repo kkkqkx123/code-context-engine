@@ -136,9 +136,16 @@ fn admission_app(app_state: SharedContext, host: &str) -> anyhow::Result<axum::R
         axum::middleware::from_fn_with_state(Arc::clone(&gate), cce_admission::timeout_middleware);
     let cors_layer =
         axum::middleware::from_fn_with_state(Arc::clone(&gate), cce_admission::cors_middleware);
-    let mut routes = router::api_routes().merge(handlers::ingest::ingest_routes(admission_metrics));
-    // Static pages stay outside the admission, timeout and CORS layers:
-    // they carry no project data, while every API route keeps its gate.
+    let api = router::api_routes().merge(handlers::ingest::ingest_routes(admission_metrics));
+    // Route layers only wrap explicit API routes, never the fallback
+    // service: static pages merged below stay outside the admission,
+    // timeout and CORS layers (they carry no project data), while every
+    // API route keeps its gate. Metrics stays outermost via `layer`.
+    let api = api
+        .route_layer(admission_layer)
+        .route_layer(timeout_layer)
+        .route_layer(cors_layer);
+    let mut routes = api;
     let frontend = cce_config::Settings::server()
         .map_err(|e| anyhow::anyhow!("Failed to load server config: {e}"))?
         .frontend;
@@ -147,9 +154,6 @@ fn admission_app(app_state: SharedContext, host: &str) -> anyhow::Result<axum::R
     }
     Ok(routes
         .with_state(app_state)
-        .layer(admission_layer)
-        .layer(timeout_layer)
-        .layer(cors_layer)
         .layer(axum::middleware::from_fn(middleware::metrics_middleware(
             http_metrics,
         ))))

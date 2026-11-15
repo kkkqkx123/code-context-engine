@@ -221,6 +221,47 @@ fn apply_server_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
             }
         }
     }
+    if config.server.frontend.index == default_server.frontend.index {
+        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_INDEX") {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                config.server.frontend.index = trimmed.to_string();
+            }
+        }
+    }
+    if config.server.frontend.fallback == default_server.frontend.fallback {
+        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_FALLBACK") {
+            let trimmed = val.trim().to_lowercase();
+            if !trimmed.is_empty() {
+                config.server.frontend.fallback = match trimmed.as_str() {
+                    "1" | "true" | "yes" | "on" => true,
+                    "0" | "false" | "no" | "off" => false,
+                    _ => {
+                        return Err(ConfigError::invalid_env_var(
+                            "CCE_SERVER_FRONTEND_FALLBACK",
+                            "expected one of 1/true/yes/on or 0/false/no/off",
+                        ));
+                    }
+                };
+            }
+        }
+    }
+    if config.server.frontend.immutable_max_age_secs
+        == default_server.frontend.immutable_max_age_secs
+    {
+        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS") {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                let secs: u64 = trimmed.parse().map_err(|_| {
+                    ConfigError::invalid_env_var(
+                        "CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS",
+                        "invalid cache lifetime in seconds",
+                    )
+                })?;
+                config.server.frontend.immutable_max_age_secs = secs;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -885,5 +926,60 @@ mod tests {
 
         // Cleanup
         std::fs::remove_file(&key_file).ok();
+    }
+
+    fn stash_env(key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+
+    fn restore_env(key: &str, saved: Option<String>) {
+        match saved {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    // Single test touching the frontend env vars: process env vars are
+    // global, so parallel tests mutating the same keys would race.
+    #[test]
+    fn test_frontend_env_vars_cover_all_fields() {
+        let saved = [
+            (
+                "CCE_SERVER_FRONTEND_INDEX",
+                stash_env("CCE_SERVER_FRONTEND_INDEX"),
+            ),
+            (
+                "CCE_SERVER_FRONTEND_FALLBACK",
+                stash_env("CCE_SERVER_FRONTEND_FALLBACK"),
+            ),
+            (
+                "CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS",
+                stash_env("CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS"),
+            ),
+        ];
+        unsafe {
+            std::env::set_var("CCE_SERVER_FRONTEND_INDEX", "app.html");
+            std::env::set_var("CCE_SERVER_FRONTEND_FALLBACK", "off");
+            std::env::set_var("CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS", "60");
+        }
+        let mut config = AppConfig::default();
+        apply_server_env_vars(&mut config).expect("frontend env vars must parse");
+        assert_eq!(config.server.frontend.index, "app.html");
+        assert!(!config.server.frontend.fallback);
+        assert_eq!(config.server.frontend.immutable_max_age_secs, 60);
+        unsafe {
+            std::env::set_var("CCE_SERVER_FRONTEND_FALLBACK", "maybe");
+        }
+        let mut config = AppConfig::default();
+        assert!(apply_server_env_vars(&mut config).is_err());
+        unsafe {
+            std::env::set_var("CCE_SERVER_FRONTEND_FALLBACK", "true");
+            std::env::set_var("CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS", "not-a-number");
+        }
+        let mut config = AppConfig::default();
+        assert!(apply_server_env_vars(&mut config).is_err());
+        for (key, saved) in saved {
+            restore_env(key, saved);
+        }
     }
 }

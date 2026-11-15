@@ -172,8 +172,14 @@ fn normalize_path(path: &str) -> &'static str {
                 "/api/index/entity/{id}"
             } else if path.starts_with("/api/project/") {
                 normalize_project_path(path)
-            } else {
+            } else if path == "/api"
+                || path.starts_with("/api/")
+                || path == "/api-docs"
+                || path.starts_with("/api-docs/")
+            {
                 "_unmatched"
+            } else {
+                "/_static"
             }
         }
     }
@@ -310,7 +316,15 @@ mod tests {
 
     #[test]
     fn test_normalize_unmatched() {
-        assert_eq!(normalize_path("/unknown/path"), "_unmatched");
+        assert_eq!(normalize_path("/api/no-such-route"), "_unmatched");
+        assert_eq!(normalize_path("/api-docs/unknown"), "_unmatched");
+    }
+
+    #[test]
+    fn test_normalize_static_bucket() {
+        assert_eq!(normalize_path("/"), "/_static");
+        assert_eq!(normalize_path("/dashboard"), "/_static");
+        assert_eq!(normalize_path("/_app/immutable/app.js"), "/_static");
     }
 
     #[test]
