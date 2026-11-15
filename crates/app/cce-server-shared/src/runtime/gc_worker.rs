@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{Level, debug, error, info, span};
 
-use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
+use cce_orchestrator::index::MetadataStore;
 use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 
@@ -150,6 +150,7 @@ use tracing::warn;
 
 #[cfg(test)]
 mod tests {
+    use cce_orchestrator::index::in_memory_metadata_store;
     use super::*;
     use cce_storage_common::metadb::{FileEnsureEntry, NewProjectRecord};
 

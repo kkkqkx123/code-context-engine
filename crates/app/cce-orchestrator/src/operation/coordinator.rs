@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use tracing::{debug, info, trace, warn};
 
-use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+use crate::index::vector_store::MetadataStore;
 use cce_types::error::common::NotFoundError;
 use cce_types::{OperationKind, StorageError};
 
@@ -735,6 +735,7 @@ impl OperationCoordinator {
 
 #[cfg(test)]
 mod tests {
+    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
     use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::{CheckpointRecord, CheckpointStatus};

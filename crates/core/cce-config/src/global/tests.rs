@@ -771,3 +771,58 @@ fn test_vector_dimension_mismatch_fails_validation() {
         .expect_err("dimension mismatch must fail");
     assert!(err.to_string().contains("embedding dimension"));
 }
+
+#[test]
+fn test_frontend_disabled_by_default() {
+    let config = AppConfig::default();
+    assert!(!config.server.frontend.enabled);
+    assert_eq!(config.server.frontend.dir, "web");
+    assert_eq!(config.server.frontend.index, "index.html");
+    assert!(config.server.frontend.fallback);
+    assert!(config.server.validate_structured().is_ok());
+}
+
+#[test]
+fn test_frontend_toml_round_trip() {
+    let raw = "[server.frontend]\nenabled = true\ndir = \"web\"\n";
+    let config: AppConfig = toml::from_str(raw).expect("frontend section must parse");
+    assert!(config.server.frontend.enabled);
+    assert_eq!(config.server.host, "127.0.0.1");
+    assert!(config.server.frontend.fallback);
+}
+
+#[test]
+fn test_frontend_enabled_with_empty_dir_fails_validation() {
+    let mut config = AppConfig::default();
+    config.server.frontend.enabled = true;
+    config.server.frontend.dir = "  ".to_string();
+    let err = config
+        .validate_structured()
+        .expect_err("empty static dir must fail");
+    assert!(err.to_string().contains("server.frontend.dir"));
+}
+
+#[test]
+fn test_frontend_resolve_dir_prefers_absolute() {
+    let frontend = FrontendConfig {
+        dir: "/srv/cce/web".to_string(),
+        ..FrontendConfig::default()
+    };
+    assert_eq!(
+        frontend.resolve_dir(),
+        std::path::PathBuf::from("/srv/cce/web")
+    );
+}
+
+#[test]
+fn test_frontend_resolve_validated_rejects_missing_dir() {
+    let frontend = FrontendConfig {
+        enabled: true,
+        dir: "/definitely/missing/cce-web-dir".to_string(),
+        ..FrontendConfig::default()
+    };
+    let err = frontend
+        .resolve_validated()
+        .expect_err("missing dir must fail");
+    assert!(err.contains("/definitely/missing/cce-web-dir"));
+}

@@ -232,7 +232,7 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::super::StorageCoordinator;
-    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use crate::index::vector_store::in_memory_metadata_store;
     use cce_storage_common::MetadataStorage;
     use cce_types::entity::{Entity, EntityId, EntityKind, ParsedFile};
     use cce_types::{Language, Span};

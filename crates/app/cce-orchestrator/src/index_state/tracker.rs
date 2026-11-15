@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::IndexStateProjection;
 
-use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+use crate::index::vector_store::MetadataStore;
 
 use crate::index_state::{FileUpdateState, StateTrackerError};
 
@@ -199,6 +199,7 @@ impl UpdateStateTracker {
 
 #[cfg(test)]
 mod tests {
+    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
     use crate::index_state::{ModuleType, ModuleUpdateState};
     use crate::operation::CheckpointManager;

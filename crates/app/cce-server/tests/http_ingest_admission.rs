@@ -258,8 +258,10 @@ fn matrix_config() -> AdmissionConfig {
 fn matrix_router(gate: Arc<AdmissionGate>) -> Router {
     Router::new()
         .route("/api/health", get(|| async { "healthy" }))
-        .route("/api/project/{id}/probe", get(|| async { "probe" }))
-        .route("/api/search", get(|| async { "search" }))
+        .route(
+            "/api/project/{id}/ingest/probe",
+            get(|| async { "probe" }).post(|| async { "probe" }),
+        )
         .layer(axum::middleware::from_fn_with_state(
             Arc::clone(&gate),
             cce_admission::admission_middleware,
@@ -319,20 +321,20 @@ async fn admission_middleware_matrix() {
     let (public, _) = get("/api/health", None);
     assert_eq!(public, 200, "public path bypasses admission");
 
-    let (missing, _) = get("/api/project/7/probe", None);
+    let (missing, _) = get("/api/project/7/ingest/probe", None);
     assert_eq!(missing, 401, "missing token is unauthorized");
 
-    let (unknown, _) = get("/api/project/7/probe", Some("no-such-token-000000000000"));
+    let (unknown, _) = get("/api/project/7/ingest/probe", Some("no-such-token-000000000000"));
     assert_eq!(unknown, 401, "unknown token is unauthorized");
 
     let (scoped, _) = get(
-        "/api/project/7/probe",
+        "/api/project/7/ingest/probe",
         Some("matrix-token-abcdef1234567890"),
     );
     assert_eq!(scoped, 200, "bound project is admitted");
 
     let (forbidden, _) = get(
-        "/api/project/8/probe",
+        "/api/project/8/ingest/probe",
         Some("matrix-token-abcdef1234567890"),
     );
     assert_eq!(forbidden, 403, "out-of-scope project is forbidden");
@@ -340,7 +342,7 @@ async fn admission_middleware_matrix() {
     let big = vec![b'x'; 64];
     let (oversize, _) = raw_request(
         &addr,
-        "POST /api/search HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer matrix-token-abcdef1234567890\r\n",
+        "POST /api/project/7/ingest/probe HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer matrix-token-abcdef1234567890\r\n",
         Some(&big),
     );
     assert_eq!(oversize, 413, "body over the admission bound is rejected");
@@ -354,7 +356,7 @@ async fn admission_middleware_matrix() {
     );
     let (body_scope, _) = raw_request(
         &addr,
-        "POST /api/search HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer matrix-token-abcdef1234567890\r\n",
+        "POST /api/project/7/ingest/probe HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAuthorization: Bearer matrix-token-abcdef1234567890\r\n",
         Some(&scoped_body),
     );
     assert_eq!(
@@ -381,7 +383,7 @@ async fn admission_rate_burst_is_rejected() {
     for _ in 0..3 {
         let (status, _) = raw_request(
             &addr,
-            "GET /api/project/7/probe HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer matrix-token-abcdef1234567890\r\n",
+            "GET /api/project/7/ingest/probe HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer matrix-token-abcdef1234567890\r\n",
             None,
         );
         statuses.push(status);

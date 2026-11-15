@@ -188,7 +188,7 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 
 #[test]
 fn test_legacy_active_epoch_missing_row_defaults_to_zero() {
-    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use crate::index::vector_store::in_memory_metadata_store;
     use cce_storage_common::MetadataStorage;
 
     let store = in_memory_metadata_store().expect("in-memory store");
@@ -202,7 +202,7 @@ fn test_legacy_active_epoch_missing_row_defaults_to_zero() {
 
 #[test]
 fn test_legacy_active_epoch_reads_stored_value() {
-    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use crate::index::vector_store::in_memory_metadata_store;
     use cce_storage_common::MetadataStorage;
 
     let store = in_memory_metadata_store().expect("in-memory store");
@@ -217,7 +217,7 @@ fn test_legacy_active_epoch_reads_stored_value() {
 
 #[test]
 fn test_legacy_active_epoch_unparseable_value_is_error() {
-    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use crate::index::vector_store::in_memory_metadata_store;
     use cce_storage_common::MetadataStorage;
 
     let store = in_memory_metadata_store().expect("in-memory store");
@@ -233,7 +233,7 @@ fn test_legacy_active_epoch_unparseable_value_is_error() {
 
 #[test]
 fn test_legacy_active_epoch_ignores_other_projects() {
-    use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+    use crate::index::vector_store::in_memory_metadata_store;
     use cce_storage_common::MetadataStorage;
 
     let store = in_memory_metadata_store().expect("in-memory store");

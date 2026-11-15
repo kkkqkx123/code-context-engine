@@ -196,6 +196,31 @@ fn apply_server_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
             }
         }
     }
+    if config.server.frontend.enabled == default_server.frontend.enabled
+        && let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_ENABLED")
+    {
+        let trimmed = val.trim().to_lowercase();
+        if !trimmed.is_empty() {
+            config.server.frontend.enabled = match trimmed.as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => {
+                    return Err(ConfigError::invalid_env_var(
+                        "CCE_SERVER_FRONTEND_ENABLED",
+                        "expected one of 1/true/yes/on or 0/false/no/off",
+                    ));
+                }
+            };
+        }
+    }
+    if config.server.frontend.dir == default_server.frontend.dir {
+        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_DIR") {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                config.server.frontend.dir = trimmed.to_string();
+            }
+        }
+    }
     Ok(())
 }
 

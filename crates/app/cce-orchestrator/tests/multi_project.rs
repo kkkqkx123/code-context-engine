@@ -3,7 +3,7 @@
 //! Verifies that query cache is properly isolated per project,
 //! preventing cross-project cache pollution.
 
-use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
+use cce_orchestrator::index::in_memory_metadata_store;
 use cce_orchestrator::query::{
     CacheConfig, CacheKey, QueryCache, QueryConfigBuilder, QueryOptions, QueryResult,
 };

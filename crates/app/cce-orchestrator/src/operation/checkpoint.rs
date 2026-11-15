@@ -6,7 +6,7 @@
 //! - Querying checkpoint states
 //! - Recovery support
 
-use crate::index::vector_store::{MetadataStore, in_memory_metadata_store};
+use crate::index::vector_store::MetadataStore;
 use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::{
     BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, FileCheckpointRecord,
@@ -618,6 +618,7 @@ impl CheckpointManager {
 
 #[cfg(test)]
 mod tests {
+    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
 
     fn make_operation_checkpoint(

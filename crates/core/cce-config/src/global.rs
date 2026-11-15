@@ -341,6 +341,8 @@ pub struct ServerConfig {
     pub host: String,
     /// Server port
     pub port: u16,
+    /// Static frontend hosting (single-host bundle: one port for API + pages)
+    pub frontend: FrontendConfig,
 }
 
 impl Default for ServerConfig {
@@ -348,7 +350,79 @@ impl Default for ServerConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: 9000,
+            frontend: FrontendConfig::default(),
         }
+    }
+}
+
+/// Static frontend hosting configuration.
+///
+/// Disabled by default so a pure-API deployment never serves files.
+/// When enabled, the HTTP layer serves the static directory built by the
+/// frontend (`frontend/build`) alongside the API on the same port. A
+/// relative `dir` resolves against the server executable's directory,
+/// matching the single-host bundle layout (`cce` next to `web/`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FrontendConfig {
+    /// Serve static files; false keeps the pure-API behavior
+    pub enabled: bool,
+    /// Static directory (absolute, or relative to the server executable)
+    pub dir: String,
+    /// Fallback page for extension-less paths (single-page application)
+    pub index: String,
+    /// Return the fallback page for unknown extension-less paths
+    pub fallback: bool,
+    /// Cache lifetime in seconds for immutable fingerprinted assets
+    pub immutable_max_age_secs: u64,
+}
+
+impl Default for FrontendConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dir: "web".to_string(),
+            index: "index.html".to_string(),
+            fallback: true,
+            immutable_max_age_secs: 31_556_952,
+        }
+    }
+}
+
+impl FrontendConfig {
+    /// Resolve the static directory against the server executable's
+    /// directory. Falls back to the process working directory when the
+    /// executable path is unavailable.
+    pub fn resolve_dir(&self) -> std::path::PathBuf {
+        let raw = std::path::PathBuf::from(self.dir.trim());
+        if raw.is_absolute() {
+            return raw;
+        }
+        let base = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        base.join(raw)
+    }
+
+    /// Validate the static directory for serving.
+    ///
+    /// Returns the resolved directory when it exists and holds the
+    /// fallback page; otherwise explains which path is unusable.
+    pub fn resolve_validated(&self) -> Result<std::path::PathBuf, String> {
+        let dir = self.resolve_dir();
+        if !dir.is_dir() {
+            return Err(format!("static directory is not usable: {}", dir.display()));
+        }
+        if self.fallback && !dir.join(self.index.trim()).is_file() {
+            return Err(format!(
+                "fallback page '{}' is missing in static directory {}",
+                self.index.trim(),
+                dir.display()
+            ));
+        }
+        Ok(dir)
     }
 }
 
@@ -393,6 +467,20 @@ impl Validate for ServerConfig {
         }
         if self.host.is_empty() {
             errors.push(ConfigValidationError::missing_field("host"));
+        }
+        if self.frontend.enabled {
+            if self.frontend.dir.trim().is_empty() {
+                errors.push(ConfigValidationError::invalid_field(
+                    "server.frontend.dir",
+                    "must not be empty when frontend hosting is enabled",
+                ));
+            }
+            if self.frontend.fallback && self.frontend.index.trim().is_empty() {
+                errors.push(ConfigValidationError::invalid_field(
+                    "server.frontend.index",
+                    "must not be empty when SPA fallback is enabled",
+                ));
+            }
         }
 
         if errors.is_empty() {

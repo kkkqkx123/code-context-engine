@@ -22,6 +22,8 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal"] }
 axum = { workspace = true, features = ["macros"] }
+tower = { workspace = true }
+tower-http = { workspace = true }
 cce-admission = { version = "0.1.0", path = "../cce-admission", optional = true }
 base64 = { version = "0.22", optional = true }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
@@ -40,6 +42,7 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tower = { workspace = true }
 criterion = { workspace = true }
 cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
 

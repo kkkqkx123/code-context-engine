@@ -13,7 +13,7 @@ use cce_config::{AstToNlConfig, NestProcessorConfig};
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_orchestrator::hot_update::FileChangeType;
 use cce_orchestrator::index::IndexOrchestrator;
-use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
+use cce_orchestrator::index::in_memory_metadata_store;
 use cce_orchestrator::index_state::{
     ModuleType, ModuleUpdateState, TOKEN_LIMIT_ERROR_CODE, TrackerFailure,
 };

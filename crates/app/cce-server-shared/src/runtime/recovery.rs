@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use cce_orchestrator::IndexOrchestrator;
-use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
+use cce_orchestrator::index::MetadataStore;
 use cce_storage_common::MetadataStorage;
 use cce_types::StorageError;
 use sha2::{Digest, Sha256};
@@ -595,6 +595,7 @@ pub struct RecoveryResult {
 
 #[cfg(test)]
 mod tests {
+    use cce_orchestrator::index::in_memory_metadata_store;
     use super::*;
 
     #[test]

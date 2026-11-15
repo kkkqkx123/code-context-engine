@@ -374,15 +374,39 @@ pub(crate) fn api_routes() -> Router<SharedContext> {
 }
 
 /// Create API router with all routes
-pub fn create_router(state: SharedContext) -> Router {
+///
+/// When `[server.frontend]` is enabled, the static file router merges in
+/// beside the API routes. API routes always win on path conflicts, and a
+/// misconfigured static directory fails router construction so the server
+/// refuses to start instead of serving a half-broken page. The metrics
+/// layer stays outermost so it also observes static traffic; static paths
+/// normalize to the shared unmatched bucket instead of per-file labels.
+pub fn create_router(state: SharedContext) -> anyhow::Result<Router> {
+    let server = cce_config::Settings::server()
+        .map_err(|e| anyhow::anyhow!("Failed to load server config: {e}"))?;
+    create_router_with_frontend(state, &server.frontend)
+}
+
+/// Create API router with an explicit frontend config.
+///
+/// The Settings-backed entry point above delegates here; integration tests
+/// use this form directly so no global configuration is touched.
+pub fn create_router_with_frontend(
+    state: SharedContext,
+    frontend: &cce_config::FrontendConfig,
+) -> anyhow::Result<Router> {
     // Create HTTP metrics wrapper for middleware. The metrics layer stays
-    // outermost so it also observes admission rejections on the remote
-    // router assembled beside this one.
+    // outermost so it also observes static traffic on the merged router.
     let http_metrics = HttpMetrics::new(state.engine.metrics_registry());
 
-    api_routes()
+    let mut router = api_routes();
+    if let Some(static_router) = super::static_files::static_router_from_config(frontend)? {
+        router = router.merge(static_router);
+    }
+
+    Ok(router
         // Inject state
         .with_state(state)
         // Apply metrics middleware to all routes
-        .layer(middleware::from_fn(metrics_middleware(http_metrics)))
+        .layer(middleware::from_fn(metrics_middleware(http_metrics))))
 }

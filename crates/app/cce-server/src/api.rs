@@ -11,6 +11,7 @@ pub mod middleware;
 pub mod openapi;
 pub mod response;
 pub mod router;
+pub mod static_files;
 pub mod validation;
 
 #[cfg(feature = "admission")]
@@ -52,7 +53,7 @@ pub async fn serve(
     #[cfg(feature = "admission")]
     let app = admission_app(app_state, host)?;
     #[cfg(not(feature = "admission"))]
-    let app = router::create_router(app_state);
+    let app = router::create_router(app_state)?;
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", host, port)).await?;
     tracing::info!("Server listening on http://{}:{}", host, port);
@@ -118,7 +119,7 @@ fn admission_app(app_state: SharedContext, host: &str) -> anyhow::Result<axum::R
         ));
     }
     if !config.is_configured() {
-        return Ok(router::create_router(app_state));
+        return router::create_router(app_state);
     }
     tracing::info!("Admission layer enabled for remote hosting");
     let admission_metrics = Arc::new(cce_admission::AdmissionMetrics::default());
@@ -135,8 +136,16 @@ fn admission_app(app_state: SharedContext, host: &str) -> anyhow::Result<axum::R
         axum::middleware::from_fn_with_state(Arc::clone(&gate), cce_admission::timeout_middleware);
     let cors_layer =
         axum::middleware::from_fn_with_state(Arc::clone(&gate), cce_admission::cors_middleware);
-    Ok(router::api_routes()
-        .merge(handlers::ingest::ingest_routes(admission_metrics))
+    let mut routes = router::api_routes().merge(handlers::ingest::ingest_routes(admission_metrics));
+    // Static pages stay outside the admission, timeout and CORS layers:
+    // they carry no project data, while every API route keeps its gate.
+    let frontend = cce_config::Settings::server()
+        .map_err(|e| anyhow::anyhow!("Failed to load server config: {e}"))?
+        .frontend;
+    if let Some(static_router) = static_files::static_router_from_config(&frontend)? {
+        routes = routes.merge(static_router);
+    }
+    Ok(routes
         .with_state(app_state)
         .layer(admission_layer)
         .layer(timeout_layer)

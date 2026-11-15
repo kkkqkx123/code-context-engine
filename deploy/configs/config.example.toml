@@ -7,6 +7,18 @@ host = "0.0.0.0"
 # Server port
 port = 9000
 
+# Static frontend hosting for the single-host bundle (one port for API + pages).
+# Disabled by default; enable to serve the frontend static directory
+# (`frontend/build` output) alongside the API. A relative dir resolves
+# against the server executable's directory (`cce` next to `web/`).
+# Env overrides: CCE_SERVER_FRONTEND_ENABLED=1, CCE_SERVER_FRONTEND_DIR=/srv/cce/web
+# [server.frontend]
+# enabled = false
+# dir = "web"
+# index = "index.html"
+# fallback = true
+# immutable_max_age_secs = 31556952
+
 [database]
 # Vector backend: local (default, embedded engine, no external service)
 # or qdrant (remote service for large-scale deployments).

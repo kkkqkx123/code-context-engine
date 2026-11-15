@@ -11,7 +11,7 @@ use cce_types::{
     CanonicalRelationSnapshot, CanonicalRelationTarget, StableSymbolKey, StorageError,
 };
 
-use super::vector_store::{MetadataStore, in_memory_metadata_store};
+use super::vector_store::MetadataStore;
 
 pub struct ResolutionPipelineService {
     store: MetadataStore,
@@ -202,6 +202,7 @@ fn validate_snapshot(snapshot: &CanonicalRelationSnapshot) -> Result<(), String>
 
 #[cfg(test)]
 mod tests {
+    use super::super::vector_store::in_memory_metadata_store;
     use super::*;
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {

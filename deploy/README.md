@@ -9,6 +9,8 @@
 | 文件 | 作用 |
 |---|---|
 | `build.sh` | 构建 `cce`、`cce-cli`、`cce-mcp` 到 `build/` |
+| `build-frontend.sh` | 构建前端静态包到 `frontend/build/`（需 Node/npm） |
+| `package-single.sh` | 组装单机包到 `dist/cce-single/`（单个 `cce` 加 `web/` 静态目录） |
 | `install.sh` | 构建（可选）、初始化配置、安装二进制、可选安装 systemd 服务 |
 | `cce-server.service` | systemd 单元模板，安装时渲染占位符 |
 | `configs/` | 配置模板与环境变量模板 |
@@ -101,4 +103,18 @@ cce-mcp
 
 ## 前端
 
-前端位于 `frontend/`，需单独构建并由反向代理或静态服务器提供；开发时通过 Vite 代理 `/api` 到后端。
+前端位于 `frontend/`，纯静态输出到 `frontend/build/`，默认同源请求接口，开箱即支持单机同源部署。
+
+```bash
+# 仅构建前端静态包
+./deploy/build-frontend.sh
+
+# 组装单机包：dist/cce-single/{cce,web/,config.single.toml,run-single.sh}
+./deploy/package-single.sh
+
+# 启动单机包（页面与接口同端口）
+./dist/cce-single/run-single.sh
+# 打开 http://127.0.0.1:9000/，接口健康检查 http://127.0.0.1:9000/api/health
+```
+
+单机包要求后端实现静态托管（详见 `docs/plan/single-binary-static-hosting-2026-11-15.md`）；实现落地前，打包脚本可正常产出目录结构，`[server.frontend]` 分组在后端生效后才会被读取。需要反向代理分开部署时，仍按原方式单独提供 `frontend/build/` 即可。

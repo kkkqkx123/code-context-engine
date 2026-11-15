@@ -12,8 +12,8 @@ pub mod settings;
 pub mod validation;
 
 pub use global::{
-    AppConfig, DatabaseConfig, LogFormat, LogLevel, LogOutput, LoggingConfig, ServerConfig,
-    SqliteConfig, SqliteSyncMode,
+    AppConfig, DatabaseConfig, FrontendConfig, LogFormat, LogLevel, LogOutput, LoggingConfig,
+    ServerConfig, SqliteConfig, SqliteSyncMode,
 };
 pub use loader::ConfigLoader;
 pub use project::{
