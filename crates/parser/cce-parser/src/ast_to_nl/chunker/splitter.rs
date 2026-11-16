@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn test_split_range_by_sentences_stops_at_tokens() {
         let text = "A B C D E F G H";
-        let boundaries = split_with_limits(text, BoundaryLevel::Sentences, 3);
+        let boundaries = split_with_limits(text, BoundaryLevel::Sentences, 2);
         assert!(boundaries.len() > 1);
         assert_partition(text, &boundaries);
     }

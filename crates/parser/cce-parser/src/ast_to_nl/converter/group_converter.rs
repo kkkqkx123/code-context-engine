@@ -310,47 +310,6 @@ impl super::AstToNlConverter {
                 proposition_tail = proposition_stats.tail_fragments,
                 "proposition coverage for file",
             );
-            // Vector-path gate post-pass: enrichment appends sidecars
-            // (propositions, raw tails, anchors) that can resurrect a member
-            // cleared before enrichment. Re-clearing here keeps the keyword
-            // side intact while the vector block stays dropped.
-            if matches!(
-                self.resolve_mode(request),
-                OutputMode::Embedding | OutputMode::Both
-            ) {
-                for gc in &mut group_conversions {
-                    if gc.group.group_type == cce_types::GroupType::FileDocumentation {
-                        continue;
-                    }
-                    for member_conv in &mut gc.member_conversions {
-                        let Some(entity) = gc
-                            .group
-                            .members
-                            .iter()
-                            .find(|m| m.id == member_conv.entity_id)
-                        else {
-                            continue;
-                        };
-                        if Self::vector_gate_drops(entity, &gc.group, Some(pr), Some(src)) {
-                            member_conv.embedding_text = None;
-                        }
-                    }
-                    if gc.group.members.is_empty() {
-                        if let (Some(header_entity), Some(header_conv)) =
-                            (gc.group.header.as_ref(), gc.header_conversion.as_mut())
-                        {
-                            if Self::vector_gate_drops(
-                                header_entity,
-                                &gc.group,
-                                Some(pr),
-                                Some(src),
-                            ) {
-                                header_conv.embedding_text = None;
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         GroupConvertOutput {
