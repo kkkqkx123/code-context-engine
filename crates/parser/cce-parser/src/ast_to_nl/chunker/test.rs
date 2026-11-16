@@ -1271,7 +1271,7 @@ mod tests {
         let budget = config.budget(ChunkPath::Embedding, false, decoration);
         assert!(budget.body_limit > 1 && budget.body_limit < budget.pre_injection_limit);
         let over = budget.body_limit.saturating_add(5);
-        let mut member_text = (0..200)
+        let mut member_text = (0..600)
             .map(|i| format!("w{i}"))
             .collect::<Vec<_>>()
             .join(" ");
@@ -1299,7 +1299,7 @@ mod tests {
             kind: EntityKind::Method,
             name: "TestMethod".to_string(),
             file_path: "PipelineTests.cs".to_string(),
-            bm25_text: Some(member_text.clone()),
+            bm25_text: Some("TestMethod body here".to_string()),
             embedding_text: Some(member_text),
             ..Default::default()
         };

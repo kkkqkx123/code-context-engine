@@ -1067,6 +1067,10 @@ mod tests {
 
     #[test]
     fn test_file_role_line_names_owning_file() {
+        assert_eq!(
+            crate::ast_to_nl::chunker::boundary::file_role_for_file("src/imp_cs.rs").as_deref(),
+            Some("In file imp cs.")
+        );
         let config = AstToNlConfig {
             default_mode: OutputMode::Embedding,
             ..Default::default()
@@ -1081,13 +1085,20 @@ mod tests {
         let conv = results[0].header_conversion.as_ref().unwrap();
         let emb = conv.embedding_text.as_deref().unwrap();
         assert!(
-            emb.contains("In file imp cs."),
-            "stem words must name the file, got: {emb}"
+            !emb.contains("In file "),
+            "converter must not emit file decoration, got: {emb}"
         );
     }
 
     #[test]
     fn test_file_role_line_uses_parent_for_module_index() {
+        assert_eq!(
+            crate::ast_to_nl::chunker::boundary::file_role_for_file(
+                "crates/searcher/src/searcher/mod.rs"
+            )
+            .as_deref(),
+            Some("In file searcher.")
+        );
         let config = AstToNlConfig {
             default_mode: OutputMode::Embedding,
             ..Default::default()
@@ -1113,8 +1124,8 @@ mod tests {
         let conv = results[0].header_conversion.as_ref().unwrap();
         let emb = conv.embedding_text.as_deref().unwrap();
         assert!(
-            emb.contains("In file searcher."),
-            "module index files resolve to the parent directory, got: {emb}"
+            !emb.contains("In file "),
+            "converter must not emit file decoration, got: {emb}"
         );
     }
 }

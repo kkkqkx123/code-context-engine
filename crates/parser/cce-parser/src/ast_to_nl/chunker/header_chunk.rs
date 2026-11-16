@@ -1163,8 +1163,9 @@ mod tests {
         ];
         let results = from_segments_for_test(&tracker, segs, &group, ChunkPath::Embedding, &nlb);
         assert_eq!(results.len(), 2);
+        let expected = format!("{aligned}\nIn file test.");
         assert_eq!(
-            results[1].text, aligned,
+            results[1].text, expected,
             "boundary-aligned segments need no repeated identity"
         );
     }

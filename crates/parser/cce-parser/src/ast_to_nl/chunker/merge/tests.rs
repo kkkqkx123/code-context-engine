@@ -152,8 +152,11 @@ fn test_merge_two_chunks_preserves_identity() {
     assert_eq!(merged.chunk_id, "group_a_emb_0");
     assert_eq!(merged.source_group_id, "group_a");
     assert_eq!(merged.path, ChunkPath::Embedding);
-    assert_eq!(merged.token_count, 110);
-    assert_eq!(merged.text, "text a\n\ntext b");
+    assert_eq!(merged.text, "text a\n\ntext b\nIn file test.");
+    assert_eq!(
+        merged.token_count,
+        super::super::boundary::cost(&merged.text, ChunkPath::Embedding)
+    );
 }
 
 #[test]

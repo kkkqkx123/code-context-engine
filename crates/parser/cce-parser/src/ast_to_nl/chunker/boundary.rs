@@ -30,27 +30,96 @@ pub fn cost(text: &str, path: ChunkPath) -> usize {
     unit(path).cost(text)
 }
 
-/// Deduplicate identical file-role lines within one chunk text.
+/// Whether a line is a file-role decoration line.
 ///
-/// The converter appends one `In file X.` line per entity, so a chunk
-/// holding several members of one file repeats the same line. Same file
-/// with the same line carries no new signal, so only the first occurrence
-/// is kept. Comparison uses the trimmed line; non-role lines pass through
-/// untouched and line order is preserved.
-pub fn dedup_file_role_lines(text: &str) -> String {
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+/// Matches the whole-line shape the chunker emits, not file content.
+pub fn is_file_role_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("In file ") && trimmed.ends_with('.')
+}
+
+/// File-role line naming the owning file in natural words.
+///
+/// Only the stem is used: extensions carry no retrieval signal.
+/// Module-index files (`mod.rs`, `__init__.py`) are named after their
+/// parent directory, which is the meaningful module name; a `mod.rs`
+/// directly under `src/` names the crate itself, so the grandparent
+/// (the crate directory) is used there. Words come from the file name
+/// itself, so the line cannot invent a subject the file does not have.
+pub fn file_role_for_file(file_path: &str) -> Option<String> {
+    let stem = std::path::Path::new(file_path)
+        .file_stem()?
+        .to_string_lossy()
+        .into_owned();
+    if stem.is_empty() {
+        return None;
+    }
+    let words = if matches!(stem.as_str(), "mod" | "__init__") {
+        let path = std::path::Path::new(file_path);
+        let mut dir = path.parent();
+        if stem == "mod" && dir.is_some_and(|d| d.file_name().is_some_and(|n| n == "src")) {
+            dir = dir.and_then(|d| d.parent());
+        }
+        let dir_name = dir?.file_name()?.to_string_lossy().into_owned();
+        split_stem_words(&dir_name)
+    } else {
+        split_stem_words(&stem)
+    };
+    if words.is_empty() {
+        return None;
+    }
+    Some(format!("In file {}.", words.join(" ")))
+}
+
+/// Split a file stem into lowercase natural words.
+///
+/// Separators and camel-case boundaries mark word breaks; empty segments
+/// are dropped without deduplication since stems rarely repeat.
+fn split_stem_words(stem: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    for part in stem.split(|c: char| !c.is_alphanumeric()) {
+        let mut current = String::new();
+        for c in part.chars() {
+            if c.is_uppercase() && !current.is_empty() {
+                words.push(std::mem::take(&mut current).to_lowercase());
+            }
+            current.push(c);
+        }
+        if !current.is_empty() {
+            words.push(current.to_lowercase());
+        }
+    }
+    words.into_iter().filter(|w| !w.is_empty()).collect()
+}
+
+/// Ensure at most one trailing file-role line.
+///
+/// File-role lines describe the file, not any entity, so they are chunk
+/// decoration: all existing copies are stripped and the canonical line for
+/// `file_path` is appended once at the end. Empty text stays empty and an
+/// unknown file keeps its stripped body without an appended line.
+pub fn ensure_single_trailing_file_role(text: &str, file_path: &str) -> String {
     let mut kept: Vec<&str> = Vec::new();
     for line in text.split('\n') {
-        let trimmed = line.trim();
-        if trimmed.starts_with("In file ")
-            && trimmed.ends_with('.')
-            && !seen.insert(trimmed.to_string())
-        {
+        // Strip complete and truncated file-role lines so a hard-truncated
+        // tail cannot leave a partial decoration behind.
+        if line.trim().starts_with("In file ") {
             continue;
         }
         kept.push(line);
     }
-    kept.join("\n")
+    let mut body = kept.join("\n");
+    let Some(role) = file_role_for_file(file_path) else {
+        return body;
+    };
+    if body.trim().is_empty() {
+        return body;
+    }
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push_str(&role);
+    body
 }
 
 /// Resolve the `(min, ceiling)` merge thresholds for `path`.
@@ -506,19 +575,32 @@ mod tests {
     }
 
     #[test]
-    fn test_dedup_file_role_lines_keeps_first() {
+    fn test_ensure_single_trailing_file_role_moves_to_end() {
         let text = "macro guard.\nIn file dash mpd.\nmacro other.\nIn file dash mpd.";
-        let deduped = dedup_file_role_lines(text);
-        assert_eq!(deduped.matches("In file dash mpd.").count(), 1);
-        assert!(deduped.contains("macro guard."));
-        assert!(deduped.contains("macro other."));
+        let normalized = ensure_single_trailing_file_role(text, "dash_mpd.h");
+        assert_eq!(normalized.matches("In file dash mpd.").count(), 1);
+        assert!(normalized.contains("macro guard."));
+        assert!(normalized.contains("macro other."));
+        assert!(normalized.ends_with("In file dash mpd."));
+        let role_pos = normalized.find("In file dash mpd.").unwrap();
+        let body_pos = normalized.find("macro other.").unwrap();
+        assert!(role_pos > body_pos);
     }
 
     #[test]
-    fn test_dedup_file_role_lines_keeps_distinct_files() {
-        let text = "a.\nIn file foo.\nb.\nIn file bar.\nc.\nIn file foo.";
-        let deduped = dedup_file_role_lines(text);
-        assert_eq!(deduped.matches("In file foo.").count(), 1);
-        assert_eq!(deduped.matches("In file bar.").count(), 1);
+    fn test_ensure_single_trailing_file_role_collapses_foreign_lines() {
+        let text = "a.\nIn file foo.\nb.\nIn file bar.";
+        let normalized = ensure_single_trailing_file_role(text, "foo.rs");
+        assert_eq!(normalized.matches("In file ").count(), 1);
+        assert!(normalized.ends_with("In file foo."));
+    }
+
+    #[test]
+    fn test_ensure_single_trailing_file_role_keeps_empty_empty() {
+        assert_eq!(ensure_single_trailing_file_role("", "foo.rs"), "");
+        assert_eq!(
+            ensure_single_trailing_file_role("   \n  ", "foo.rs").trim(),
+            ""
+        );
     }
 }

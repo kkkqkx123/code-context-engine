@@ -326,7 +326,12 @@ impl GroupChunker {
             self.measured_terminology_reserve(file_path, language, texts, ChunkPath::Embedding);
         let bm25_reserve =
             self.measured_terminology_reserve(file_path, language, texts, ChunkPath::Bm25);
-        let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
+        let mut embedding_decoration =
+            ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
+        if let Some(role) = super::boundary::file_role_for_file(file_path) {
+            embedding_decoration = embedding_decoration
+                .saturating_add(self.config.cost(&format!("\n{role}"), ChunkPath::Embedding));
+        }
         let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25);
         let emb_budget: ChunkBudget = self.config.budget_with_reserve(
             ChunkPath::Embedding,
@@ -482,6 +487,7 @@ impl GroupChunker {
             all_chunks.vocabulary.absorb(stats);
         }
         super::limits::enforce_hard_limit(&mut all_chunks.chunks, &self.config, file_path)?;
+        restore_trailing_file_roles(&mut all_chunks.chunks, &self.config);
 
         let first_emb = all_chunks
             .chunks
@@ -558,6 +564,7 @@ impl GroupChunker {
             output.vocabulary.absorb(stats);
         }
         super::limits::enforce_hard_limit(&mut output.chunks, &self.config, file_path)?;
+        restore_trailing_file_roles(&mut output.chunks, &self.config);
         let first_emb = output
             .chunks
             .iter()
@@ -629,6 +636,7 @@ impl GroupChunker {
             self.chunk_groups_builtin(group_conversions, file_path)?
         };
         super::limits::enforce_hard_limit(&mut output.chunks, &self.config, file_path)?;
+        restore_trailing_file_roles(&mut output.chunks, &self.config);
 
         Ok(output)
     }
@@ -843,6 +851,59 @@ impl GroupChunker {
 impl Default for GroupChunker {
     fn default() -> Self {
         Self::new(ChunkingConfig::default())
+    }
+}
+
+/// Restore the single trailing file-role line on every embedding chunk.
+///
+/// Terminology injection and hard-limit truncation both run after chunk
+/// assembly and can rewrite or cut the trailing line. This final pass
+/// strips any interior copies and re-appends the canonical line, shrinking
+/// the body first when the hard limit leaves no room for it.
+fn restore_trailing_file_roles(chunks: &mut [ChunkedResult], config: &ChunkingConfig) {
+    for chunk in chunks.iter_mut() {
+        if chunk.path != ChunkPath::Embedding {
+            continue;
+        }
+        let file_path = chunk.metadata.file_path.clone();
+        let normalized = super::boundary::ensure_single_trailing_file_role(&chunk.text, &file_path);
+        let hard = config.limit(ChunkPath::Embedding);
+        if hard == 0 || config.cost(&normalized, ChunkPath::Embedding) <= hard {
+            chunk.text = normalized;
+        } else if let Some(role) = super::boundary::file_role_for_file(&file_path) {
+            let role_block = format!("\n{role}");
+            let role_cost = config.cost(&role_block, ChunkPath::Embedding);
+            let body_cap = hard.saturating_sub(role_cost).max(1);
+            let mut body: Vec<&str> = Vec::new();
+            for line in normalized.split('\n') {
+                if line.trim().starts_with("In file ") {
+                    continue;
+                }
+                body.push(line);
+            }
+            let mut truncated = cce_text::truncate_to_cost(
+                &body.join("\n"),
+                config.unit(ChunkPath::Embedding),
+                body_cap,
+            )
+            .to_string();
+            if truncated.trim().is_empty() {
+                chunk.text = truncated;
+            } else {
+                if !truncated.ends_with('\n') {
+                    truncated.push('\n');
+                }
+                truncated.push_str(&role);
+                chunk.text = truncated;
+            }
+            chunk.truncated = true;
+        } else {
+            chunk.text = normalized;
+        }
+        chunk.token_count = config.cost(&chunk.text, ChunkPath::Embedding);
+        if chunk.metadata.bm25_word_count.is_some() {
+            chunk.metadata.bm25_word_count = Some(config.cost(&chunk.text, ChunkPath::Bm25));
+        }
     }
 }
 

@@ -121,7 +121,17 @@ pub(crate) fn merge_two_chunks(
     b: &ChunkedResult,
     combined_cost: usize,
 ) -> ChunkedResult {
-    let merged_text = format!("{}\n\n{}", a.text, b.text);
+    let raw_merged = format!("{}\n\n{}", a.text, b.text);
+    let merged_text = if a.path == ChunkPath::Embedding {
+        super::boundary::ensure_single_trailing_file_role(&raw_merged, &a.metadata.file_path)
+    } else {
+        raw_merged
+    };
+    let token_count = if a.path == ChunkPath::Embedding {
+        cost(&merged_text, a.path)
+    } else {
+        combined_cost
+    };
 
     let mut content_entity_ids = a.metadata.content_entity_ids().to_vec();
     content_entity_ids.extend_from_slice(b.metadata.content_entity_ids());
@@ -293,7 +303,7 @@ pub(crate) fn merge_two_chunks(
         text: merged_text,
         bm25_title: merged_title,
         bm25_keywords,
-        token_count: combined_cost,
+        token_count,
         start_byte: a.start_byte,
         end_byte: b.end_byte,
         prev_overlap: None,
