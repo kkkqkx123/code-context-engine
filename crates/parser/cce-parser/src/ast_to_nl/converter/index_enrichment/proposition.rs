@@ -24,4 +24,4 @@ mod guards;
 mod render;
 pub(super) mod vocab;
 
-pub(crate) use assembly::{data_reference_stats, render_propositions};
+pub(crate) use assembly::{data_reference_stats, proposition_stats, render_propositions};

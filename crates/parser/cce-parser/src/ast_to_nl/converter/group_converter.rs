@@ -298,6 +298,18 @@ impl super::AstToNlConverter {
                 reference_ratio = reference_stats.proportion(),
                 "data reference coverage for file",
             );
+            let proposition_stats =
+                super::index_enrichment::proposition::proposition_stats(pr, src);
+            tracing::debug!(
+                file_path,
+                proposition_fact_entities = proposition_stats.fact_entities,
+                proposition_with_head = proposition_stats.with_head,
+                proposition_sentences = proposition_stats.sentences,
+                proposition_silent = proposition_stats.silent_entities(),
+                proposition_overflow = proposition_stats.overflow_entities,
+                proposition_tail = proposition_stats.tail_fragments,
+                "proposition coverage for file",
+            );
             // Vector-path gate post-pass: enrichment appends sidecars
             // (propositions, raw tails, anchors) that can resurrect a member
             // cleared before enrichment. Re-clearing here keeps the keyword

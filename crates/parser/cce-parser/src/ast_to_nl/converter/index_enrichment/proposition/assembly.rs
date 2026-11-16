@@ -20,11 +20,14 @@ use super::super::source_extract::{code_body_start, find_entity_span, is_docstri
 /// `head` holds at most [`MAX_PROPOSITION_SENTENCES`] sentences for the
 /// head of the embedding text. `tail` holds the raw fragments of mapped
 /// facts the head could not cover, for the embedding tail. `overflow`
-/// tells whether such a tail exists.
+/// tells whether such a tail exists. `candidates` counts the facts that
+/// passed hygiene and reached the renderer, including the straddling and
+/// kind-silenced ones that earned no sentence.
 pub(crate) struct PropositionSet {
     pub head: Vec<String>,
     pub tail: Vec<(usize, usize, String)>,
     pub overflow: bool,
+    pub candidates: usize,
 }
 
 /// Render the embedding-path propositions of one entity.
@@ -50,6 +53,7 @@ pub(crate) fn render_propositions(
     let mut ordered: Vec<(usize, usize, usize, String)> = Vec::new();
     // Mapped fragments that may need a raw tail, keyed by range.
     let mut mapped: Vec<(usize, usize, String)> = Vec::new();
+    let mut candidates = 0usize;
 
     if let Some(store) = processing_result.control_flow.get(entity_id) {
         for fact in &store.facts {
@@ -60,6 +64,16 @@ pub(crate) fn render_propositions(
                 if fact.end_byte <= body {
                     continue;
                 }
+            }
+            candidates += 1;
+            // A fact straddling the body start mixes declaration prefix
+            // with code in its stored text. The raw sidecar clamps such
+            // ranges to the body, but a proposition rendered from the
+            // unclamped text would speak signature tokens as behavior.
+            // Skip the sentence; the body part stays available to the
+            // raw sidecar fallback.
+            if body_start.is_some_and(|body| fact.start_byte < body) {
+                continue;
             }
             if let Some(sentence) = render_control_flow(fact.kind, &fact.text) {
                 mapped.push((fact.start_byte, fact.end_byte, fact.text.clone()));
@@ -83,6 +97,13 @@ pub(crate) fn render_propositions(
                 if fact.end_byte <= body {
                     continue;
                 }
+            }
+            candidates += 1;
+            // Same straddling hygiene as control flow above: the stored
+            // text of a range crossing the body start carries a
+            // declaration prefix that no sentence may restate.
+            if body_start.is_some_and(|body| fact.start_byte < body) {
+                continue;
             }
             if let Some(sentence) = render_behavior(fact.kind, &fact.text) {
                 mapped.push((fact.start_byte, fact.end_byte, fact.text.clone()));
@@ -138,6 +159,7 @@ pub(crate) fn render_propositions(
         head,
         tail: merged,
         overflow,
+        candidates,
     }
 }
 
@@ -224,6 +246,70 @@ pub(crate) fn data_reference_stats(processing_result: &ProcessingResult) -> Data
         }
     }
     DataReferenceStats { total, independent }
+}
+
+/// Proposition coverage of one file, for budget and vocabulary decisions.
+///
+/// Counts reuse the single rendering entry point, so the numbers always
+/// describe the exact sentences the embedding path emits. Silent entities
+/// are derived rather than stored: facts present but no head earned.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub(crate) struct PropositionStats {
+    /// Entities holding at least one hygiene-passing fact.
+    pub fact_entities: usize,
+    /// Entities whose head holds at least one sentence.
+    pub with_head: usize,
+    /// Head sentences across all entities.
+    pub sentences: usize,
+    /// Entities whose mapped facts overflowed the head budget.
+    pub overflow_entities: usize,
+    /// Raw tail fragments kept for overflowed entities.
+    pub tail_fragments: usize,
+}
+
+impl PropositionStats {
+    /// Entities with facts but no sentence: all signal intentionally
+    /// silenced or held back by hygiene.
+    pub(crate) fn silent_entities(&self) -> usize {
+        self.fact_entities.saturating_sub(self.with_head)
+    }
+}
+
+/// Count proposition coverage in one file result.
+///
+/// Entity enumeration mirrors the reference coverage above: group members
+/// plus the behavior sidecar, so reference-only entities are still
+/// visited while control-flow ids arrive via their groups.
+/// Rendering cost matches the enrichment pass it observes.
+pub(crate) fn proposition_stats(
+    processing_result: &ProcessingResult,
+    source: &str,
+) -> PropositionStats {
+    let mut stats = PropositionStats::default();
+    let mut entity_ids: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    for group in &processing_result.groups {
+        for id in group.all_entity_ids() {
+            entity_ids.insert(id);
+        }
+    }
+    for (id, _) in processing_result.behavior.iter() {
+        entity_ids.insert(id);
+    }
+    for entity_id in entity_ids {
+        let set = render_propositions(entity_id, processing_result, source);
+        if set.candidates > 0 {
+            stats.fact_entities += 1;
+        }
+        if !set.head.is_empty() {
+            stats.with_head += 1;
+        }
+        stats.sentences += set.head.len();
+        if set.overflow {
+            stats.overflow_entities += 1;
+        }
+        stats.tail_fragments += set.tail.len();
+    }
+    stats
 }
 
 #[cfg(test)]
@@ -462,5 +548,89 @@ mod tests {
         let stats = data_reference_stats(&processing_result);
         assert_eq!(stats.total, 0);
         assert_eq!(stats.proportion(), 0.0);
+    }
+
+    #[test]
+    fn test_straddling_fact_stays_silent_but_body_speaks() {
+        use crate::grouper::types::{EntityGroup, GroupType};
+        use cce_types::Span;
+
+        let source = "@setupmethod\ndef register_blueprint(self, blueprint):\n    \"\"\"Register the blueprint.\"\"\"\n    blueprint.register(self)\n";
+        let call_text = "blueprint.register(self)";
+        let call_start = source.find(call_text).expect("call");
+        let call_end = call_start + call_text.len();
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group
+            .entity_spans
+            .insert(EntityId(1), Span::new(0, source.len(), 0, 0, 0, 0));
+        let mut bf_store = BehaviorStore::default();
+        // A range crossing the body start carries a declaration prefix in
+        // its stored text. Rendering it would speak signature tokens as
+        // behavior, so it stays silent while the clean body fact speaks.
+        let straddle_start = source.find("blueprint):").expect("signature tail");
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            &source[straddle_start..call_end],
+            straddle_start,
+            call_end,
+        ));
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            call_text,
+            call_start,
+            call_end,
+        ));
+        let processing_result = ProcessingResult {
+            groups: vec![group],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let set = render_propositions(EntityId(1), &processing_result, source);
+        assert_eq!(set.candidates, 2, "both facts reach the renderer");
+        assert_eq!(set.head.len(), 1, "got: {:?}", set.head);
+        assert!(
+            set.head[0].contains("invokes blueprint.register(self)."),
+            "body fact must speak, got: {:?}",
+            set.head
+        );
+        assert!(
+            !set.head.iter().any(|s| s.contains("):")),
+            "no signature remnant may leak, got: {:?}",
+            set.head
+        );
+        assert!(!set.overflow);
+    }
+
+    #[test]
+    fn test_proposition_stats_counts_head_silent_and_overflow() {
+        let mut bf_store = BehaviorStore::default();
+        // Entity 1 earns a sentence.
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataBind,
+            "v = load(arg)",
+            0,
+            13,
+        ));
+        // Entity 2 holds only an intentionally silent reference.
+        bf_store.entry_mut(EntityId(2)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataReference,
+            "lonely",
+            0,
+            6,
+        ));
+        let processing_result = ProcessingResult {
+            groups: vec![],
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+        let stats = proposition_stats(&processing_result, "");
+        assert_eq!(stats.fact_entities, 2);
+        assert_eq!(stats.with_head, 1);
+        assert_eq!(stats.sentences, 1);
+        assert_eq!(stats.silent_entities(), 1);
+        assert_eq!(stats.overflow_entities, 0);
+        assert_eq!(stats.tail_fragments, 0);
     }
 }
