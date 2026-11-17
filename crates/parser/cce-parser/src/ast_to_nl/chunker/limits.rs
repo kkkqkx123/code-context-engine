@@ -278,6 +278,47 @@ mod tests {
     }
 
     #[test]
+    fn test_hard_limit_keeps_identity_head_truncates_sidecar_tail() {
+        // Identity head plus doc lines survive while the over-long body
+        // tail is cut: truncation drops the sidecar tail, never the head.
+        let config = ChunkingConfig {
+            max_bm25_terms: 10,
+            ..Default::default()
+        };
+        let head = "fn should_bind_with() ShouldBindWith.\nBinds the request body.\n";
+        let text = format!("{head}{}", words(40));
+        let mut chunk = ChunkedResult::new(
+            "group_3_bm25_0".to_string(),
+            "group_3".to_string(),
+            ChunkPath::Bm25,
+            0,
+            1,
+        );
+        chunk.text = text;
+        chunk.metadata.code_metadata = Some(cce_types::ast_to_nl::CodeSpecificMetadata {
+            content_entity_ids: vec![
+                cce_types::entity::EntityId(1),
+                cce_types::entity::EntityId(2),
+            ],
+            ..Default::default()
+        });
+        let mut chunks = vec![chunk];
+        super::enforce_hard_limit(&mut chunks, &config, "bind.rs")
+            .expect("hard limit must not drop the file");
+        assert!(
+            chunks[0].text.contains("ShouldBindWith"),
+            "identity head survives truncation: {:?}",
+            chunks[0].text
+        );
+        assert!(
+            chunks[0].text.contains("Binds the request body."),
+            "doc lines survive truncation: {:?}",
+            chunks[0].text
+        );
+        assert!(chunks[0].truncated, "truncation must set the flag");
+    }
+
+    #[test]
     fn test_hard_limit_compliant_chunk_passes_through() {
         let config = ChunkingConfig::default();
         let mut chunk = ChunkedResult::new(

@@ -319,7 +319,8 @@ pub(super) fn confirmed_body_start(
         || head.starts_with("class ")
         || head.starts_with("class\t");
     if !is_definition {
-        return brace_body_start(&lines, &offsets, index, span_end);
+        return brace_body_start(&lines, &offsets, index, span_end)
+            .or_else(|| generic_body_start(&lines, &offsets, index, span_end));
     }
     let mut sig_end = index;
     loop {
@@ -335,7 +336,17 @@ pub(super) fn confirmed_body_start(
     }
     let end_code = lines[sig_end].split('#').next().unwrap_or(lines[sig_end]);
     if !end_code.trim_end().ends_with(':') {
-        return None;
+        // Single-line definition with code after the colon keeps its
+        // signal instead of going fully silent.
+        let line = lines[sig_end];
+        let cut = line.find('#').unwrap_or(line.len());
+        let code = &line[..cut];
+        let colon = code.find(':')?;
+        let after = code[colon + 1..].trim();
+        if after.is_empty() {
+            return None;
+        }
+        return Some(offsets[sig_end] + colon + 1);
     }
     let mut body = sig_end + 1;
     while body < lines.len() && lines[body].trim().is_empty() {
@@ -416,6 +427,37 @@ fn strip_same_line_comments(line: &str) -> std::borrow::Cow<'_, str> {
         Some(cut) => std::borrow::Cow::Owned(current[..cut].to_string()),
         None => current,
     }
+}
+
+/// Body start for layouts without a recognizable opener.
+///
+/// Skips leading trivia and one signature line, then starts at the next
+/// non-trivia line. Single-line declarations have no next line and stay
+/// unrecognized so the caller keeps the previous fact-based text.
+/// A lone `end` tail is returned here and filtered downstream by the
+/// meaningful-code check, keeping this scan conservative instead of wrong.
+fn generic_body_start(
+    lines: &[&str],
+    offsets: &[usize],
+    index: usize,
+    span_end: usize,
+) -> Option<usize> {
+    let mut cursor = index;
+    while cursor < lines.len() && is_trivia_line(lines[cursor].trim_start()) {
+        cursor += 1;
+    }
+    let sig = cursor;
+    if sig >= lines.len() {
+        return None;
+    }
+    cursor = sig + 1;
+    while cursor < lines.len() && is_trivia_line(lines[cursor].trim_start()) {
+        cursor += 1;
+    }
+    if cursor >= lines.len() {
+        return None;
+    }
+    Some(offsets.get(cursor).copied().unwrap_or(span_end))
 }
 
 /// Body start for brace-style definitions scanned from `index`.
@@ -582,14 +624,26 @@ mod tests {
 
     #[test]
     fn code_body_start_falls_back_for_unknown_shapes() {
-        // Brace-less layouts stay unknown: Lua-style `function` blocks
-        // keep the previous span-start fallback.
+        // Brace-less layouts use the generic signature-skip fallback so
+        // body literals stay searchable; single-line declarations and
+        // unterminated docstrings stay unknown.
         let lua = "function foo()\n    return 1\nend\n";
-        assert_eq!(code_body_start(lua, 0, lua.len()), 0);
+        assert_eq!(
+            &lua[code_body_start(lua, 0, lua.len())..],
+            "    return 1\nend\n"
+        );
         let one_liner = "def f(): return 1\n";
-        assert_eq!(code_body_start(one_liner, 0, one_liner.len()), 0);
+        assert_eq!(
+            &one_liner[code_body_start(one_liner, 0, one_liner.len())..],
+            " return 1\n"
+        );
         let unterminated = "def f():\n    \"\"\"never closed\n    return 1\n";
         assert_eq!(code_body_start(unterminated, 0, unterminated.len()), 0);
+        let single_decl = "local x = 1\n";
+        assert_eq!(
+            confirmed_body_start(single_decl, 0, single_decl.len()),
+            None
+        );
     }
 
     #[test]

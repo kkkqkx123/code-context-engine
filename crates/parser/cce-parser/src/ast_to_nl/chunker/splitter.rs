@@ -108,6 +108,86 @@ fn is_module_entity(group: &EntityGroup, id: EntityId) -> bool {
             .any(|member| member.id == id && member.kind == EntityKind::Module)
 }
 
+/// Whether two entity sets hold a direct call edge in either direction.
+///
+/// Adjacent cross-entity fragments whose entities call each other keep
+/// the caller context the query needs together (for example a binder
+/// method next to the body parser it feeds). The edge comes from the
+/// call-path metadata the grouper already wrote, so the splitter only
+/// reads. Name comparison uses the last path segment case-insensitively
+/// so qualified targets still match their short entity names.
+fn entities_call_related(group: &EntityGroup, first: &[EntityId], second: &[EntityId]) -> bool {
+    fn names_of(group: &EntityGroup, ids: &[EntityId]) -> Vec<String> {
+        let mut out = Vec::new();
+        for id in ids {
+            let name = group
+                .header
+                .as_ref()
+                .filter(|h| h.id == *id)
+                .map(|h| h.name.as_str())
+                .or_else(|| {
+                    group
+                        .members
+                        .iter()
+                        .find(|m| m.id == *id)
+                        .map(|m| m.name.as_str())
+                });
+            if let Some(name) = name {
+                let short = name
+                    .rsplit(['.', ':', '/', '#'])
+                    .next()
+                    .unwrap_or(name)
+                    .trim()
+                    .to_lowercase();
+                if !short.is_empty() {
+                    out.push(short);
+                }
+            }
+        }
+        out
+    }
+    fn targets_of(group: &EntityGroup, id: EntityId) -> Vec<String> {
+        let raw = group
+            .header
+            .as_ref()
+            .filter(|h| h.id == id)
+            .and_then(|h| h.metadata.get(cce_types::entity::meta_keys::CALL_PATHS))
+            .or_else(|| {
+                group
+                    .members
+                    .iter()
+                    .find(|m| m.id == id)
+                    .and_then(|m| m.metadata.get(cce_types::entity::meta_keys::CALL_PATHS))
+            });
+        let Some(raw) = raw else { return Vec::new() };
+        raw.split(',')
+            .map(|part| {
+                part.rsplit(['.', ':', '/', '#'])
+                    .next()
+                    .unwrap_or(part)
+                    .trim()
+                    .to_lowercase()
+            })
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+    let first_names = names_of(group, first);
+    let second_names = names_of(group, second);
+    for id in first {
+        let targets = targets_of(group, *id);
+        if targets.iter().any(|t| second_names.contains(t)) {
+            return true;
+        }
+    }
+    for id in second {
+        let targets = targets_of(group, *id);
+        if targets.iter().any(|t| first_names.contains(t)) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Text splitter
 pub struct TextSplitter {
     config: ChunkingConfig,
@@ -544,6 +624,18 @@ impl TextSplitter {
                     } else {
                         same_unit_ceiling
                     }
+                } else if path == ChunkPath::Bm25
+                    && entities_call_related(
+                        group,
+                        &last.boundary.entity_ids,
+                        &segment.boundary.entity_ids,
+                    )
+                {
+                    // Call-related neighbours keep caller context together
+                    // up to the pre-injection ceiling so a binder method is
+                    // not split from the body parser it feeds. Unrelated
+                    // members stay at the merge ceiling.
+                    same_unit_ceiling
                 } else {
                     ceiling
                 };
@@ -1595,6 +1687,132 @@ mod tests {
         let merged =
             splitter.merge_small_segments(&EntityGroup::default(), segments, ChunkPath::Embedding);
         assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn test_entities_call_related_detects_edge() {
+        use cce_types::entity::{EntityKind, GroupedEntity};
+
+        let mut caller = GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Method,
+            "ShouldBindWith".to_string(),
+            "ShouldBindWith".to_string(),
+        );
+        caller.metadata.insert(
+            cce_types::entity::meta_keys::CALL_PATHS.to_string(),
+            "BodyWith".to_string(),
+        );
+        let callee = GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Method,
+            "BodyWith".to_string(),
+            "BodyWith".to_string(),
+        );
+        let other = GroupedEntity::new(
+            EntityId(3),
+            EntityKind::Method,
+            "Unrelated".to_string(),
+            "Unrelated".to_string(),
+        );
+        let group = EntityGroup {
+            members: [caller, callee, other].into_iter().collect(),
+            ..EntityGroup::default()
+        };
+        assert!(entities_call_related(
+            &group,
+            &[EntityId(1)],
+            &[EntityId(2)]
+        ));
+        assert!(entities_call_related(
+            &group,
+            &[EntityId(2)],
+            &[EntityId(1)]
+        ));
+        assert!(!entities_call_related(
+            &group,
+            &[EntityId(1)],
+            &[EntityId(3)]
+        ));
+        assert!(!entities_call_related(
+            &group,
+            &[EntityId(2)],
+            &[EntityId(3)]
+        ));
+    }
+
+    #[test]
+    fn test_call_related_neighbours_merge_up_to_pre_injection() {
+        use cce_config::modules::ChunkBudget;
+        use cce_types::entity::{EntityKind, GroupedEntity};
+
+        // Merge ceiling sits below the pre-injection ceiling: an undersized
+        // fragment plus its call neighbour combine past the merge ceiling
+        // but inside the pre-injection room.
+        let config = ChunkingConfig {
+            max_bm25_terms: 1000,
+            min_chunk_bm25_terms: 60,
+            ..Default::default()
+        };
+        let bm25_budget = ChunkBudget {
+            unit: cce_text::ChunkUnit::Terms,
+            hard_limit: 1000,
+            reserve: 0,
+            decoration_cost: 0,
+            pre_injection_limit: 300,
+            body_limit: 1000,
+            min_limit: 60,
+            merge_limit: 100,
+        };
+        let emb_budget = config.budget(cce_types::ChunkPath::Embedding, false, 0);
+        let splitter = TextSplitter::with_budgets(config, emb_budget, bm25_budget);
+        let mut caller = GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Method,
+            "ShouldBindWith".to_string(),
+            "ShouldBindWith".to_string(),
+        );
+        caller.metadata.insert(
+            cce_types::entity::meta_keys::CALL_PATHS.to_string(),
+            "BodyWith".to_string(),
+        );
+        let callee = GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Method,
+            "BodyWith".to_string(),
+            "BodyWith".to_string(),
+        );
+        let group = EntityGroup {
+            members: [caller, callee].into_iter().collect(),
+            ..EntityGroup::default()
+        };
+        let pair = || {
+            vec![
+                ChunkSegment::new(
+                    ChunkBoundary::new(0, 50, SplitReason::MemberBoundary)
+                        .with_entity_ids(vec![EntityId(1)]),
+                    words(50),
+                ),
+                ChunkSegment::new(
+                    ChunkBoundary::new(50, 170, SplitReason::MemberBoundary)
+                        .with_entity_ids(vec![EntityId(2)]),
+                    words(120),
+                ),
+            ]
+        };
+        let merged = splitter.merge_small_segments(&group, pair(), ChunkPath::Bm25);
+        assert_eq!(
+            merged.len(),
+            1,
+            "call-related neighbours stay in one BM25 chunk"
+        );
+        let plain = EntityGroup::default();
+        let merged_plain = splitter.merge_small_segments(&plain, pair(), ChunkPath::Bm25);
+        assert_eq!(
+            merged_plain.len(),
+            2,
+            "unrelated neighbours respect the merge ceiling"
+        );
     }
 
     #[test]
