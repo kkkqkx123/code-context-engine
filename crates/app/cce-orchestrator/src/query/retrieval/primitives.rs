@@ -13,7 +13,8 @@ pub use entity_mapper::{
     resolve_project_root_from_store,
 };
 pub use fusion::{
-    HybridFusionConfig, alignment_key, fuse_hybrid_results, fuse_hybrid_results_with_stats,
-    minmax_normalize, unified_dedup_key, weak_post_key,
+    HybridFusionConfig, complete_keys_from_records, fuse_hybrid_results,
+    fuse_hybrid_results_with_stats, is_alignable, minmax_normalize, unified_dedup_key,
+    weak_post_key,
 };
 pub use glob_filter::GlobFilter;

@@ -5,13 +5,15 @@
 //! here exactly once: project config merge, expansion resolver injection,
 //! coordinator assembly, execution, DTO conversion, and relation stamping.
 
-use cce_api::models::{ContentStateDto, SearchResultItem};
+use cce_api::models::{
+    ContentStateDto, EntityScoreDto, RecallPathDto, SearchResultItem, SecondaryEvidenceDto,
+};
 use cce_config::modules::search::RelationAnnotationConfig;
 use cce_orchestrator::SearchResult as OrchestratorResultItem;
 use cce_orchestrator::query::expansion::{ExpansionPathFilter, NeighbourResolver, stable_id_of};
 use cce_orchestrator::query::types::{
-    ContentState, DowngradeReason, ExcludableContentType, QueryConfigBuilder, SearchConfig,
-    SearchSources,
+    ContentState, DowngradeReason, ExcludableContentType, QueryConfigBuilder, RecallPath,
+    SearchConfig, SearchSources,
 };
 use cce_orchestrator::query::{
     AggregatedQueryOptions, FilterOptions, QueryCoordinator, QueryIntent, QueryOptions,
@@ -571,6 +573,27 @@ impl<'a> SearchService<'a> {
             forward_nodes: metadata_count(&item.metadata, "forward_nodes"),
             backward_nodes: metadata_count(&item.metadata, "backward_nodes"),
             omitted_self_evident: metadata_count(&item.metadata, "omitted_self_evident"),
+            secondary_evidence: item
+                .secondary_evidence
+                .map(|evidence| SecondaryEvidenceDto {
+                    path: match evidence.path {
+                        RecallPath::Vector => RecallPathDto::Vector,
+                        RecallPath::Bm25 => RecallPathDto::Bm25,
+                    },
+                    chunk_id: evidence.chunk_id,
+                    normalized_score: evidence.normalized_score,
+                    raw_score: evidence.raw_score,
+                    start_line: evidence.start_line,
+                    end_line: evidence.end_line,
+                }),
+            entity_scores: item
+                .entity_scores
+                .iter()
+                .map(|entry| EntityScoreDto {
+                    entity_id: entry.entity_id.0 as i64,
+                    score: entry.score,
+                })
+                .collect(),
         }
     }
 

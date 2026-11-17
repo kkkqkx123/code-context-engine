@@ -510,6 +510,10 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "search_hybrid_alignment_match_ratio",
         "Hybrid search alignment match ratio",
     ),
+    (
+        "search_hybrid_alignment_unalignable_ratio",
+        "Share of hybrid search candidates with no cross-path alignment key",
+    ),
     ("search_queries_total", "Total search queries"),
     (
         "search_query_latency_ms",

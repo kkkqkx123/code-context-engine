@@ -38,6 +38,53 @@ use crate::index::vector_store::FulltextStore;
 use crate::index::vector_store::MetadataStore;
 use crate::index::vector_store::VectorStore;
 
+/// Combine two sub-query contributions that share one dedup key.
+///
+/// `Max` keeps the strongest contribution (historical behaviour). `NoisyOr`
+/// treats each contribution as independent evidence and accumulates it:
+/// `1 - (1 - a)(1 - b)`, so a second sub-query hitting the same entity always
+/// raises its score while the result stays in `[0, 1]` — which is what keeps
+/// the single global `result.min_score` comparable with single-query scores.
+/// Contributions are clamped just below 1 because a sub-query weight above 1
+/// would otherwise push the product negative (saturation instead of wrap).
+///
+/// Public so offline evaluations can measure the shipped formula instead of
+/// keeping a copy that drifts: the benchmark baseline has to move when this
+/// changes.
+pub fn combine_aggregate_scores(
+    current: f32,
+    contribution: f32,
+    strategy: cce_config::modules::search::AggregationScoreStrategy,
+) -> f32 {
+    use cce_config::modules::search::AggregationScoreStrategy;
+    let sanitize = |value: f32| {
+        if value.is_finite() {
+            value.clamp(0.0, 0.999)
+        } else {
+            0.0
+        }
+    };
+    match strategy {
+        AggregationScoreStrategy::Max => current.max(contribution),
+        AggregationScoreStrategy::NoisyOr => {
+            let acc = 1.0 - (1.0 - sanitize(current)) * (1.0 - sanitize(contribution));
+            acc.clamp(0.0, 1.0)
+        }
+    }
+}
+
+/// Union the `sources` of two hits merged onto one dedup key.
+fn merge_sources(
+    target: &mut crate::query::types::SearchResult,
+    other: &crate::query::types::SearchResult,
+) {
+    for source in &other.sources {
+        if !target.sources.contains(source) {
+            target.sources.push(source.clone());
+        }
+    }
+}
+
 /// Query coordinator
 ///
 /// Unified entry point for all query operations:
@@ -650,10 +697,20 @@ impl QueryCoordinator {
                     }
                 }
 
-                // Deduplicate by unified key (alignment key, else content weak key),
-                // keeping the highest weighted score. Shares the key space with
-                // hybrid fusion and single-search post-processing.
+                // Merge by unified key (alignment key, else content weak key).
+                // The key space is shared with hybrid fusion and single-search
+                // post-processing, so one entity collapses to one entry no
+                // matter how many sub-queries surfaced it. How the multiple
+                // contributions combine is configurable:
+                // `noisy_or` accumulates evidence (agreement between
+                // sub-queries raises the score), `max` keeps the historical
+                // strongest-contribution-wins behaviour.
+                let strategy = agg_options.global_config.aggregation.score_strategy;
                 let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
+                // Strongest single contribution per key; the entry carrying it
+                // stays the representative so content and metadata come from
+                // the sub-query that scored it highest.
+                let mut best_contribution: HashMap<String, f32> = HashMap::new();
                 let mut unkeyed: Vec<crate::query::types::SearchResult> = Vec::new();
                 for item in all_results {
                     let Some(key) = crate::query::retrieval::primitives::unified_dedup_key(&item)
@@ -661,14 +718,30 @@ impl QueryCoordinator {
                         unkeyed.push(item);
                         continue;
                     };
-                    dedup
-                        .entry(key)
-                        .and_modify(|existing| {
-                            if item.score > existing.score {
-                                *existing = item.clone();
+                    match dedup.get_mut(&key) {
+                        Some(existing) => {
+                            let combined =
+                                combine_aggregate_scores(existing.score, item.score, strategy);
+                            let is_stronger = item.score
+                                > best_contribution.get(&key).copied().unwrap_or(f32::MIN);
+                            if is_stronger {
+                                let mut replacement = item.clone();
+                                replacement.score = combined;
+                                replacement.original_score = combined;
+                                merge_sources(&mut replacement, existing);
+                                *existing = replacement;
+                                best_contribution.insert(key, item.score);
+                            } else {
+                                existing.score = combined;
+                                existing.original_score = combined;
+                                merge_sources(existing, &item);
                             }
-                        })
-                        .or_insert(item);
+                        }
+                        None => {
+                            best_contribution.insert(key.clone(), item.score);
+                            dedup.insert(key, item);
+                        }
+                    }
                 }
 
                 let mut merged: Vec<crate::query::types::SearchResult> =
@@ -1066,9 +1139,64 @@ impl QueryCoordinator {
 
 #[cfg(test)]
 mod tests {
+    use super::{combine_aggregate_scores, merge_sources};
+    use crate::query::types::SearchResult;
+    use cce_config::modules::search::AggregationScoreStrategy;
+
     #[test]
     fn test_coordinator_creation() {
         // This test would require mock components
         // For now, we just verify the structure compiles
+    }
+
+    #[test]
+    fn noisy_or_rewards_repeated_hits_and_stays_bounded() {
+        let strategy = AggregationScoreStrategy::NoisyOr;
+        let first = combine_aggregate_scores(0.0, 0.5, strategy);
+        assert!((first - 0.5).abs() < 1e-6);
+        let second = combine_aggregate_scores(first, 0.5, strategy);
+        assert!(second > first, "a second hit must raise the score");
+        assert!((second - 0.75).abs() < 1e-6);
+        // Monotone and bounded no matter how many sub-queries agree.
+        let mut acc = 0.0;
+        for _ in 0..64 {
+            acc = combine_aggregate_scores(acc, 0.9, strategy);
+            assert!((0.0..=1.0).contains(&acc));
+        }
+        assert!(acc <= 1.0);
+    }
+
+    #[test]
+    fn noisy_or_saturates_instead_of_wrapping_for_heavy_weights() {
+        // A sub-query weight above 1 pushes the contribution past 1; the
+        // combination must saturate, never go negative or above 1.
+        let strategy = AggregationScoreStrategy::NoisyOr;
+        let score = combine_aggregate_scores(0.4, 2.0, strategy);
+        assert!((0.0..=1.0).contains(&score));
+        assert!(score > 0.4);
+    }
+
+    #[test]
+    fn max_strategy_keeps_the_strongest_contribution() {
+        let strategy = AggregationScoreStrategy::Max;
+        assert!((combine_aggregate_scores(0.3, 0.6, strategy) - 0.6).abs() < 1e-6);
+        assert!((combine_aggregate_scores(0.8, 0.6, strategy) - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn merged_entry_keeps_both_provenance_labels() {
+        let mut target = SearchResult {
+            sources: vec!["vector".to_string()],
+            ..Default::default()
+        };
+        let other = SearchResult {
+            sources: vec!["bm25".to_string(), "vector".to_string()],
+            ..Default::default()
+        };
+        merge_sources(&mut target, &other);
+        assert_eq!(
+            target.sources,
+            vec!["vector".to_string(), "bm25".to_string()]
+        );
     }
 }

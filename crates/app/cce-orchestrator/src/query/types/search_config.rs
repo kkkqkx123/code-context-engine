@@ -14,9 +14,9 @@
 /// between config.toml and runtime usage.
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
-    Bm25RetrievalConfig, HybridFusionConfig, HybridWeightConfig, PluginSearchConfig,
-    QueryIntentWeights, RelationAnnotationConfig, RerankFusionStrategy, ResultFilterConfig,
-    ScoreNormalizationConfig, VectorRetrievalConfig,
+    AggregationConfig, AggregationScoreStrategy, Bm25RetrievalConfig, HybridFusionConfig,
+    HybridWeightConfig, PluginSearchConfig, QueryIntentWeights, RelationAnnotationConfig,
+    RerankFusionStrategy, ResultFilterConfig, ScoreNormalizationConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================
@@ -70,6 +70,8 @@ pub struct SearchConfig {
     pub bm25: Bm25RetrievalConfig,
     /// Hybrid fusion configuration
     pub fusion: HybridFusionConfig,
+    /// Multi-sub-query aggregation configuration
+    pub aggregation: AggregationConfig,
     /// Result filtering configuration
     pub result: ResultFilterConfig,
     /// LLM reranking configuration
@@ -90,6 +92,7 @@ impl Default for SearchConfig {
             vector: VectorRetrievalConfig::default(),
             bm25: Bm25RetrievalConfig::default(),
             fusion: HybridFusionConfig::default(),
+            aggregation: AggregationConfig::default(),
             result: ResultFilterConfig::default(),
             rerank: RerankConfig::default(),
             score: ScoreNormalizationConfig::default(),
@@ -106,6 +109,7 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             vector: cfg.vector,
             bm25: cfg.bm25,
             fusion: cfg.fusion,
+            aggregation: cfg.aggregation,
             result: cfg.result,
             // `[search.rerank]` was removed: rerank runtime parameters come
             // exclusively from the top-level `[rerank]` section (merged per

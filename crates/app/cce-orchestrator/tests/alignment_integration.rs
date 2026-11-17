@@ -62,7 +62,8 @@ fn test_end_to_end_code_chunk_alignment() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -101,7 +102,8 @@ fn test_end_to_end_document_chunk_alignment() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -144,7 +146,8 @@ fn test_end_to_end_mixed_code_and_document() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -184,7 +187,8 @@ fn test_end_to_end_bm25_sub_chunks_align_with_embedding() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -209,7 +213,8 @@ fn test_end_to_end_different_segments_do_not_fuse() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -242,7 +247,8 @@ fn test_end_to_end_entity_id_takes_priority() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -273,7 +279,8 @@ fn test_end_to_end_exclude_single_path() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: false,
+        include_vector_only_keys: false,
+        include_bm25_only_keys: false,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -304,7 +311,8 @@ fn test_end_to_end_fusion_preserves_metadata() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -407,7 +415,8 @@ fn test_searcher_pipeline_expand_then_fuse_matches_across_paths() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -454,7 +463,8 @@ fn test_searcher_pipeline_dedup_collapses_expanded_entities() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()
@@ -518,7 +528,8 @@ fn test_searcher_pipeline_unkeyed_results_keep_distinct_keys() {
     let config = HybridFusionConfig {
         vector_weight: 0.5,
         bm25_weight: 0.5,
-        include_single_path: true,
+        include_vector_only_keys: true,
+        include_bm25_only_keys: true,
         min_score: 0.0,
         dedup_by_chunk: false,
         ..HybridFusionConfig::default()

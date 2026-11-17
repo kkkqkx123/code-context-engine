@@ -7,7 +7,7 @@
 //!
 //! Every execution strategy runs the same stage contract:
 //! retrieval (with glob and content-type filtering plus over-fetch refill)
-//! → (hybrid: entity expansion + weighted fusion) →
+//! → (hybrid: alignment-key completion + entity expansion + weighted fusion) →
 //! optional score normalization → SQLite enrichment → post-processing
 //! (rerank, sort, filter, threshold).
 //!
@@ -15,6 +15,9 @@
 //!   post-processing: fusion, filtering and normalization only need
 //!   index-carried fields (scores, entity/segment ids, file_path), so the
 //!   expensive content lookups run once, on the surviving candidate set.
+//!   The one earlier metadata read is the identifier-only key completion,
+//!   which exists because fusion cannot align a candidate whose payload lost
+//!   its entity/segment linkage; it touches identifiers only and is bounded.
 //! - When `config.score.enable` is set, normalization applies uniformly to
 //!   all strategies, so the final `result.min_score` threshold observes one
 //!   score scale regardless of recall mode.
@@ -312,20 +315,35 @@ impl Searcher {
         // Both paths must succeed — never degrade one to the other.
         // Genuine configuration errors pass through unchanged so they are
         // not mislabeled as transient; runtime failures become retryable.
-        let vector_results = vector_attempt.map_err(|e| {
+        let mut vector_results = vector_attempt.map_err(|e| {
             if e.is_config_error() {
                 e
             } else {
                 QueryError::retryable("vector", format!("Vector recall path failed: {e}"))
             }
         })?;
-        let bm25_results = bm25_attempt.map_err(|e| {
+        let mut bm25_results = bm25_attempt.map_err(|e| {
             if e.is_config_error() {
                 e
             } else {
                 QueryError::retryable("bm25", format!("BM25 recall path failed: {e}"))
             }
         })?;
+
+        // Fusion derives alignment keys from index-carried fields only, so a
+        // candidate whose payload lost its entity/segment linkage is
+        // unmatchable even when the metadata store still knows the mapping.
+        // Complete those keys here, before fusion; bodies stay untouched and
+        // the single full enrichment still runs on the fused survivors.
+        self.complete_alignment_keys(
+            &mut vector_results,
+            options.project_id,
+            query_filter,
+            "vector",
+        )
+        .await;
+        self.complete_alignment_keys(&mut bm25_results, options.project_id, query_filter, "bm25")
+            .await;
 
         // Expand multi-entity results before fusion for entity-level alignment.
         // Fusion consumes only index-carried fields (scores, entity/segment
@@ -363,6 +381,7 @@ impl Searcher {
                 alignment_stats.vector_keys,
                 alignment_stats.bm25_keys,
                 alignment_stats.matched_keys,
+                alignment_stats.unalignable(),
             );
         }
         tracing::trace!(
@@ -379,6 +398,85 @@ impl Searcher {
         )
         .await;
         self.post_process_results(fused_results, options).await
+    }
+
+    /// Upper bound on candidates per path whose alignment keys are completed
+    /// before fusion.
+    ///
+    /// The pass costs one batched metadata query per path; the cap keeps that
+    /// cost fixed instead of scaling with the (over-fetched) candidate set.
+    const MAX_KEY_COMPLETION_CANDIDATES: usize = 200;
+
+    /// Complete path-local alignment keys from the metadata store before fusion.
+    ///
+    /// A key is path-local when it degrades to the chunk id: either no
+    /// entity/segment at all, or the index's chunk-id `segment_id` fallback.
+    /// Such candidates can never match the other recall path, even though the
+    /// chunk record usually still carries the real entity/segment linkage
+    /// (the full enrichment fills it, but only after fusion).
+    ///
+    /// Only identifiers are completed here — `entity_ids` and a meaningful
+    /// `segment_id`. Content, scores and line ranges are left alone, and the
+    /// single full enrichment still runs once on the fused survivors, so this
+    /// pass cannot change what a hit displays.
+    ///
+    /// Fails soft by design: without a metadata store, on a failed query, or
+    /// when the record carries nothing usable, the candidate keeps its
+    /// current key and fusion behaves exactly as before.
+    async fn complete_alignment_keys(
+        &self,
+        results: &mut [SearchResult],
+        project_id: i64,
+        query_filter: &QueryFilter,
+        path: &'static str,
+    ) {
+        use crate::query::retrieval::primitives::{
+            complete_keys_from_records, get_chunk_records_from_store, is_alignable,
+        };
+
+        let Some(store) = &self.metadata_store else {
+            return;
+        };
+        let mut ids: Vec<String> = Vec::new();
+        for result in results.iter() {
+            if is_alignable(&result.entity_ids, result.segment_id.as_deref(), &result.id) {
+                continue;
+            }
+            if ids.len() >= Self::MAX_KEY_COMPLETION_CANDIDATES {
+                break;
+            }
+            if !ids.contains(&result.id) {
+                ids.push(result.id.clone());
+            }
+        }
+        if ids.is_empty() {
+            return;
+        }
+        let records =
+            match get_chunk_records_from_store(store, &ids, project_id, query_filter).await {
+                Ok(Some(records)) => records,
+                Ok(None) => {
+                    tracing::debug!(
+                        path,
+                        looked_up = ids.len(),
+                        "Key completion skipped: no records"
+                    );
+                    return;
+                }
+                Err(error) => {
+                    tracing::debug!(path, looked_up = ids.len(), %error, "Key completion degraded");
+                    return;
+                }
+            };
+        let outcome = complete_keys_from_records(results, &records);
+        tracing::trace!(
+            path,
+            candidates = outcome.candidates,
+            looked_up = ids.len(),
+            completed = outcome.completed,
+            still_unalignable = outcome.still_unalignable,
+            "Completed path-local alignment keys before fusion"
+        );
     }
 
     /// Single-path dense vector recall over chunk embeddings.

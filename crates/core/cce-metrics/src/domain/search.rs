@@ -15,7 +15,11 @@ pub struct SearchMetrics {
     pub queries_total: LabeledCounter,
     pub query_latency_ms: LabeledHistogram,
     pub queries_by_type: Arc<DashMap<String, LabeledCounter>>,
+    /// Share of vector keys that also exist on the BM25 path.
     pub hybrid_alignment_match_ratio: LabeledHistogram,
+    /// Share of candidates that carry no cross-path alignment key (either no
+    /// key at all or the intentional chunk-id fallback).
+    pub hybrid_alignment_unalignable_ratio: LabeledHistogram,
     project_id_label: String,
     registry: MetricsRegistry,
 }
@@ -30,6 +34,10 @@ impl SearchMetrics {
             queries_by_type: Arc::new(DashMap::new()),
             hybrid_alignment_match_ratio: registry.histogram_default(
                 "search_hybrid_alignment_match_ratio",
+                &[("project_id", &proj_val)],
+            ),
+            hybrid_alignment_unalignable_ratio: registry.histogram_default(
+                "search_hybrid_alignment_unalignable_ratio",
                 &[("project_id", &proj_val)],
             ),
             project_id_label: proj_val,
@@ -58,13 +66,34 @@ impl SearchMetrics {
         }
     }
 
-    pub fn record_hybrid_alignment(&self, vector_keys: usize, _bm25_keys: usize, matched: usize) {
+    /// Record cross-path alignment coverage for one hybrid query.
+    ///
+    /// `match_ratio` uses the vector key count as the denominator (the vector
+    /// path is the primary semantic recall). `unalignable_ratio` uses every
+    /// observed entry as the denominator, so it reports how much of the
+    /// candidate set could never align rather than how much failed to align.
+    pub fn record_hybrid_alignment(
+        &self,
+        vector_keys: usize,
+        bm25_keys: usize,
+        matched: usize,
+        unalignable: usize,
+    ) {
         let ratio = if vector_keys == 0 {
             0.0
         } else {
             matched as f64 / vector_keys as f64
         };
         self.hybrid_alignment_match_ratio.observe(ratio);
+
+        let total = vector_keys + bm25_keys + unalignable;
+        let unalignable_ratio = if total == 0 {
+            0.0
+        } else {
+            unalignable as f64 / total as f64
+        };
+        self.hybrid_alignment_unalignable_ratio
+            .observe(unalignable_ratio);
     }
 }
 

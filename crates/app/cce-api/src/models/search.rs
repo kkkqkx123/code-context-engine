@@ -134,6 +134,55 @@ pub struct SearchResultItem {
     /// Forward units dropped as directly inferable from the rendered body.
     #[serde(default)]
     pub omitted_self_evident: usize,
+    /// Representative hit of the recall path that lost the hybrid fusion tie.
+    ///
+    /// Only a reference (chunk id, scores, line range), never a body: the
+    /// result itself is still the winning path's chunk. Absent for single-path
+    /// hits and non-hybrid strategies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_evidence: Option<SecondaryEvidenceDto>,
+    /// Per-entity fused scores when one physical chunk carries several
+    /// entities (chunk grouping is enabled). Empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_scores: Vec<EntityScoreDto>,
+}
+
+/// Recall path of a secondary evidence reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecallPathDto {
+    /// Dense vector path.
+    Vector,
+    /// BM25 full-text path.
+    Bm25,
+}
+
+/// Reference to the losing recall path's representative chunk.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SecondaryEvidenceDto {
+    /// Path the reference belongs to.
+    pub path: RecallPathDto,
+    /// Chunk id of that path's representative hit.
+    pub chunk_id: String,
+    /// Path score normalized to `[0, 1]`.
+    pub normalized_score: f32,
+    /// Raw retrieval score on that path.
+    pub raw_score: f32,
+    /// One-based start line the path knows about (0 when unknown).
+    #[serde(default)]
+    pub start_line: u32,
+    /// One-based end line the path knows about (0 when unknown).
+    #[serde(default)]
+    pub end_line: u32,
+}
+
+/// Fused score of one entity inside a multi-entity chunk group.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EntityScoreDto {
+    /// Entity the score belongs to.
+    pub entity_id: i64,
+    /// Fused score that entity earned on its own alignment key.
+    pub score: f32,
 }
 
 /// Sub-query definition for aggregated search

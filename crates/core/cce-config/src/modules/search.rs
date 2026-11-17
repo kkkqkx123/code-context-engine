@@ -194,20 +194,23 @@ pub struct HybridFusionConfig {
     pub intent_weights: QueryIntentWeights,
     /// Whether to enable query-intent-based dynamic weight selection
     pub enable_intent_based_weights: bool,
-    /// Whether to include items that only appear in one path.
+    /// Whether alignment keys hit only by the vector path join the fused list.
     ///
-    /// Explicit single-path policy, asymmetric by design: vector-only keys
-    /// are always kept, this switch only controls whether BM25-only keys
-    /// join the fused list. The vector path is the primary semantic recall,
-    /// so a lone vector path is never gated here while a lone BM25 path
-    /// is; use `require_strict_intersection` for a true intersection of
-    /// both paths. The same rule applies to the single-path fast path,
-    /// which skips the union key set but thresholds identically.
-    pub include_single_path: bool,
+    /// Symmetric with `include_bm25_only_keys`. Both default to `true`; the
+    /// historical implementation always kept vector-only keys and gated only
+    /// the BM25 side, which made the asymmetry invisible in configuration.
+    /// `require_strict_intersection` takes precedence over both switches.
+    pub include_vector_only_keys: bool,
+    /// Whether alignment keys hit only by the BM25 path join the fused list.
+    ///
+    /// Symmetric with `include_vector_only_keys`. Disable either switch (or
+    /// enable `require_strict_intersection`) to narrow recall to keys that
+    /// both paths agree on.
+    pub include_bm25_only_keys: bool,
     /// Require keys present in both paths, dropping all single-path keys.
     ///
-    /// Off by default. When enabled it takes precedence over
-    /// `include_single_path` and yields the strict intersection.
+    /// Off by default. When enabled it takes precedence over both
+    /// single-path switches and yields the strict intersection.
     pub require_strict_intersection: bool,
     /// Minimum fused score threshold, normalized to `[0.0, 1.0]` across all
     /// algorithms. Each algorithm internally scales its raw output to this
@@ -217,16 +220,55 @@ pub struct HybridFusionConfig {
     /// prices the fused ranking, the result threshold is the user-visible
     /// quality gate applied after rerank fusion.
     pub min_score: f32,
-    /// Whether to keep at most one result per physical chunk after fusion.
+    /// Whether to group results by physical chunk after fusion.
     ///
     /// Entity-level alignment can surface the same chunk once per contained
-    /// entity; enabling this collapses them to the best-scoring entry per
-    /// chunk id so multi-entity chunks do not inflate the result list with
-    /// identical content.
+    /// entity; enabling this groups them onto the best-scoring entry per
+    /// chunk id (one entry per chunk) while the sibling entities and their
+    /// fused scores stay recorded on `entity_scores`, so multi-entity chunks
+    /// neither inflate the list with identical content nor lose the losing
+    /// entities' evidence.
     pub dedup_by_chunk: bool,
 }
 
-/// Operator used to combine the terms of a multi-word BM25 query.
+/// How multiple sub-query hits on the same dedup key combine scores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregationScoreStrategy {
+    /// Evidence accumulation: `score = 1 - Π(1 - s_i)` over the key's hits.
+    ///
+    /// Every additional sub-query that hits the same entity raises the score
+    /// (noisy-OR), so agreement between sub-queries is rewarded instead of
+    /// being flattened to the largest single contribution. The result stays
+    /// in `[0, 1]`, which keeps the single global `result.min_score`
+    /// meaningful across aggregated and single queries. Contributions are
+    /// clamped below 1, so sub-query weights above 1 saturate.
+    #[default]
+    NoisyOr,
+    /// Keep the highest weighted contribution per key (the historical
+    /// behaviour). Ordering follows the strongest sub-query only, which lets
+    /// one heavy sub-query monopolise the ranking.
+    Max,
+}
+
+/// Multi-sub-query aggregation configuration.
+///
+/// Aggregation merges the result lists of decomposed sub-queries; it is
+/// unrelated to path fusion (vector vs BM25), which stays in
+/// [`HybridFusionConfig`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AggregationConfig {
+    /// Score combination for hits sharing one dedup key.
+    pub score_strategy: AggregationScoreStrategy,
+}
+
+impl Validate for AggregationConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TermOperator {
@@ -267,7 +309,8 @@ impl Default for HybridFusionConfig {
             algorithm: RecallFusionAlgorithm::default(),
             intent_weights: QueryIntentWeights::default(),
             enable_intent_based_weights: true,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             require_strict_intersection: false,
             min_score: 0.0,
             dedup_by_chunk: true,
@@ -343,10 +386,12 @@ impl Validate for HybridFusionConfig {
                 ));
             }
         }
-        if self.require_strict_intersection && !self.include_single_path {
+        if self.require_strict_intersection
+            && (!self.include_vector_only_keys || !self.include_bm25_only_keys)
+        {
             errors.push(ConfigValidationError::invalid_field(
                 "require_strict_intersection",
-                "strict intersection already drops all single-path keys; keep include_single_path enabled to avoid dead configuration",
+                "strict intersection already drops all single-path keys; keep both single-path switches enabled to avoid dead configuration",
             ));
         }
 
@@ -1005,6 +1050,9 @@ pub struct SearchModuleConfig {
     /// Hybrid fusion configuration (vector + BM25 combination)
     #[serde(default)]
     pub fusion: HybridFusionConfig,
+    /// Multi-sub-query aggregation configuration
+    #[serde(default)]
+    pub aggregation: AggregationConfig,
     /// Result filtering configuration
     #[serde(default)]
     pub result: ResultFilterConfig,
@@ -1039,6 +1087,9 @@ impl Validate for SearchModuleConfig {
             errors.push(e);
         }
         if let Err(e) = self.fusion.validate_structured() {
+            errors.push(e);
+        }
+        if let Err(e) = self.aggregation.validate_structured() {
             errors.push(e);
         }
         if let Err(e) = self.result.validate_structured() {

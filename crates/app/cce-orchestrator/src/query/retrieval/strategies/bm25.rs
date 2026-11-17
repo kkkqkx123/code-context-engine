@@ -148,6 +148,8 @@ impl Bm25Strategy {
                     category: None,
                     truncated: false,
                     content_state: crate::query::types::ContentState::Full,
+                    secondary_evidence: None,
+                    entity_scores: Vec::new(),
                 }
             })
             .collect();

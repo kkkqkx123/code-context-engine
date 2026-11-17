@@ -103,6 +103,8 @@ impl DenseRetrieval {
                 category: None,
                 truncated: r.payload.truncated.unwrap_or(false),
                 content_state: crate::query::types::ContentState::Full,
+                secondary_evidence: None,
+                entity_scores: Vec::new(),
             })
             .collect();
 

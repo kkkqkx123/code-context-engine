@@ -59,6 +59,26 @@ pub struct SearchResult {
     pub truncated: bool,
     /// Whether `content` carries a full body or a file-and-range reference.
     pub content_state: ContentState,
+    /// Representative hit of the losing recall path when both paths matched
+    /// the same alignment key.
+    ///
+    /// Only a reference is kept (chunk id, scores, line range), never the
+    /// body: display and reranking keep consuming the winning hit's text, so
+    /// ordering semantics stay stable, while the fused score remains
+    /// explainable and the other path's evidence can be looked up when the
+    /// caller asks for it.
+    pub secondary_evidence: Option<SecondaryEvidence>,
+    /// Per-entity fused scores when one physical chunk carries several
+    /// entities.
+    ///
+    /// `entity_ids` stays single-entity (the representative) so every
+    /// downstream key derivation keeps its one-entity contract; the sibling
+    /// entities and their fused scores live here instead of being dropped.
+    /// Populated by chunk grouping (a multi-entity chunk collapses to one
+    /// entry, with every entity's score recorded here and the best entity
+    /// first); empty when grouping is disabled or the chunk maps to at most
+    /// one entity.
+    pub entity_scores: Vec<EntityScore>,
 }
 
 impl SearchResult {
@@ -123,8 +143,51 @@ impl Default for SearchResult {
             category: None,
             truncated: false,
             content_state: ContentState::Full,
+            secondary_evidence: None,
+            entity_scores: Vec::new(),
         }
     }
+}
+
+/// Recall path a hybrid fusion hit came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecallPath {
+    /// Dense vector (embedding) path.
+    Vector,
+    /// BM25 full-text path.
+    Bm25,
+}
+
+/// Index-carried reference to the losing path's representative chunk.
+///
+/// Populated only when both recall paths produced a hit for the same
+/// alignment key; the winner becomes the result itself, the loser is kept
+/// here so the fusion contribution of each path stays attributable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecondaryEvidence {
+    /// Path the reference belongs to (the one that did not become the result).
+    pub path: RecallPath,
+    /// Chunk id of that path's representative hit.
+    pub chunk_id: String,
+    /// Normalized path score, comparable with `SearchResult::score` parts.
+    pub normalized_score: f32,
+    /// Raw retrieval score on that path, before per-path normalization.
+    pub raw_score: f32,
+    /// One-based line range of the reference, as carried by the index.
+    /// Zero when the path does not know it (BM25 carries no line numbers
+    /// until enrichment).
+    pub start_line: u32,
+    /// End of the reference's line range.
+    pub end_line: u32,
+}
+
+/// Fused score of one entity inside a multi-entity chunk group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityScore {
+    /// Entity the score belongs to.
+    pub entity_id: EntityId,
+    /// Fused score that entity earned on its own alignment key.
+    pub score: f32,
 }
 
 /// Boost statistics for search results

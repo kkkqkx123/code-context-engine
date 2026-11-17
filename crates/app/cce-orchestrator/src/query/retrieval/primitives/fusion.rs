@@ -15,11 +15,12 @@ mod merger;
 mod normalizer;
 
 pub use aligner::{
-    FusionAlignmentStats, alignment_key, compute_alignment_coverage, expand_multi_entity_results,
-    unified_dedup_key, weak_post_key,
+    FusionAlignmentStats, KeyCompletionOutcome, alignment_key, complete_keys_from_records,
+    compute_alignment_coverage, expand_multi_entity_results, is_alignable, unified_dedup_key,
+    weak_post_key,
 };
 pub use merger::{fuse_hybrid_results, fuse_hybrid_results_with_stats};
-pub use normalizer::minmax_normalize;
+pub use normalizer::{NormalizedPath, minmax_normalize};
 
 pub use cce_config::modules::search::HybridFusionConfig;
 
@@ -115,7 +116,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -148,6 +150,7 @@ mod tests {
 
     #[test]
     fn test_fuse_hybrid_results_exclude_single_path() {
+        // Both switches off: only keys both paths agree on survive.
         let vector = vec![
             make_vector_result("emb_a", 1, 0.9),
             make_vector_result("emb_b", 2, 0.7),
@@ -160,7 +163,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: false,
+            include_vector_only_keys: false,
+            include_bm25_only_keys: false,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -194,7 +198,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -202,7 +207,8 @@ mod tests {
         let fused = fuse_hybrid_results(vec![], vec![make_bm25_result("a", 1, 0.9)], &config);
         assert_eq!(fused.len(), 1);
         assert_eq!(fused[0].entity_ids.first(), Some(&EntityId(1)));
-        assert!((fused[0].score - 1.0).abs() < 0.001);
+        // Equal weights: a lone BM25 key earns its own weight share only.
+        assert!((fused[0].score - 0.5).abs() < 0.001);
 
         let filtered = fuse_hybrid_results(
             vec![],
@@ -216,7 +222,7 @@ mod tests {
 
         let fused = fuse_hybrid_results(vec![make_vector_result("emb_a", 1, 0.9)], vec![], &config);
         assert_eq!(fused.len(), 1);
-        assert!((fused[0].score - 1.0).abs() < 0.001);
+        assert!((fused[0].score - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -240,7 +246,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -271,7 +278,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -315,7 +323,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.6,
             bm25_weight: 0.4,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -348,7 +357,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -377,7 +387,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -409,7 +420,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -436,7 +448,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: false,
+            include_vector_only_keys: false,
+            include_bm25_only_keys: false,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -481,7 +494,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -514,7 +528,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -551,7 +566,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -586,7 +602,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -634,7 +651,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: false,
             ..HybridFusionConfig::default()
@@ -683,7 +701,8 @@ mod tests {
         let config = HybridFusionConfig {
             vector_weight: 0.7,
             bm25_weight: 0.3,
-            include_single_path: true,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
             min_score: 0.0,
             dedup_by_chunk: true,
             ..HybridFusionConfig::default()
@@ -876,30 +895,167 @@ mod tests {
     }
 
     #[test]
-    fn test_fuse_single_vector_path_kept_even_when_single_path_excluded() {
-        // The vector path is the primary semantic recall: when BM25 returns
-        // nothing, vector-only results are kept regardless of
-        // `include_single_path` — matching `union_keys` seeding with vector
-        // keys in the dual-path algorithms.
-        let config = HybridFusionConfig {
-            include_single_path: false,
+    fn test_single_path_switches_are_symmetric() {
+        // Each side honours its own switch, in the union key set and in the
+        // empty-path fast path alike.
+        let vector_only = HybridFusionConfig {
+            include_vector_only_keys: true,
+            include_bm25_only_keys: false,
             ..HybridFusionConfig::default()
         };
         let (fused, _) = fuse_hybrid_results_with_stats(
             vec![make_vector_result("emb_1", 1, 0.9)],
             vec![],
-            &config,
+            &vector_only,
         );
         assert_eq!(fused.len(), 1);
         assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
-        assert!((fused[0].score - 1.0).abs() < 1e-6);
+        assert!((fused[0].score - 0.5).abs() < 1e-6);
 
-        // A surviving BM25 path still honors the switch.
+        // A surviving BM25 path is dropped by the BM25 switch.
         let (fused, _) = fuse_hybrid_results_with_stats(
             vec![],
             vec![make_bm25_result("bm25_1", 1, 0.9)],
-            &config,
+            &vector_only,
         );
         assert_eq!(fused.len(), 0);
+
+        // The mirror image: BM25-only configuration.
+        let bm25_only = HybridFusionConfig {
+            include_vector_only_keys: false,
+            include_bm25_only_keys: true,
+            ..HybridFusionConfig::default()
+        };
+        let (fused, _) = fuse_hybrid_results_with_stats(
+            vec![make_vector_result("emb_1", 1, 0.9)],
+            vec![],
+            &bm25_only,
+        );
+        assert_eq!(fused.len(), 0);
+        let (fused, _) = fuse_hybrid_results_with_stats(
+            vec![],
+            vec![make_bm25_result("bm25_1", 1, 0.9)],
+            &bm25_only,
+        );
+        assert_eq!(fused.len(), 1);
+        assert!((fused[0].score - 0.5).abs() < 1e-6);
+    }
+    fn equal_weight_config() -> HybridFusionConfig {
+        HybridFusionConfig {
+            vector_weight: 0.5,
+            bm25_weight: 0.5,
+            include_vector_only_keys: true,
+            include_bm25_only_keys: true,
+            min_score: 0.0,
+            dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
+        }
+    }
+
+    #[test]
+    fn test_single_path_key_scores_identically_across_other_path_state() {
+        // Same vector key, same raw score: once with an empty BM25 path, once
+        // with a BM25 path that returned an unrelated key. The score must not
+        // depend on whether the other path happened to return anything.
+        let config = equal_weight_config();
+        let (with_empty, _) = fuse_hybrid_results_with_stats(
+            vec![make_vector_result("emb_a", 1, 0.9)],
+            vec![],
+            &config,
+        );
+        let (with_unrelated, _) = fuse_hybrid_results_with_stats(
+            vec![
+                make_vector_result("emb_a", 1, 0.9),
+                make_vector_result("emb_b", 2, 0.1),
+            ],
+            vec![make_bm25_result("bm25_c", 3, 0.8)],
+            &config,
+        );
+        let a_empty = with_empty
+            .iter()
+            .find(|r| r.entity_ids == vec![EntityId(1)])
+            .expect("key present");
+        let a_related = with_unrelated
+            .iter()
+            .find(|r| r.entity_ids == vec![EntityId(1)])
+            .expect("key present");
+        assert!(
+            (a_empty.score - a_related.score).abs() < 1e-6,
+            "single-path key scored {} with an empty other path and {} with an unrelated one",
+            a_empty.score,
+            a_related.score
+        );
+    }
+
+    #[test]
+    fn test_matched_key_carries_secondary_path_evidence() {
+        let fused = fuse_hybrid_results(
+            vec![make_vector_result("emb_a", 1, 0.9)],
+            vec![make_bm25_result("bm25_a", 1, 0.4)],
+            &equal_weight_config(),
+        );
+        assert_eq!(fused.len(), 1);
+        let hit = &fused[0];
+        // Vector dominates (both normalize to 1.0, tie goes to vector).
+        assert_eq!(hit.id, "emb_a");
+        let secondary = hit.secondary_evidence.as_ref().expect("secondary kept");
+        assert_eq!(secondary.path, crate::query::types::RecallPath::Bm25);
+        assert_eq!(secondary.chunk_id, "bm25_a");
+        assert!((secondary.raw_score - 0.4).abs() < 1e-6);
+        assert!((hit.score - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_single_path_hit_has_no_secondary_evidence() {
+        let fused = fuse_hybrid_results(
+            vec![make_vector_result("emb_a", 1, 0.9)],
+            vec![make_bm25_result("bm25_b", 2, 0.4)],
+            &equal_weight_config(),
+        );
+        assert!(fused.iter().all(|r| r.secondary_evidence.is_none()));
+    }
+
+    #[test]
+    fn test_chunk_group_records_every_entity_score() {
+        let mut v1 = make_vector_result("chunk_x", 100, 0.5);
+        v1.segment_id = Some("seg".to_string());
+        let mut v2 = make_vector_result("chunk_x", 200, 0.9);
+        v2.segment_id = Some("seg".to_string());
+        let config = HybridFusionConfig {
+            dedup_by_chunk: true,
+            ..equal_weight_config()
+        };
+        let fused = fuse_hybrid_results(vec![v1, v2], vec![], &config);
+        assert_eq!(fused.len(), 1, "one entry per physical chunk");
+        let entry = &fused[0];
+        assert_eq!(
+            entry.entity_ids,
+            vec![EntityId(200)],
+            "representative is the best entity"
+        );
+        assert_eq!(
+            entry.entity_scores.len(),
+            2,
+            "sibling entity is recorded, not dropped"
+        );
+        assert_eq!(entry.entity_scores[0].entity_id, EntityId(200));
+        assert!(entry.entity_scores[0].score >= entry.entity_scores[1].score);
+        assert_eq!(entry.entity_scores[1].entity_id, EntityId(100));
+    }
+
+    #[test]
+    fn test_alignment_coverage_reports_unalignable_entries() {
+        // segment_id equal to the chunk id is the index's fallback shape: the
+        // key is path-local and can never match the other path.
+        let mut fallback = make_vector_result_with_segment("group_1_emb_0", "group_1_emb_0", 0.9);
+        fallback.segment_id = Some("group_1_emb_0".to_string());
+        let vector = vec![fallback, make_vector_result("emb_b", 2, 0.8)];
+        let bm25 = vec![make_bm25_result("bm25_b", 2, 0.7)];
+        let stats = compute_alignment_coverage(&vector, &bm25);
+        assert_eq!(stats.vector_keys, 2);
+        assert_eq!(stats.vector_unalignable, 1);
+        assert_eq!(stats.matched_keys, 1);
+        assert!(stats.unalignable_ratio() > 0.0);
+        assert!((stats.match_ratio() - 0.5).abs() < 1e-9);
     }
 }

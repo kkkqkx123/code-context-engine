@@ -387,13 +387,30 @@ timeout_ms = 5000
 # bm25_weight = 0.5
 # algorithm = "weighted_min_max"  # "weighted_min_max" | "borda_count" |
 #                                 # { rrf = { k = 60 } }
-# include_single_path = true  # controls BM25-only keys only; vector-only
-#                             # keys are always kept (vector path is the
-#                             # primary semantic recall)
-# min_score = 0.0  # on the [0, w_v + w_b] scale for weighted_min_max and
-#                  # borda_count; RRF yields at most (w_v + w_b) / (k + 1)
+# # Single-path keys: a key hit by only one path caps at that path's weight
+# # share (0.5 with equal weights), never at full marks. Keys hit by both
+# # paths always participate; these two switches only gate lone keys.
+# include_vector_only_keys = true
+# include_bm25_only_keys = true
+# # Strict intersection overrides both switches and keeps only matched keys.
+# require_strict_intersection = false
+# # Fusion-side hygiene threshold on the [0, 1] evidence-strength scale.
+# # Recommended ranges by algorithm: weighted_min_max 0.25-0.5 (a matched key
+# # needs both paths to agree), borda_count 0.3-0.6, rrf 0.3-0.7. The business
+# # gate stays in result.min_score.
+# min_score = 0.0
+# # Group results by physical chunk: one entry per chunk, sibling entities and
+# # their fused scores kept on `entity_scores`.
 # dedup_by_chunk = true
 # enable_intent_based_weights = true
+
+# [search.aggregation]
+# Multi-sub-query aggregation (decomposed queries), unrelated to path fusion.
+# score_strategy = "noisy_or"  # "noisy_or" | "max"
+# # noisy_or accumulates evidence: 1 - Π(1 - s_i), stays in [0, 1], so the
+# # global result.min_score keeps its meaning. Sub-query weights above 1
+# # saturate the contribution; keep them <= 1.
+# # "max" keeps the historical strongest-sub-query-wins behaviour.
 
 # [search.boost]
 # Unified boost aggregation: per-source capped additions, globally capped.
