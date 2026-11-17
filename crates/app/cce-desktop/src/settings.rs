@@ -5,7 +5,7 @@
 //! lives only in the running process, and the environment fallback is read at
 //! client construction time.
 
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use directories::ProjectDirs;
 use gpui_kit::{App, Global};
@@ -78,6 +78,11 @@ pub struct Settings {
     pub window: Option<WindowGeometry>,
     #[serde(default)]
     pub last_base_url: Option<String>,
+    /// Recent inputs per panel, newest first and capped by the panel service.
+    /// Only query text and paths live here; no token, response or snippet is
+    /// ever written, so the file stays small and free of secrets.
+    #[serde(default)]
+    pub history: BTreeMap<String, Vec<String>>,
 }
 
 struct SettingsGlobal(Settings);
@@ -122,11 +127,11 @@ impl Settings {
                 return;
             }
         };
-        if let Some(parent) = path.parent() {
-            if let Err(err) = fs::create_dir_all(parent) {
-                log::warn!("failed to create config dir {}: {err}", parent.display());
-                return;
-            }
+        if let Some(parent) = path.parent()
+            && let Err(err) = fs::create_dir_all(parent)
+        {
+            log::warn!("failed to create config dir {}: {err}", parent.display());
+            return;
         }
         let tmp = path.with_extension("toml.tmp");
         if let Err(err) = fs::write(&tmp, raw) {
@@ -173,6 +178,7 @@ mod tests {
         assert_eq!(settings.locale, Locale::En);
         assert_eq!(settings.window, None);
         assert_eq!(settings.last_base_url, None);
+        assert!(settings.history.is_empty());
     }
 
     #[test]
@@ -196,6 +202,10 @@ mod tests {
                 height: 800.0,
             }),
             last_base_url: Some("http://127.0.0.1:9000".to_string()),
+            history: BTreeMap::from([
+                ("search".to_string(), vec!["retry budget".to_string()]),
+                ("graph".to_string(), vec!["sym_abc".to_string()]),
+            ]),
         };
         let raw = toml::to_string_pretty(&settings).expect("settings serialize");
         let back: Settings = toml::from_str(&raw).expect("settings parse");

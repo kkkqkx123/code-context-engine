@@ -80,6 +80,9 @@ impl ConnectionView {
                         AppState::global(cx).update(cx, |state, cx| {
                             state.set_connected(base_url_shared, summary, cx);
                         });
+                        // Load the project scope so project-bound panels have a
+                        // target as soon as the workspace opens.
+                        crate::services::project_service::refresh_scope(cx);
                     }
                     Err(err) => {
                         this.error = Some(err.to_string().into());

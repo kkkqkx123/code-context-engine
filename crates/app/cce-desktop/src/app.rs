@@ -1,7 +1,8 @@
 //! Desktop application entry: initialization order and main window.
 //!
-//! The tray integration lands with the tray submodule (stage 4); until then
-//! closing the window persists the geometry and quits the process.
+//! The tray integration waits on the gpui-kit tray submodule, which is not
+//! initialized in this checkout; until then closing the window persists the
+//! geometry and quits the process.
 
 use gpui_kit::component::ThemeMode;
 use gpui_kit::{

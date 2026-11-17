@@ -15,6 +15,7 @@ Tailwind 分区。
 - 桌面端架构见 `03-desktop-architecture.md`，包括 crate 选址、工作区隔离、依赖方向与模块划分。
 - 视图与服务映射见 `04-views-and-services.md`，即前端路由如何对应到桌面面板与服务。
 - 分阶段落地计划与验收见 `05-implementation-plan.md`。
+- 各阶段落地报告见 `06-stage1-2-report.md`、`07-stage3-4-report.md`，含验证结果与偏差说明。
 
 ## 核心结论
 
