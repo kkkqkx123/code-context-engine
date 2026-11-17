@@ -28,3 +28,6 @@
 [submodule "crates/tree-sitter/tree-sitter-groovy"]
 	path = crates/tree-sitter/tree-sitter-groovy
 	url = https://github.com/kkkqkx123/tree-sitter-groovy.git
+[submodule "crates/gpui-kit"]
+	path = crates/gpui-kit
+	url = https://github.com/kkkqkx123/gpui-kit
