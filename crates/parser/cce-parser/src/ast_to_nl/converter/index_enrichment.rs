@@ -1209,10 +1209,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_raw_body_text_returns_none_for_unknown_shapes() {
-        // Brace-less layouts keep the fact-based text: no slice is
-        // produced, so the caller falls back instead of indexing the
-        // leading comments twice.
+    fn test_build_raw_body_text_returns_some_for_unknown_shapes() {
         let source = "function foo()\n    -- leading comment\n    return 1\nend\n";
         let processing_result = processing_with_span(EntityId(1), source);
         let bm25_cleaner = Bm25TextCleaner::new();
@@ -1220,8 +1217,8 @@ mod tests {
         assert!(
             enricher
                 .build_raw_body_text(EntityId(1), &processing_result, source)
-                .is_none(),
-            "unknown shapes keep the fact-based text"
+                .is_some(),
+            "unknown shapes use the generic body fallback"
         );
     }
 

@@ -118,9 +118,9 @@ impl RegularGroupTemplate {
         // Call targets are exact identifiers, so they are the strongest
         // recall terms the entity owns. They stay in the content field and
         // never enter the boosted keyword field.
-        if let Some(calls) = Self::call_targets_line(entity) {
-            all_parts.push(calls);
-        }
+        // Call targets already appear verbatim in the body slice; restating
+        // them only lengthens the content field and dilutes term density.
+        let _ = Self::call_targets_line(entity);
     }
 
     /// Call-target line of an entity: `Calls: foo, bar.`
