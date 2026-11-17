@@ -507,7 +507,20 @@ impl TextSplitter {
         path: ChunkPath,
     ) -> Vec<ChunkSegment> {
         let (min_threshold, ceiling) = self.merge_ceiling(path);
-        let same_unit_ceiling = self.budget(path).pre_injection_limit.max(ceiling);
+        let budget = self.budget(path);
+        let same_unit_ceiling = budget.pre_injection_limit.max(ceiling);
+        // Single-entity BM25 fragments may reunite up to the bounded whole
+        // (three times the hard limit): a doc-only slice plus its code-only
+        // sibling cover the same source span, and keeping them apart forces
+        // semantic queries to choose one side. Multi-entity packs stay at
+        // the pre-injection ceiling so unrelated members do not merge.
+        let single_unit_ceiling = if budget.hard_limit == 0 {
+            usize::MAX
+        } else {
+            budget
+                .hard_limit
+                .saturating_mul(SINGLE_ENTITY_BM25_TOLERANCE_FACTOR)
+        };
         let mut merged: Vec<ChunkSegment> = Vec::with_capacity(segments.len());
         for segment in segments {
             if let Some(last) = merged.last_mut() {
@@ -524,7 +537,13 @@ impl TextSplitter {
                     continue;
                 }
                 let effective_ceiling = if same_unit {
-                    same_unit_ceiling
+                    let single_entity = last.boundary.entity_ids.len() == 1
+                        && segment.boundary.entity_ids.len() == 1;
+                    if path == ChunkPath::Bm25 && single_entity {
+                        single_unit_ceiling
+                    } else {
+                        same_unit_ceiling
+                    }
                 } else {
                     ceiling
                 };

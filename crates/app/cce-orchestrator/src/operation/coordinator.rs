@@ -735,8 +735,8 @@ impl OperationCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
+    use crate::index::vector_store::in_memory_metadata_store;
     use cce_storage_common::MetadataStorage;
     use cce_storage_common::metadb::{CheckpointRecord, CheckpointStatus};
 

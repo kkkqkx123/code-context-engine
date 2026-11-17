@@ -595,8 +595,8 @@ pub struct RecoveryResult {
 
 #[cfg(test)]
 mod tests {
-    use cce_orchestrator::index::in_memory_metadata_store;
     use super::*;
+    use cce_orchestrator::index::in_memory_metadata_store;
 
     #[test]
     fn test_project_meta_creation() {

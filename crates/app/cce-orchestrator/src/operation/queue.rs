@@ -499,8 +499,8 @@ impl OperationQueue {
 
 #[cfg(test)]
 mod tests {
-    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
+    use crate::index::vector_store::in_memory_metadata_store;
 
     #[tokio::test]
     async fn test_priority_ordering() {

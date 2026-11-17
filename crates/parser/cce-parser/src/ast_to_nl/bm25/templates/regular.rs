@@ -30,6 +30,7 @@ impl GroupTemplate for RegularGroupTemplate {
     fn generate(&self, group: &EntityGroup) -> String {
         let mut all_parts: Vec<String> = Vec::new();
 
+        let has_header = group.header.is_some();
         if let Some(header) = &group.header {
             Self::push_entity_features(&mut all_parts, header, group.language);
         } else {
@@ -41,7 +42,15 @@ impl GroupTemplate for RegularGroupTemplate {
             }
         }
 
-        Self::push_member_signals(&mut all_parts, group);
+        // Member signals only for header-less groups. Groups with a header
+        // carry each member in its own conversion and chunk, so a group-level
+        // member table only repeats the same names in the first chunk,
+        // inflates its length and dilutes the header topic. Header-less
+        // groups have no owner text of their own and keep the bounded table
+        // as their only member-name signal.
+        if !has_header {
+            Self::push_member_signals(&mut all_parts, group);
+        }
 
         // Parts stay on separate lines: the BM25 cleaner preserves line
         // breaks so the chunker can split oversized groups at line
@@ -308,15 +317,11 @@ mod tests {
 
     #[test]
     fn test_bm25_excludes_import_like_members() {
+        // Header-less groups keep the bounded member table; import-like
+        // members never enter it while semantic members do.
         let group = EntityGroup {
             name: "Config".into(),
             kind: EntityKind::Struct,
-            header: Some(cce_types::entity::GroupedEntity {
-                id: cce_types::entity::EntityId(1),
-                name: "Config".to_string(),
-                kind: EntityKind::Struct,
-                ..Default::default()
-            }),
             members: [
                 cce_types::entity::GroupedEntity {
                     id: cce_types::entity::EntityId(2),
@@ -360,6 +365,42 @@ mod tests {
     }
 
     #[test]
+    fn test_regular_template_header_skips_member_table() {
+        let group = EntityGroup {
+            name: "Big".into(),
+            kind: EntityKind::Class,
+            header: Some(cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1000),
+                name: "Big".to_string(),
+                kind: EntityKind::Class,
+                ..Default::default()
+            }),
+            members: [cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1),
+                name: "method_0".to_string(),
+                kind: EntityKind::Method,
+                ..Default::default()
+            }]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let text = template.generate(&group);
+
+        assert!(text.contains("Big"), "header identity remains: {text}");
+        assert!(
+            !text.contains("Members:"),
+            "header groups must not repeat the member table: {text}"
+        );
+        assert!(
+            !text.contains("method_0"),
+            "member names live in member chunks, not the header: {text}"
+        );
+    }
+
+    #[test]
     fn test_regular_template_member_table_bounded() {
         let members: Vec<cce_types::entity::GroupedEntity> = (0..40)
             .map(|i| cce_types::entity::GroupedEntity {
@@ -372,12 +413,6 @@ mod tests {
         let group = EntityGroup {
             name: "Big".into(),
             kind: EntityKind::Class,
-            header: Some(cce_types::entity::GroupedEntity {
-                id: cce_types::entity::EntityId(1000),
-                name: "Big".to_string(),
-                kind: EntityKind::Class,
-                ..Default::default()
-            }),
             members: members.into_iter().collect(),
             ..Default::default()
         };
@@ -395,15 +430,11 @@ mod tests {
 
     #[test]
     fn test_regular_template_member_types() {
+        // Header-less groups keep member type signals; header groups rely
+        // on member chunks for type recall.
         let group = EntityGroup {
             name: "Builder".into(),
             kind: EntityKind::Struct,
-            header: Some(cce_types::entity::GroupedEntity {
-                id: cce_types::entity::EntityId(1),
-                name: "Builder".to_string(),
-                kind: EntityKind::Struct,
-                ..Default::default()
-            }),
             members: [cce_types::entity::GroupedEntity {
                 id: cce_types::entity::EntityId(2),
                 name: "add_line".to_string(),

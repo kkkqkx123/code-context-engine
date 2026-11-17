@@ -324,7 +324,10 @@ async fn admission_middleware_matrix() {
     let (missing, _) = get("/api/project/7/ingest/probe", None);
     assert_eq!(missing, 401, "missing token is unauthorized");
 
-    let (unknown, _) = get("/api/project/7/ingest/probe", Some("no-such-token-000000000000"));
+    let (unknown, _) = get(
+        "/api/project/7/ingest/probe",
+        Some("no-such-token-000000000000"),
+    );
     assert_eq!(unknown, 401, "unknown token is unauthorized");
 
     let (scoped, _) = get(

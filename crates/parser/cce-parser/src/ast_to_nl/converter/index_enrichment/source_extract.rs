@@ -255,9 +255,33 @@ fn skip_leading_docstring_block(lines: Vec<&str>) -> Vec<&str> {
 /// signatures), and a leading docstring block. Any shape mismatch falls
 /// back to the span start, so filtering based on this offset stays a
 /// no-op for languages and layouts the scan does not understand.
+///
+/// Brace-style definitions (Java, Go, Rust, C++ and similar) are
+/// understood as well: leading annotations and comments are skipped and
+/// the body starts after the opening brace. See
+/// [`confirmed_body_start`] for the shape-sensitive core.
 pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) -> usize {
+    confirmed_body_start(source, span_start, span_end).unwrap_or(span_start)
+}
+
+/// First byte of executable code inside an entity span, when the span
+/// shape is understood; `None` otherwise.
+///
+/// Python-style definitions (`def`/`async def`/`class` ending with `:`)
+/// skip the signature and a leading docstring block, exactly as
+/// [`code_body_start`] always has. Brace-style definitions skip leading
+/// annotations and comment lines, then start after the opening `{` of
+/// the body. A span with no recognizable body opener (a declaration, a
+/// `function`/`function`-style layout without braces, an unterminated
+/// docstring) yields `None` so the caller keeps the previous
+/// fact-based text instead of indexing the documentation twice.
+pub(super) fn confirmed_body_start(
+    source: &str,
+    span_start: usize,
+    span_end: usize,
+) -> Option<usize> {
     let Some(window) = source.get(span_start..span_end) else {
-        return span_start;
+        return None;
     };
     let mut offsets: Vec<usize> = Vec::new();
     let mut lines: Vec<&str> = Vec::new();
@@ -268,7 +292,7 @@ pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) 
         cursor += piece.len();
     }
     if lines.is_empty() {
-        return span_start;
+        return None;
     }
     let mut index = 0usize;
     while index < lines.len() && lines[index].trim().is_empty() {
@@ -285,7 +309,7 @@ pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) 
         }
     }
     if index >= lines.len() {
-        return span_start;
+        return None;
     }
     let head = lines[index].trim_start();
     let is_definition = head.starts_with("def ")
@@ -295,7 +319,7 @@ pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) 
         || head.starts_with("class ")
         || head.starts_with("class\t");
     if !is_definition {
-        return span_start;
+        return brace_body_start(&lines, &offsets, index, span_end);
     }
     let mut sig_end = index;
     loop {
@@ -306,19 +330,19 @@ pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) 
         }
         sig_end += 1;
         if sig_end >= lines.len() {
-            return span_start;
+            return None;
         }
     }
     let end_code = lines[sig_end].split('#').next().unwrap_or(lines[sig_end]);
     if !end_code.trim_end().ends_with(':') {
-        return span_start;
+        return None;
     }
     let mut body = sig_end + 1;
     while body < lines.len() && lines[body].trim().is_empty() {
         body += 1;
     }
     if body >= lines.len() {
-        return span_end;
+        return Some(span_end);
     }
     let opener = lines[body].trim_start();
     let stripped = opener.trim_start_matches(['r', 'R', 'u', 'U', 'b', 'B', 'f', 'F']);
@@ -330,28 +354,117 @@ pub(super) fn code_body_start(source: &str, span_start: usize, span_end: usize) 
         None
     };
     let Some(delimiter) = delimiter else {
-        return offsets[body];
+        return Some(offsets[body]);
     };
     let after_open = &stripped[delimiter.len()..];
     if after_open.contains(delimiter) {
-        return if body + 1 < lines.len() {
+        return Some(if body + 1 < lines.len() {
             offsets[body + 1]
         } else {
             span_end
-        };
+        });
     }
     let mut close = body + 1;
     while close < lines.len() && !lines[close].contains(delimiter) {
         close += 1;
     }
     if close >= lines.len() {
-        return span_start;
+        return None;
     }
-    if close + 1 < lines.len() {
+    Some(if close + 1 < lines.len() {
         offsets[close + 1]
     } else {
         span_end
+    })
+}
+
+/// Whether a brace-style leading line carries no code of its own.
+///
+/// Javadoc and block-comment lines (`/**`, ` *`, ` */`), line comments
+/// (`//`) and annotations (`@`) precede the signature and never hold
+/// the body opener. `#` lines stay: preprocessor directives
+/// (`#include`, `#define`) are code the body slice must keep, and a
+/// `#` comment fallback would hide them.
+fn is_trivia_line(trimmed_start: &str) -> bool {
+    trimmed_start.is_empty()
+        || trimmed_start.starts_with('@')
+        || trimmed_start.starts_with("//")
+        || trimmed_start.starts_with("/*")
+        || trimmed_start.starts_with('*')
+}
+
+/// Strip same-line comments for body-opener search.
+///
+/// Removes `/*...*/` spans first so a `//` inside them cannot cut the
+/// line early, then cuts a `//` tail. String literals holding comment
+/// markers (an annotation regexp, a URL default) may lose their tail;
+/// the scan then simply continues to the next line, which keeps the
+/// detection conservative instead of wrong.
+fn strip_same_line_comments(line: &str) -> std::borrow::Cow<'_, str> {
+    let mut current = std::borrow::Cow::Borrowed(line);
+    loop {
+        let Some(open) = current.find("/*") else {
+            break;
+        };
+        let Some(rel_close) = current[open + 2..].find("*/") else {
+            break;
+        };
+        let close = open + 2 + rel_close + 2;
+        current = std::borrow::Cow::Owned(format!("{} {}", &current[..open], &current[close..]));
     }
+    match current.find("//") {
+        Some(cut) => std::borrow::Cow::Owned(current[..cut].to_string()),
+        None => current,
+    }
+}
+
+/// Body start for brace-style definitions scanned from `index`.
+///
+/// Skips leading trivia, then the body starts after the first opening
+/// brace outside comments. When executable code follows the brace on
+/// the same line (a single-line definition), the body starts right
+/// there instead of on the next line, so one-line entities keep their
+/// signal instead of going fully silent. Annotations never hold the
+/// opener and are skipped while scanning as well. No brace anywhere
+/// means no executable body is recognizable (a declaration, a
+/// brace-less layout): `None` keeps the caller on the fact-based text.
+fn brace_body_start(
+    lines: &[&str],
+    offsets: &[usize],
+    index: usize,
+    span_end: usize,
+) -> Option<usize> {
+    let mut cursor = index;
+    while cursor < lines.len() && is_trivia_line(lines[cursor].trim_start()) {
+        cursor += 1;
+    }
+    for (pos, line) in lines.iter().enumerate().skip(cursor) {
+        if line.trim_start().starts_with('@') {
+            continue;
+        }
+        let stripped = strip_same_line_comments(line);
+        let Some(brace_at) = stripped.find('{') else {
+            continue;
+        };
+        let after = stripped[brace_at + 1..]
+            .trim()
+            .trim_matches(|c| c == '}' || c == '{')
+            .trim();
+        // A block comment on the opener line shifts raw offsets, so the
+        // same-line start is only taken when the brace maps 1:1 back
+        // onto the source line; otherwise the next line stays the
+        // conservative body start.
+        if !after.is_empty() && !line.contains("/*") {
+            if let Some(raw_at) = line.find('{') {
+                let cut = line.find("//").unwrap_or(line.len());
+                if raw_at < cut {
+                    return Some(offsets[pos] + raw_at + 1);
+                }
+            }
+        }
+        return Some(offsets.get(pos + 1).copied().unwrap_or(span_end));
+    }
+    None
 }
 
 fn docstring_delimiter(line: &str) -> Option<&'static str> {
@@ -469,11 +582,45 @@ mod tests {
 
     #[test]
     fn code_body_start_falls_back_for_unknown_shapes() {
-        let rust = "fn demo() {\n    let x = 1;\n}";
-        assert_eq!(code_body_start(rust, 0, rust.len()), 0);
+        // Brace-less layouts stay unknown: Lua-style `function` blocks
+        // keep the previous span-start fallback.
+        let lua = "function foo()\n    return 1\nend\n";
+        assert_eq!(code_body_start(lua, 0, lua.len()), 0);
         let one_liner = "def f(): return 1\n";
         assert_eq!(code_body_start(one_liner, 0, one_liner.len()), 0);
         let unterminated = "def f():\n    \"\"\"never closed\n    return 1\n";
         assert_eq!(code_body_start(unterminated, 0, unterminated.len()), 0);
+    }
+
+    #[test]
+    fn confirmed_body_start_finds_brace_body() {
+        let rust = "fn demo() {\n    let x = 1;\n}";
+        let body = confirmed_body_start(rust, 0, rust.len()).expect("brace body found");
+        assert_eq!(&rust[body..], "    let x = 1;\n}");
+    }
+
+    #[test]
+    fn confirmed_body_start_skips_javadoc_and_annotations() {
+        let java = "/**\n * Returns a builder.\n * {@link Builder} here.\n */\n@Override\npublic Builder builder() {\n    return new Builder();\n}";
+        let body = confirmed_body_start(java, 0, java.len()).expect("java body found");
+        assert_eq!(&java[body..], "    return new Builder();\n}");
+    }
+
+    #[test]
+    fn confirmed_body_start_returns_none_for_declarations() {
+        let field = "private static final int MAX = 500;";
+        assert_eq!(confirmed_body_start(field, 0, field.len()), None);
+        let abstract_method = "public abstract void run();";
+        assert_eq!(
+            confirmed_body_start(abstract_method, 0, abstract_method.len()),
+            None
+        );
+    }
+
+    #[test]
+    fn confirmed_body_start_ignores_braces_inside_comments() {
+        let java = "// {\npublic void foo()\n{\n    work();\n}";
+        let body = confirmed_body_start(java, 0, java.len()).expect("body found");
+        assert_eq!(&java[body..], "    work();\n}");
     }
 }

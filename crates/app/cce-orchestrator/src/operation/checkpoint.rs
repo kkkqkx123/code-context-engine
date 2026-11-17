@@ -618,8 +618,8 @@ impl CheckpointManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
+    use crate::index::vector_store::in_memory_metadata_store;
 
     fn make_operation_checkpoint(
         operation_id: &str,

@@ -199,8 +199,8 @@ impl UpdateStateTracker {
 
 #[cfg(test)]
 mod tests {
-    use crate::index::vector_store::in_memory_metadata_store;
     use super::*;
+    use crate::index::vector_store::in_memory_metadata_store;
     use crate::index_state::{ModuleType, ModuleUpdateState};
     use crate::operation::CheckpointManager;
     use crate::operation::checkpoint::CreateCheckpointParams;

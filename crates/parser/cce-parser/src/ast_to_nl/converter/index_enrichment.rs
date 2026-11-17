@@ -34,9 +34,9 @@ use cce_types::ast_to_nl::ConversionResult;
 use cce_types::language::Language;
 use cce_types::{BehaviorFactKind, EntityId};
 use source_extract::{
-    code_body_start, extract_body_without_signature, extract_clean_source, find_entity_doc_comment,
-    find_entity_signature, find_entity_span, is_docstring_statement, is_meaningful_code,
-    strip_trailing_closers,
+    code_body_start, confirmed_body_start, extract_body_without_signature, extract_clean_source,
+    find_entity_doc_comment, find_entity_signature, find_entity_span, is_docstring_statement,
+    is_meaningful_code, strip_trailing_closers,
 };
 use syntax_strip::strip_syntax_noise;
 use topic_anchor::{insert_after_first_line, topic_anchor};
@@ -147,8 +147,17 @@ impl<'a> IndexTextEnricher<'a> {
             }
         }
 
+        // The keyword path indexes a continuous body slice: every line
+        // between the first executable line and the entity end stays
+        // searchable, comments and literals included, so literal recall
+        // no longer depends on fact coverage. Shapes the detector does
+        // not understand keep the previous fact-based text, so no body
+        // signal is lost on brace-less layouts.
         let full_text = self
-            .build_extra_text(conversion.entity_id, processing_result, source, true)
+            .build_raw_body_text(conversion.entity_id, processing_result, source)
+            .or_else(|| {
+                self.build_extra_text(conversion.entity_id, processing_result, source, true)
+            })
             .unwrap_or_default();
 
         if !full_text.trim().is_empty() {
@@ -263,6 +272,46 @@ impl<'a> IndexTextEnricher<'a> {
             body_text,
         ]);
         conversion.set_glossary(matched);
+    }
+
+    /// Build the continuous raw body slice for the BM25 path.
+    ///
+    /// The slice runs from the first executable line to the entity end
+    /// with trailing closers stripped and every line in between kept:
+    /// body comments and literals stay searchable, so literal recall no
+    /// longer depends on fact coverage. Documentation never enters:
+    /// `confirmed_body_start` skips the signature and any leading
+    /// docstring or Javadoc block, while the template already owns the
+    /// cleaned doc text. The fact-filtered text stays on the embedding
+    /// path, where dense averaging punishes implementation filler.
+    /// `None` keeps the caller on the previous fact-based text: shapes
+    /// the detector does not understand (brace-less layouts) and pure
+    /// documentation groups carry no sliceable body.
+    fn build_raw_body_text(
+        &self,
+        entity_id: EntityId,
+        processing_result: &ProcessingResult,
+        source: &str,
+    ) -> Option<String> {
+        if processing_result.groups.iter().any(|group| {
+            group.group_type == cce_types::GroupType::FileDocumentation
+                && (group.header.as_ref().is_some_and(|h| h.id == entity_id)
+                    || group.members.iter().any(|m| m.id == entity_id))
+        }) {
+            return None;
+        }
+        let (span_start, span_end) = find_entity_span(processing_result, entity_id)?;
+        let body_start = confirmed_body_start(source, span_start, span_end)?;
+        if body_start >= span_end {
+            return None;
+        }
+        let raw = extract_clean_source(source, body_start, span_end);
+        let stripped = strip_trailing_closers(&raw);
+        let trimmed = stripped.trim();
+        if !is_meaningful_code(trimmed) {
+            return None;
+        }
+        Some(trimmed.to_string())
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by
@@ -1103,6 +1152,118 @@ mod tests {
         assert!(
             bm25.contains("v0 = load_0(arg_0)"),
             "bm25 keeps the raw text, got: {bm25:?}"
+        );
+    }
+
+    fn processing_with_span(entity: EntityId, source: &str) -> ProcessingResult {
+        use crate::grouper::types::{EntityGroup, GroupType};
+        use cce_types::Span;
+
+        let mut group = EntityGroup::new("g", GroupType::Standalone);
+        group
+            .entity_spans
+            .insert(entity, Span::new(0, source.len(), 0, 0, 0, 0));
+        ProcessingResult {
+            groups: vec![group],
+            behavior: BehaviorStore::default(),
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_build_raw_body_text_keeps_body_comments_drops_javadoc() {
+        let source = "/**\n * Returns a builder.\n * See {@link Builder} for details.\n */\n@Override\npublic Builder builder() {\n    // fresh instance each call\n    return new Builder();\n}";
+        let processing_result = processing_with_span(EntityId(1), source);
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let raw = enricher
+            .build_raw_body_text(EntityId(1), &processing_result, source)
+            .expect("method body slices");
+        assert!(
+            raw.contains("fresh instance each call"),
+            "body comments stay searchable, got: {raw:?}"
+        );
+        assert!(
+            raw.contains("return new Builder();"),
+            "body code stays, got: {raw:?}"
+        );
+        assert!(
+            !raw.contains("Returns a builder") && !raw.contains("for details"),
+            "javadoc never re-enters the sidecar, got: {raw:?}"
+        );
+    }
+
+    #[test]
+    fn test_build_raw_body_text_returns_none_for_declarations() {
+        let source = "private static final int MAX = 500;";
+        let processing_result = processing_with_span(EntityId(1), source);
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        assert!(
+            enricher
+                .build_raw_body_text(EntityId(1), &processing_result, source)
+                .is_none(),
+            "declarations carry no sliceable body"
+        );
+    }
+
+    #[test]
+    fn test_build_raw_body_text_returns_none_for_unknown_shapes() {
+        // Brace-less layouts keep the fact-based text: no slice is
+        // produced, so the caller falls back instead of indexing the
+        // leading comments twice.
+        let source = "function foo()\n    -- leading comment\n    return 1\nend\n";
+        let processing_result = processing_with_span(EntityId(1), source);
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        assert!(
+            enricher
+                .build_raw_body_text(EntityId(1), &processing_result, source)
+                .is_none(),
+            "unknown shapes keep the fact-based text"
+        );
+    }
+
+    #[test]
+    fn test_enrich_bm25_uses_continuous_body_slice() {
+        use cce_types::language::Language;
+        use cce_types::{EntityKind, ast_to_nl::ConversionResult};
+
+        // No facts at all: the fact-based text would be empty, so any
+        // sidecar must come from the continuous slice.
+        let source = "/**\n * Returns a builder.\n */\npublic Builder builder() {\n    // fresh instance each call\n    return new Builder();\n}";
+        let processing_result = processing_with_span(EntityId(1), source);
+        let mut conversion = ConversionResult::bm25_only(
+            EntityId(1),
+            EntityKind::Method,
+            "builder".to_string(),
+            "Builder.java".to_string(),
+            "method builder.".to_string(),
+            vec![],
+        );
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, true);
+        let resolved_index = super::ResolvedCallsIndex::from_processing_result(&processing_result);
+        enricher.enrich_conversion(
+            &mut conversion,
+            &processing_result,
+            source,
+            Language::Java,
+            None,
+            super::PluginSupport {
+                resolved: Some(&resolved_index),
+                ..Default::default()
+            },
+        );
+        let bm25 = conversion.bm25_text.expect("bm25 survives");
+        assert!(
+            bm25.contains("fresh instance each call"),
+            "bm25 carries the continuous body, got: {bm25:?}"
+        );
+        assert!(
+            !bm25.contains("Returns a builder"),
+            "bm25 never repeats the template doc, got: {bm25:?}"
         );
     }
 }

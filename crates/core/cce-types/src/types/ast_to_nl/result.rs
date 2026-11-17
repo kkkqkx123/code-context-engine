@@ -303,9 +303,13 @@ impl ConversionResult {
 
     /// Append code context text with separate content for BM25 and embedding.
     ///
-    /// BM25 text uses double-newline separators for clear token boundaries.
-    /// Embedding text uses single-newline separator for readability while
-    /// keeping the section logically connected.
+    /// Both paths join template and sidecar with a single newline so the
+    /// identity, documentation and code of one entity stay in one paragraph:
+    /// the BM25 splitter subdivides oversized single-entity pieces at
+    /// paragraph boundaries, and a blank line between template and sidecar
+    /// would force a doc-only versus code-only split that semantic queries
+    /// cannot match in one chunk. The tokenizer treats newlines as
+    /// separators, so the indexed token stream is unchanged.
     pub fn append_index_context_raw_separate(&mut self, bm25_extra: &str, emb_extra: &str) {
         use cce_utils::token_estimation::estimate_tokens;
 
@@ -313,7 +317,7 @@ impl ConversionResult {
         if !bm25_extra.is_empty() {
             if let Some(text) = self.bm25_text.as_mut() {
                 if !text.is_empty() {
-                    text.push_str("\n\n");
+                    text.push('\n');
                 }
                 text.push_str(bm25_extra);
                 self.bm25_word_count = Some(Self::count_words(text));

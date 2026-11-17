@@ -150,8 +150,8 @@ use tracing::warn;
 
 #[cfg(test)]
 mod tests {
-    use cce_orchestrator::index::in_memory_metadata_store;
     use super::*;
+    use cce_orchestrator::index::in_memory_metadata_store;
     use cce_storage_common::metadb::{FileEnsureEntry, NewProjectRecord};
 
     async fn setup_test_db() -> MetadataStore {
