@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["crates/infra/llm-suite"]
+exclude = ["crates/infra/llm-suite", "crates/gpui-kit", "crates/app/cce-desktop"]
 members = [
     # core
     "crates/core/cce-types",

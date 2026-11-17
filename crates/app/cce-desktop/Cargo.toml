@@ -1,0 +1,66 @@
+[package]
+name = "cce-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "CCE native desktop client built on GPUI"
+license.workspace = true
+repository = "https://github.com/kkkqkx123/code-context-engine"
+publish = false
+
+[workspace]
+# Own workspace root: this crate is intentionally NOT a member of the CCE
+# root workspace. The root workspace does not define the private entries the
+# gpui-kit tree resolves through its own workspace (gpui, edition, lints
+# table), so sharing one resolve between ../cce-client and ../../gpui-kit
+# misattributes the gpui-kit tree to the root workspace. The root manifest
+# therefore excludes both this crate and crates/gpui-kit (see its `exclude`),
+# and from here ../../gpui-kit resolves against its own workspace root while
+# ../cce-client and ../cce-api resolve against the CCE root workspace.
+# All sources are local checkouts: local builds never fetch git.
+# Build with `cargo build --manifest-path crates/app/cce-desktop/Cargo.toml`
+# (or plain `cargo build` inside this directory).
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.86"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Mirrors the CCE root specs for the crates.io deps used here, so both
+# workspaces resolve compatible versions. Bumps should stay in sync.
+anyhow = "1.0"
+directories = "6"
+env_logger = "0.11"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.50", features = ["rt-multi-thread", "macros", "sync", "time"] }
+toml = "1.1"
+
+[dependencies]
+# Local sources only (see [workspace] above for why).
+gpui-kit = { path = "../../gpui-kit/crates/kit", default-features = false, features = ["component", "assets"] }
+cce-client = { path = "../cce-client" }
+cce-api = { path = "../cce-api" }
+anyhow.workspace = true
+directories.workspace = true
+env_logger.workspace = true
+futures.workspace = true
+log = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+# Keep the GPUI render loop (text shaping, layout, SVG decoding, networking)
+# usable in debug builds: these crates are unusably slow unoptimized.
+[profile.dev.package]
+resvg = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+smol = { opt-level = 3 }
+gpui-pre = { opt-level = 3 }
+ropey = { opt-level = 3 }
