@@ -1,10 +1,12 @@
-//! Storage panel: backend status, index statistics and removal of indexed
-//! content.
+//! Storage panel: backend status, index statistics, removal of indexed
+//! content and the managed vector backend's lifecycle.
 //!
-//! Every removal path here is destructive and immediate: the panel asks for an
-//! explicit selection first, so a click can never clear storage by accident.
+//! Every removal path here is destructive, so each one is armed first: the
+//! browser turns into a confirm/cancel pair carrying the exact scope about to
+//! be dropped. The managed backend's stop/restart actions are armed the same
+//! way, because they interrupt every query in flight.
 
-use cce_api::models::{IndexStatsResponse, StorageStatusResponse};
+use cce_api::models::{IndexStatsResponse, QdrantProcessStatusResponse, StorageStatusResponse};
 use gpui_kit::component::{
     Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
@@ -17,15 +19,25 @@ use gpui_kit::{
 };
 
 use crate::components::{
-    Cell, Column, Tone, actions, data_grid, failure_block, field, field_group, hint, loading_row,
-    notice, page_body, panel_header, stack, stat_line, surface,
+    Cell, Column, Confirm, Tone, actions, confirm_bar, data_grid, failure_block, field,
+    field_group, hint, loading_row, notice, page_body, panel_header, stack, stat_line, surface,
+    toast,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
+use crate::services::refresh;
 use crate::services::request::{self, Load};
-use crate::services::storage_service::{self, ClearScope};
+use crate::services::storage_service::{self, ClearScope, QdrantAction};
 use crate::state::AppState;
 use crate::views::PanelKind;
+
+/// Confirmation slots; one per destructive action in this panel.
+const CONFIRM_CLEAR: usize = 0;
+const CONFIRM_DELETE_FILE: usize = 1;
+const CONFIRM_DELETE_ENTITY: usize = 2;
+const CONFIRM_BATCH_DELETE: usize = 3;
+const CONFIRM_QDRANT_STOP: usize = 4;
+const CONFIRM_QDRANT_RESTART: usize = 5;
 
 pub struct StorageView {
     file: Entity<InputState>,
@@ -34,7 +46,9 @@ pub struct StorageView {
     batch_entities: Entity<InputState>,
     status: Load<StorageStatusResponse>,
     stats: Load<IndexStatsResponse>,
+    qdrant: Load<QdrantProcessStatusResponse>,
     scope: ClearScope,
+    confirm: Confirm,
     outcome: Option<(bool, &'static str)>,
 }
 
@@ -60,6 +74,8 @@ impl StorageView {
             batch_entities,
             status: Load::idle(),
             stats: Load::idle(),
+            qdrant: Load::idle(),
+            confirm: Confirm::none(),
             scope: ClearScope {
                 vectors: false,
                 bm25: false,
@@ -99,6 +115,7 @@ impl StorageView {
             self.stats = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -108,6 +125,66 @@ impl StorageView {
         let task = storage_service::stats(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
             this.stats = Load::settle(outcome);
+            cx.notify();
+        });
+    }
+
+    fn load_qdrant(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = ClientStore::client(cx) else {
+            self.qdrant = Load::Failed(request::Failure::disconnected());
+            cx.notify();
+            return;
+        };
+        self.qdrant.begin();
+        cx.notify();
+        let task = storage_service::qdrant_status(cx, client);
+        request::spawn_into(cx, task, |this, outcome, cx| {
+            this.qdrant = Load::settle(outcome);
+            cx.notify();
+        });
+    }
+
+    /// Re-read the snapshots that are already on screen.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        refresh::touch(PanelKind::Storage, cx);
+        if !matches!(self.status, Load::Idle) {
+            self.load_status(cx);
+        }
+        if !matches!(self.stats, Load::Idle) {
+            self.load_stats(cx);
+        }
+        if !matches!(self.qdrant, Load::Idle) {
+            self.load_qdrant(cx);
+        }
+    }
+
+    fn qdrant(&mut self, action: QdrantAction, cx: &mut Context<Self>) {
+        let Some(client) = ClientStore::client(cx) else {
+            self.outcome = Some((false, "error.notConnected"));
+            cx.notify();
+            return;
+        };
+        self.outcome = None;
+        cx.notify();
+        let task = storage_service::qdrant_action(cx, client, action);
+        request::spawn_into(cx, task, move |this, outcome, cx| {
+            match outcome {
+                Ok(response) => {
+                    this.outcome = Some((true, action.key()));
+                    log::info!("qdrant {}: {}", action.key(), response.message);
+                    toast::push(
+                        SharedString::from(response.message),
+                        response.success,
+                        &mut *cx,
+                    );
+                    this.load_qdrant(cx);
+                }
+                Err(err) => {
+                    log::warn!("qdrant {} failed: {err}", action.key());
+                    this.outcome = Some((false, "storage.qdrantFailed"));
+                    this.load_qdrant(cx);
+                }
+            }
             cx.notify();
         });
     }
@@ -240,6 +317,84 @@ impl StorageView {
             });
             cx.notify();
         });
+    }
+
+    /// Managed vector backend: state plus the three lifecycle actions.
+    ///
+    /// Status is polled while the panel is open, so a backend that crashed on
+    /// its own shows up without a manual refresh.
+    fn render_qdrant(&self, cx: &mut Context<Self>) -> AnyElement {
+        let locale = locale(cx);
+        let dense = AppState::global(cx).read(cx).density.is_dense();
+        let body = match &self.qdrant {
+            Load::Idle => hint(t("storage.qdrantIdle", locale), cx).into_any_element(),
+            Load::Loading => loading_row(t("storage.qdrantLoading", locale), cx).into_any_element(),
+            Load::Failed(failure) => failure_block(failure, locale, cx).into_any_element(),
+            Load::Ready(response) => surface(dense, cx)
+                .child(stat_line(
+                    t("storage.qdrantState", locale),
+                    response.status.to_string(),
+                    cx,
+                ))
+                .child(stat_line(
+                    t("storage.qdrantManagedLabel", locale),
+                    match response.managed {
+                        true => t("storage.qdrantManaged", locale).to_string(),
+                        false => t("storage.qdrantExternal", locale).to_string(),
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+        };
+
+        field_group(cx)
+            .child(hint(t("storage.qdrantHint", locale), cx))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("storage-qdrant-refresh")
+                            .small()
+                            .label(t("storage.qdrantRefresh", locale))
+                            .on_click(cx.listener(|this, _, _, cx| this.load_qdrant(cx))),
+                    )
+                    .child(
+                        Button::new("storage-qdrant-start")
+                            .small()
+                            .label(t("storage.qdrantStart", locale))
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.qdrant(QdrantAction::Start, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("storage-qdrant-stop")
+                            .small()
+                            .selected(self.confirm.is_armed(CONFIRM_QDRANT_STOP))
+                            .label(t("storage.qdrantStop", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.confirm.request(CONFIRM_QDRANT_STOP) {
+                                    this.qdrant(QdrantAction::Stop, cx);
+                                } else {
+                                    cx.notify();
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("storage-qdrant-restart")
+                            .small()
+                            .label(t("storage.qdrantRestart", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.confirm.request(CONFIRM_QDRANT_RESTART) {
+                                    this.qdrant(QdrantAction::Restart, cx);
+                                } else {
+                                    cx.notify();
+                                }
+                            })),
+                    ),
+            )
+            .child(body)
+            .into_any_element()
     }
 
     fn render_status(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -394,8 +549,15 @@ impl Render for StorageView {
                 Button::new("storage-clear")
                     .small()
                     .danger()
+                    .selected(self.confirm.is_armed(CONFIRM_CLEAR))
                     .label(t("storage.clear", locale))
-                    .on_click(cx.listener(|this, _, _, cx| this.clear(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.confirm.request(CONFIRM_CLEAR) {
+                            this.clear(cx);
+                        } else {
+                            cx.notify();
+                        }
+                    })),
             );
 
         let single_group = field_group(cx)
@@ -408,7 +570,13 @@ impl Render for StorageView {
                         Button::new("storage-delete-file")
                             .small()
                             .label(t("storage.deleteFile", locale))
-                            .on_click(cx.listener(|this, _, _, cx| this.delete_file(cx))),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.confirm.request(CONFIRM_DELETE_FILE) {
+                                    this.delete_file(cx);
+                                } else {
+                                    cx.notify();
+                                }
+                            })),
                     )
                     .child(field(
                         t("storage.entityId", locale),
@@ -419,7 +587,13 @@ impl Render for StorageView {
                         Button::new("storage-delete-entity")
                             .small()
                             .label(t("storage.deleteEntity", locale))
-                            .on_click(cx.listener(|this, _, _, cx| this.delete_entity(cx))),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.confirm.request(CONFIRM_DELETE_ENTITY) {
+                                    this.delete_entity(cx);
+                                } else {
+                                    cx.notify();
+                                }
+                            })),
                     ),
             )
             .child(
@@ -440,9 +614,129 @@ impl Render for StorageView {
                         Button::new("storage-batch-delete")
                             .small()
                             .label(t("storage.batchDelete", locale))
-                            .on_click(cx.listener(|this, _, _, cx| this.batch_delete(cx))),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.confirm.request(CONFIRM_BATCH_DELETE) {
+                                    this.batch_delete(cx);
+                                } else {
+                                    cx.notify();
+                                }
+                            })),
                     ),
             );
+
+        let confirm_block = match self.confirm.armed() {
+            Some(CONFIRM_CLEAR) => Some(
+                confirm_bar(
+                    "confirm-clear",
+                    SharedString::from(t("storage.confirmClear", locale)),
+                    locale,
+                    cx,
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        this.clear(cx);
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+            Some(CONFIRM_DELETE_FILE) => Some(
+                confirm_bar(
+                    "confirm-delete-file",
+                    SharedString::from(format!(
+                        "{}: {}",
+                        t("storage.confirmDeleteFile", locale),
+                        self.file.read(cx).value()
+                    )),
+                    locale,
+                    cx,
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        this.delete_file(cx);
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+            Some(CONFIRM_DELETE_ENTITY) => Some(
+                confirm_bar(
+                    "confirm-delete-entity",
+                    SharedString::from(format!(
+                        "{}: {}",
+                        t("storage.confirmDeleteEntity", locale),
+                        self.entity_id.read(cx).value()
+                    )),
+                    locale,
+                    cx,
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        this.delete_entity(cx);
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+            Some(CONFIRM_BATCH_DELETE) => Some(
+                confirm_bar(
+                    "confirm-batch-delete",
+                    SharedString::from(t("storage.confirmBatchDelete", locale)),
+                    locale,
+                    cx,
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        this.batch_delete(cx);
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+            Some(CONFIRM_QDRANT_STOP) => Some(
+                confirm_bar(
+                    "confirm-qdrant-stop",
+                    SharedString::from(t("storage.confirmQdrantStop", locale)),
+                    locale,
+                    cx,
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        this.qdrant(QdrantAction::Stop, cx);
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+            Some(CONFIRM_QDRANT_RESTART) => Some(
+                confirm_bar(
+                    "confirm-qdrant-restart",
+                    SharedString::from(t("storage.confirmQdrantRestart", locale)),
+                    locale,
+                    cx,
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        this.qdrant(QdrantAction::Restart, cx);
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.confirm.cancel();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+            _ => None,
+        };
 
         let outcome_row = self
             .outcome
@@ -460,6 +754,8 @@ impl Render for StorageView {
                     .children(outcome_row)
                     .child(self.render_status(cx))
                     .child(self.render_stats(cx))
+                    .children(confirm_block)
+                    .child(self.render_qdrant(cx))
                     .child(clear_group)
                     .child(single_group)
                     .child(notice(t("storage.warningHint", locale), false, cx)),

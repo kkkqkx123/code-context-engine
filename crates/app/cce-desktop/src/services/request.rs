@@ -6,6 +6,7 @@
 //! state machine and the failure classification, so a panel only decides what
 //! to send and how a successful payload looks.
 
+use cce_api::models::SymbolCandidate;
 use cce_client::ClientError;
 use gpui_kit::{Context, SharedString, Task};
 
@@ -20,6 +21,9 @@ pub struct Failure {
     pub key: &'static str,
     /// Untranslated transport detail, empty when there is nothing to add.
     pub detail: SharedString,
+    /// Candidate entities when the server could not resolve an ambiguous
+    /// seed. Non-empty makes the failure actionable instead of terminal.
+    pub candidates: Vec<SymbolCandidate>,
 }
 
 impl Failure {
@@ -35,6 +39,7 @@ impl Failure {
         Self {
             key,
             detail: SharedString::from(error.to_string()),
+            candidates: error.symbol_candidates(),
         }
     }
 
@@ -43,6 +48,7 @@ impl Failure {
         Self {
             key: "error.notConnected",
             detail: SharedString::default(),
+            candidates: Vec::new(),
         }
     }
 }
@@ -125,6 +131,7 @@ mod tests {
             status: 400,
             code: Some("bad_request".to_string()),
             message: "query is empty".to_string(),
+            details: None,
         };
         assert_eq!(Failure::from_error(&rejected).key, "error.rejected");
 
@@ -148,6 +155,38 @@ mod tests {
         let slot = Load::settle(Ok(7u8));
         assert_eq!(slot.ready(), Some(&7));
         assert!(!slot.is_loading());
+    }
+
+    #[test]
+    fn ambiguous_rejections_carry_their_candidates() {
+        let rejected = ClientError::Rejected {
+            method: ApiMethod::Post,
+            path: "/api/graph/ego".to_string(),
+            status: 400,
+            code: Some("AMBIGUOUS_SYMBOL".to_string()),
+            message: "2 entities match".to_string(),
+            details: Some(
+                r#"[{"stable_id":"sym_a","file_path":"a.rs","scoped_name":"a::run","kind":"function"}]"#
+                    .to_string(),
+            ),
+        };
+        let failure = Failure::from_error(&rejected);
+        assert_eq!(failure.key, "error.rejected");
+        assert_eq!(failure.candidates.len(), 1);
+        assert_eq!(failure.candidates[0].stable_id, "sym_a");
+    }
+
+    #[test]
+    fn a_plain_rejection_has_no_candidates() {
+        let rejected = ClientError::Rejected {
+            method: ApiMethod::Post,
+            path: "/api/search".to_string(),
+            status: 400,
+            code: Some("INVALID_INPUT".to_string()),
+            message: "query is empty".to_string(),
+            details: None,
+        };
+        assert!(Failure::from_error(&rejected).candidates.is_empty());
     }
 
     #[test]

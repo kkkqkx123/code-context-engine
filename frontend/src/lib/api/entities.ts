@@ -25,6 +25,8 @@ export type ClassImplementationsResponse =
 	components['schemas']['ClassImplementationsResponse'];
 export type ClassificationStatsResponse =
 	components['schemas']['ClassificationStatsResponse'];
+export type ClassificationRelation =
+	components['schemas']['ClassificationRelation'];
 
 /** Relation listing filter shared by calls, callers and call-chain. */
 export interface RelationFilter {
@@ -177,7 +179,7 @@ export const entityApi = {
 		projectId: number,
 		classification: string,
 		limit?: number,
-	): Promise<unknown[]> =>
+	): Promise<ClassificationRelation[]> =>
 		call(
 			client.GET(
 				'/api/project/{project_id}/relations/classification/{classification}',

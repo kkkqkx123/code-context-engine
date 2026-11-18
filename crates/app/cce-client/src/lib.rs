@@ -24,6 +24,7 @@ mod graph;
 mod health;
 mod index;
 mod ingest;
+mod logs;
 mod metrics;
 mod project;
 mod qdrant;

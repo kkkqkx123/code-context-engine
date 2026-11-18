@@ -695,6 +695,66 @@ pub async fn relations_by_classification(
         .collect())
 }
 
+/// Typed detail rows of one external-call classification.
+///
+/// The HTTP surface serves this projection instead of dumping the indexer's
+/// `ResolvedRelation` as untyped JSON: the wire shape is owned by `cce_api` and
+/// adding a field to the internal type no longer changes the response.
+pub async fn classification_relation_details(
+    state: &SharedContext,
+    project_id: i64,
+    category: ClassificationCategory,
+    limit: usize,
+) -> Result<Vec<cce_api::models::ClassificationRelation>, RelationServiceError> {
+    let access = relation_access(state, project_id).await?;
+    let probe = category.into_probe();
+    let relations = access
+        .snapshot
+        .index
+        .get_relations_by_classification(&probe);
+    let matches = |external: Option<&ExternalCallType>| {
+        external
+            .map(|value| std::mem::discriminant(value) == std::mem::discriminant(&probe))
+            .unwrap_or(false)
+    };
+    let details = relations
+        .into_iter()
+        .filter(|relation| matches(relation.external_type.as_ref()))
+        .take(limit)
+        .map(|relation| {
+            let caller = entity_ref(&access.snapshot, relation.caller);
+            let relation_type = serde_json::to_value(relation.relation_type)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap_or_default();
+            let external_target = match relation.external_type.as_ref() {
+                Some(ExternalCallType::StandardLibrary { library }) => Some(library.clone()),
+                Some(ExternalCallType::ExternalLibrary { package })
+                | Some(ExternalCallType::DevDependency { package })
+                | Some(ExternalCallType::LocalDependency { package }) => Some(package.clone()),
+                Some(ExternalCallType::Unknown { raw_target }) => Some(raw_target.clone()),
+                None => None,
+            };
+            cce_api::models::ClassificationRelation {
+                caller_id: relation.caller.0,
+                caller_stable_id: caller.stable_id,
+                caller_name: caller.name,
+                caller_file_path: caller.file_path,
+                callee_id: relation.callee_id.map(|id| id.0),
+                callee_name: relation.callee_name,
+                relation_type,
+                classification: category.label().to_string(),
+                external_target,
+                is_external: relation.is_external,
+                call_row: relation.span.start_position.row,
+                overload_signature: relation.overload_signature,
+                call_frequency: relation.call_frequency,
+            }
+        })
+        .collect();
+    Ok(details)
+}
+
 /// Counts of resolved relations grouped by external classification.
 pub async fn classification_stats(
     state: &SharedContext,

@@ -2,7 +2,7 @@
 
 use cce_api::models::AggregatedMetric;
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
@@ -13,13 +13,14 @@ use gpui_kit::{
 };
 
 use crate::components::{
-    Cell, Column, actions, choice_row, data_grid, empty_state, failure_block, field, field_group,
-    hint, loading_row, notice, page_body, panel_header, stack, surface,
+    Cell, Column, Confirm, actions, choice_row, confirm_bar, data_grid, empty_state, failure_block,
+    field, field_group, hint, loading_row, notice, page_body, panel_header, stack, surface,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
 use crate::metrics::CARD_RADIUS;
 use crate::services::ops_service;
+use crate::services::refresh;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
 use crate::views::PanelKind;
@@ -40,8 +41,15 @@ enum MetricsAnswer {
 pub struct MetricsView {
     hours: Entity<InputState>,
     metric: Entity<InputState>,
+    /// Explicit window bounds; both must be set to override `hours`.
+    from: Entity<InputState>,
+    to: Entity<InputState>,
+    /// Whether the history query is narrowed to the active project.
+    project_scope: bool,
     tab: usize,
     answer: Load<MetricsAnswer>,
+    /// Cleanup drops recorded metrics, so it is armed before it runs.
+    confirm: Confirm,
     outcome: Option<(bool, &'static str)>,
 }
 
@@ -56,9 +64,18 @@ impl MetricsView {
         let metric = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t("metrics.metricPlaceholder", locale))
         });
+        let from = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t("metrics.fromPlaceholder", locale))
+        });
+        let to = cx
+            .new(|cx| InputState::new(window, cx).placeholder(t("metrics.toPlaceholder", locale)));
         Self {
             hours,
             metric,
+            from,
+            to,
+            project_scope: false,
+            confirm: Confirm::none(),
             tab: 0,
             answer: Load::idle(),
             outcome: None,
@@ -108,7 +125,17 @@ impl MetricsView {
                 });
             }
             _ => {
-                let task = ops_service::metrics_history(cx, client, hours, metric);
+                let input = ops_service::HistoryInput {
+                    hours,
+                    from: crate::services::optional_text(&self.from.read(cx).value()),
+                    to: crate::services::optional_text(&self.to.read(cx).value()),
+                    metric,
+                    project_id: self
+                        .project_scope
+                        .then(|| AppState::global(cx).read(cx).active_project_id())
+                        .flatten(),
+                };
+                let task = ops_service::metrics_history(cx, client, input);
                 request::spawn_into(cx, task, |this, outcome, cx| {
                     this.answer = match outcome {
                         Ok(rows) => Load::Ready(MetricsAnswer::History(rows)),
@@ -118,6 +145,15 @@ impl MetricsView {
                 });
             }
         }
+    }
+
+    /// Re-run the active metric view on the next refresh tick.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.answer, Load::Idle) {
+            return;
+        }
+        refresh::touch(PanelKind::Metrics, cx);
+        self.run(cx);
     }
 
     fn cleanup(&mut self, cx: &mut Context<Self>) {
@@ -236,6 +272,18 @@ impl Render for MetricsView {
                     Input::new(&self.metric),
                     cx,
                 ))
+                .child(field(t("metrics.from", locale), Input::new(&self.from), cx))
+                .child(field(t("metrics.to", locale), Input::new(&self.to), cx))
+                .child(
+                    Button::new("metrics-project-scope")
+                        .small()
+                        .label(t("metrics.projectScope", locale))
+                        .selected(self.project_scope)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.project_scope = !this.project_scope;
+                            cx.notify();
+                        })),
+                )
                 .child(
                     Button::new("metrics-run")
                         .small()
@@ -250,9 +298,35 @@ impl Render for MetricsView {
             Button::new("metrics-cleanup")
                 .small()
                 .danger()
+                .selected(self.confirm.is_armed(0))
                 .label(t("metrics.cleanup", locale))
-                .on_click(cx.listener(|this, _, _, cx| this.cleanup(cx))),
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if this.confirm.request(0) {
+                        this.cleanup(cx);
+                    } else {
+                        cx.notify();
+                    }
+                })),
         );
+
+        let confirm_block = if self.confirm.is_armed(0) {
+            Some(confirm_bar(
+                "confirm-metrics-cleanup",
+                SharedString::from(t("metrics.confirmCleanup", locale)),
+                locale,
+                cx,
+                cx.listener(|this, _, _, cx| {
+                    this.confirm.cancel();
+                    this.cleanup(cx);
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.confirm.cancel();
+                    cx.notify();
+                }),
+            ))
+        } else {
+            None
+        };
 
         let outcome_row = self
             .outcome
@@ -282,6 +356,7 @@ impl Render for MetricsView {
                 stack()
                     .children(outcome_row)
                     .child(form)
+                    .children(confirm_block)
                     .child(hint(t("metrics.cleanupHint", locale), cx))
                     .child(body),
             )

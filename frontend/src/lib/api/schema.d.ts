@@ -298,6 +298,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /api/logs
+         * @description One page of the in-memory log buffer, filtered server side.
+         */
+        get: operations["handle_get_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /api/logs/config
+         * @description Effective logger configuration of the running process.
+         */
+        get: operations["handle_get_log_config"];
+        /**
+         * PUT /api/logs/config
+         * @description Changes the level, format or filter of the running logger.
+         */
+        put: operations["handle_update_log_config"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /api/logs/files
+         * @description Files currently present in the configured log directory.
+         */
+        get: operations["handle_list_log_files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * DELETE /api/logs/files/{name}
+         * @description Removes one log file; the active file is refused.
+         */
+        delete: operations["handle_delete_log_file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/files/{name}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /api/logs/files/{name}/download
+         * @description Raw bytes of one log file as an attachment.
+         */
+        get: operations["handle_download_log_file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST /api/logs/rotate
+         * @description Applies the retention policy now instead of waiting for the next write.
+         */
+        post: operations["handle_rotate_logs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/metrics": {
         parameters: {
             query?: never;
@@ -1721,6 +1845,45 @@ export interface components {
             depth: number;
             file_path: string;
         };
+        /**
+         * @description One resolved relation in an external-call classification detail view.
+         *
+         *     This is a deliberate projection of the indexer's `ResolvedRelation`: only
+         *     fields that a console can render are part of the wire contract, so adding
+         *     an internal field cannot silently change the HTTP response.
+         */
+        ClassificationRelation: {
+            /** Format: int64 */
+            call_frequency: number;
+            /** @description Zero-indexed row of the call site. */
+            call_row: number;
+            /**
+             * Format: int64
+             * @description Numeric entity id of the callee, absent for external references.
+             */
+            callee_id?: number | null;
+            /** @description Callee name as extracted or resolved. */
+            callee_name: string;
+            /** @description File that contains the call site. */
+            caller_file_path: string;
+            /**
+             * Format: int64
+             * @description Numeric entity id of the caller.
+             */
+            caller_id: number;
+            /** @description Caller name, or `Unknown` when the snapshot has no function record. */
+            caller_name: string;
+            /** @description Stable symbol id of the caller, falling back to `entity:<id>`. */
+            caller_stable_id: string;
+            /** @description Canonical classification label: stdlib, external, dev, local, unknown. */
+            classification: string;
+            /** @description Library, package or raw target carried by the classification, if any. */
+            external_target?: string | null;
+            is_external: boolean;
+            overload_signature?: string | null;
+            /** @description Wire name of the relation type, e.g. `call.method`. */
+            relation_type: string;
+        };
         /** @description Classification statistics response */
         ClassificationStatsResponse: {
             /** @description Per-classification counts */
@@ -2009,6 +2172,19 @@ export interface components {
             signature?: string | null;
             /** Format: int32 */
             start_line: number;
+        };
+        /** @description Fused score of one entity inside a multi-entity chunk group. */
+        EntityScoreDto: {
+            /**
+             * Format: int64
+             * @description Entity the score belongs to.
+             */
+            entity_id: number;
+            /**
+             * Format: float
+             * @description Fused score that entity earned on its own alignment key.
+             */
+            score: number;
         };
         /** @description Entity search request (FTS5) */
         EntitySearchRequest: {
@@ -2659,6 +2835,70 @@ export interface components {
             service: string;
             success: boolean;
         };
+        /**
+         * @description Effective logger configuration.
+         *
+         *     Every field is the value the server is running with, not the value from
+         *     the configuration file: a rotation applied at runtime shows here.
+         */
+        LogConfig: {
+            /** @description Whether the HTTP log API is enabled for this process. */
+            enable_http_api: boolean;
+            /** @description Active log file, absent when file output is off. */
+            file?: string | null;
+            /** @description Active `tracing` filter directive, when one is set. */
+            filter?: string | null;
+            /** @description Active record format (`pretty`, `compact`, `json`). */
+            format: string;
+            /** @description Active level name. */
+            level: string;
+            /** Format: int64 */
+            max_file_size_mb?: number | null;
+            max_files?: number | null;
+            /** Format: int64 */
+            max_total_size_mb?: number | null;
+            /** @description In-memory ring buffer capacity. */
+            memory_buffer_size: number;
+            /** @description Active sink (`stdout`, `file`, both). */
+            output: string;
+            /** @description WebSocket broadcast capacity. */
+            ws_capacity: number;
+        };
+        /** @description One captured log record. */
+        LogEntry: {
+            /** @description Structured fields attached to the record; shape is per record. */
+            fields?: unknown;
+            /** @description Level name as the logger rendered it (`INFO`, `WARN`, ...). */
+            level: string;
+            /** @description Rendered message without structured fields. */
+            message: string;
+            /** @description Module or crate target that emitted the record. */
+            target: string;
+            /** @description Event time (RFC 3339). */
+            timestamp: string;
+        };
+        /** @description One file on disk in the log directory. */
+        LogFileInfo: {
+            /** @description Last modification time (RFC 3339). */
+            modified: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description Size in bytes.
+             */
+            size: number;
+        };
+        /** @description One page of captured records. */
+        LogsResponse: {
+            /** @description Records of this page, newest last. */
+            entries: components["schemas"]["LogEntry"][];
+            /** @description Echo of the requested page. */
+            page: number;
+            /** @description Echo of the applied page size. */
+            page_size: number;
+            /** @description Records matching the filter before paging. */
+            total: number;
+        };
         /** @description Metrics cleanup response */
         MetricsCleanupResponse: {
             deleted_count: number;
@@ -2884,7 +3124,11 @@ export interface components {
             /** @description Current process status */
             status: components["schemas"]["QdrantProcessStatus"];
         };
-        /** @description Qdrant process status */
+        /**
+         * @description Wire copy of the managed Qdrant subprocess lifecycle state.
+         *
+         *     Mirrors the backend domain type without pulling in storage machinery.
+         */
         QdrantProcessStatus: {
             /** @enum {string} */
             type: "Idle";
@@ -2913,6 +3157,11 @@ export interface components {
             managed: boolean;
             status: components["schemas"]["QdrantProcessStatus"];
         };
+        /**
+         * @description Recall path of a secondary evidence reference.
+         * @enum {string}
+         */
+        RecallPathDto: "vector" | "bm25";
         /** @description A single reference location */
         ReferenceLocation: {
             /** @description Callee definition end line (1-based, if available) */
@@ -3033,6 +3282,11 @@ export interface components {
             /** Format: int64 */
             elapsed_ms: number;
             /**
+             * @description Number of sub-queries that entered the retrieval pipeline. Zero when
+             *     the whole aggregate result was served from the result cache.
+             */
+            executed_sub_queries?: number;
+            /**
              * @description Sub-query texts that failed during an aggregated search (empty for
              *     single queries); makes partial degradation visible to the caller.
              */
@@ -3044,16 +3298,6 @@ export interface components {
             planned_sub_queries?: number;
             /**
              * Format: int64
-             * @description Number of sub-queries that entered the retrieval pipeline. Zero when
-             *     the whole aggregate result was served from the result cache.
-             */
-            executed_sub_queries?: number;
-            /** @description Number of sub-query results that contributed to the final list. */
-            succeeded_sub_queries?: number;
-            /** @description Number of executed sub-queries served by their own cached results. */
-            sub_query_cache_hits?: number;
-            /**
-             * Format: int64
              * @description Relation epoch the backing index was at when the query ran, when a
              *     relation snapshot is available. Lets callers judge result freshness
              *     against graph query versions.
@@ -3062,6 +3306,8 @@ export interface components {
             /** @description True when the serving relation snapshot reports itself stale. */
             relation_stale?: boolean;
             sources_used?: string[];
+            /** @description Number of executed sub-queries served by their own cached results. */
+            sub_query_cache_hits?: number;
             /**
              * @description Per-sub-query accounting in caller order (empty for single queries and
              *     for a fully cached aggregate answer, where nothing ran).
@@ -3071,40 +3317,11 @@ export interface components {
              *     what it recalled survived the merge.
              */
             sub_query_stats?: components["schemas"]["SubQueryStatDto"][];
+            /** @description Number of sub-queries whose candidate lists contributed to this result. */
+            succeeded_sub_queries?: number;
             success: boolean;
             total: number;
         };
-        /** @description Per-sub-query execution accounting for aggregated search. */
-        SubQueryStatDto: {
-            /** @description Candidates recalled before alignment and merging. */
-            candidates: number;
-            /**
-             * Format: int64
-             * @description Final hits this sub-query contributed to.
-             */
-            contributed: number;
-            /**
-             * Format: int64
-             * @description Wall-clock time spent in this sub-query.
-             */
-            elapsed_ms: number;
-            /** @description Failure detail for `failed` and `timed_out`. */
-            error?: string | null;
-            /**
-             * Format: int64
-             * @description Zero-based position in the request's sub-query list.
-             */
-            index: number;
-            /** @description Terminal state. */
-            status: components["schemas"]["SubQueryStatusDto"];
-            /** @description Query text as executed. */
-            text: string;
-        };
-        /**
-         * @description Terminal state of one sub-query inside an aggregated request.
-         * @enum {string}
-         */
-        SubQueryStatusDto: "succeeded" | "empty" | "failed" | "timed_out";
         /** @description Search result item */
         SearchResultItem: {
             /** @description Attached caller (backward) units. */
@@ -3112,6 +3329,11 @@ export interface components {
             code_chunk: string;
             /** @description Whether `code_chunk` is the full body or a reference. */
             content_state?: components["schemas"]["ContentStateDto"];
+            /**
+             * @description Number of aggregated sub-queries that hit this result's alignment key.
+             *     Zero for single-query results.
+             */
+            contributing_sub_queries?: number;
             /** Format: int32 */
             end_line: number;
             /**
@@ -3120,6 +3342,11 @@ export interface components {
              */
             entity_ids?: number[];
             entity_names?: string[];
+            /**
+             * @description Per-entity fused scores when one physical chunk carries several
+             *     entities (chunk grouping is enabled). Empty otherwise.
+             */
+            entity_scores?: components["schemas"]["EntityScoreDto"][];
             entity_type?: string | null;
             /** @description True when relation expansion attached at least one neighbour unit. */
             expanded?: boolean;
@@ -3135,6 +3362,7 @@ export interface components {
              * @description Unified relevance score (post-fusion).
              */
             score: number;
+            secondary_evidence?: null | components["schemas"]["SecondaryEvidenceDto"];
             /** @description Retrieval sources that contributed to this result (e.g. "vector", "bm25"). */
             sources?: string[];
             /**
@@ -3144,6 +3372,33 @@ export interface components {
             stable_symbol_ids?: string[];
             /** Format: int32 */
             start_line: number;
+        };
+        /** @description Reference to the losing recall path's representative chunk. */
+        SecondaryEvidenceDto: {
+            /** @description Chunk id of that path's representative hit. */
+            chunk_id: string;
+            /**
+             * Format: int32
+             * @description One-based end line the path knows about (0 when unknown).
+             */
+            end_line?: number;
+            /**
+             * Format: float
+             * @description Path score normalized to `[0, 1]`.
+             */
+            normalized_score: number;
+            /** @description Path the reference belongs to. */
+            path: components["schemas"]["RecallPathDto"];
+            /**
+             * Format: float
+             * @description Raw retrieval score on that path.
+             */
+            raw_score: number;
+            /**
+             * Format: int32
+             * @description One-based start line the path knows about (0 when unknown).
+             */
+            start_line?: number;
         };
         /** @description Service status */
         ServiceStatus: {
@@ -3250,11 +3505,36 @@ export interface components {
             /**
              * Format: float
              * @description Weight applied to this sub-query's candidate scores before the
-             *     cross-query merge (`score *= weight`, then dedup keeps the highest
-             *     weighted score per alignment key). Must be finite and >= 0.
+             *     cross-query merge (`score *= weight`, then scores are clamped to the
+             *     shared `[0, 1]` evidence domain). Must be finite and in `(0, 1]`.
              */
             weight?: number;
         };
+        /** @description Per-sub-query execution accounting for aggregated search. */
+        SubQueryStatDto: {
+            /** @description Candidates recalled before alignment and merging. */
+            candidates: number;
+            /** @description Final hits this sub-query contributed to. */
+            contributed: number;
+            /**
+             * Format: int64
+             * @description Wall-clock time spent in this sub-query.
+             */
+            elapsed_ms: number;
+            /** @description Failure detail for `failed` and `timed_out`. */
+            error?: string | null;
+            /** @description Zero-based position in the request's sub-query list. */
+            index: number;
+            /** @description Terminal state. */
+            status: components["schemas"]["SubQueryStatusDto"];
+            /** @description Query text as executed. */
+            text: string;
+        };
+        /**
+         * @description Terminal state of one sub-query inside an aggregated request.
+         * @enum {string}
+         */
+        SubQueryStatusDto: "succeeded" | "empty" | "failed" | "timed_out";
         /** @description Summary request */
         SummaryRequest: {
             directory_paths?: string[];
@@ -3291,6 +3571,20 @@ export interface components {
             line: number;
             /** @description Symbol name */
             name: string;
+        };
+        /**
+         * @description Logger fields the console may change at runtime.
+         *
+         *     File sinks and rotation limits are deliberately absent: changing them
+         *     requires reopening the writer, which is a restart, not a live update.
+         */
+        UpdateLogConfigRequest: {
+            /** @description New filter directive; takes precedence over `level`. */
+            filter?: string | null;
+            /** @description New format name; unknown names are ignored by the server. */
+            format?: string | null;
+            /** @description New level name; unknown names are ignored by the server. */
+            level?: string | null;
         };
         /** @description Update project request */
         UpdateProjectRequest: {
@@ -4123,6 +4417,255 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_get_logs: {
+        parameters: {
+            query?: {
+                /** @description Minimum level (`trace`, `debug`, `info`, `warn`, `error`). */
+                level?: string;
+                /** @description Target/module substring. */
+                module?: string;
+                /** @description Message substring. */
+                query?: string;
+                /** @description Inclusive lower bound (RFC 3339, compared as text). */
+                start_time?: string;
+                /** @description Inclusive upper bound (RFC 3339, compared as text). */
+                end_time?: string;
+                /** @description One-based page number. */
+                page?: number;
+                /** @description Page size, clamped by the server. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogsResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_get_log_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogConfig"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_update_log_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateLogConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description Applied */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_list_log_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogFileInfo"][];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_delete_log_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Log file name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid file name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Refused for the active file */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description File not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_download_log_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Log file name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File contents */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Invalid file name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description File not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_rotate_logs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retention applied */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Internal error */
             500: {
@@ -6252,12 +6795,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Matched relations as untyped JSON array */
+            /** @description Success */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ClassificationRelation"][];
+                };
             };
             /** @description Invalid request */
             400: {

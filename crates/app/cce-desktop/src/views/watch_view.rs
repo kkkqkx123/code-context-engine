@@ -18,6 +18,7 @@ use crate::components::{
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
+use crate::services::refresh;
 use crate::services::request::{self, Load};
 use crate::services::watch_service;
 use crate::state::AppState;
@@ -68,6 +69,7 @@ impl WatchView {
             self.status = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -79,6 +81,12 @@ impl WatchView {
             this.status = Load::settle(outcome);
             cx.notify();
         });
+    }
+
+    /// Re-read the watch status on the next refresh tick.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        refresh::touch(PanelKind::Watch, cx);
+        self.load(cx);
     }
 
     fn start(&mut self, cx: &mut Context<Self>) {

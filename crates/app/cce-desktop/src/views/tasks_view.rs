@@ -5,10 +5,11 @@
 
 use cce_api::models::{DeadLetterListResponse, RetryQueueDeadResponse, RetryQueueStatusResponse};
 use gpui_kit::component::{
-    Sizable as _,
+    Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
+    v_flex,
 };
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
@@ -16,12 +17,13 @@ use gpui_kit::{
 };
 
 use crate::components::{
-    Cell, Column, Tone, actions, data_grid, empty_state, failure_block, field, field_group, hint,
-    loading_row, notice, page_body, panel_header, stack, stat_line, surface,
+    Cell, Column, Confirm, actions, confirm_bar, data_grid, empty_state, failure_block, field,
+    field_group, hint, loading_row, notice, page_body, panel_header, stack, stat_line, surface,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
 use crate::services::ops_service;
+use crate::services::refresh;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
 use crate::views::PanelKind;
@@ -31,6 +33,9 @@ pub struct TasksView {
     dead: Load<DeadLetterListResponse>,
     queue: Load<RetryQueueStatusResponse>,
     dead_queries: Load<RetryQueueDeadResponse>,
+    /// Dead-letter files ticked for a batch action.
+    selected: std::collections::BTreeSet<String>,
+    confirm: Confirm,
     outcome: Option<(bool, &'static str)>,
 }
 
@@ -44,7 +49,20 @@ impl TasksView {
             dead: Load::idle(),
             queue: Load::idle(),
             dead_queries: Load::idle(),
+            selected: std::collections::BTreeSet::new(),
+            confirm: Confirm::none(),
             outcome: None,
+        }
+    }
+
+    /// Re-read whichever lists are already on screen.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        refresh::touch(PanelKind::Tasks, cx);
+        if !matches!(self.dead, Load::Idle) {
+            self.load_dead(cx);
+        }
+        if !matches!(self.queue, Load::Idle) {
+            self.load_queue(cx);
         }
     }
 
@@ -62,6 +80,7 @@ impl TasksView {
             self.dead = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -118,6 +137,82 @@ impl TasksView {
                 Ok(_) => (true, "tasks.retried"),
                 Err(_) => (false, "tasks.retryFailed"),
             });
+            this.load_dead(cx);
+            cx.notify();
+        });
+    }
+
+    /// Files ticked in the dead-letter list.
+    fn selection(&self) -> Vec<String> {
+        self.selected.iter().cloned().collect()
+    }
+
+    fn toggle(&mut self, file: &str, cx: &mut Context<Self>) {
+        if !self.selected.remove(file) {
+            self.selected.insert(file.to_string());
+        }
+        cx.notify();
+    }
+
+    /// Retry the ticked files instead of every file in the project.
+    fn retry_selected(&mut self, cx: &mut Context<Self>) {
+        let files = self.selection();
+        if files.is_empty() {
+            self.outcome = Some((false, "tasks.selected"));
+            cx.notify();
+            return;
+        }
+        let Some(client) = ClientStore::client(cx) else {
+            self.outcome = Some((false, "error.notConnected"));
+            cx.notify();
+            return;
+        };
+        let Some(project_id) = Self::project(cx) else {
+            self.outcome = Some((false, "error.noProject"));
+            cx.notify();
+            return;
+        };
+        self.outcome = None;
+        cx.notify();
+        let task = ops_service::retry_dead_letters(cx, client, project_id, files);
+        request::spawn_into(cx, task, |this, outcome, cx| {
+            this.outcome = Some(match outcome {
+                Ok(_) => (true, "tasks.retried"),
+                Err(_) => (false, "tasks.retryFailed"),
+            });
+            this.selected.clear();
+            this.load_dead(cx);
+            cx.notify();
+        });
+    }
+
+    /// Acknowledge the ticked files.
+    fn acknowledge_selected(&mut self, cx: &mut Context<Self>) {
+        let files = self.selection();
+        if files.is_empty() {
+            self.outcome = Some((false, "tasks.selected"));
+            cx.notify();
+            return;
+        }
+        let Some(client) = ClientStore::client(cx) else {
+            self.outcome = Some((false, "error.notConnected"));
+            cx.notify();
+            return;
+        };
+        let Some(project_id) = Self::project(cx) else {
+            self.outcome = Some((false, "error.noProject"));
+            cx.notify();
+            return;
+        };
+        self.outcome = None;
+        cx.notify();
+        let task = ops_service::acknowledge_dead_letters(cx, client, project_id, files);
+        request::spawn_into(cx, task, |this, outcome, cx| {
+            this.outcome = Some(match outcome {
+                Ok(_) => (true, "tasks.acknowledged"),
+                Err(_) => (false, "tasks.acknowledgeFailed"),
+            });
+            this.selected.clear();
             this.load_dead(cx);
             cx.notify();
         });
@@ -228,42 +323,77 @@ impl TasksView {
             )
             .into_any_element(),
             Load::Ready(response) => {
-                let columns = [
-                    Column::grow(t("tasks.colFile", locale)),
-                    Column::fixed(t("tasks.colModules", locale), 90.0),
-                    Column::fixed(t("tasks.colUpdated", locale), 190.0),
-                ];
-                let rows: Vec<Vec<Cell>> = response
-                    .files
-                    .iter()
-                    .map(|entry| {
-                        let pending = entry
-                            .modules
-                            .iter()
-                            .filter(|module| !module.acknowledged)
-                            .count();
-                        vec![
-                            Cell::new(SharedString::from(entry.file_path.clone())),
-                            Cell::toned(
-                                SharedString::from(pending.to_string()),
-                                if pending == 0 {
-                                    Tone::Muted
-                                } else {
-                                    Tone::Warning
-                                },
-                            ),
-                            Cell::muted(SharedString::from(entry.updated_at.clone())),
-                        ]
-                    })
-                    .collect();
+                // The lightweight grid is read-only, so the batch actions get
+                // their own selectable rows: a row that cannot be ticked is
+                // exactly the thing a batch action needs.
+                let mut list = v_flex().gap_1().w_full();
+                for entry in &response.files {
+                    let file = entry.file_path.clone();
+                    let pending = entry
+                        .modules
+                        .iter()
+                        .filter(|module| !module.acknowledged)
+                        .count();
+                    let ticked = self.selected.contains(&file);
+                    list = list.child(
+                        Button::new(SharedString::from(format!("tasks-pick-{file}")))
+                            .small()
+                            .selected(ticked)
+                            .label(SharedString::from(format!(
+                                "{}  /  {}  /  {}",
+                                file, pending, entry.updated_at
+                            )))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let file = file.clone();
+                                this.toggle(&file, cx);
+                            })),
+                    );
+                }
+                let batch = actions()
+                    .child(
+                        Button::new("tasks-select-all")
+                            .small()
+                            .ghost()
+                            .label(t("tasks.selectAll", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Load::Ready(response) = &this.dead {
+                                    for entry in &response.files {
+                                        this.selected.insert(entry.file_path.clone());
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("tasks-clear-selection")
+                            .small()
+                            .ghost()
+                            .label(t("tasks.clearSelection", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.selected.clear();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("tasks-retry-selected")
+                            .small()
+                            .label(t("tasks.retrySelected", locale))
+                            .on_click(cx.listener(|this, _, _, cx| this.retry_selected(cx))),
+                    )
+                    .child(
+                        Button::new("tasks-ack-selected")
+                            .small()
+                            .label(t("tasks.acknowledgeSelected", locale))
+                            .on_click(cx.listener(|this, _, _, cx| this.acknowledge_selected(cx))),
+                    );
                 surface(dense, cx)
-                    .child(data_grid(
-                        PanelKind::Tasks,
-                        &columns,
-                        &rows,
-                        dense,
-                        &mut *cx,
+                    .child(stat_line(
+                        t("tasks.selected", locale),
+                        self.selected.len().to_string(),
+                        cx,
                     ))
+                    .child(list)
+                    .child(batch)
                     .into_any_element()
             }
         }
@@ -373,9 +503,35 @@ impl Render for TasksView {
                 Button::new("tasks-clear-dead")
                     .small()
                     .danger()
+                    .selected(self.confirm.is_armed(0))
                     .label(t("tasks.clearDeadQueue", locale))
-                    .on_click(cx.listener(|this, _, _, cx| this.clear_dead_queue(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.confirm.request(0) {
+                            this.clear_dead_queue(cx);
+                        } else {
+                            cx.notify();
+                        }
+                    })),
             );
+
+        let confirm_block = if self.confirm.is_armed(0) {
+            Some(confirm_bar(
+                "confirm-dead-cleanup",
+                SharedString::from(t("tasks.confirmCleanup", locale)),
+                locale,
+                cx,
+                cx.listener(|this, _, _, cx| {
+                    this.confirm.cancel();
+                    this.clear_dead_queue(cx);
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.confirm.cancel();
+                    cx.notify();
+                }),
+            ))
+        } else {
+            None
+        };
 
         let outcome_row = self
             .outcome
@@ -396,6 +552,7 @@ impl Render for TasksView {
                     .child(div())
                     .child(self.render_queue(cx))
                     .child(queue_actions)
+                    .children(confirm_block)
                     .child(
                         h_flex()
                             .gap_2()

@@ -11,6 +11,7 @@ import {
 	type ClassInheritanceResponse,
 	type ClassImplementationsResponse,
 	type ClassificationStatsResponse,
+	type ClassificationRelation,
 	type RelationFilter,
 } from '../api/entities';
 import { type CallChainNode } from '../api/search';
@@ -31,7 +32,7 @@ export interface EntityState {
 	inheritance: ClassInheritanceResponse | null;
 	implementations: ClassImplementationsResponse | null;
 	classificationStats: ClassificationStatsResponse | null;
-	classificationRelations: unknown[];
+	classificationRelations: ClassificationRelation[];
 	classificationCategory: string;
 	isLoading: boolean;
 	/** Page-level failure for the entity itself (structured). */
@@ -51,7 +52,7 @@ class EntityStore {
 	inheritance = $state<ClassInheritanceResponse | null>(null);
 	implementations = $state<ClassImplementationsResponse | null>(null);
 	classificationStats = $state<ClassificationStatsResponse | null>(null);
-	classificationRelations = $state<unknown[]>([]);
+	classificationRelations = $state<ClassificationRelation[]>([]);
 	classificationCategory = $state('');
 	isLoading = $state(false);
 	error = $state<AppError | null>(null);

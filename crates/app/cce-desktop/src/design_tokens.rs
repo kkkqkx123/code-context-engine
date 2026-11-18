@@ -122,6 +122,22 @@ pub fn color(section: Section, name: &str) -> Option<Hsla> {
     raw(section, name).and_then(parse_color)
 }
 
+/// Packed `0xRRGGBB` value of a token.
+///
+/// The graph renderer takes packed colours rather than `Hsla`, so the canvas
+/// reads the same palette through this form instead of re-deriving it. Alpha
+/// is dropped: node fills are opaque by contract.
+pub fn packed(section: Section, name: &str) -> Option<u32> {
+    let text = raw(section, name)?.trim();
+    let hex = text.strip_prefix('#')?;
+    let expanded = match hex.len() {
+        3 => hex.chars().flat_map(|c| [c, c]).collect::<String>(),
+        6 => hex.to_string(),
+        _ => return None,
+    };
+    u32::from_str_radix(&expanded, 16).ok()
+}
+
 /// Parse a CSS length into logical pixels. `px` values pass through, `rem`
 /// values scale by the 16px root, and bare `0` is zero. Relative units
 /// (`em`, `%`) and composite values return `None`.
@@ -182,6 +198,20 @@ mod tests {
         assert_eq!(raw(Section::Gray, "--gray-500"), Some("#737373"));
         assert_eq!(raw(Section::Nodes, "--node-type-border"), Some("#5b21b6"));
         assert_eq!(raw(Section::Nodes, "--node-callable-bg"), Some("#eff6ff"));
+    }
+
+    #[test]
+    fn node_palette_exposes_packed_colours() {
+        assert_eq!(
+            packed(Section::Nodes, "--node-callable-bg"),
+            Some(0x00ef_f6ff)
+        );
+        assert_eq!(
+            packed(Section::Nodes, "--node-type-border"),
+            Some(0x005b_21b6)
+        );
+        assert_eq!(packed(Section::Nodes, "--node-missing"), None);
+        assert_eq!(packed(Section::Typography, "--tracking-tight"), None);
     }
 
     #[test]

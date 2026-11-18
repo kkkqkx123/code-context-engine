@@ -8,6 +8,7 @@ use gpui_kit::{
     SharedString, Styled as _, Window, div,
 };
 
+use crate::components::toast;
 use crate::i18n::{locale, t};
 use crate::state::{AppState, ConnectionStatus};
 use crate::views::{ConnectionView, MainWindow};
@@ -22,6 +23,13 @@ impl Shell {
         let connection = cx.new(|cx| ConnectionView::new(window, cx));
         let state = AppState::global(cx);
         cx.observe_in(&state, window, |this, _, window, cx| this.sync(window, cx))
+            .detach();
+
+        // The feedback overlay lives on the window root so a result stays
+        // visible when the panel that produced it is rebuilt for a new scope.
+        toast::init(cx);
+        let toasts = toast::state(cx);
+        cx.observe_in(&toasts, window, |_, _, _, cx| cx.notify())
             .detach();
 
         let mut shell = Self {
@@ -73,12 +81,20 @@ impl Render for Shell {
             Some(main) => main.into_any_element(),
             None => self.connection.clone().into_any_element(),
         };
+        let feedback = toast::overlay(cx);
 
         v_flex()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_title_bar(cx))
-            .child(div().flex_1().min_h_0().child(content))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(content)
+                    .children(feedback),
+            )
     }
 }

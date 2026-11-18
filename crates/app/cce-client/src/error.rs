@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use cce_api::models::ErrorResponse;
+use cce_api::models::{ErrorResponse, SymbolCandidate};
 
 /// HTTP verb of the call that failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +59,13 @@ pub enum ClientError {
         status: u16,
         code: Option<String>,
         message: String,
+        /// Machine-readable payload the server attached, verbatim.
+        ///
+        /// It used to be folded into `message`, which made an ambiguous-symbol
+        /// answer ("pass one of the candidate stable IDs") impossible to act
+        /// on: the ids were inside a sentence. Keeping it separate lets a
+        /// caller render the candidates without re-parsing prose.
+        details: Option<String>,
     },
     /// A 2xx response whose body does not match the declared response type.
     Protocol {
@@ -99,7 +106,14 @@ impl fmt::Display for ClientError {
                 status,
                 code,
                 message,
-            } => write_failure(f, "rejected", method, path, *status, code, message),
+                details,
+            } => {
+                write_failure(f, "rejected", method, path, *status, code, message)?;
+                match details {
+                    Some(details) if !details.is_empty() => write!(f, " ({details})"),
+                    _ => Ok(()),
+                }
+            }
             ClientError::Protocol {
                 method,
                 path,
@@ -157,6 +171,26 @@ impl ClientError {
         }
     }
 
+    /// Candidate entities when the server rejected an ambiguous seed.
+    ///
+    /// Empty for every other failure, and for a `details` payload that is not
+    /// the candidate array: a caller must never render a malformed payload as
+    /// if it were a list of choices.
+    pub fn symbol_candidates(&self) -> Vec<SymbolCandidate> {
+        let Some(details) = self.details() else {
+            return Vec::new();
+        };
+        serde_json::from_str::<Vec<SymbolCandidate>>(details).unwrap_or_default()
+    }
+
+    /// Structured detail the server attached, when it sent one.
+    pub fn details(&self) -> Option<&str> {
+        match self {
+            ClientError::Rejected { details, .. } => details.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Request path of the failed call; empty when the client never formed a
     /// request.
     pub fn path(&self) -> &str {
@@ -176,7 +210,7 @@ impl ClientError {
         status: u16,
         body: &str,
     ) -> ClientError {
-        let (code, message) = parse_error_body(body);
+        let (code, message, details) = parse_error_body(body);
         match status {
             401 | 403 => ClientError::Unauthorized {
                 method,
@@ -200,32 +234,30 @@ impl ClientError {
                 status,
                 code,
                 message,
+                details,
             },
         }
     }
 }
 
-/// Extract the server error code and message from an error response body.
+/// Extract the server error code, message and details from a body.
 ///
 /// Bodies that are not the contract error envelope stay as raw text so the
-/// detail is never silently dropped.
-fn parse_error_body(body: &str) -> (Option<String>, String) {
+/// detail is never silently dropped. `details` is kept apart from `message`
+/// because callers act on it: an ambiguous-symbol answer carries the candidate
+/// ids there.
+fn parse_error_body(body: &str) -> (Option<String>, String, Option<String>) {
     match serde_json::from_str::<ErrorResponse>(body) {
         Ok(error) => {
-            let message = match error.error.details {
-                Some(details) if !details.is_empty() => {
-                    format!("{} ({details})", error.error.message)
-                }
-                _ => error.error.message,
-            };
-            (Some(error.error.code), message)
+            let details = error.error.details.filter(|details| !details.is_empty());
+            (Some(error.error.code), error.error.message, details)
         }
         Err(_) => {
             let trimmed = body.trim();
             if trimmed.is_empty() {
-                (None, "empty response body".to_string())
+                (None, "empty response body".to_string(), None)
             } else {
-                (None, trimmed.to_string())
+                (None, trimmed.to_string(), None)
             }
         }
     }
@@ -273,6 +305,55 @@ mod tests {
             assert!(text.contains("backend down"), "detail lost: {text}");
             assert!(text.contains("SERVICE_UNAVAILABLE"), "code lost: {text}");
         }
+    }
+
+    #[test]
+    fn details_stay_out_of_the_message() {
+        let raw = serde_json::json!({
+            "success": false,
+            "error": {
+                "code": "AMBIGUOUS_SYMBOL",
+                "message": "3 entities match",
+                "details": "[{\"stable_id\":\"sym_a\",\"file_path\":\"a.rs\",\"scoped_name\":\"a::run\",\"kind\":\"function\"}]",
+            },
+        })
+        .to_string();
+        let error = ClientError::from_failure(ApiMethod::Post, "/api/graph/ego", 400, &raw);
+        let ClientError::Rejected {
+            message, details, ..
+        } = &error
+        else {
+            panic!("expected a rejection");
+        };
+        assert_eq!(message, "3 entities match");
+        assert!(details.as_deref().is_some_and(|d| d.contains("sym_a")));
+        let candidates = error.symbol_candidates();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].stable_id, "sym_a");
+        assert!(error.to_string().contains("sym_a"), "display keeps details");
+    }
+
+    #[test]
+    fn a_details_payload_that_is_not_a_candidate_list_yields_none() {
+        let plain = serde_json::json!({
+            "success": false,
+            "error": {
+                "code": "ENTITY_NOT_FOUND",
+                "message": "unknown seed",
+                "details": "Seed must be a stable symbol ID",
+            },
+        })
+        .to_string();
+        let error = ClientError::from_failure(ApiMethod::Post, "/api/graph/ego", 404, &plain);
+        assert_eq!(error.details(), Some("Seed must be a stable symbol ID"));
+        assert!(error.symbol_candidates().is_empty());
+    }
+
+    #[test]
+    fn a_failure_without_a_body_has_no_details() {
+        let error = ClientError::from_failure(ApiMethod::Post, "/api/graph/ego", 400, "<html>bad");
+        assert_eq!(error.details(), None);
+        assert!(error.symbol_candidates().is_empty());
     }
 
     #[test]

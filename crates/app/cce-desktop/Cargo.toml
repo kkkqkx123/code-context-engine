@@ -43,6 +43,14 @@ toml = "1.1"
 # Local sources only (see [workspace] above for why).
 gpui-kit = { path = "../../gpui-kit/crates/kit", default-features = false, features = ["component", "assets"] }
 gpui-tray = { path = "../../gpui-kit/crates/tray", default-features = false, features = ["gpui-kit"] }
+# compograph lives in a third workspace (crates/gpui-kit/crates/compograph) whose
+# manifest pins the same `gpui-pre =0.3.10` snapshot this workspace resolves, so
+# the GPUI types unify and no duplicate snapshot enters the graph.
+compograph-graph = { path = "../../gpui-kit/crates/compograph/crates/cg-graph" }
+compograph-interact = { path = "../../gpui-kit/crates/compograph/crates/cg-interact" }
+compograph-layout = { path = "../../gpui-kit/crates/compograph/crates/cg-layout" }
+compograph-render = { path = "../../gpui-kit/crates/compograph/crates/cg-render" }
+compograph-types = { path = "../../gpui-kit/crates/compograph/crates/cg-types" }
 cce-client = { path = "../cce-client" }
 cce-api = { path = "../cce-api" }
 anyhow.workspace = true

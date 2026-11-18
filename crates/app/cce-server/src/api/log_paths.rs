@@ -1,14 +1,12 @@
-//! Console-only log endpoints.
+//! Console log routes.
 //!
-//! These routes serve the web console and are intentionally outside the shared
-//! contract in `cce-api`. No Rust consumer calls them and their payloads are
-//! not modeled as wire types, so keeping them here prevents contract bloat
-//! and keeps `cce-client` coverage complete by construction.
+//! The HTTP log endpoints are part of the shared contract now: their payloads
+//! live in `cce_api::models::logs`, so the paths come from `cce_api::paths`
+//! and the router registers the same templates the client expands. Only the
+//! WebSocket stream stays outside the contract, because its frames are not
+//! HTTP payloads.
 
-pub const LOGS: &str = "/api/logs";
-pub const LOGS_FILES: &str = "/api/logs/files";
-pub const LOGS_FILE_TEMPLATE: &str = "/api/logs/files/{name}";
-pub const LOGS_FILE_DOWNLOAD_TEMPLATE: &str = "/api/logs/files/{name}/download";
-pub const LOGS_ROTATE: &str = "/api/logs/rotate";
-pub const LOGS_CONFIG: &str = "/api/logs/config";
-pub const LOGS_WS: &str = "/ws/logs";
+pub use cce_api::paths::{
+    LOGS, LOGS_CONFIG, LOGS_FILE_DOWNLOAD_TEMPLATE, LOGS_FILE_TEMPLATE, LOGS_FILES, LOGS_ROTATE,
+    LOGS_WS,
+};

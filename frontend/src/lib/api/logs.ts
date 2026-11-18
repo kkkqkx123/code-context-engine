@@ -1,106 +1,94 @@
-import { BASE_URL } from '#api/client';
+/**
+ * Logs API
+ * In-memory log buffer, log files and logger settings.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts), so this
+ * module no longer hand-parses payloads or builds URLs beyond the two
+ * non-JSON cases called out below.
+ */
 
-export interface LogEntry {
-	timestamp: string;
-	level: string;
-	target: string;
-	message: string;
-	fields: Record<string, unknown>;
-}
+import { ApiError, BASE_URL, call, client } from '#api/client';
+import type { components } from './schema';
 
-export interface LogsResponse {
-	entries: LogEntry[];
-	total: number;
-	page: number;
-	page_size: number;
-}
+export type LogEntry = components['schemas']['LogEntry'];
+export type LogsResponse = components['schemas']['LogsResponse'];
+export type LogFileInfo = components['schemas']['LogFileInfo'];
+export type LogConfig = components['schemas']['LogConfig'];
+export type UpdateLogConfigRequest =
+	components['schemas']['UpdateLogConfigRequest'];
 
-export interface LogFileInfo {
-	name: string;
-	size: number;
-	modified: string;
-}
-
-export interface LogConfig {
-	level: string;
-	output: string;
-	format: string;
-	file: string | null;
-	filter: string | null;
-	max_file_size_mb: number | null;
-	max_files: number | null;
-	max_total_size_mb: number | null;
-	enable_http_api: boolean;
-	ws_capacity: number;
-	memory_buffer_size: number;
-}
+export type LogsQuery = {
+	level?: string;
+	module?: string;
+	query?: string;
+	start_time?: string;
+	end_time?: string;
+	page?: number;
+	page_size?: number;
+};
 
 export const logsApi = {
-	async getLogs(params: {
-		level?: string;
-		module?: string;
-		query?: string;
-		start_time?: string;
-		end_time?: string;
-		page?: number;
-		page_size?: number;
-	}): Promise<LogsResponse> {
-		const qs = new URLSearchParams();
-		if (params.level) qs.set('level', params.level);
-		if (params.module) qs.set('module', params.module);
-		if (params.query) qs.set('query', params.query);
-		if (params.start_time) qs.set('start_time', params.start_time);
-		if (params.end_time) qs.set('end_time', params.end_time);
-		if (params.page) qs.set('page', String(params.page));
-		if (params.page_size) qs.set('page_size', String(params.page_size));
-		const res = await fetch(`${BASE_URL}/api/logs?${qs.toString()}`);
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		return res.json();
-	},
+	// One page of the captured buffer, filtered server side
+	getLogs: (params: LogsQuery): Promise<LogsResponse> =>
+		call(client.GET('/api/logs', { params: { query: params } })),
 
-	async listFiles(): Promise<LogFileInfo[]> {
-		const res = await fetch(`${BASE_URL}/api/logs/files`);
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		return res.json();
-	},
+	// Files present in the configured log directory
+	listFiles: (): Promise<LogFileInfo[]> => call(client.GET('/api/logs/files')),
 
+	// Non-JSON exception: the download answers with an opaque attachment, so
+	// there is no typed payload to return. The URL still comes from the
+	// contract path, rendered here because the browser downloads it directly
+	// instead of the client buffering the bytes.
 	downloadUrl(name: string): string {
 		return `${BASE_URL}/api/logs/files/${encodeURIComponent(name)}/download`;
 	},
 
-	async deleteFile(name: string): Promise<void> {
-		const res = await fetch(
-			`${BASE_URL}/api/logs/files/${encodeURIComponent(name)}`,
-			{ method: 'DELETE' },
-		);
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-	},
-
-	async rotate(): Promise<void> {
-		const res = await fetch(`${BASE_URL}/api/logs/rotate`, { method: 'POST' });
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-	},
-
-	async getConfig(): Promise<LogConfig> {
-		const res = await fetch(`${BASE_URL}/api/logs/config`);
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		return res.json();
-	},
-
-	async updateConfig(data: {
-		level?: string;
-		format?: string;
-		filter?: string;
-	}): Promise<void> {
-		const res = await fetch(`${BASE_URL}/api/logs/config`, {
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(data),
+	// Remove one log file; the server refuses the active file with 403
+	deleteFile: async (name: string): Promise<void> => {
+		const res = await client.DELETE('/api/logs/files/{name}', {
+			params: { path: { name } },
 		});
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		if (res.error !== undefined && res.error !== null) {
+			throw new ApiError(
+				'Log file could not be deleted',
+				res.response?.status ?? 0,
+				undefined,
+				res.error,
+			);
+		}
+	},
+
+	// Apply the retention policy now
+	rotate: async (): Promise<void> => {
+		const res = await client.POST('/api/logs/rotate');
+		if (res.error !== undefined && res.error !== null) {
+			throw new ApiError(
+				'Log retention could not be applied',
+				res.response?.status ?? 0,
+				undefined,
+				res.error,
+			);
+		}
+	},
+
+	// Effective logger configuration of the running process
+	getConfig: (): Promise<LogConfig> => call(client.GET('/api/logs/config')),
+
+	// Change level, format or filter of the running logger
+	updateConfig: async (data: UpdateLogConfigRequest): Promise<void> => {
+		const res = await client.PUT('/api/logs/config', { body: data });
+		if (res.error !== undefined && res.error !== null) {
+			throw new ApiError(
+				'Logger settings could not be saved',
+				res.response?.status ?? 0,
+				undefined,
+				res.error,
+			);
+		}
 	},
 };
 
+// Non-JSON exception: the realtime viewer needs a WebSocket URL, which is not
+// an HTTP operation, so it stays outside the typed client.
 export function wsLogsUrl(): string {
 	const base = BASE_URL || window.location.origin;
 	const url = new URL('/ws/logs', base);

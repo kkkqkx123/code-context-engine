@@ -69,6 +69,13 @@ use super::handlers;
         handlers::metrics::handle_get_metrics_json,
         handlers::metrics::handle_get_metrics_history,
         handlers::metrics::handle_cleanup_metrics,
+        handlers::logs::handle_get_logs,
+        handlers::logs::handle_list_log_files,
+        handlers::logs::handle_download_log_file,
+        handlers::logs::handle_delete_log_file,
+        handlers::logs::handle_rotate_logs,
+        handlers::logs::handle_get_log_config,
+        handlers::logs::handle_update_log_config,
         handlers::watch::handle_start_watch,
         handlers::watch::handle_stop_watch,
         handlers::watch::handle_watch_status,
@@ -109,6 +116,7 @@ use super::handlers;
         (name = "Entity", description = "Entity detail and relation queries"),
         (name = "Graph", description = "Graph traversal over the relation snapshot"),
         (name = "Metrics", description = "Metrics export and retention"),
+        (name = "Logs", description = "Console log buffer, files and logger settings"),
         (name = "Watch", description = "Hot-reload file watching"),
         (name = "Config", description = "Server configuration management"),
         (name = "Qdrant", description = "Embedded Qdrant process lifecycle"),
@@ -215,13 +223,10 @@ mod tests {
         true
     }
 
-    /// Dev-only documentation endpoint, not part of the contract.
-    /// Console-only log endpoints are also excluded: they live in
-    /// `log_paths` and intentionally have no OpenAPI annotation.
+    /// Dev-only documentation endpoint and the WebSocket log stream, neither
+    /// of which is an HTTP payload and so neither belongs in the contract.
     fn is_ignored_path(path: &str) -> bool {
-        path.starts_with("/api-docs")
-            || path.starts_with("/api/logs")
-            || path.starts_with("/ws/logs")
+        path.starts_with("/api-docs") || path.starts_with("/ws/logs")
     }
 
     fn feature_enabled(name: &str) -> bool {

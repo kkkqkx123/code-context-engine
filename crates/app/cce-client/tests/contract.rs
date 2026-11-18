@@ -2,12 +2,16 @@
 //!
 //! The check reads sources instead of a hand-kept table, so adding a route
 //! constant without a client method fails here rather than waiting for a
-//! consumer to notice. Console-only log endpoints live in
-//! `cce-server::api::log_paths` and never enter this contract.
+//! consumer to notice. Push transports are the one exception: a WebSocket
+//! frame is not a request/response exchange, so `LOGS_WS` has no client method
+//! by design and is listed below.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Route constants that intentionally have no client method.
+const PUSH_TRANSPORTS: [&str; 1] = ["LOGS_WS"];
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -72,6 +76,7 @@ fn every_route_constant_has_a_client_call_site() {
     let missing: Vec<&str> = constants
         .iter()
         .map(String::as_str)
+        .filter(|name| !PUSH_TRANSPORTS.contains(name))
         .filter(|name| !sources.contains(&format!("paths::{name}")))
         .collect();
     assert!(

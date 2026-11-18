@@ -3,8 +3,8 @@
 use cce_api::models::{
     CallChainDirectionParams, CallChainQueryParams, CallChainResponse, CallPathQuery,
     CallPathResponse, ClassImplementationsResponse, ClassInheritanceResponse,
-    ClassificationQueryParams, ClassificationStatsResponse, FunctionCallersResponse,
-    FunctionCallsResponse, FunctionDetailResponse,
+    ClassificationQueryParams, ClassificationRelation, ClassificationStatsResponse,
+    FunctionCallersResponse, FunctionCallsResponse, FunctionDetailResponse,
 };
 use cce_api::paths;
 
@@ -128,7 +128,7 @@ impl Client {
         project_id: i64,
         classification: &str,
         params: &ClassificationQueryParams,
-    ) -> Result<Vec<serde_json::Value>, ClientError> {
+    ) -> Result<Vec<ClassificationRelation>, ClientError> {
         self.get_json_query(
             id_scoped(
                 paths::CLASSIFICATION_DETAIL_TEMPLATE,

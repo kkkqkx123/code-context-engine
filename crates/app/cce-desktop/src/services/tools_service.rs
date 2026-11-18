@@ -6,7 +6,8 @@
 //! against the index on the server.
 
 use cce_api::models::{
-    CompressApiResponse, CompressRequest, DiagnoseApiResponse, DiagnoseRequest,
+    BatchCompressRequest, BatchCompressResponse, BatchFoldItem, BatchFoldRequest,
+    BatchFoldResponse, CompressApiResponse, CompressRequest, DiagnoseApiResponse, DiagnoseRequest,
     FindReferencesRequest, FindReferencesResponse, FoldRequest, FoldResponse, GetSymbolsRequest,
     GetSymbolsResponse, GotoDefinitionRequest, GotoDefinitionResponse, KeywordSearchApiResponse,
     KeywordSearchRequest, KeywordTermOperator,
@@ -47,6 +48,75 @@ pub fn compress(
             include_groups: false,
         };
         client.compress(&request).await
+    })
+}
+
+/// Split a multi-snippet field into batch fold items.
+///
+/// A line of `---` separates snippets, and a snippet may open with a
+/// `# name` line naming it. Both rules are visible in the placeholder text, so
+/// the panel never asks the caller to guess an undocumented format.
+pub fn batch_items(text: &str, language: Option<String>) -> Vec<BatchFoldItem> {
+    let mut items = Vec::new();
+    for (index, block) in text.split("\n---\n").enumerate() {
+        let block = block.trim();
+        if block.is_empty() {
+            continue;
+        }
+        let (name, body) = match block.strip_prefix("# ") {
+            Some(rest) => match rest.split_once('\n') {
+                Some((name, body)) => (Some(name.trim().to_string()), body.trim().to_string()),
+                None => (Some(rest.trim().to_string()), String::new()),
+            },
+            None => (None, block.to_string()),
+        };
+        if body.is_empty() {
+            continue;
+        }
+        items.push(BatchFoldItem {
+            id: name.unwrap_or_else(|| format!("item-{}", index + 1)),
+            text: body,
+            language: language.clone(),
+            file_name: None,
+            max_tokens: None,
+            mode: None,
+        });
+    }
+    items
+}
+
+pub fn fold_batch(
+    cx: &App,
+    client: Client,
+    text: String,
+    language: Option<String>,
+) -> Task<Result<BatchFoldResponse, ClientError>> {
+    let items = batch_items(&text, language.clone());
+    runtime::spawn(cx, async move {
+        let request = BatchFoldRequest {
+            items,
+            language,
+            max_tokens: None,
+            mode: None,
+            max_concurrency: None,
+        };
+        client.fold_batch(&request).await
+    })
+}
+
+pub fn compress_batch(
+    cx: &App,
+    client: Client,
+    paths: Vec<String>,
+) -> Task<Result<BatchCompressResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        let request = BatchCompressRequest {
+            file_paths: paths,
+            include_entities: Some(true),
+            include_groups: None,
+            max_concurrency: 4,
+        };
+        client.compress_batch(&request).await
     })
 }
 

@@ -8,9 +8,11 @@
 use cce_api::models::{
     AdmissionStatsResponse, Bm25HealthResponse, ConfigInfoResponse, ConfigReloadQuery,
     ConfigReloadResponse, ConfigValidateResponse, DeadLetterActionResponse, DeadLetterListResponse,
-    DeadLetterRetryRequest, EmbeddingHealthResponse, HealthStatus, MetricsCleanupQuery,
-    MetricsCleanupResponse, MetricsHistoryQuery, QdrantHealthResponse, RetryQueueDeadResponse,
-    RetryQueueQuery, RetryQueueStatusResponse,
+    DeadLetterRetryRequest, EmbeddingHealthResponse, HealthStatus, LlmTestRequest, LlmTestResponse,
+    MetricsCleanupQuery, MetricsCleanupResponse, MetricsHistoryQuery, ProjectConfigGetResponse,
+    ProjectConfigUpdateRequest, ProjectConfigUpdateResponse, ProjectLlmOverviewResponse,
+    ProjectLlmUpdateRequest, ProjectLlmUpdateResponse, QdrantHealthResponse,
+    RetryQueueDeadResponse, RetryQueueQuery, RetryQueueStatusResponse,
 };
 use cce_client::{Client, ClientError};
 use gpui_kit::{App, Task};
@@ -52,19 +54,41 @@ pub fn metrics_json(cx: &App, client: Client) -> Task<Result<serde_json::Value, 
     runtime::spawn(cx, async move { client.metrics_json().await })
 }
 
+/// One history query: a window plus the optional scope narrowing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryInput {
+    /// Window width used when `from`/`to` are omitted.
+    pub hours: u64,
+    /// Explicit window start, RFC 3339; wins over `hours` together with `to`.
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub metric: Option<String>,
+    /// Restrict to one project, as the web console can.
+    pub project_id: Option<i64>,
+}
+
+impl HistoryInput {
+    /// Resolve the window: explicit bounds win, otherwise the last `hours`.
+    fn window(&self) -> (String, String) {
+        match (self.from.clone(), self.to.clone()) {
+            (Some(from), Some(to)) => (from, to),
+            _ => history_window(self.hours),
+        }
+    }
+}
+
 pub fn metrics_history(
     cx: &App,
     client: Client,
-    hours: u64,
-    metric: Option<String>,
+    input: HistoryInput,
 ) -> Task<Result<Vec<cce_api::models::AggregatedMetric>, ClientError>> {
-    let (from, to) = history_window(hours);
+    let (from, to) = input.window();
     runtime::spawn(cx, async move {
         let query = MetricsHistoryQuery {
             from,
             to,
-            metric,
-            project_id: None,
+            metric: input.metric,
+            project_id: input.project_id,
             operation_type: None,
         };
         client.metrics_history(&query).await
@@ -107,6 +131,63 @@ pub fn config_reload(
         client
             .config_reload(&ConfigReloadQuery { project_id })
             .await
+    })
+}
+
+/// Read the stored project profile document.
+pub fn project_config(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+) -> Task<Result<ProjectConfigGetResponse, ClientError>> {
+    runtime::spawn(cx, async move { client.project_config(project_id).await })
+}
+
+/// Replace the stored project profile document.
+pub fn update_project_config(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+    request: ProjectConfigUpdateRequest,
+) -> Task<Result<ProjectConfigUpdateResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        client.update_project_config(project_id, &request).await
+    })
+}
+
+/// Masked LLM settings of one project.
+pub fn llm_overview(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+) -> Task<Result<ProjectLlmOverviewResponse, ClientError>> {
+    runtime::spawn(
+        cx,
+        async move { client.project_llm_overview(project_id).await },
+    )
+}
+
+/// Patch the project-effective chat and rerank settings.
+pub fn update_llm(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+    request: ProjectLlmUpdateRequest,
+) -> Task<Result<ProjectLlmUpdateResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        client.update_project_llm_config(project_id, &request).await
+    })
+}
+
+/// Probe one configured model without persisting anything.
+pub fn test_llm(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+    request: LlmTestRequest,
+) -> Task<Result<LlmTestResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        client.test_project_llm(project_id, &request).await
     })
 }
 
@@ -210,6 +291,32 @@ pub fn acknowledge_dead_letter(
 }
 
 /// Time window for a metrics history query: the last `hours` hours up to now.
+/// Acknowledge several dead-letter files in one pass.
+///
+/// The wire takes one file per call, so the batch is a sequential loop here
+/// rather than a second endpoint. It stops at the first failure and reports
+/// how many files were acknowledged before it, because a partial result the
+/// caller cannot see is worse than a slow one.
+pub fn acknowledge_dead_letters(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+    files: Vec<String>,
+) -> Task<Result<usize, ClientError>> {
+    runtime::spawn(cx, async move {
+        let mut done = 0;
+        for file_path in files {
+            let request = cce_api::models::DeadLetterAcknowledgeRequest {
+                file_path,
+                module: None,
+            };
+            client.acknowledge_dead_letter(project_id, &request).await?;
+            done += 1;
+        }
+        Ok(done)
+    })
+}
+
 pub fn history_window(hours: u64) -> (String, String) {
     let now = time::unix_seconds();
     let span = hours.saturating_mul(3600);

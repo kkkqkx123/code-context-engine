@@ -4,11 +4,12 @@
 //! entity only mirrors what the UI renders so views can observe it without
 //! touching the client stack. CCE has no login session, so the state tracks
 //! the base URL, the connection lifecycle, the latest health probe, the project
-//! scope every project-bound panel queries within, and the hand-off slot that
-//! carries a search hit into the graph panel.
+//! scope every project-bound panel queries within, the pending cross-panel
+//! navigation request and the newest relation epoch any panel has observed.
 
 use gpui_kit::{App, AppContext as _, Entity, Global, SharedString};
 
+use crate::navigator::{NavRequest, Target};
 use crate::settings::{Density, Locale};
 
 /// Connection lifecycle as displayed in the status bar and by view switching.
@@ -51,18 +52,6 @@ impl ProjectEntry {
     }
 }
 
-/// One graph query handed over from the search panel.
-///
-/// Cross-panel delivery goes through a slot plus a monotonic generation number
-/// so the receiving panel can drop a seed it already applied, and a repeated
-/// click on the same hit still counts as a new delivery.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphSeed {
-    pub entity_id: SharedString,
-    pub label: SharedString,
-    pub generation: u64,
-}
-
 pub struct AppState {
     pub status: ConnectionStatus,
     pub base_url: Option<SharedString>,
@@ -71,8 +60,9 @@ pub struct AppState {
     pub density: Density,
     projects: Vec<ProjectEntry>,
     active_project: Option<i64>,
-    graph_seed: Option<GraphSeed>,
-    seed_generation: u64,
+    nav: Option<NavRequest>,
+    nav_generation: u64,
+    epoch: Option<i64>,
 }
 
 pub struct AppStateGlobal(Entity<AppState>);
@@ -92,8 +82,9 @@ impl AppState {
             density,
             projects: Vec::new(),
             active_project: None,
-            graph_seed: None,
-            seed_generation: 0,
+            nav: None,
+            nav_generation: 0,
+            epoch: None,
         });
         cx.set_global(AppStateGlobal(entity));
     }
@@ -138,7 +129,8 @@ impl AppState {
         self.health = None;
         self.projects.clear();
         self.active_project = None;
-        self.graph_seed = None;
+        self.nav = None;
+        self.epoch = None;
         cx.notify();
     }
 
@@ -185,27 +177,37 @@ impl AppState {
         }
     }
 
-    /// Publish a search hit for the graph panel. Returns the delivery number
+    /// Publish a cross-panel navigation request. Returns the delivery number
     /// the receiver compares against.
-    pub fn deliver_graph_seed(
-        &mut self,
-        entity_id: impl Into<SharedString>,
-        label: impl Into<SharedString>,
-        cx: &mut gpui_kit::Context<Self>,
-    ) -> u64 {
-        self.seed_generation += 1;
-        let seed = GraphSeed {
-            entity_id: entity_id.into(),
-            label: label.into(),
-            generation: self.seed_generation,
-        };
-        self.graph_seed = Some(seed);
+    pub fn navigate(&mut self, target: Target, cx: &mut gpui_kit::Context<Self>) -> u64 {
+        self.nav_generation += 1;
+        self.nav = Some(NavRequest {
+            target,
+            generation: self.nav_generation,
+        });
         cx.notify();
-        self.seed_generation
+        self.nav_generation
     }
 
-    pub fn graph_seed(&self) -> Option<&GraphSeed> {
-        self.graph_seed.as_ref()
+    pub fn pending_nav(&self) -> Option<&NavRequest> {
+        self.nav.as_ref()
+    }
+
+    /// Record the newest relation epoch any panel has observed.
+    ///
+    /// Panels compare the epoch their payload was served from against this
+    /// value, so a result computed before a rebase is flagged instead of
+    /// silently presented as current.
+    pub fn note_epoch(&mut self, epoch: Option<i64>, cx: &mut gpui_kit::Context<Self>) {
+        if epoch.is_none() || epoch == self.epoch {
+            return;
+        }
+        self.epoch = epoch;
+        cx.notify();
+    }
+
+    pub fn epoch(&self) -> Option<i64> {
+        self.epoch
     }
 }
 

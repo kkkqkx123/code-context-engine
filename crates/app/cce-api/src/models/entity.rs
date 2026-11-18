@@ -252,6 +252,38 @@ pub struct ClassificationStatsResponse {
     pub total: usize,
 }
 
+/// One resolved relation in an external-call classification detail view.
+///
+/// This is a deliberate projection of the indexer's `ResolvedRelation`: only
+/// fields that a console can render are part of the wire contract, so adding
+/// an internal field cannot silently change the HTTP response.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ClassificationRelation {
+    /// Numeric entity id of the caller.
+    pub caller_id: u64,
+    /// Stable symbol id of the caller, falling back to `entity:<id>`.
+    pub caller_stable_id: String,
+    /// Caller name, or `Unknown` when the snapshot has no function record.
+    pub caller_name: String,
+    /// File that contains the call site.
+    pub caller_file_path: String,
+    /// Numeric entity id of the callee, absent for external references.
+    pub callee_id: Option<u64>,
+    /// Callee name as extracted or resolved.
+    pub callee_name: String,
+    /// Wire name of the relation type, e.g. `call.method`.
+    pub relation_type: String,
+    /// Canonical classification label: stdlib, external, dev, local, unknown.
+    pub classification: String,
+    /// Library, package or raw target carried by the classification, if any.
+    pub external_target: Option<String>,
+    pub is_external: bool,
+    /// Zero-indexed row of the call site.
+    pub call_row: usize,
+    pub overload_signature: Option<String>,
+    pub call_frequency: u64,
+}
+
 /// Entity search request (FTS5)
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EntitySearchRequest {

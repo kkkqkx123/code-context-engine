@@ -41,6 +41,8 @@ pub fn run(settings: Settings) {
 
         settings::init_global(settings, cx);
         state::AppState::init(cx);
+        crate::components::toast::init(cx);
+        crate::services::refresh::init(cx);
         init_runtime(cx);
         ClientStore::init(cx);
         crate::dock_layout::init(cx);
@@ -49,6 +51,9 @@ pub fn run(settings: Settings) {
         bind_keys(cx);
         apply_saved_theme(cx);
         start_heartbeat(cx);
+        // One refresh loop for every polling panel; the task is detached
+        // because it lives as long as the app does.
+        let _refresh = crate::services::refresh::start(cx);
         crate::tray::init(cx);
         open_main_window(cx);
     });

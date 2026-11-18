@@ -19,6 +19,7 @@ use crate::components::{
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
 use crate::services::ops_service;
+use crate::services::refresh;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
 
@@ -82,6 +83,12 @@ impl HealthView {
             .ok();
         })
         .detach();
+    }
+
+    /// Re-probe on the next refresh tick.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        refresh::touch(crate::views::PanelKind::Health, cx);
+        self.load(cx);
     }
 
     fn render_answer(&self, answer: &Answer, cx: &Context<Self>) -> AnyElement {

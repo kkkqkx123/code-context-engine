@@ -6,31 +6,26 @@ use axum::{
     http::{StatusCode, header},
     response::IntoResponse,
 };
-use serde::{Deserialize, Serialize};
 use std::path::Path as StdPath;
 
+use cce_api::models::{
+    ErrorResponse, LogConfig, LogEntry, LogFileInfo, LogsQuery, LogsResponse,
+    UpdateLogConfigRequest,
+};
 use cce_config::Settings;
-use cce_logging::{LogEvent, recent, subscribe};
+use cce_logging::{recent, subscribe};
 
-#[derive(Deserialize)]
-pub struct LogsQuery {
-    pub level: Option<String>,
-    pub module: Option<String>,
-    pub query: Option<String>,
-    pub start_time: Option<String>,
-    pub end_time: Option<String>,
-    pub page: Option<usize>,
-    pub page_size: Option<usize>,
-}
-
-#[derive(Serialize)]
-pub struct LogsResponse {
-    pub entries: Vec<LogEvent>,
-    pub total: usize,
-    pub page: usize,
-    pub page_size: usize,
-}
-
+/// GET /api/logs
+///
+/// One page of the in-memory log buffer, filtered server side.
+#[utoipa::path(
+    get, path = "/api/logs", tag = "Logs",
+    params(LogsQuery),
+    responses(
+        (status = 200, body = LogsResponse, description = "Success"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_get_logs(Query(q): Query<LogsQuery>) -> Json<LogsResponse> {
     let mut entries = recent(q.level.as_deref(), q.module.as_deref(), q.query.as_deref());
 
@@ -46,10 +41,17 @@ pub async fn handle_get_logs(Query(q): Query<LogsQuery>) -> Json<LogsResponse> {
     let page = q.page.unwrap_or(1).max(1);
     let page_size = q.page_size.unwrap_or(100).clamp(1, 1000);
     let start_idx = (page - 1) * page_size;
-    let page_entries: Vec<LogEvent> = entries
+    let page_entries: Vec<LogEntry> = entries
         .into_iter()
         .skip(start_idx)
         .take(page_size)
+        .map(|event| LogEntry {
+            timestamp: event.timestamp,
+            level: event.level,
+            target: event.target,
+            message: event.message,
+            fields: event.fields,
+        })
         .collect();
 
     Json(LogsResponse {
@@ -60,13 +62,16 @@ pub async fn handle_get_logs(Query(q): Query<LogsQuery>) -> Json<LogsResponse> {
     })
 }
 
-#[derive(Serialize)]
-pub struct LogFileInfo {
-    pub name: String,
-    pub size: u64,
-    pub modified: String,
-}
-
+/// GET /api/logs/files
+///
+/// Files currently present in the configured log directory.
+#[utoipa::path(
+    get, path = "/api/logs/files", tag = "Logs",
+    responses(
+        (status = 200, body = Vec<LogFileInfo>, description = "Success"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_list_log_files() -> Result<Json<Vec<LogFileInfo>>, StatusCode> {
     let cfg = Settings::logger().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let file_path = cfg.file.clone().unwrap_or_default();
@@ -110,6 +115,18 @@ pub async fn handle_list_log_files() -> Result<Json<Vec<LogFileInfo>>, StatusCod
     Ok(Json(files))
 }
 
+/// GET /api/logs/files/{name}/download
+///
+/// Raw bytes of one log file as an attachment.
+#[utoipa::path(
+    get, path = "/api/logs/files/{name}/download", tag = "Logs",
+    params(("name" = String, Path, description = "Log file name")),
+    responses(
+        (status = 200, description = "File contents", content_type = "application/octet-stream"),
+        (status = 400, body = ErrorResponse, description = "Invalid file name"),
+        (status = 404, body = ErrorResponse, description = "File not found")
+    )
+)]
 pub async fn handle_download_log_file(
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -135,6 +152,19 @@ pub async fn handle_download_log_file(
     ))
 }
 
+/// DELETE /api/logs/files/{name}
+///
+/// Removes one log file; the active file is refused.
+#[utoipa::path(
+    delete, path = "/api/logs/files/{name}", tag = "Logs",
+    params(("name" = String, Path, description = "Log file name")),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 400, body = ErrorResponse, description = "Invalid file name"),
+        (status = 403, body = ErrorResponse, description = "Refused for the active file"),
+        (status = 404, body = ErrorResponse, description = "File not found")
+    )
+)]
 pub async fn handle_delete_log_file(Path(name): Path<String>) -> StatusCode {
     if name.contains("..") || name.contains('/') || name.contains('\\') {
         return StatusCode::BAD_REQUEST;
@@ -163,6 +193,16 @@ pub async fn handle_delete_log_file(Path(name): Path<String>) -> StatusCode {
     }
 }
 
+/// POST /api/logs/rotate
+///
+/// Applies the retention policy now instead of waiting for the next write.
+#[utoipa::path(
+    post, path = "/api/logs/rotate", tag = "Logs",
+    responses(
+        (status = 204, description = "Retention applied"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_rotate_logs() -> StatusCode {
     if let Ok(cfg) = Settings::logger() {
         cce_logging::cleanup_logs(&cfg);
@@ -170,24 +210,19 @@ pub async fn handle_rotate_logs() -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-#[derive(Serialize)]
-pub struct LogConfigResponse {
-    pub level: String,
-    pub output: String,
-    pub format: String,
-    pub file: Option<String>,
-    pub filter: Option<String>,
-    pub max_file_size_mb: Option<u64>,
-    pub max_files: Option<usize>,
-    pub max_total_size_mb: Option<u64>,
-    pub enable_http_api: bool,
-    pub ws_capacity: usize,
-    pub memory_buffer_size: usize,
-}
-
-pub async fn handle_get_log_config() -> Json<LogConfigResponse> {
+/// GET /api/logs/config
+///
+/// Effective logger configuration of the running process.
+#[utoipa::path(
+    get, path = "/api/logs/config", tag = "Logs",
+    responses(
+        (status = 200, body = LogConfig, description = "Success"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_get_log_config() -> Json<LogConfig> {
     let cfg = Settings::logger().unwrap_or_default();
-    Json(LogConfigResponse {
+    Json(LogConfig {
         level: cfg.level.to_string(),
         output: cfg.output.to_string(),
         format: cfg.format.to_string(),
@@ -202,13 +237,17 @@ pub async fn handle_get_log_config() -> Json<LogConfigResponse> {
     })
 }
 
-#[derive(Deserialize)]
-pub struct UpdateLogConfigRequest {
-    pub level: Option<String>,
-    pub format: Option<String>,
-    pub filter: Option<String>,
-}
-
+/// PUT /api/logs/config
+///
+/// Changes the level, format or filter of the running logger.
+#[utoipa::path(
+    put, path = "/api/logs/config", tag = "Logs",
+    request_body = UpdateLogConfigRequest,
+    responses(
+        (status = 204, description = "Applied"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_update_log_config(Json(req): Json<UpdateLogConfigRequest>) -> StatusCode {
     let mut cfg = match Settings::logger() {
         Ok(c) => c,

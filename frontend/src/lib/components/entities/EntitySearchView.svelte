@@ -226,18 +226,20 @@
 									onclick={(e) => {
 										e.preventDefault();
 										goto(resolve(`/entities/${entity.id}`));
-									}}>{entity.name}</a
+									}}
 								>
+									{entity.name}
+								</a>
 							</td>
-							<td
-								><Badge
+							<td>
+								<Badge
 									label={entity.kind}
 									variant={kindBadgeVariant(entity.kind)}
-								/></td
-							>
-							<td class="cell-signature"
-								>{truncateSignature(entity.signature)}</td
-							>
+								/>
+							</td>
+							<td class="cell-signature">
+								{truncateSignature(entity.signature)}
+							</td>
 							<td class="cell-mono">#{entity.file_id}</td>
 							<td class="cell-mono">
 								{#if entity.span_start_row !== null && entity.span_start_row !== undefined}
@@ -254,6 +256,38 @@
 				</tbody>
 			</table>
 		</div>
+		{#if entityStore.classificationRelations.length > 0}
+			<div class="detail-heading">
+				{entityStore.classificationCategory} · {entityStore
+					.classificationRelations.length} relations
+			</div>
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Caller</th>
+							<th>Callee</th>
+							<th>Type</th>
+							<th>Target</th>
+							<th>Call site</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each entityStore.classificationRelations as relation (relation.caller_id + ':' + relation.callee_name + ':' + relation.call_row)}
+							<tr>
+								<td class="cell-mono">{relation.caller_name}</td>
+								<td class="cell-mono">{relation.callee_name}</td>
+								<td class="cell-mono">{relation.relation_type}</td>
+								<td class="cell-mono">{relation.external_target ?? '—'}</td>
+								<td class="cell-signature">
+									{relation.caller_file_path}:{relation.call_row + 1}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 		<div class="result-meta">
 			{results.length} of {total} matches · {elapsedMs} ms
 		</div>

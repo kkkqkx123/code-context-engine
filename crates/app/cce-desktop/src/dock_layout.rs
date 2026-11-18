@@ -23,45 +23,43 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::{empty_state, export_button, export_notice, page_body, panel_header};
 use crate::i18n::{locale, t};
+use crate::navigator::Target;
 use crate::settings;
 use crate::state::AppState;
 use crate::views::{
-    ConfigView, EntityView, GraphView, HealthView, IndexView, MetricsView, PanelKind, ProjectsView,
-    SearchView, StorageView, TasksView, ToolsView, WatchView,
+    ConfigView, EntityView, GraphView, HealthView, IndexView, LogsView, MetricsView, PanelKind,
+    ProjectsView, SearchView, StorageView, TasksView, ToolsView, WatchView,
 };
 
 /// Bump when the default layout or the panel identity set changes.
-pub const LAYOUT_VERSION: usize = 1;
+pub const LAYOUT_VERSION: usize = 2;
 const LAYOUT_FILE: &str = "layout.json";
 
 /// Handle the dock holds for a panel entity.
 pub type DockPanelHandle = Arc<dyn gpui_kit::component::dock::BasePanelView>;
 
-/// Typed handles kept alongside the dock so navigation can select a tab and
-/// cross-panel delivery can reach the graph view without trait objects.
+/// Typed handles kept alongside the dock so navigation can select a tab,
+/// cross-panel links can reach their receiver and the refresh loop can ask a
+/// panel to replay without trait objects.
+///
+/// Only the variants that need to be addressed carry their entity; the rest
+/// stay unit values so the dock remains the single owner of a panel nobody
+/// links to.
 #[derive(Clone)]
 pub enum WorkspacePanel {
     Search,
     Graph(Entity<GraphView>),
-    Entities,
+    Entities(Entity<EntityView>),
     Index,
     Projects,
     Tools,
-    Storage,
-    Watch,
-    Health,
-    Metrics,
+    Storage(Entity<StorageView>),
+    Watch(Entity<WatchView>),
+    Health(Entity<HealthView>),
+    Metrics(Entity<MetricsView>),
     Config,
-    Tasks,
-}
-
-impl WorkspacePanel {
-    fn graph(&self) -> Option<&Entity<GraphView>> {
-        match self {
-            Self::Graph(view) => Some(view),
-            _ => None,
-        }
-    }
+    Tasks(Entity<TasksView>),
+    Logs(Entity<LogsView>),
 }
 
 #[derive(Clone)]
@@ -245,6 +243,7 @@ pub fn register_panels(cx: &mut App) {
     register!(PanelKind::Metrics);
     register!(PanelKind::Config);
     register!(PanelKind::Tasks);
+    register!(PanelKind::Logs);
 }
 
 /// Create a fresh view, register its typed handle and wrap it for the dock.
@@ -273,7 +272,7 @@ pub fn build_panel(
             window,
             cx,
             |window, cx| cx.new(|cx| EntityView::new(window, cx)),
-            |_| WorkspacePanel::Entities,
+            WorkspacePanel::Entities,
         ),
         PanelKind::Index => make(
             kind,
@@ -301,26 +300,26 @@ pub fn build_panel(
             window,
             cx,
             |window, cx| cx.new(|cx| StorageView::new(window, cx)),
-            |_| WorkspacePanel::Storage,
+            WorkspacePanel::Storage,
         ),
         PanelKind::Watch => make(
             kind,
             window,
             cx,
             |window, cx| cx.new(|cx| WatchView::new(window, cx)),
-            |_| WorkspacePanel::Watch,
+            WorkspacePanel::Watch,
         ),
         PanelKind::Health => {
             let view = cx.new(|cx| HealthView::new(window, cx));
             view.update(cx, |health, cx| health.load(cx));
-            wrap_panel(kind, view, cx, |_| WorkspacePanel::Health)
+            wrap_panel(kind, view, cx, WorkspacePanel::Health)
         }
         PanelKind::Metrics => make(
             kind,
             window,
             cx,
             |window, cx| cx.new(|cx| MetricsView::new(window, cx)),
-            |_| WorkspacePanel::Metrics,
+            WorkspacePanel::Metrics,
         ),
         PanelKind::Config => make(
             kind,
@@ -334,7 +333,14 @@ pub fn build_panel(
             window,
             cx,
             |window, cx| cx.new(|cx| TasksView::new(window, cx)),
-            |_| WorkspacePanel::Tasks,
+            WorkspacePanel::Tasks,
+        ),
+        PanelKind::Logs => make(
+            kind,
+            window,
+            cx,
+            |window, cx| cx.new(|cx| LogsView::new(window, cx)),
+            WorkspacePanel::Logs,
         ),
     }
 }
@@ -389,9 +395,73 @@ pub fn panel(kind: PanelKind, cx: &App) -> Option<PanelEntry> {
         .cloned()
 }
 
-/// Typed handle of the graph panel, used by cross-panel delivery.
-pub fn graph(cx: &App) -> Option<Entity<GraphView>> {
-    panel(PanelKind::Graph, cx).and_then(|entry| entry.view.graph().cloned())
+/// Hand a navigation target to the panel that answers it.
+///
+/// Returns `false` when that panel is not open yet, so the window can open it
+/// and deliver again instead of losing the request. Dispatch is a `match` on
+/// the typed handle: no trait object and no second registry.
+pub fn apply_nav(target: &Target, window: &mut Window, cx: &mut App) -> bool {
+    let kind = target.panel();
+    let Some(entry) = panel(kind, cx) else {
+        return false;
+    };
+    match (&entry.view, target) {
+        (WorkspacePanel::Graph(view), Target::GraphSeed { .. } | Target::GraphFile { .. }) => {
+            let view = view.clone();
+            let target = target.clone();
+            view.update(cx, |view, cx| {
+                view.on_navigate(&target, window, cx);
+            });
+            true
+        }
+        (WorkspacePanel::Entities(view), Target::Entity { .. }) => {
+            let view = view.clone();
+            let target = target.clone();
+            view.update(cx, |view, cx| {
+                view.on_navigate(&target, window, cx);
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Ask one open panel to re-run its last request.
+///
+/// A panel that is not open, or that has no live answer yet, ignores the
+/// signal: replaying an untouched panel would turn an empty state into an
+/// unsolicited request.
+pub fn replay(kind: PanelKind, cx: &mut App) {
+    let Some(entry) = panel(kind, cx) else {
+        return;
+    };
+    match &entry.view {
+        WorkspacePanel::Health(view) => {
+            let view = view.clone();
+            view.update(cx, |view, cx| view.replay(cx));
+        }
+        WorkspacePanel::Metrics(view) => {
+            let view = view.clone();
+            view.update(cx, |view, cx| view.replay(cx));
+        }
+        WorkspacePanel::Watch(view) => {
+            let view = view.clone();
+            view.update(cx, |view, cx| view.replay(cx));
+        }
+        WorkspacePanel::Storage(view) => {
+            let view = view.clone();
+            view.update(cx, |view, cx| view.replay(cx));
+        }
+        WorkspacePanel::Tasks(view) => {
+            let view = view.clone();
+            view.update(cx, |view, cx| view.replay(cx));
+        }
+        WorkspacePanel::Logs(view) => {
+            let view = view.clone();
+            view.update(cx, |view, cx| view.replay(cx));
+        }
+        _ => {}
+    }
 }
 
 fn remove_handle(kind: PanelKind, id: PanelId, cx: &App) {

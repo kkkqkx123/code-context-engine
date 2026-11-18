@@ -17,14 +17,24 @@ use crate::runtime;
 pub const QUERY_TYPES: [&str; 3] = ["hybrid", "vector", "bm25"];
 
 /// One single-query retrieval request as the panel collects it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SearchInput {
     pub project_id: i64,
     pub query: String,
     pub query_type: String,
+    /// Rows wanted for this page, already multiplied by the page number: the
+    /// wire request has no offset, so the caller asks for everything up to the
+    /// end of its page and slices.
     pub limit: usize,
     pub directory_prefix: Option<String>,
     pub exclude_tests: bool,
+    /// Drop hits below this fused score; `None` keeps the server default.
+    pub min_score: Option<f32>,
+    /// Path globs to keep or drop, in the server's glob syntax.
+    pub include_patterns: Vec<String>,
+    pub exclude_patterns: Vec<String>,
+    /// Per-request rerank override.
+    pub rerank: bool,
 }
 
 impl SearchInput {
@@ -35,14 +45,52 @@ impl SearchInput {
             query: self.query.trim().to_string(),
             query_type: self.query_type.clone(),
             limit: self.limit,
+            min_score: self.min_score,
             directory_prefix: self.directory_prefix.clone(),
+            exclude_patterns: self.exclude_patterns.clone(),
+            include_patterns: self.include_patterns.clone(),
             exclude_content_types: if self.exclude_tests {
                 vec!["test".to_string()]
             } else {
                 Vec::new()
             },
+            enable_rerank: Some(self.rerank),
             ..SearchRequest::default()
         }
+    }
+}
+
+/// One page of a retrieval answer after the client-side slicing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Page {
+    /// Index of the first row shown, one-based.
+    pub first: usize,
+    /// Row count on this page.
+    pub shown: usize,
+    /// Total rows the server reported.
+    pub total: usize,
+}
+
+impl Page {
+    /// Whether the server holds rows past this page.
+    pub fn has_more(&self) -> bool {
+        self.first.saturating_sub(1) + self.shown < self.total
+    }
+}
+
+/// Slice one page out of a response.
+///
+/// The request has no offset, so page `n` asks for `n * page_size` rows and
+/// this function drops the earlier ones. `total` decides whether a next page
+/// exists, never the number of rows received: a server that caps `limit`
+/// would otherwise report "no more rows" while rows remain.
+pub fn page(items: &[SearchResultItem], total: usize, page: usize, page_size: usize) -> Page {
+    let start = page.saturating_mul(page_size);
+    let shown = items.len().saturating_sub(start);
+    Page {
+        first: if shown == 0 { start } else { start + 1 },
+        shown,
+        total,
     }
 }
 
@@ -91,33 +139,46 @@ pub fn sub_queries(text: &str, query_type: &str) -> Vec<SubQueryRequest> {
         .collect()
 }
 
+/// Aggregated retrieval with the same filters as a single query.
+///
+/// The filter set is passed as one value instead of seven arguments so the
+/// single and aggregated paths cannot drift.
+pub struct AggregatedInput {
+    pub project_id: i64,
+    pub queries: Vec<SubQueryRequest>,
+    pub limit: usize,
+    pub directory_prefix: Option<String>,
+    pub exclude_tests: bool,
+    pub min_score: Option<f32>,
+    pub include_patterns: Vec<String>,
+    pub exclude_patterns: Vec<String>,
+    pub rerank: bool,
+}
+
 pub fn run_aggregated(
     cx: &App,
     client: Client,
-    project_id: i64,
-    queries: Vec<SubQueryRequest>,
-    limit: usize,
-    exclude_tests: bool,
+    input: AggregatedInput,
 ) -> Task<Result<SearchResponse, ClientError>> {
     runtime::spawn(cx, async move {
         let request = AggregatedSearchRequest {
-            project_id: Some(project_id),
+            project_id: Some(input.project_id),
             project_path: None,
             query: None,
-            sub_queries: queries,
-            limit,
-            min_score: None,
-            directory_prefix: None,
-            exclude_content_types: if exclude_tests {
+            sub_queries: input.queries,
+            limit: input.limit,
+            min_score: input.min_score,
+            directory_prefix: input.directory_prefix,
+            exclude_content_types: if input.exclude_tests {
                 vec!["test".to_string()]
             } else {
                 Vec::new()
             },
-            exclude_patterns: Vec::new(),
-            include_patterns: Vec::new(),
+            exclude_patterns: input.exclude_patterns,
+            include_patterns: input.include_patterns,
             include_categories: Vec::new(),
             exclude_categories: Vec::new(),
-            enable_rerank: None,
+            enable_rerank: Some(input.rerank),
             rerank_max_candidates: None,
             query_intent: None,
             expand: None,
@@ -178,11 +239,18 @@ mod tests {
             limit: 10,
             directory_prefix: None,
             exclude_tests: true,
+            min_score: Some(0.2),
+            include_patterns: vec!["src/**".to_string()],
+            exclude_patterns: Vec::new(),
+            rerank: true,
         };
         let request = input.request();
         assert_eq!(request.project_id, Some(3));
         assert_eq!(request.query, "retry budget");
         assert_eq!(request.exclude_content_types, vec!["test".to_string()]);
+        assert_eq!(request.min_score, Some(0.2));
+        assert_eq!(request.include_patterns, vec!["src/**".to_string()]);
+        assert_eq!(request.enable_rerank, Some(true));
     }
 
     #[test]
@@ -192,6 +260,40 @@ mod tests {
         assert_eq!(queries[1].text, "beta");
         assert_eq!(queries[0].query_type, "bm25");
         assert!((queries[0].weight - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_page_slices_what_the_request_over_fetched() {
+        let items: Vec<SearchResultItem> = (0..25).map(|_| item(Vec::new(), Vec::new())).collect();
+        let first = page(&items[..10], 120, 0, 10);
+        assert_eq!(
+            first,
+            Page {
+                first: 1,
+                shown: 10,
+                total: 120
+            }
+        );
+        assert!(first.has_more());
+
+        let third = page(&items[..25], 25, 2, 10);
+        assert_eq!(
+            third,
+            Page {
+                first: 21,
+                shown: 5,
+                total: 25
+            }
+        );
+        assert!(!third.has_more(), "the last page stops at total");
+    }
+
+    #[test]
+    fn the_last_page_is_empty_past_the_end() {
+        let items: Vec<SearchResultItem> = vec![item(Vec::new(), Vec::new())];
+        let past = page(&items, 1, 4, 10);
+        assert_eq!(past.shown, 0);
+        assert!(!past.has_more());
     }
 
     #[test]

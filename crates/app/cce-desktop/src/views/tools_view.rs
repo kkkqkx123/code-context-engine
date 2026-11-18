@@ -5,8 +5,9 @@
 //! the indexed project and therefore need the active scope.
 
 use cce_api::models::{
-    CompressApiResponse, DiagnoseApiResponse, FindReferencesResponse, FoldResponse,
-    GetSymbolsResponse, GotoDefinitionResponse, KeywordSearchApiResponse,
+    BatchCompressResponse, BatchFoldResponse, CompressApiResponse, DiagnoseApiResponse,
+    FindReferencesResponse, FoldResponse, GetSymbolsResponse, GotoDefinitionResponse,
+    KeywordSearchApiResponse,
 };
 use gpui_kit::component::{
     ActiveTheme as _, Selectable as _, Sizable as _,
@@ -33,7 +34,7 @@ use crate::services::tools_service;
 use crate::state::AppState;
 use crate::views::PanelKind;
 
-const TOOL_TABS: [&str; 7] = [
+const TOOL_TABS: [&str; 9] = [
     "tools.tab.fold",
     "tools.tab.compress",
     "tools.tab.diagnose",
@@ -41,12 +42,16 @@ const TOOL_TABS: [&str; 7] = [
     "tools.tab.symbols",
     "tools.tab.references",
     "tools.tab.definition",
+    "tools.tab.foldBatch",
+    "tools.tab.compressBatch",
 ];
 
 #[derive(Debug)]
 enum ToolAnswer {
     Fold(FoldResponse),
     Compress(CompressApiResponse),
+    FoldBatch(BatchFoldResponse),
+    CompressBatch(BatchCompressResponse),
     Diagnose(DiagnoseApiResponse),
     Keyword(KeywordSearchApiResponse),
     Symbols(GetSymbolsResponse),
@@ -62,6 +67,8 @@ pub struct ToolsView {
     symbol: Entity<InputState>,
     query: Entity<InputState>,
     top_n: Entity<InputState>,
+    /// One file path per line, used by the batch compress tab.
+    paths: Entity<TextareaState>,
     tab: usize,
     include_ast: bool,
     all_terms: bool,
@@ -97,6 +104,11 @@ impl ToolsView {
                 .placeholder(t("tools.topNPlaceholder", locale))
                 .default_value("20")
         });
+        let paths = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .rows(4)
+                .placeholder(t("tools.pathsPlaceholder", locale))
+        });
         let history = history::entries(HistoryKind::Tools, cx);
         Self {
             code,
@@ -106,6 +118,7 @@ impl ToolsView {
             symbol,
             query,
             top_n,
+            paths,
             tab: 0,
             include_ast: false,
             all_terms: false,
@@ -144,8 +157,16 @@ impl ToolsView {
 
         // Snippet tools need text, file tools need a path, and both navigation
         // tools need a usable line number.
-        if matches!(tab, 0 | 2) && code.trim().is_empty() {
+        if matches!(tab, 0 | 2 | 7) && code.trim().is_empty() {
             self.fail("tools.codeRequired", cx);
+            return;
+        }
+        if tab == 7 && tools_service::batch_items(&code, language.clone()).is_empty() {
+            self.fail("tools.codeRequired", cx);
+            return;
+        }
+        if tab == 8 && crate::services::split_list(&self.paths.read(cx).value()).is_empty() {
+            self.fail("tools.pathsRequired", cx);
             return;
         }
         if matches!(tab, 1 | 4 | 5 | 6) && file.is_empty() {
@@ -182,7 +203,7 @@ impl ToolsView {
         self.history = history::entries(HistoryKind::Tools, cx);
 
         // Project-scoped tools need a scope; snippet tools do not.
-        let project_id = if matches!(tab, 3..=6) {
+        let project_id = if matches!(tab, 3..=6 | 8) {
             match AppState::global(cx).read(cx).active_project_id() {
                 Some(id) => Some(id),
                 None => {
@@ -213,6 +234,27 @@ impl ToolsView {
                 request::spawn_into(cx, task, |this, outcome, cx| {
                     this.answer = match outcome {
                         Ok(value) => Load::Ready(ToolAnswer::Compress(value)),
+                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
+                    };
+                    cx.notify();
+                });
+            }
+            7 => {
+                let task = tools_service::fold_batch(cx, client, code, language);
+                request::spawn_into(cx, task, |this, outcome, cx| {
+                    this.answer = match outcome {
+                        Ok(value) => Load::Ready(ToolAnswer::FoldBatch(value)),
+                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
+                    };
+                    cx.notify();
+                });
+            }
+            8 => {
+                let paths = crate::services::split_list(&self.paths.read(cx).value());
+                let task = tools_service::compress_batch(cx, client, paths);
+                request::spawn_into(cx, task, |this, outcome, cx| {
+                    this.answer = match outcome {
+                        Ok(value) => Load::Ready(ToolAnswer::CompressBatch(value)),
                         Err(error) => Load::Failed(request::Failure::from_error(&error)),
                     };
                     cx.notify();
@@ -280,6 +322,7 @@ impl ToolsView {
         self.answer = Load::Failed(request::Failure {
             key,
             detail: SharedString::default(),
+            candidates: Vec::new(),
         });
         cx.notify();
     }
@@ -317,6 +360,85 @@ impl ToolsView {
                 ))
                 .child(self.mono_block(response.folded_text.clone(), cx))
                 .into_any_element(),
+            ToolAnswer::FoldBatch(response) => {
+                let columns = [
+                    Column::grow(t("tools.colItem", locale)),
+                    Column::fixed(t("tools.colTokens", locale), 130.0),
+                    Column::fixed(t("tools.colStructure", locale), 110.0),
+                ];
+                let rows: Vec<Vec<Cell>> = response
+                    .results
+                    .iter()
+                    .map(|item| {
+                        vec![
+                            Cell::new(SharedString::from(item.id.clone())),
+                            Cell::muted(SharedString::from(format!(
+                                "{} -> {}",
+                                item.original_tokens, item.folded_tokens
+                            ))),
+                            Cell::muted(SharedString::from(if item.structure_known {
+                                "known".to_string()
+                            } else {
+                                "unknown".to_string()
+                            })),
+                        ]
+                    })
+                    .collect();
+                surface(dense, cx)
+                    .child(hint(
+                        SharedString::from(format!(
+                            "{} -> {} tokens",
+                            response.stats.total_original_tokens,
+                            response.stats.total_folded_tokens
+                        )),
+                        cx,
+                    ))
+                    .child(data_grid(
+                        PanelKind::Tools,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
+                    .into_any_element()
+            }
+            ToolAnswer::CompressBatch(response) => {
+                let mut rows: Vec<Vec<Cell>> = response
+                    .successes
+                    .iter()
+                    .map(|entry| {
+                        vec![
+                            Cell::new(SharedString::from(entry.path.clone())),
+                            Cell::toned(SharedString::from("ok"), Tone::Success),
+                            Cell::muted(SharedString::from(format!(
+                                "{} chars",
+                                entry.result.semantic_text.chars().count()
+                            ))),
+                        ]
+                    })
+                    .collect();
+                for failure in &response.failures {
+                    rows.push(vec![
+                        Cell::new(SharedString::from(failure.path.clone())),
+                        Cell::toned(SharedString::from("failed"), Tone::Danger),
+                        Cell::muted(SharedString::from(failure.error.clone())),
+                    ]);
+                }
+                let columns = [
+                    Column::grow(t("tools.colFile", locale)),
+                    Column::fixed(t("tools.colOutcome", locale), 90.0),
+                    Column::grow(t("tools.colDetail", locale)),
+                ];
+                surface(dense, cx)
+                    .child(data_grid(
+                        PanelKind::Tools,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
+                    .into_any_element()
+            }
             ToolAnswer::Compress(response) => {
                 let Some(result) = &response.result else {
                     return hint(
@@ -578,7 +700,16 @@ impl Render for ToolsView {
         );
 
         let inputs = match self.tab {
-            0 | 2 => v_flex()
+            8 => v_flex()
+                .gap_2()
+                .child(field(
+                    t("tools.paths", locale),
+                    Textarea::new(&self.paths),
+                    cx,
+                ))
+                .child(hint(t("tools.pathsHint", locale), cx))
+                .into_any_element(),
+            0 | 2 | 7 => v_flex()
                 .gap_3()
                 .child(field(
                     t("tools.code", locale),
@@ -605,6 +736,11 @@ impl Render for ToolsView {
                                 })),
                         ),
                 )
+                .children(if self.tab == 7 {
+                    Some(hint(t("tools.batchHint", locale), cx))
+                } else {
+                    None
+                })
                 .into_any_element(),
             1 => field(t("tools.file", locale), Input::new(&self.file), cx).into_any_element(),
             3 => v_flex()

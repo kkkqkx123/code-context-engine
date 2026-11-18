@@ -62,6 +62,7 @@ impl ExportFailure {
         Failure {
             key: self.key,
             detail: SharedString::from(self.detail.clone()),
+            candidates: Vec::new(),
         }
     }
 }

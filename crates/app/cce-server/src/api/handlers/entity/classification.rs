@@ -6,7 +6,8 @@
 use axum::extract::{Path, Query, State};
 
 use cce_api::models::{
-    ClassificationQueryParams, ClassificationStatsResponse, ErrorResponse, error_codes,
+    ClassificationQueryParams, ClassificationRelation, ClassificationStatsResponse, ErrorResponse,
+    error_codes,
 };
 
 use crate::api::response::{ApiResult, relation_error};
@@ -20,14 +21,14 @@ use cce_server_shared::services::relation::{self, ClassificationCategory};
     get, path = "/api/project/{project_id}/relations/classification/{classification}", tag = "Entity",
     params(ClassificationQueryParams, ("project_id" = i64, Path, description = "Project id"), ("classification" = String, Path, description = "Relation classification")),
     responses(
-        (status = 200, description = "Matched relations as untyped JSON array"), (status = 400, body = ErrorResponse, description = "Invalid request"), (status = 404, body = ErrorResponse, description = "Resource not found"), (status = 503, body = ErrorResponse, description = "Index unavailable"), (status = 500, body = ErrorResponse, description = "Internal error")
+        (status = 200, body = Vec<ClassificationRelation>, description = "Success"), (status = 400, body = ErrorResponse, description = "Invalid request"), (status = 404, body = ErrorResponse, description = "Resource not found"), (status = 503, body = ErrorResponse, description = "Index unavailable"), (status = 500, body = ErrorResponse, description = "Internal error")
     )
 )]
 pub async fn get_relations_by_classification(
     State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, classification)): Path<(i64, String)>,
     Query(params): Query<ClassificationQueryParams>,
-) -> ApiResult<Vec<serde_json::Value>> {
+) -> ApiResult<Vec<ClassificationRelation>> {
     let Some(category) = ClassificationCategory::parse(&classification) else {
         return ApiResult::Error(ErrorResponse::new(
             error_codes::INVALID_REQUEST,
@@ -38,13 +39,8 @@ pub async fn get_relations_by_classification(
         ));
     };
     let limit = params.limit.unwrap_or(1000);
-    match relation::relations_by_classification(&state, project_id, category, limit).await {
-        Ok(relations) => ApiResult::Success(
-            relations
-                .into_iter()
-                .filter_map(|relation| serde_json::to_value(&relation).ok())
-                .collect(),
-        ),
+    match relation::classification_relation_details(&state, project_id, category, limit).await {
+        Ok(relations) => ApiResult::Success(relations),
         Err(error) => ApiResult::Error(relation_error(error)),
     }
 }

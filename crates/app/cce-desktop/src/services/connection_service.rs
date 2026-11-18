@@ -60,6 +60,7 @@ pub fn summarize(health: &HealthStatus) -> HealthSummary {
 /// connection rebuilds the client from fresh input.
 pub fn disconnect(cx: &mut App) {
     ClientStore::clear(cx);
+    crate::components::toast::clear(cx);
     AppState::global(cx).update(cx, |state, cx| state.set_disconnected(cx));
 }
 

@@ -6,7 +6,7 @@
 
 use cce_api::models::{
     CreateProjectRequest, ProjectConfig, ProjectConfigGetResponse, ProjectConfigReloadResponse,
-    ProjectDeleteResponse, ProjectIndexResponse, ProjectListResponse,
+    ProjectDeleteResponse, ProjectIndexResponse, ProjectListResponse, UpdateProjectRequest,
 };
 use cce_client::{Client, ClientError};
 use gpui_kit::{App, AsyncApp, Task};
@@ -42,6 +42,22 @@ pub fn create(
     request: CreateProjectRequest,
 ) -> Task<Result<cce_api::models::ProjectDetailResponse, ClientError>> {
     runtime::spawn(cx, async move { client.create_project(&request).await })
+}
+
+/// Patch a project's editable fields.
+///
+/// `root_path` is not editable through this call: the server keeps a project's
+/// root fixed after creation, so a wrong root is fixed by creating a new
+/// project rather than by moving an indexed one.
+pub fn update(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+    request: UpdateProjectRequest,
+) -> Task<Result<cce_api::models::ProjectDetailResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        client.update_project(project_id, &request).await
+    })
 }
 
 pub fn delete(

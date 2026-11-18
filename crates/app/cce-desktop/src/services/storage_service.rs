@@ -6,7 +6,8 @@
 
 use cce_api::models::{
     BatchDeleteRequest, BatchDeleteResponse, ClearIndexRequest, ClearIndexResponse,
-    DeleteEntityResponse, DeleteFileResponse, IndexStatsResponse, StorageStatusResponse,
+    DeleteEntityResponse, DeleteFileResponse, IndexStatsResponse, QdrantActionResponse,
+    QdrantProcessStatusResponse, StorageStatusResponse,
 };
 use cce_client::{Client, ClientError};
 use gpui_kit::{App, Task};
@@ -27,6 +28,46 @@ impl ClearScope {
     pub fn is_empty(self) -> bool {
         !(self.vectors || self.bm25 || self.relations || self.cache)
     }
+}
+
+/// Managed backend lifecycle actions the storage panel offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QdrantAction {
+    Start,
+    Stop,
+    Restart,
+}
+
+impl QdrantAction {
+    /// Message key naming the action in a notice.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Start => "storage.qdrantStarted",
+            Self::Stop => "storage.qdrantStopped",
+            Self::Restart => "storage.qdrantRestarted",
+        }
+    }
+}
+
+pub fn qdrant_status(
+    cx: &App,
+    client: Client,
+) -> Task<Result<QdrantProcessStatusResponse, ClientError>> {
+    runtime::spawn(cx, async move { client.qdrant_process_status().await })
+}
+
+pub fn qdrant_action(
+    cx: &App,
+    client: Client,
+    action: QdrantAction,
+) -> Task<Result<QdrantActionResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        match action {
+            QdrantAction::Start => client.qdrant_process_start().await,
+            QdrantAction::Stop => client.qdrant_process_stop().await,
+            QdrantAction::Restart => client.qdrant_process_restart().await,
+        }
+    })
 }
 
 pub fn status(cx: &App, client: Client) -> Task<Result<StorageStatusResponse, ClientError>> {

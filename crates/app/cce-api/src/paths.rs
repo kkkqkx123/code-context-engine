@@ -4,8 +4,10 @@
 //! concrete paths. Templates use the unified project placeholder so routers,
 //! clients and documentation never diverge.
 //!
-//! Console-only log endpoints live in `cce-server::api::log_paths` and are
-//! intentionally excluded: they have no wire models and no Rust consumer.
+//! The console log endpoints are part of the contract: their payloads are
+//! modeled in `cce_api::models::logs`, so the web console and the desktop
+//! client read one shape. Only the WebSocket stream stays outside it, because
+//! its frames are not HTTP payloads.
 
 /// Project identifier placeholder used by every project scoped template.
 pub const PROJECT_ID_PLACEHOLDER: &str = "{project_id}";
@@ -25,6 +27,15 @@ pub const INDEX_ENTITY_TEMPLATE: &str = "/api/index/entity/{id}";
 pub const INDEX_BATCH: &str = "/api/index/batch";
 pub const INDEX_STATS: &str = "/api/index/stats";
 pub const STORAGE_STATUS: &str = "/api/storage/status";
+
+pub const LOGS: &str = "/api/logs";
+pub const LOGS_FILES: &str = "/api/logs/files";
+pub const LOGS_FILE_TEMPLATE: &str = "/api/logs/files/{name}";
+pub const LOGS_FILE_DOWNLOAD_TEMPLATE: &str = "/api/logs/files/{name}/download";
+pub const LOGS_ROTATE: &str = "/api/logs/rotate";
+pub const LOGS_CONFIG: &str = "/api/logs/config";
+/// WebSocket log stream; not an HTTP payload, so not in the OpenAPI document.
+pub const LOGS_WS: &str = "/ws/logs";
 
 pub const PROJECT: &str = "/api/project";
 pub const PROJECT_DETAIL_TEMPLATE: &str = "/api/project/{project_id}";
@@ -194,6 +205,13 @@ mod tests {
             INDEX_BATCH,
             INDEX_STATS,
             STORAGE_STATUS,
+            LOGS,
+            LOGS_FILES,
+            LOGS_FILE_TEMPLATE,
+            LOGS_FILE_DOWNLOAD_TEMPLATE,
+            LOGS_ROTATE,
+            LOGS_CONFIG,
+            LOGS_WS,
             PROJECT,
             METRICS,
             METRICS_JSON,

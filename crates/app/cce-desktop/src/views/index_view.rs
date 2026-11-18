@@ -111,6 +111,7 @@ impl IndexView {
             self.answer = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -126,8 +127,9 @@ impl IndexView {
         let force = self.force;
         let recursive = self.recursive;
 
+        // A full pass no longer needs a path: the project record is the
+        // source of truth, and the field is only an override.
         let missing = match tab {
-            0 => path.is_empty(),
             2 => file.is_empty(),
             3 => file.is_empty() && directories.is_empty(),
             _ => false,
@@ -136,6 +138,7 @@ impl IndexView {
             self.answer = Load::Failed(request::Failure {
                 key: "index.pathRequired",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -154,7 +157,16 @@ impl IndexView {
 
         match tab {
             0 => {
-                let task = index_service::full(cx, client, project_id, path, extensions);
+                let overrides = index_service::IndexOverrides {
+                    path: crate::services::optional_text(&path),
+                    extensions: if extensions.is_empty() {
+                        None
+                    } else {
+                        Some(extensions)
+                    },
+                    ..index_service::IndexOverrides::default()
+                };
+                let task = index_service::full(cx, client, project_id, overrides);
                 request::spawn_into(cx, task, |this, outcome, cx| {
                     this.answer = match outcome {
                         Ok(value) => Load::Ready(IndexAnswer::Full(value)),
@@ -418,13 +430,14 @@ impl Render for IndexView {
 
         let inputs = match self.tab {
             0 => v_flex()
-                .gap_3()
+                .gap_2()
                 .child(field(t("index.path", locale), Input::new(&self.path), cx))
                 .child(field(
                     t("index.extensions", locale),
                     Input::new(&self.extensions),
                     cx,
                 ))
+                .child(hint(t("index.pathOptionalHint", locale), cx))
                 .into_any_element(),
             1 => v_flex()
                 .gap_3()

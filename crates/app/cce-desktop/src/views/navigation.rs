@@ -24,6 +24,7 @@ pub enum PanelKind {
     Metrics,
     Config,
     Tasks,
+    Logs,
 }
 
 impl PanelKind {
@@ -35,7 +36,7 @@ impl PanelKind {
         Self::Projects,
     ];
 
-    pub const OPERATIONS: [Self; 7] = [
+    pub const OPERATIONS: [Self; 8] = [
         Self::Tools,
         Self::Storage,
         Self::Watch,
@@ -43,9 +44,10 @@ impl PanelKind {
         Self::Metrics,
         Self::Config,
         Self::Tasks,
+        Self::Logs,
     ];
 
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Search,
         Self::Graph,
         Self::Entities,
@@ -58,6 +60,7 @@ impl PanelKind {
         Self::Metrics,
         Self::Config,
         Self::Tasks,
+        Self::Logs,
     ];
 
     /// Persisted identity in dock layouts and capture snapshots.
@@ -75,6 +78,7 @@ impl PanelKind {
             Self::Metrics => "cce.metrics",
             Self::Config => "cce.config",
             Self::Tasks => "cce.tasks",
+            Self::Logs => "cce.logs",
         }
     }
 
@@ -97,6 +101,7 @@ impl PanelKind {
             Self::Metrics => "nav.metrics",
             Self::Config => "nav.config",
             Self::Tasks => "nav.tasks",
+            Self::Logs => "nav.logs",
         }
     }
 
@@ -114,6 +119,7 @@ impl PanelKind {
             Self::Metrics => IconName::ChartColumn,
             Self::Config => IconName::Settings,
             Self::Tasks => IconName::ListChecks,
+            Self::Logs => IconName::List,
         }
     }
 
@@ -121,7 +127,7 @@ impl PanelKind {
     pub fn needs_project(self) -> bool {
         !matches!(
             self,
-            Self::Health | Self::Metrics | Self::Config | Self::Projects
+            Self::Health | Self::Metrics | Self::Config | Self::Projects | Self::Logs
         )
     }
 

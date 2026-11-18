@@ -6,11 +6,11 @@
 
 use cce_api::models::{
     CallChainResponse, CallPathResponse, ClassImplementationsResponse, ClassInheritanceResponse,
-    ClassificationStatsResponse, EntitySearchResponse, FunctionCallersResponse,
-    FunctionCallsResponse, FunctionDetailResponse,
+    ClassificationRelation, ClassificationStatsResponse, EntitySearchResponse,
+    FunctionCallersResponse, FunctionCallsResponse, FunctionDetailResponse,
 };
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
@@ -23,12 +23,14 @@ use gpui_kit::{
 
 use crate::components::{
     Cell, Column, Tone, choice_row, data_grid, empty_state, failure_block, field, field_group,
-    hint, loading_row, page_body, panel_header, stack, surface,
+    hint, loading_row, page_body, panel_header, stack, stale_epoch, surface,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
-use crate::services::entity_service::{self, CHAIN_DIRECTIONS};
+use crate::navigator::Target;
+use crate::services::entity_service::{self, CHAIN_DIRECTIONS, ChainFilter};
 use crate::services::history::{self, HistoryKind};
+use crate::services::refresh;
 use crate::services::request::{self, Load};
 use crate::services::search_service;
 use crate::state::AppState;
@@ -59,14 +61,44 @@ enum EntityAnswer {
     Classification(ClassificationStatsResponse),
 }
 
+impl EntityAnswer {
+    /// Epoch the answer was served from, when the payload carries one.
+    ///
+    /// The detail and classification answers have no epoch on the wire, so
+    /// they never raise a staleness warning instead of guessing.
+    fn relation_epoch(&self) -> Option<i64> {
+        match self {
+            Self::Detail(_) | Self::Classification(_) => None,
+            Self::Calls(response) => Some(response.relation_epoch),
+            Self::Callers(response) => Some(response.relation_epoch),
+            Self::Chain(response) => Some(response.relation_epoch),
+            Self::Path(response) => Some(response.relation_epoch),
+            Self::Inheritance(response) => Some(response.relation_epoch),
+            Self::Implementations(response) => Some(response.relation_epoch),
+        }
+    }
+}
+
 pub struct EntityView {
     symbol: Entity<InputState>,
     target: Entity<InputState>,
     lookup: Entity<InputState>,
     depth: Entity<InputState>,
     limit: Entity<InputState>,
+    /// Directory prefix limiting the relation queries.
+    prefix: Entity<InputState>,
+    /// Coarse domains kept in the relation queries, comma separated.
+    domains: Entity<InputState>,
     tab: usize,
     direction: usize,
+    exclude_tests: bool,
+    include_external: bool,
+    /// Classification category used by the detail query.
+    category: Entity<InputState>,
+    /// Typed detail rows of the selected classification.
+    detail: Load<Vec<ClassificationRelation>>,
+    /// Relation epoch the current answer came from.
+    served_epoch: Option<i64>,
     answer: Load<EntityAnswer>,
     matches: Load<EntitySearchResponse>,
     history: Vec<String>,
@@ -94,6 +126,17 @@ impl EntityView {
                 .placeholder(t("entity.limitPlaceholder", locale))
                 .default_value("20")
         });
+        let prefix = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t("entity.prefixPlaceholder", locale))
+        });
+        let domains = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t("entity.domainsPlaceholder", locale))
+        });
+        let category = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t("entity.categoryPlaceholder", locale))
+                .default_value("stdlib")
+        });
         let history = history::entries(HistoryKind::Entity, cx);
         Self {
             symbol,
@@ -101,8 +144,15 @@ impl EntityView {
             lookup,
             depth,
             limit,
+            prefix,
+            domains,
+            category,
+            detail: Load::idle(),
             tab: 0,
             direction: 0,
+            exclude_tests: false,
+            include_external: true,
+            served_epoch: None,
             answer: Load::idle(),
             matches: Load::idle(),
             history,
@@ -130,6 +180,7 @@ impl EntityView {
             self.matches = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -145,6 +196,57 @@ impl EntityView {
             this.matches = Load::settle(outcome);
             cx.notify();
         });
+    }
+
+    /// Relation filters as the wire wants them.
+    fn filter(&self, cx: &Context<Self>) -> ChainFilter {
+        ChainFilter {
+            exclude_tests: self.exclude_tests,
+            directory_prefix: crate::services::optional_text(&self.prefix.read(cx).value()),
+            domains: crate::services::split_list(&self.domains.read(cx).value()),
+            include_external: self.include_external,
+        }
+    }
+
+    /// Record a finished answer and the epoch it was served from.
+    fn finish(
+        &mut self,
+        outcome: Result<EntityAnswer, cce_client::ClientError>,
+        cx: &mut Context<Self>,
+    ) {
+        match outcome {
+            Ok(answer) => {
+                self.served_epoch = answer.relation_epoch();
+                let epoch = self.served_epoch;
+                AppState::global(cx).update(cx, |state, cx| state.note_epoch(epoch, cx));
+                self.answer = Load::Ready(answer);
+            }
+            Err(error) => {
+                self.served_epoch = None;
+                self.answer = Load::Failed(request::Failure::from_error(&error));
+            }
+        }
+    }
+
+    /// Load a symbol handed over by another panel.
+    pub fn on_navigate(&mut self, target: &Target, window: &mut Window, cx: &mut Context<Self>) {
+        let Target::Entity { id } = target else {
+            return;
+        };
+        let id = id.to_string();
+        self.symbol
+            .update(cx, |state, cx| state.set_value(id, window, cx));
+        self.tab = 0;
+        self.run(cx);
+    }
+
+    /// Re-run the current answer on the next refresh tick.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.answer, Load::Idle) {
+            return;
+        }
+        refresh::touch(PanelKind::Entities, cx);
+        self.run(cx);
     }
 
     fn use_match(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -164,6 +266,7 @@ impl EntityView {
             self.answer = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -174,6 +277,7 @@ impl EntityView {
             self.answer = Load::Failed(request::Failure {
                 key: "entity.symbolRequired",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -193,41 +297,43 @@ impl EntityView {
             0 => {
                 let task = entity_service::detail(cx, client, project_id, symbol);
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Detail(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Detail), cx);
                     cx.notify();
                 });
             }
             1 => {
-                let task = entity_service::calls(cx, client, project_id, symbol, depth, limit);
+                let filter = self.filter(cx);
+                let task =
+                    entity_service::calls(cx, client, project_id, symbol, depth, limit, filter);
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Calls(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Calls), cx);
                     cx.notify();
                 });
             }
             2 => {
-                let task = entity_service::callers(cx, client, project_id, symbol, depth, limit);
+                let filter = self.filter(cx);
+                let task =
+                    entity_service::callers(cx, client, project_id, symbol, depth, limit, filter);
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Callers(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Callers), cx);
                     cx.notify();
                 });
             }
             3 => {
-                let task =
-                    entity_service::chain(cx, client, project_id, symbol, direction, depth, limit);
+                let task = entity_service::chain(
+                    cx,
+                    client,
+                    project_id,
+                    entity_service::ChainRequest {
+                        function_id: symbol,
+                        direction,
+                        max_depth: depth,
+                        limit,
+                        filter: self.filter(cx),
+                    },
+                );
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Chain(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Chain), cx);
                     cx.notify();
                 });
             }
@@ -239,50 +345,85 @@ impl EntityView {
                 let task =
                     entity_service::call_path(cx, client, project_id, symbol, target_id, depth);
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Path(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Path), cx);
                     cx.notify();
                 });
             }
             5 => {
                 let task = entity_service::inheritance(cx, client, project_id, symbol.clone());
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Inheritance(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Inheritance), cx);
                     cx.notify();
                 });
             }
             6 => {
                 let task = entity_service::implementations(cx, client, project_id, symbol.clone());
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Implementations(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Implementations), cx);
                     cx.notify();
                 });
             }
             _ => {
                 let task = entity_service::classification_stats(cx, client, project_id);
                 request::spawn_into(cx, task, |this, outcome, cx| {
-                    this.answer = match outcome {
-                        Ok(value) => Load::Ready(EntityAnswer::Classification(value)),
-                        Err(error) => Load::Failed(request::Failure::from_error(&error)),
-                    };
+                    this.finish(outcome.map(EntityAnswer::Classification), cx);
                     cx.notify();
                 });
             }
         }
     }
 
+    /// Load the typed detail rows for the selected classification.
+    ///
+    /// The limit is shared with the other relation tabs: one input controls
+    /// how much data the panel holds, whichever query produced it.
+    fn load_detail(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = ClientStore::client(cx) else {
+            self.detail = Load::Failed(request::Failure::disconnected());
+            cx.notify();
+            return;
+        };
+        let Some(project_id) = AppState::global(cx).read(cx).active_project_id() else {
+            self.detail = Load::Failed(request::Failure {
+                key: "error.noProject",
+                detail: SharedString::default(),
+                candidates: Vec::new(),
+            });
+            cx.notify();
+            return;
+        };
+        let classification = self.category.read(cx).value().trim().to_ascii_lowercase();
+        if !matches!(
+            classification.as_str(),
+            "stdlib" | "external" | "dev" | "local" | "unknown"
+        ) {
+            self.detail = Load::Failed(request::Failure {
+                key: "entity.categoryInvalid",
+                detail: SharedString::default(),
+                candidates: Vec::new(),
+            });
+            cx.notify();
+            return;
+        }
+        let limit = self.number(&self.limit, 100, cx);
+        self.detail.begin();
+        cx.notify();
+        let task =
+            entity_service::classification_relations(cx, client, project_id, classification, limit);
+        request::spawn_into(cx, task, |this, outcome, cx| {
+            this.detail = match outcome {
+                Ok(rows) => Load::Ready(rows),
+                Err(error) => Load::Failed(request::Failure::from_error(&error)),
+            };
+            cx.notify();
+        });
+    }
+
     fn fail(&mut self, key: &'static str, cx: &mut Context<Self>) {
         self.answer = Load::Failed(request::Failure {
             key,
             detail: SharedString::default(),
+            candidates: Vec::new(),
         });
         cx.notify();
     }
@@ -463,12 +604,64 @@ impl EntityView {
                         ]
                     })
                     .collect();
-                self.block(
+                let stats = self.block(
                     &columns,
                     &rows,
                     format!("{} {}", response.total, t("entity.relations", locale)),
                     cx,
-                )
+                );
+                let detail_columns = [
+                    Column::grow(t("entity.colCaller", locale)),
+                    Column::grow(t("entity.colCallee", locale)),
+                    Column::fixed(t("entity.colRelation", locale), 140.0),
+                    Column::fixed(t("entity.colTarget", locale), 160.0),
+                    Column::fixed(t("entity.colCallSite", locale), 180.0),
+                ];
+                let detail = match &self.detail {
+                    Load::Idle => div().into_any_element(),
+                    Load::Loading => {
+                        loading_row(t("entity.detailLoading", locale), cx).into_any_element()
+                    }
+                    Load::Failed(failure) => failure_block(failure, locale, cx).into_any_element(),
+                    Load::Ready(rows) => {
+                        let rows: Vec<Vec<Cell>> = rows
+                            .iter()
+                            .map(|row| {
+                                vec![
+                                    Cell::new(SharedString::from(format!(
+                                        "{} ({})",
+                                        row.caller_name, row.caller_stable_id
+                                    ))),
+                                    Cell::new(SharedString::from(row.callee_name.clone())),
+                                    Cell::toned(
+                                        SharedString::from(row.relation_type.clone()),
+                                        Tone::Info,
+                                    ),
+                                    Cell::muted(SharedString::from(
+                                        row.external_target.clone().unwrap_or_default(),
+                                    )),
+                                    Cell::muted(SharedString::from(format!(
+                                        "{}:{}",
+                                        row.caller_file_path,
+                                        row.call_row + 1
+                                    ))),
+                                ]
+                            })
+                            .collect();
+                        self.block(
+                            &detail_columns,
+                            &rows,
+                            format!("{} {}", rows.len(), t("entity.detailRows", locale)),
+                            cx,
+                        )
+                    }
+                };
+                v_flex()
+                    .gap_3()
+                    .w_full()
+                    .child(stats)
+                    .child(detail)
+                    .into_any_element()
             }
         }
     }
@@ -572,6 +765,64 @@ impl Render for EntityView {
             } else {
                 div().into_any_element()
             })
+            .child(if self.tab == 7 {
+                h_flex()
+                    .gap_3()
+                    .items_end()
+                    .child(field(
+                        t("entity.category", locale),
+                        Input::new(&self.category),
+                        cx,
+                    ))
+                    .child(
+                        Button::new("entity-category-detail")
+                            .small()
+                            .label(t("entity.loadDetail", locale))
+                            .loading(self.detail.is_loading())
+                            .on_click(cx.listener(|this, _, _, cx| this.load_detail(cx))),
+                    )
+                    .into_any_element()
+            } else {
+                div().into_any_element()
+            })
+            .child(if matches!(self.tab, 1..=3) {
+                h_flex()
+                    .gap_3()
+                    .items_end()
+                    .child(field(
+                        t("entity.prefix", locale),
+                        Input::new(&self.prefix),
+                        cx,
+                    ))
+                    .child(field(
+                        t("entity.domains", locale),
+                        Input::new(&self.domains),
+                        cx,
+                    ))
+                    .child(
+                        Button::new("entity-exclude-tests")
+                            .small()
+                            .label(t("entity.excludeTests", locale))
+                            .selected(self.exclude_tests)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.exclude_tests = !this.exclude_tests;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("entity-include-external")
+                            .small()
+                            .label(t("entity.includeExternal", locale))
+                            .selected(self.include_external)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.include_external = !this.include_external;
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element()
+            } else {
+                div().into_any_element()
+            })
             .child(
                 h_flex()
                     .gap_3()
@@ -594,6 +845,27 @@ impl Render for EntityView {
                             .label(t("common.run", locale))
                             .loading(self.answer.is_loading())
                             .on_click(cx.listener(|this, _, _, cx| this.run(cx))),
+                    )
+                    .child(
+                        Button::new("entity-to-graph")
+                            .small()
+                            .ghost()
+                            .label(t("entity.openInGraph", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let symbol = this.symbol.read(cx).value().trim().to_string();
+                                if symbol.is_empty() {
+                                    return;
+                                }
+                                AppState::global(cx).update(cx, |state, cx| {
+                                    state.navigate(
+                                        Target::GraphSeed {
+                                            entity_id: SharedString::from(symbol.clone()),
+                                            label: SharedString::from(symbol),
+                                        },
+                                        cx,
+                                    );
+                                });
+                            })),
                     ),
             );
 
@@ -645,6 +917,23 @@ impl Render for EntityView {
             Load::Ready(answer) => self.render_answer(answer, cx),
         };
 
+        let epoch_row = {
+            let current = AppState::global(cx).read(cx).epoch();
+            stale_epoch(self.served_epoch, current, locale, cx).map(|banner| {
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(banner.flex_1())
+                    .child(
+                        Button::new("entity-replay")
+                            .small()
+                            .label(t("common.replay", locale))
+                            .on_click(cx.listener(|this, _, _, cx| this.replay(cx))),
+                    )
+                    .into_any_element()
+            })
+        };
+
         page_body("entity")
             .child(panel_header(
                 t("entity.title", locale),
@@ -657,6 +946,7 @@ impl Render for EntityView {
                     .child(form)
                     .children(matches_block)
                     .children(history_row)
+                    .children(epoch_row)
                     .child(answer),
             )
     }

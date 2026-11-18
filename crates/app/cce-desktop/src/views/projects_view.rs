@@ -21,6 +21,7 @@ use crate::components::{
     Cell, Column, Tone, actions, data_grid, empty_state, failure_block, field, field_group, hint,
     loading_row, notice, page_body, panel_header, surface,
 };
+use crate::components::{Confirm, confirm_bar};
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
 use crate::metrics::CARD_RADIUS;
@@ -37,6 +38,8 @@ pub struct ProjectsView {
     config: Load<ProjectConfigGetResponse>,
     /// Outcome of the last mutating command, as (success, catalogue key).
     outcome: Option<(bool, &'static str)>,
+    /// Deletion is armed before it runs; nothing else in this panel is.
+    confirm: Confirm,
     busy: bool,
 }
 
@@ -59,6 +62,7 @@ impl ProjectsView {
             projects: Load::idle(),
             config: Load::idle(),
             outcome: None,
+            confirm: Confirm::none(),
             busy: false,
         }
     }
@@ -157,6 +161,54 @@ impl ProjectsView {
                     this.refresh(cx);
                 }
                 Err(error) => this.projects = Load::settle(Err(error)),
+            }
+            cx.notify();
+        });
+    }
+
+    /// Save the editable basics of the active project.
+    ///
+    /// Only the fields the panel shows are sent: an update that omitted a
+    /// field would leave it untouched, but sending empty vectors would clear
+    /// the exclusion list, so untouched fields stay out of the request.
+    fn save_basics(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = Self::client(cx) else {
+            self.outcome = Some((false, "error.notConnected"));
+            cx.notify();
+            return;
+        };
+        let Some(project_id) = AppState::global(cx).read(cx).active_project_id() else {
+            self.outcome = Some((false, "projects.noneActive"));
+            cx.notify();
+            return;
+        };
+        let name = crate::services::optional_text(&self.name.read(cx).value());
+        let extensions = crate::services::split_list(&self.extensions.read(cx).value());
+        let request = cce_api::models::UpdateProjectRequest {
+            name,
+            extensions: if extensions.is_empty() {
+                None
+            } else {
+                Some(extensions)
+            },
+            exclude_dirs: None,
+            respect_gitignore: None,
+            ignore_patterns: None,
+            supply_mode: None,
+        };
+        self.busy = true;
+        self.outcome = None;
+        cx.notify();
+        let task = project_service::update(cx, client, project_id, request);
+        request::spawn_into(cx, task, |this, outcome, cx| {
+            this.busy = false;
+            match outcome {
+                Ok(_) => {
+                    this.outcome = Some((true, "projects.updated"));
+                    this.refresh(cx);
+                    this.load_config(cx);
+                }
+                Err(error) => this.config = Load::settle(Err(error)),
             }
             cx.notify();
         });
@@ -382,17 +434,49 @@ impl ProjectsView {
                             .on_click(cx.listener(|this, _, _, cx| this.reload_config(cx))),
                     )
                     .child(
+                        Button::new("projects-save-basics")
+                            .small()
+                            .label(t("projects.saveBasics", locale))
+                            .on_click(cx.listener(|this, _, _, cx| this.save_basics(cx))),
+                    )
+                    .child(
                         Button::new("projects-delete")
                             .small()
                             .danger()
+                            .selected(self.confirm.is_armed(0))
                             .label(t("projects.delete", locale))
-                            .on_click(cx.listener(|this, _, _, cx| this.delete_active(cx))),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.confirm.request(0) {
+                                    this.delete_active(cx);
+                                } else {
+                                    cx.notify();
+                                }
+                            })),
                     );
+                let confirm_block = if self.confirm.is_armed(0) {
+                    Some(confirm_bar(
+                        "confirm-project-delete",
+                        SharedString::from(t("projects.confirmDelete", locale)),
+                        locale,
+                        cx,
+                        cx.listener(|this, _, _, cx| {
+                            this.confirm.cancel();
+                            this.delete_active(cx);
+                        }),
+                        cx.listener(|this, _, _, cx| {
+                            this.confirm.cancel();
+                            cx.notify();
+                        }),
+                    ))
+                } else {
+                    None
+                };
                 v_flex()
                     .gap_3()
                     .w_full()
                     .child(rows)
                     .child(management)
+                    .children(confirm_block)
                     .into_any_element()
             }
         }

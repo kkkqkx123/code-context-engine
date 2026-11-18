@@ -257,6 +257,52 @@ impl Client {
         decode(ApiMethod::Put, &path, &body)
     }
 
+    /// Sends a request whose success response carries no body.
+    ///
+    /// Several console endpoints answer `204 No Content`; decoding an empty
+    /// body as JSON would turn a success into a parse error, so those calls
+    /// finish here instead of in `decode`.
+    async fn send_no_content(
+        &self,
+        method: ApiMethod,
+        path: &str,
+        budget: Duration,
+        request: reqwest::RequestBuilder,
+    ) -> Result<(), ClientError> {
+        self.send(method, path, budget, request).await.map(|_| ())
+    }
+
+    pub(crate) async fn post_no_content(
+        &self,
+        path: String,
+        budget: Duration,
+    ) -> Result<(), ClientError> {
+        let request = self.prepare(reqwest::Method::POST, &path, budget);
+        self.send_no_content(ApiMethod::Post, &path, budget, request)
+            .await
+    }
+
+    pub(crate) async fn put_json_no_content<B: Serialize>(
+        &self,
+        path: String,
+        body: &B,
+        budget: Duration,
+    ) -> Result<(), ClientError> {
+        let request = self.prepare(reqwest::Method::PUT, &path, budget).json(body);
+        self.send_no_content(ApiMethod::Put, &path, budget, request)
+            .await
+    }
+
+    pub(crate) async fn delete_no_content(
+        &self,
+        path: String,
+        budget: Duration,
+    ) -> Result<(), ClientError> {
+        let request = self.prepare(reqwest::Method::DELETE, &path, budget);
+        self.send_no_content(ApiMethod::Delete, &path, budget, request)
+            .await
+    }
+
     pub(crate) async fn delete_json<T: DeserializeOwned>(
         &self,
         path: String,

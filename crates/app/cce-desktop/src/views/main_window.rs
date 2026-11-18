@@ -7,8 +7,9 @@
 use std::{rc::Rc, sync::Mutex, time::Duration};
 
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, IndexPath, Sizable as _,
     button::{Button, ButtonVariants as _},
+    command::{Command, CommandGroup, CommandItem, CommandState},
     dock::{DockArea, DockEvent, DockPlacement, DockSkin},
     h_flex,
     sidebar::{
@@ -19,13 +20,14 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Styled as _, Task,
-    Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Task, Window, div, px,
 };
 
 use crate::dock_layout::{self, LAYOUT_VERSION};
 use crate::i18n::{locale, set_locale, t};
 use crate::metrics::SIDEBAR_W;
+use crate::navigator::Applied;
 use crate::services::connection_service;
 use crate::settings::{Density, Locale, ThemeModeSetting};
 use crate::state::{AppState, ConnectionStatus};
@@ -37,7 +39,10 @@ pub struct MainWindow {
     _skin: Rc<DockSkin>,
     selected: PanelKind,
     scope: Option<i64>,
-    applied_seed: u64,
+    applied_nav: Applied,
+    /// Command palette state, shared across renders so the query survives.
+    palette: Entity<CommandState>,
+    palette_open: bool,
     save_generation: u64,
     _save_task: Option<Task<()>>,
 }
@@ -48,10 +53,13 @@ impl MainWindow {
         let layout = dock_layout::load_or_default(cx);
 
         let state = AppState::global(cx);
-        let (scope, applied_seed) = {
+        let (scope, applied_nav) = {
             let snapshot = state.read(cx);
-            let seed = snapshot.graph_seed().map(|seed| seed.generation);
-            (snapshot.active_project_id(), seed.unwrap_or_default())
+            let generation = snapshot
+                .pending_nav()
+                .map(|request| request.generation)
+                .unwrap_or_default();
+            (snapshot.active_project_id(), Applied::accepting(generation))
         };
         let selected = if PanelKind::ALL.contains(&layout.active_panel) {
             layout.active_panel
@@ -87,7 +95,9 @@ impl MainWindow {
             _skin: skin,
             selected,
             scope,
-            applied_seed,
+            applied_nav,
+            palette: cx.new(|cx| CommandState::new(window, cx)),
+            palette_open: false,
             save_generation: 0,
             _save_task: None,
         };
@@ -106,12 +116,15 @@ impl MainWindow {
         );
     }
 
-    /// React to scope and hand-off changes.
+    /// React to scope and navigation changes.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = AppState::global(cx);
-        let (scope, seed) = {
+        let (scope, nav) = {
             let snapshot = state.read(cx);
-            (snapshot.active_project_id(), snapshot.graph_seed().cloned())
+            (
+                snapshot.active_project_id(),
+                snapshot.pending_nav().cloned(),
+            )
         };
         if scope != self.scope {
             self.scope = scope;
@@ -124,17 +137,21 @@ impl MainWindow {
                 }
             });
             self.select_tab(self.selected, window, cx);
-        }
-
-        if let Some(seed) = seed
-            && seed.generation > self.applied_seed
+            // A request addressed to the previous scope's panels has no
+            // receiver left, so it is dropped rather than replayed against
+            // unrelated data.
+            if let Some(request) = nav.as_ref() {
+                self.applied_nav.accept(request.generation);
+            }
+        } else if let Some(request) = nav
+            && self.applied_nav.accept(request.generation)
         {
-            self.applied_seed = seed.generation;
-            self.open(PanelKind::Graph, window, cx);
-            if let Some(graph) = dock_layout::graph(cx) {
-                graph.update(cx, |view, cx| {
-                    view.apply_seed(&seed, window, cx);
-                });
+            self.open(request.target.panel(), window, cx);
+            if !dock_layout::apply_nav(&request.target, window, cx) {
+                log::warn!(
+                    "navigation target {} had no receiver after opening its panel",
+                    request.target.name()
+                );
             }
         }
         cx.notify();
@@ -265,6 +282,71 @@ impl MainWindow {
             )
     }
 
+    /// Command palette over the workspace.
+    ///
+    /// Entries are derived from `PanelKind::ALL`, so adding a panel to the
+    /// sidebar also adds it here without a second list to keep in sync.
+    fn render_palette(&self, cx: &mut Context<Self>) -> AnyElement {
+        if !self.palette_open {
+            return div().into_any_element();
+        }
+        let locale = locale(cx);
+        let theme = cx.theme();
+        let dock = self.dock_area.clone();
+        let weak = cx.entity().downgrade();
+        let items = PanelKind::ALL.into_iter().map(|kind| {
+            CommandItem::new()
+                .label(kind.label(locale))
+                .keywords([kind.panel_name()])
+        });
+        let command = Command::new(&self.palette)
+            .group(
+                CommandGroup::new()
+                    .label(t("command.panels", locale))
+                    .items(items),
+            )
+            .placeholder(t("command.placeholder", locale))
+            .max_h(px(420.))
+            .on_confirm(move |index, window, cx| {
+                for (position, kind) in PanelKind::ALL.into_iter().enumerate() {
+                    if index.eq_row(IndexPath::new(position)) {
+                        if let Some(entry) = dock_layout::panel(kind, cx) {
+                            let dock = dock.clone();
+                            dock.update(cx, |dock, cx| {
+                                dock.select_panel(entry.id, window, cx);
+                            });
+                        }
+                        weak.update(cx, |this, cx| {
+                            this.selected = kind;
+                            this.palette_open = false;
+                            cx.notify();
+                        })
+                        .ok();
+                        break;
+                    }
+                }
+            });
+        div()
+            .absolute()
+            .top(px(0.))
+            .left(px(0.))
+            .size_full()
+            .bg(theme.background)
+            .child(
+                div().w_full().p_6().child(
+                    div()
+                        .w(px(640.))
+                        .p_2()
+                        .rounded(px(8.))
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.muted)
+                        .child(command),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn render_status_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         let locale = locale(cx);
         let theme = cx.theme();
@@ -314,6 +396,16 @@ impl MainWindow {
                 h_flex()
                     .items_center()
                     .gap_2()
+                    .child(
+                        Button::new("status-commands")
+                            .ghost()
+                            .small()
+                            .label(t("command.open", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.palette_open = !this.palette_open;
+                                cx.notify();
+                            })),
+                    )
                     .child(
                         Button::new("status-theme")
                             .ghost()
@@ -382,6 +474,7 @@ fn status_base_url(cx: &Context<MainWindow>) -> SharedString {
 impl Render for MainWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.dock_area.clone().into_any_element();
+        let palette = self.render_palette(cx);
         v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -395,5 +488,6 @@ impl Render for MainWindow {
                     .child(v_flex().flex_1().min_w_0().min_h_0().child(content)),
             )
             .child(self.render_status_bar(cx))
+            .child(palette)
     }
 }

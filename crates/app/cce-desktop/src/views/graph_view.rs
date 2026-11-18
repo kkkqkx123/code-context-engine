@@ -9,27 +9,32 @@ use cce_api::models::{
     GraphPathResponse, GraphStructuralResponse, GraphSubgraphResponse,
 };
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Window, div,
+    AnyElement, AppContext as _, Context, Div, Entity, FontWeight, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Window, div, px,
 };
 
 use crate::components::{
     Cell, Column, Tone, choice_row, data_grid, empty_state, failure_block, field, field_group,
-    hint, loading_row, page_body, panel_header, stack, surface,
+    hint, loading_row, page_body, panel_header, stack, stale_epoch, surface, toast,
 };
 use crate::connection::ClientStore;
+use crate::graph::{CanvasEvent, DEFAULT_MAX_NODES, GraphCanvas, LayoutKind, Topology};
 use crate::i18n::{locale, t};
+use crate::navigator::Target;
+use crate::services::export_service;
 use crate::services::graph_service::{self, CYCLE_LEVELS, EGO_DIRECTIONS, STRUCTURAL_KINDS};
 use crate::services::history::{self, HistoryKind};
+use crate::services::refresh;
 use crate::services::request::{self, Load};
-use crate::state::{AppState, GraphSeed};
+use crate::services::time;
+use crate::state::AppState;
 use crate::views::PanelKind;
 
 /// Graph answer families, one per operation tab.
@@ -42,6 +47,22 @@ enum GraphAnswer {
     Impact(GraphImpactResponse),
     Structural(GraphStructuralResponse),
     Module(GraphModuleResponse),
+}
+
+impl GraphAnswer {
+    /// Epoch the answer was served from, recorded so a later rebase can be
+    /// detected instead of silently presenting stale topology.
+    fn relation_epoch(&self) -> Option<i64> {
+        match self {
+            Self::Subgraph(response) => Some(response.relation_epoch),
+            Self::Path(response) => Some(response.relation_epoch),
+            Self::Components(response) => Some(response.relation_epoch),
+            Self::Cycles(response) => Some(response.relation_epoch),
+            Self::Impact(response) => Some(response.relation_epoch),
+            Self::Structural(response) => Some(response.relation_epoch),
+            Self::Module(response) => Some(response.relation_epoch),
+        }
+    }
 }
 
 /// Operation tabs, in display order.
@@ -59,6 +80,8 @@ const TABS: [&str; 9] = [
 
 const DIRECTION_KEYS: [&str; 3] = ["graph.dir.both", "graph.dir.out", "graph.dir.in"];
 const LEVEL_KEYS: [&str; 2] = ["graph.level.entity", "graph.level.file"];
+/// Presentation modes: the tables stay the default, the canvas is opt-in.
+const PRESENTATION_KEYS: [&str; 2] = ["graph.view.table", "graph.view.canvas"];
 const STRUCTURAL_KEYS: [&str; 8] = [
     "graph.kind.trait_bound",
     "graph.kind.child_elements",
@@ -82,9 +105,13 @@ pub struct GraphView {
     level: usize,
     structural: usize,
     result: Load<GraphAnswer>,
-    /// Highest seed delivery already applied.
-    applied_seed: u64,
+    /// Relation epoch the current answer came from.
+    served_epoch: Option<i64>,
     history: Vec<String>,
+    /// Relation canvas shared by every answer that carries topology.
+    canvas: Entity<GraphCanvas>,
+    /// 0 renders tables, 1 renders the canvas.
+    presentation: usize,
 }
 
 impl GraphView {
@@ -110,6 +137,17 @@ impl GraphView {
                 .default_value("200")
         });
         let history = history::entries(HistoryKind::Graph, cx);
+        let canvas = cx.new(GraphCanvas::new);
+        // A double click on a node re-roots the neighbourhood: the canvas only
+        // reports the intent, the panel owns the request.
+        cx.subscribe_in(
+            &canvas,
+            window,
+            |this, _, event: &CanvasEvent, window, cx| match event {
+                CanvasEvent::Expand { label } => this.expand(label.clone(), window, cx),
+            },
+        )
+        .detach();
         Self {
             seed,
             target,
@@ -122,31 +160,53 @@ impl GraphView {
             level: 0,
             structural: 0,
             result: Load::idle(),
-            applied_seed: 0,
+            served_epoch: None,
             history,
+            canvas,
+            presentation: 0,
         }
     }
 
-    /// Apply a seed delivered by the search panel.
-    ///
-    /// Returns `true` when the seed was new, so the window can switch to this
-    /// panel only for a delivery it has not shown yet.
-    pub fn apply_seed(
-        &mut self,
-        seed: &GraphSeed,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if seed.generation <= self.applied_seed {
-            return false;
-        }
-        self.applied_seed = seed.generation;
+    /// Re-roots the ego query on one node label.
+    fn expand(&mut self, label: String, window: &mut Window, cx: &mut Context<Self>) {
         self.tab = 0;
-        let entity_id = seed.entity_id.to_string();
+        self.presentation = 1;
         self.seed
-            .update(cx, |state, cx| state.set_value(entity_id, window, cx));
+            .update(cx, |state, cx| state.set_value(label, window, cx));
         self.run(cx);
-        true
+    }
+
+    /// Apply a link delivered by another panel.
+    ///
+    /// An entity seed fills the ego form and runs it; a file link fills the
+    /// file field and runs the impact tab, which is the question a file link
+    /// asks in practice.
+    pub fn on_navigate(&mut self, target: &Target, window: &mut Window, cx: &mut Context<Self>) {
+        match target {
+            Target::GraphSeed { entity_id, .. } => {
+                self.tab = 0;
+                let entity_id = entity_id.to_string();
+                self.seed
+                    .update(cx, |state, cx| state.set_value(entity_id, window, cx));
+            }
+            Target::GraphFile { file } => {
+                self.tab = 5;
+                let file = file.to_string();
+                self.file
+                    .update(cx, |state, cx| state.set_value(file, window, cx));
+            }
+            _ => return,
+        }
+        self.run(cx);
+    }
+
+    /// Re-run the current inputs on the next refresh tick.
+    pub fn replay(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.result, Load::Idle) {
+            return;
+        }
+        refresh::touch(PanelKind::Graph, cx);
+        self.run(cx);
     }
 
     fn number(&self, input: &Entity<InputState>, fallback: usize, cx: &Context<Self>) -> usize {
@@ -170,6 +230,7 @@ impl GraphView {
             self.result = Load::Failed(request::Failure {
                 key: "error.noProject",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -190,6 +251,7 @@ impl GraphView {
             self.result = Load::Failed(request::Failure {
                 key: "graph.seedRequired",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -198,6 +260,7 @@ impl GraphView {
             self.result = Load::Failed(request::Failure {
                 key: "graph.targetRequired",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -206,6 +269,7 @@ impl GraphView {
             self.result = Load::Failed(request::Failure {
                 key: "graph.idsRequired",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -214,6 +278,7 @@ impl GraphView {
             self.result = Load::Failed(request::Failure {
                 key: "graph.fileRequired",
                 detail: SharedString::default(),
+                candidates: Vec::new(),
             });
             cx.notify();
             return;
@@ -272,12 +337,105 @@ impl GraphView {
         wrap: impl FnOnce(T) -> GraphAnswer + 'static,
     ) {
         request::spawn_into(cx, task, move |this, outcome, cx| {
-            this.result = match outcome {
-                Ok(value) => Load::Ready(wrap(value)),
-                Err(error) => Load::Failed(request::Failure::from_error(&error)),
-            };
+            match outcome {
+                Ok(value) => {
+                    let answer = wrap(value);
+                    this.served_epoch = answer.relation_epoch();
+                    let epoch = this.served_epoch;
+                    AppState::global(cx).update(cx, |state, cx| state.note_epoch(epoch, cx));
+                    this.sync_canvas(&answer, cx);
+                    this.result = Load::Ready(answer);
+                }
+                Err(error) => {
+                    this.served_epoch = None;
+                    this.result = Load::Failed(request::Failure::from_error(&error));
+                }
+            }
             cx.notify();
         });
+    }
+
+    /// Hands the topology of one answer to the canvas.
+    ///
+    /// Only the two answers that carry nodes and edges feed the canvas; the
+    /// other families keep whatever the last drawn topology was, so switching
+    /// tabs does not blank the picture the user is reading.
+    fn sync_canvas(&mut self, answer: &GraphAnswer, cx: &mut Context<Self>) {
+        let topology = match answer {
+            GraphAnswer::Subgraph(response) => {
+                Topology::from_answer(&response.nodes, &response.edges)
+            }
+            GraphAnswer::Path(response) if response.path_found => {
+                Topology::from_answer(&response.nodes, &response.edges)
+            }
+            _ => return,
+        };
+        let limit = self.number(&self.limit, DEFAULT_MAX_NODES, cx);
+        let (topology, dropped) = topology.capped(limit);
+        self.canvas
+            .update(cx, |canvas, cx| canvas.set_topology(topology, dropped, cx));
+    }
+
+    /// Write the whole graph as a PNG into the download directory.
+    ///
+    /// Export is deliberately a plain file write: no new dependency and no
+    /// window-level dialog, and the resulting path is reported in a toast so
+    /// the caller can find it.
+    fn export_png(&self, cx: &mut Context<Self>) {
+        let Some(bytes) = self.canvas.read(cx).export_png() else {
+            toast::push(t("graph.canvas.exportEmpty", locale(cx)), false, cx);
+            return;
+        };
+        let name = format!("cce-graph-{}.png", time::file_stamp(time::unix_seconds()));
+        let mut path = export_service::export_dir().join(name);
+        let mut sequence = 2;
+        while path.exists() {
+            path = export_service::export_dir().join(format!(
+                "cce-graph-{}-{}.png",
+                time::file_stamp(time::unix_seconds()),
+                sequence
+            ));
+            sequence += 1;
+        }
+        match std::fs::write(&path, bytes) {
+            Ok(()) => toast::push(path.display().to_string(), true, cx),
+            Err(_) => toast::push(t("graph.canvas.exportFailed", locale(cx)), false, cx),
+        }
+    }
+
+    /// True when the answer has topology the canvas can draw.
+    fn has_topology(answer: &GraphAnswer) -> bool {
+        match answer {
+            GraphAnswer::Subgraph(response) => !response.nodes.is_empty(),
+            GraphAnswer::Path(response) => response.path_found && !response.nodes.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Epoch line under the form.
+    ///
+    /// While the answer is still current this is the static explanation the
+    /// panel always carried. Once the server's relation epoch moved past the
+    /// one this answer was served from, it becomes a warning plus an explicit
+    /// replay button instead of an automatic reload.
+    fn render_epoch_row(&self, locale: crate::settings::Locale, cx: &mut Context<Self>) -> Div {
+        let current = AppState::global(cx).read(cx).epoch();
+        match stale_epoch(self.served_epoch, current, locale, cx) {
+            Some(banner) => h_flex()
+                .gap_2()
+                .items_center()
+                .child(banner.flex_1())
+                .child(
+                    Button::new("graph-replay")
+                        .small()
+                        .label(t("common.replay", locale))
+                        .on_click(cx.listener(|this, _, _, cx| this.replay(cx))),
+                ),
+            None => div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(SharedString::from(t("graph.epochNote", locale))),
+        }
     }
 
     fn render_answer(&self, answer: &GraphAnswer, cx: &mut Context<Self>) -> AnyElement {
@@ -569,6 +727,244 @@ impl GraphView {
             _ => div().into_any_element(),
         }
     }
+
+    /// Presentation switch plus the canvas controls that only apply to it.
+    fn render_presentation_row(&self, cx: &mut Context<Self>) -> Div {
+        let locale = locale(cx);
+        let mut row = h_flex()
+            .gap_3()
+            .items_center()
+            .flex_wrap()
+            .child(choice_row(
+                "graph-presentation",
+                &PRESENTATION_KEYS,
+                self.presentation,
+                |this: &mut Self, index| this.presentation = index,
+                cx,
+            ));
+        if self.presentation == 1 {
+            row = row
+                .child(self.render_layout_buttons(cx))
+                .child(
+                    Button::new("graph-canvas-zoom-in")
+                        .small()
+                        .ghost()
+                        .label(t("graph.canvas.zoomIn", locale))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.canvas.update(cx, |canvas, cx| canvas.zoom_in(cx));
+                        })),
+                )
+                .child(
+                    Button::new("graph-canvas-zoom-out")
+                        .small()
+                        .ghost()
+                        .label(t("graph.canvas.zoomOut", locale))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.canvas.update(cx, |canvas, cx| canvas.zoom_out(cx));
+                        })),
+                )
+                .child(
+                    Button::new("graph-canvas-fit")
+                        .small()
+                        .ghost()
+                        .label(t("graph.canvas.fit", locale))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.canvas.update(cx, |canvas, cx| {
+                                canvas.fit();
+                                cx.notify();
+                            });
+                        })),
+                )
+                .child(
+                    Button::new("graph-canvas-export")
+                        .small()
+                        .ghost()
+                        .label(t("graph.canvas.export", locale))
+                        .on_click(cx.listener(|this, _, _, cx| this.export_png(cx))),
+                );
+        }
+        row
+    }
+
+    /// Layout family buttons for the canvas.
+    ///
+    /// Built by hand instead of with `choice_row` because switching a layout
+    /// has to reach the canvas entity, and that row's setter only sees the
+    /// panel.
+    fn render_layout_buttons(&self, cx: &mut Context<Self>) -> Div {
+        let locale = locale(cx);
+        let current = self.canvas.read(cx).layout_kind();
+        let mut row = h_flex().gap_1().items_center();
+        for (index, kind) in LayoutKind::ALL.into_iter().enumerate() {
+            let active = kind == current;
+            let mut button = Button::new(format!("graph-layout-{index}"))
+                .small()
+                .label(t(kind.key(), locale))
+                .selected(active)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.canvas
+                        .update(cx, |canvas, cx| canvas.set_layout(kind, cx));
+                }));
+            button = if active {
+                button.primary()
+            } else {
+                button.ghost()
+            };
+            row = row.child(button);
+        }
+        row
+    }
+
+    /// Canvas block: the picture, the gesture hint and the node inspector.
+    fn render_canvas_panel(&self, answer: &GraphAnswer, cx: &mut Context<Self>) -> AnyElement {
+        let locale = locale(cx);
+        if !Self::has_topology(answer) {
+            return empty_state(
+                t("graph.canvas.noTopology", locale),
+                Some(SharedString::from(t("graph.canvas.noTopologyHint", locale))),
+                None,
+                cx,
+            )
+            .into_any_element();
+        }
+        let dense = AppState::global(cx).read(cx).density.is_dense();
+        let theme = cx.theme();
+        surface(dense, cx)
+            .child(
+                div()
+                    .h(px(CANVAS_HEIGHT))
+                    .w_full()
+                    .overflow_hidden()
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(self.canvas.clone()),
+            )
+            .child(hint(
+                SharedString::from(t("graph.canvas.gestures", locale)),
+                cx,
+            ))
+            .child({
+                let dropped = self.canvas.read(cx).dropped_nodes();
+                if dropped == 0 {
+                    div().into_any_element()
+                } else {
+                    hint(
+                        SharedString::from(format!(
+                            "{}: {}",
+                            t("graph.canvas.dropped", locale),
+                            dropped
+                        )),
+                        cx,
+                    )
+                    .into_any_element()
+                }
+            })
+            .child(self.render_inspector(cx))
+            .into_any_element()
+    }
+
+    /// Selected node details, with the two links a node selection implies.
+    fn render_inspector(&self, cx: &mut Context<Self>) -> Div {
+        let locale = locale(cx);
+        let (selected, outgoing, incoming) = {
+            let canvas = self.canvas.read(cx);
+            let (out, inc) = canvas.selected_neighbours();
+            (
+                canvas.selected_node().cloned(),
+                out.into_iter()
+                    .map(|node| node.label.clone())
+                    .collect::<Vec<_>>(),
+                inc.into_iter()
+                    .map(|node| node.label.clone())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let Some(node) = selected else {
+            return hint(SharedString::from(t("graph.canvas.selectHint", locale)), cx);
+        };
+        let location = format!("{}:{}", node.file, node.location);
+        let outgoing_line = format!(
+            "{} {} · {}",
+            t("graph.canvas.out", locale),
+            outgoing.len(),
+            join_labels(&outgoing)
+        );
+        let incoming_line = format!(
+            "{} {} · {}",
+            t("graph.canvas.in", locale),
+            incoming.len(),
+            join_labels(&incoming)
+        );
+        let title = node.label.clone();
+
+        v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .flex_wrap()
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(SharedString::from(title.clone())),
+                    )
+                    .child(hint(SharedString::from(node.kind.clone()), cx))
+                    .child(hint(SharedString::from(location), cx))
+                    .child(
+                        Button::new("graph-canvas-entity")
+                            .small()
+                            .ghost()
+                            .label(t("graph.canvas.openEntity", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let Some(node) = this.canvas.read(cx).selected_node().cloned()
+                                else {
+                                    return;
+                                };
+                                AppState::global(cx).update(cx, |state, cx| {
+                                    state.navigate(
+                                        Target::Entity {
+                                            id: SharedString::from(node.id),
+                                        },
+                                        cx,
+                                    )
+                                });
+                            })),
+                    )
+                    .child(
+                        Button::new("graph-canvas-expand")
+                            .small()
+                            .ghost()
+                            .label(t("graph.canvas.expand", locale))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.expand(title.clone(), window, cx);
+                            })),
+                    ),
+            )
+            .child(hint(SharedString::from(outgoing_line), cx))
+            .child(hint(SharedString::from(incoming_line), cx))
+    }
+}
+
+/// Height reserved for the canvas inside the panel scroll area.
+const CANVAS_HEIGHT: f32 = 520.0;
+
+/// Joins neighbour labels for the inspector, keeping the line readable.
+fn join_labels(labels: &[String]) -> String {
+    if labels.is_empty() {
+        return "—".to_string();
+    }
+    let mut text = labels
+        .iter()
+        .take(8)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if labels.len() > 8 {
+        text.push_str(" …");
+    }
+    text
 }
 
 /// One in-flight graph request, kept typed until it is wrapped into an answer.
@@ -585,7 +981,6 @@ enum Erased {
 impl Render for GraphView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let locale = locale(cx);
-        let theme = cx.theme().colors;
 
         let tabs = choice_row(
             "graph-tab",
@@ -667,6 +1062,7 @@ impl Render for GraphView {
             .into_any_element(),
             Load::Loading => loading_row(t("graph.loading", locale), cx).into_any_element(),
             Load::Failed(failure) => failure_block(failure, locale, cx).into_any_element(),
+            Load::Ready(answer) if self.presentation == 1 => self.render_canvas_panel(answer, cx),
             Load::Ready(answer) => self.render_answer(answer, cx),
         };
 
@@ -681,12 +1077,8 @@ impl Render for GraphView {
                 stack()
                     .child(form)
                     .children(history_row)
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(SharedString::from(t("graph.epochNote", locale))),
-                    )
+                    .child(self.render_epoch_row(locale, cx))
+                    .child(self.render_presentation_row(cx))
                     .child(answer),
             )
     }

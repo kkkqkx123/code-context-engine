@@ -982,6 +982,335 @@
         }
       }
     },
+    "/api/logs": {
+      "get": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "GET /api/logs",
+        "description": "One page of the in-memory log buffer, filtered server side.",
+        "operationId": "handle_get_logs",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "description": "Minimum level (`trace`, `debug`, `info`, `warn`, `error`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "module",
+            "in": "query",
+            "description": "Target/module substring.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "description": "Message substring.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "description": "Inclusive lower bound (RFC 3339, compared as text).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "description": "Inclusive upper bound (RFC 3339, compared as text).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "One-based page number.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Page size, clamped by the server.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/config": {
+      "get": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "GET /api/logs/config",
+        "description": "Effective logger configuration of the running process.",
+        "operationId": "handle_get_log_config",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogConfig"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "PUT /api/logs/config",
+        "description": "Changes the level, format or filter of the running logger.",
+        "operationId": "handle_update_log_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLogConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Applied"
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/files": {
+      "get": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "GET /api/logs/files",
+        "description": "Files currently present in the configured log directory.",
+        "operationId": "handle_list_log_files",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogFileInfo"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/files/{name}": {
+      "delete": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "DELETE /api/logs/files/{name}",
+        "description": "Removes one log file; the active file is refused.",
+        "operationId": "handle_delete_log_file",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Log file name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Invalid file name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused for the active file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/files/{name}/download": {
+      "get": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "GET /api/logs/files/{name}/download",
+        "description": "Raw bytes of one log file as an attachment.",
+        "operationId": "handle_download_log_file",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Log file name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File contents",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "400": {
+            "description": "Invalid file name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/rotate": {
+      "post": {
+        "tags": [
+          "Logs"
+        ],
+        "summary": "POST /api/logs/rotate",
+        "description": "Applies the retention policy now instead of waiting for the next write.",
+        "operationId": "handle_rotate_logs",
+        "responses": {
+          "204": {
+            "description": "Retention applied"
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/metrics": {
       "get": {
         "tags": [
@@ -4457,7 +4786,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Matched relations as untyped JSON array"
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClassificationRelation"
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -6042,6 +6381,13 @@
             ],
             "description": "Project root path (optional if project_id is provided)"
           },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Original user question the sub-queries were derived from.\n\nAggregation uses it as the rerank context and for logging. When absent\nthe caller's sub-query texts are joined, which reads as a synthetic\nquery to a semantic reranker."
+          },
           "query_intent": {
             "type": [
               "string",
@@ -6773,6 +7119,89 @@
           },
           "file_path": {
             "type": "string"
+          }
+        }
+      },
+      "ClassificationRelation": {
+        "type": "object",
+        "description": "One resolved relation in an external-call classification detail view.\n\nThis is a deliberate projection of the indexer's `ResolvedRelation`: only\nfields that a console can render are part of the wire contract, so adding\nan internal field cannot silently change the HTTP response.",
+        "required": [
+          "caller_id",
+          "caller_stable_id",
+          "caller_name",
+          "caller_file_path",
+          "callee_name",
+          "relation_type",
+          "classification",
+          "is_external",
+          "call_row",
+          "call_frequency"
+        ],
+        "properties": {
+          "call_frequency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "call_row": {
+            "type": "integer",
+            "description": "Zero-indexed row of the call site.",
+            "minimum": 0
+          },
+          "callee_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Numeric entity id of the callee, absent for external references.",
+            "minimum": 0
+          },
+          "callee_name": {
+            "type": "string",
+            "description": "Callee name as extracted or resolved."
+          },
+          "caller_file_path": {
+            "type": "string",
+            "description": "File that contains the call site."
+          },
+          "caller_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Numeric entity id of the caller.",
+            "minimum": 0
+          },
+          "caller_name": {
+            "type": "string",
+            "description": "Caller name, or `Unknown` when the snapshot has no function record."
+          },
+          "caller_stable_id": {
+            "type": "string",
+            "description": "Stable symbol id of the caller, falling back to `entity:<id>`."
+          },
+          "classification": {
+            "type": "string",
+            "description": "Canonical classification label: stdlib, external, dev, local, unknown."
+          },
+          "external_target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Library, package or raw target carried by the classification, if any."
+          },
+          "is_external": {
+            "type": "boolean"
+          },
+          "overload_signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relation_type": {
+            "type": "string",
+            "description": "Wire name of the relation type, e.g. `call.method`."
           }
         }
       },
@@ -7653,6 +8082,26 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "EntityScoreDto": {
+        "type": "object",
+        "description": "Fused score of one entity inside a multi-entity chunk group.",
+        "required": [
+          "entity_id",
+          "score"
+        ],
+        "properties": {
+          "entity_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entity the score belongs to."
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "Fused score that entity earned on its own alignment key."
           }
         }
       },
@@ -9925,6 +10374,172 @@
           }
         }
       },
+      "LogConfig": {
+        "type": "object",
+        "description": "Effective logger configuration.\n\nEvery field is the value the server is running with, not the value from\nthe configuration file: a rotation applied at runtime shows here.",
+        "required": [
+          "level",
+          "output",
+          "format",
+          "enable_http_api",
+          "ws_capacity",
+          "memory_buffer_size"
+        ],
+        "properties": {
+          "enable_http_api": {
+            "type": "boolean",
+            "description": "Whether the HTTP log API is enabled for this process."
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Active log file, absent when file output is off."
+          },
+          "filter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Active `tracing` filter directive, when one is set."
+          },
+          "format": {
+            "type": "string",
+            "description": "Active record format (`pretty`, `compact`, `json`)."
+          },
+          "level": {
+            "type": "string",
+            "description": "Active level name."
+          },
+          "max_file_size_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_files": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_total_size_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "memory_buffer_size": {
+            "type": "integer",
+            "description": "In-memory ring buffer capacity.",
+            "minimum": 0
+          },
+          "output": {
+            "type": "string",
+            "description": "Active sink (`stdout`, `file`, both)."
+          },
+          "ws_capacity": {
+            "type": "integer",
+            "description": "WebSocket broadcast capacity.",
+            "minimum": 0
+          }
+        }
+      },
+      "LogEntry": {
+        "type": "object",
+        "description": "One captured log record.",
+        "required": [
+          "timestamp",
+          "level",
+          "target",
+          "message"
+        ],
+        "properties": {
+          "fields": {
+            "description": "Structured fields attached to the record; shape is per record."
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name as the logger rendered it (`INFO`, `WARN`, ...)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Rendered message without structured fields."
+          },
+          "target": {
+            "type": "string",
+            "description": "Module or crate target that emitted the record."
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Event time (RFC 3339)."
+          }
+        }
+      },
+      "LogFileInfo": {
+        "type": "object",
+        "description": "One file on disk in the log directory.",
+        "required": [
+          "name",
+          "size",
+          "modified"
+        ],
+        "properties": {
+          "modified": {
+            "type": "string",
+            "description": "Last modification time (RFC 3339)."
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
+          }
+        }
+      },
+      "LogsResponse": {
+        "type": "object",
+        "description": "One page of captured records.",
+        "required": [
+          "entries",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "description": "Records of this page, newest last."
+          },
+          "page": {
+            "type": "integer",
+            "description": "Echo of the requested page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Echo of the applied page size.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "description": "Records matching the filter before paging.",
+            "minimum": 0
+          }
+        }
+      },
       "MetricsCleanupResponse": {
         "type": "object",
         "description": "Metrics cleanup response",
@@ -10740,6 +11355,14 @@
           }
         }
       },
+      "RecallPathDto": {
+        "type": "string",
+        "description": "Recall path of a secondary evidence reference.",
+        "enum": [
+          "vector",
+          "bm25"
+        ]
+      },
       "ReferenceLocation": {
         "type": "object",
         "description": "A single reference location",
@@ -11118,6 +11741,11 @@
             "format": "int64",
             "minimum": 0
           },
+          "executed_sub_queries": {
+            "type": "integer",
+            "description": "Number of sub-queries that entered the retrieval pipeline. Zero when\nthe whole aggregate result was served from the result cache.",
+            "minimum": 0
+          },
           "failed_sub_queries": {
             "type": "array",
             "items": {
@@ -11125,11 +11753,20 @@
             },
             "description": "Sub-query texts that failed during an aggregated search (empty for\nsingle queries); makes partial degradation visible to the caller."
           },
+          "from_cache": {
+            "type": "boolean",
+            "description": "Whether the aggregate result was served from the shared result cache."
+          },
           "items": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SearchResultItem"
             }
+          },
+          "planned_sub_queries": {
+            "type": "integer",
+            "description": "Number of sub-queries supplied by the caller.",
+            "minimum": 0
           },
           "relation_epoch": {
             "type": [
@@ -11148,6 +11785,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "sub_query_cache_hits": {
+            "type": "integer",
+            "description": "Number of executed sub-queries served by their own cached results.",
+            "minimum": 0
+          },
+          "sub_query_stats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubQueryStatDto"
+            },
+            "description": "Per-sub-query accounting in caller order (empty for single queries and\nfor a fully cached aggregate answer, where nothing ran).\n\n`failed_sub_queries` says a sub-query did not contribute; this says\nwhether it erred, timed out or simply matched nothing, and how much of\nwhat it recalled survived the merge."
+          },
+          "succeeded_sub_queries": {
+            "type": "integer",
+            "description": "Number of sub-queries whose candidate lists contributed to this result.",
+            "minimum": 0
           },
           "success": {
             "type": "boolean"
@@ -11181,6 +11835,11 @@
             "$ref": "#/components/schemas/ContentStateDto",
             "description": "Whether `code_chunk` is the full body or a reference."
           },
+          "contributing_sub_queries": {
+            "type": "integer",
+            "description": "Number of aggregated sub-queries that hit this result's alignment key.\nZero for single-query results.",
+            "minimum": 0
+          },
           "end_line": {
             "type": "integer",
             "format": "int32",
@@ -11199,6 +11858,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "entity_scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntityScoreDto"
+            },
+            "description": "Per-entity fused scores when one physical chunk carries several\nentities (chunk grouping is enabled). Empty otherwise."
           },
           "entity_type": {
             "type": [
@@ -11233,6 +11899,17 @@
             "format": "float",
             "description": "Unified relevance score (post-fusion)."
           },
+          "secondary_evidence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SecondaryEvidenceDto",
+                "description": "Representative hit of the recall path that lost the hybrid fusion tie.\n\nOnly a reference (chunk id, scores, line range), never a body: the\nresult itself is still the winning path's chunk. Absent for single-path\nhits and non-hybrid strategies."
+              }
+            ]
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -11250,6 +11927,48 @@
           "start_line": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SecondaryEvidenceDto": {
+        "type": "object",
+        "description": "Reference to the losing recall path's representative chunk.",
+        "required": [
+          "path",
+          "chunk_id",
+          "normalized_score",
+          "raw_score"
+        ],
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "description": "Chunk id of that path's representative hit."
+          },
+          "end_line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "One-based end line the path knows about (0 when unknown).",
+            "minimum": 0
+          },
+          "normalized_score": {
+            "type": "number",
+            "format": "float",
+            "description": "Path score normalized to `[0, 1]`."
+          },
+          "path": {
+            "$ref": "#/components/schemas/RecallPathDto",
+            "description": "Path the reference belongs to."
+          },
+          "raw_score": {
+            "type": "number",
+            "format": "float",
+            "description": "Raw retrieval score on that path."
+          },
+          "start_line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "One-based start line the path knows about (0 when unknown).",
             "minimum": 0
           }
         }
@@ -11535,9 +12254,69 @@
           "weight": {
             "type": "number",
             "format": "float",
-            "description": "Weight applied to this sub-query's candidate scores before the\ncross-query merge (`score *= weight`, then dedup keeps the highest\nweighted score per alignment key). Must be finite and >= 0."
+            "description": "Weight applied to this sub-query's candidate scores before the\ncross-query merge (`score *= weight`, then scores are clamped to the\nshared `[0, 1]` evidence domain). Must be finite and in `(0, 1]`."
           }
         }
+      },
+      "SubQueryStatDto": {
+        "type": "object",
+        "description": "Per-sub-query execution accounting for aggregated search.",
+        "required": [
+          "index",
+          "text",
+          "status",
+          "candidates",
+          "contributed",
+          "elapsed_ms"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "integer",
+            "description": "Candidates recalled before alignment and merging.",
+            "minimum": 0
+          },
+          "contributed": {
+            "type": "integer",
+            "description": "Final hits this sub-query contributed to.",
+            "minimum": 0
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent in this sub-query.",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Failure detail for `failed` and `timed_out`."
+          },
+          "index": {
+            "type": "integer",
+            "description": "Zero-based position in the request's sub-query list.",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubQueryStatusDto",
+            "description": "Terminal state."
+          },
+          "text": {
+            "type": "string",
+            "description": "Query text as executed."
+          }
+        }
+      },
+      "SubQueryStatusDto": {
+        "type": "string",
+        "description": "Terminal state of one sub-query inside an aggregated request.",
+        "enum": [
+          "succeeded",
+          "empty",
+          "failed",
+          "timed_out"
+        ]
       },
       "SummaryRequest": {
         "type": "object",
@@ -11761,6 +12540,33 @@
           }
         }
       },
+      "UpdateLogConfigRequest": {
+        "type": "object",
+        "description": "Logger fields the console may change at runtime.\n\nFile sinks and rotation limits are deliberately absent: changing them\nrequires reopening the writer, which is a restart, not a live update.",
+        "properties": {
+          "filter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New filter directive; takes precedence over `level`."
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New format name; unknown names are ignored by the server."
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New level name; unknown names are ignored by the server."
+          }
+        }
+      },
       "UpdateProjectRequest": {
         "type": "object",
         "description": "Update project request",
@@ -11914,6 +12720,10 @@
     {
       "name": "Metrics",
       "description": "Metrics export and retention"
+    },
+    {
+      "name": "Logs",
+      "description": "Console log buffer, files and logger settings"
     },
     {
       "name": "Watch",
