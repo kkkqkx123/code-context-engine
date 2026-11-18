@@ -159,6 +159,10 @@ pub struct SearchOutcome {
     pub sources: Vec<String>,
     /// Sub-query texts that failed during aggregated search.
     pub failed_sub_queries: Vec<String>,
+    /// Number of sub-queries executed by the engine.
+    pub sub_queries_count: usize,
+    /// Whether the engine served the result from cache.
+    pub from_cache: bool,
     /// Relation snapshot epoch, when available.
     pub relation_epoch: Option<i64>,
     /// Whether the relation snapshot is stale.
@@ -293,6 +297,8 @@ impl<'a> SearchService<'a> {
             elapsed_ms: result.elapsed_ms,
             sources: result.sources,
             failed_sub_queries: result.failed_sub_queries,
+            sub_queries_count: result.sub_queries_count,
+            from_cache: result.from_cache,
             relation_epoch,
             relation_stale,
         })
@@ -384,6 +390,8 @@ impl<'a> SearchService<'a> {
             elapsed_ms: result.elapsed_ms,
             sources: result.sources,
             failed_sub_queries: result.failed_sub_queries,
+            sub_queries_count: result.sub_queries_count,
+            from_cache: result.from_cache,
             relation_epoch,
             relation_stale,
         })
@@ -412,6 +420,7 @@ impl<'a> SearchService<'a> {
         config.vector = entry.config.search.vector.clone();
         config.bm25 = entry.config.search.bm25.clone();
         config.fusion = entry.config.search.fusion.clone();
+        config.aggregation = entry.config.search.aggregation.clone();
         config.score = entry.config.search.score.clone();
         config.plugin = entry.config.search.plugin.clone();
         config.annotation = entry.config.search.annotation.clone();
@@ -567,6 +576,7 @@ impl<'a> SearchService<'a> {
                 .unwrap_or_default(),
             score: item.score,
             sources: item.sources,
+            contributing_sub_queries: item.contributing_sub_queries,
             content_state,
             expanded: item.metadata.get("expanded").is_some_and(|v| v == "true"),
             expanded_nodes: metadata_count(&item.metadata, "expanded_nodes"),

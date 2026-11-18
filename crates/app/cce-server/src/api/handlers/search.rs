@@ -167,6 +167,8 @@ pub async fn handle_search(
             elapsed_ms: start.elapsed().as_millis() as u64,
             sources_used: outcome.sources,
             failed_sub_queries: outcome.failed_sub_queries,
+            sub_queries_count: outcome.sub_queries_count,
+            from_cache: outcome.from_cache,
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
         }),
@@ -250,6 +252,12 @@ pub async fn handle_aggregated_search(
     let service = SearchService::new(&state);
     let mut sub_queries = Vec::with_capacity(request.sub_queries.len());
     for sq in &request.sub_queries {
+        if is_blank(&sq.text) {
+            return SearchApiResponse::Error(ErrorResponse::new(
+                error_codes::INVALID_INPUT,
+                "Sub-query text cannot be empty",
+            ));
+        }
         let sources =
             match SearchService::parse_search_sources(&sq.query_type, "query type in sub-query") {
                 Ok(sources) => sources,
@@ -324,6 +332,8 @@ pub async fn handle_aggregated_search(
             elapsed_ms: start.elapsed().as_millis() as u64,
             sources_used: outcome.sources,
             failed_sub_queries: outcome.failed_sub_queries,
+            sub_queries_count: outcome.sub_queries_count,
+            from_cache: outcome.from_cache,
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
         }),

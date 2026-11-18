@@ -37,6 +37,9 @@ pub struct SearchResult {
     pub bm25_score: Option<f32>,
     /// Source identifiers (e.g., "vector", "bm25")
     pub sources: Vec<String>,
+    /// Number of aggregated sub-queries that contributed a hit on this
+    /// result's alignment key. Zero for single-query results.
+    pub contributing_sub_queries: usize,
     /// Code chunk content
     pub content: String,
     /// Start line
@@ -133,6 +136,7 @@ impl Default for SearchResult {
             vector_score: 0.0,
             bm25_score: None,
             sources: Vec::new(),
+            contributing_sub_queries: 0,
             content: String::new(),
             start_line: 0,
             end_line: 0,

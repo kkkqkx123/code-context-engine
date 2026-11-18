@@ -193,6 +193,8 @@ pub async fn search(
                 "elapsed_ms": outcome.elapsed_ms,
                 "sources": outcome.sources,
                 "failed_sub_queries": outcome.failed_sub_queries,
+                "sub_queries_count": outcome.sub_queries_count,
+                "from_cache": outcome.from_cache,
                 "relation_epoch": outcome.relation_epoch,
                 "relation_stale": outcome.relation_stale,
                 "items": outcome.items,

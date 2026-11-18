@@ -16,7 +16,7 @@
 //! - Query planning and optimization
 //! - Caching at the coordinator level
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -140,6 +140,7 @@ pub struct QueryCoordinatorBuilder {
     searcher_builder: Option<SearcherBuilder>,
     relation_searcher: Option<Arc<RelationSearcher>>,
     cache_config: Option<CacheConfig>,
+    shared_cache: Option<QueryCache>,
     capabilities: Option<IndexCapabilities>,
     metadata_store: Option<MetadataStore>,
     metrics_registry: Option<Arc<MetricsRegistry>>,
@@ -164,6 +165,7 @@ impl QueryCoordinatorBuilder {
             searcher_builder: Some(searcher_builder),
             relation_searcher: Some(relation_searcher),
             cache_config: None,
+            shared_cache: None,
             capabilities: None,
             metadata_store: None,
             metrics_registry: None,
@@ -211,8 +213,11 @@ impl QueryCoordinatorBuilder {
         self
     }
 
-    /// Attach a shared query result cache (forwarded to the searcher).
+    /// Attach one shared query result cache to the searcher and the
+    /// coordinator. Single-query and aggregated keys never collide, so both
+    /// layers can use the same single-flight store.
     pub fn with_shared_cache(mut self, cache: QueryCache) -> Self {
+        self.shared_cache = Some(cache.clone());
         if let Some(builder) = self.searcher_builder.take() {
             self.searcher_builder = Some(builder.with_shared_cache(cache));
         }
@@ -263,10 +268,14 @@ impl QueryCoordinatorBuilder {
             .relation_searcher
             .expect("relation_searcher must be set");
 
+        let cache = self
+            .shared_cache
+            .unwrap_or_else(|| QueryCache::new(self.cache_config.unwrap_or_default()));
+
         QueryCoordinator {
             searcher: Arc::new(searcher),
             relation_searcher,
-            cache: QueryCache::new(self.cache_config.unwrap_or_default()),
+            cache,
             capabilities: self.capabilities.unwrap_or_default(),
             metadata_store: self.metadata_store,
             metrics: None,
@@ -599,9 +608,9 @@ impl QueryCoordinator {
     /// merges the results, deduplicating by entity ID and sorting by score.
     /// Each sub-query's `weight` scales its candidates' scores before the
     /// merge, so a weight of 2.0 counts that sub-query's hits double against
-    /// the rest. A failed sub-query does not abort the search; its text is
-    /// reported in [`QueryResult::failed_sub_queries`] so partial degradation
-    /// is visible.
+    /// the rest. A failed sub-query does not abort a partially successful
+    /// search; its text is reported in [`QueryResult::failed_sub_queries`].
+    /// When every sub-query fails the request itself fails.
     pub async fn search_aggregated(
         &self,
         agg_options: &AggregatedQueryOptions,
@@ -612,7 +621,15 @@ impl QueryCoordinator {
             .load_query_filter(agg_options.project_id)
             .await?;
         let sub_queries_count = agg_options.sub_queries.len();
+        if sub_queries_count == 0 {
+            return Err(QueryError::invalid(
+                "aggregated search needs at least one sub-query",
+            ));
+        }
         for sub_query in &agg_options.sub_queries {
+            if cce_utils::text::is_blank(&sub_query.text) {
+                return Err(QueryError::invalid("sub-query text cannot be blank"));
+            }
             if !sub_query.weight.is_finite() || sub_query.weight < 0.0 {
                 return Err(QueryError::invalid(&format!(
                     "invalid sub-query weight {} for '{}'",
@@ -638,156 +655,178 @@ impl QueryCoordinator {
         // aggregated key differs from every sub-query key, so the nested
         // single-flight guards never re-enter on one key.
         let key = CacheKey::for_aggregated(agg_options.project_id, &view, agg_options);
-        self.cache
-            .get_or_compute(key, || async move {
-                // Execute sub-queries concurrently, bounded by a semaphore: the results
-                // stay aligned with the sub-query order (`join_all` preserves input
-                // order), so the merged output is deterministic regardless of which
-                // sub-query finishes first.
-                let semaphore = Arc::new(tokio::sync::Semaphore::new(
-                    Self::AGGREGATED_SUB_QUERY_CONCURRENCY,
-                ));
-                let attempts: Vec<_> = sub_options
-                    .into_iter()
-                    .map(|options| {
-                        let semaphore = semaphore.clone();
-                        let view = view.clone();
-                        async move {
-                            // The semaphore is never closed, so acquire cannot fail.
-                            let _permit = semaphore
-                                .acquire_owned()
-                                .await
-                                .expect("aggregated search semaphore closed");
-                            self.search_with_view(&options, &view).await
-                        }
-                    })
-                    .collect();
-                let attempts = futures::future::join_all(attempts).await;
-
-                let mut all_results: Vec<crate::query::types::SearchResult> = Vec::new();
-                let mut sources_used: Vec<String> = Vec::new();
-                let mut failed_sub_queries: Vec<String> = Vec::new();
-
-                for (sub_query, attempt) in agg_options.sub_queries.iter().zip(attempts) {
-                    match attempt {
-                        Ok(mut result) => {
-                            for source in &result.sources {
-                                if !sources_used.contains(source) {
-                                    sources_used.push(source.clone());
-                                }
-                            }
-                            // Weights are validated upfront; scale here unconditionally.
-                            let weight = sub_query.weight;
-                            if weight != 1.0 {
-                                for item in &mut result.items {
-                                    item.score *= weight;
-                                    item.original_score *= weight;
-                                }
-                            }
-                            all_results.extend(result.items);
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                query = %sub_query.text,
-                                error = %e,
-                                "Sub-query failed in aggregated search"
-                            );
-                            failed_sub_queries.push(sub_query.text.clone());
-                        }
+        let timeout_ms = agg_options.global_config.timeout_ms;
+        let aggregated = self.cache.get_or_compute(key, || async move {
+            // Execute sub-queries concurrently, bounded by a semaphore: the results
+            // stay aligned with the sub-query order (`join_all` preserves input
+            // order), so the merged output is deterministic regardless of which
+            // sub-query finishes first.
+            let semaphore = Arc::new(tokio::sync::Semaphore::new(
+                Self::AGGREGATED_SUB_QUERY_CONCURRENCY,
+            ));
+            let attempts: Vec<_> = sub_options
+                .into_iter()
+                .map(|options| {
+                    let semaphore = semaphore.clone();
+                    let view = view.clone();
+                    async move {
+                        // The semaphore is never closed, so acquire cannot fail.
+                        let _permit = semaphore
+                            .acquire_owned()
+                            .await
+                            .expect("aggregated search semaphore closed");
+                        self.search_with_view(&options, &view).await
                     }
-                }
-
-                // Merge by unified key (alignment key, else content weak key).
-                // The key space is shared with hybrid fusion and single-search
-                // post-processing, so one entity collapses to one entry no
-                // matter how many sub-queries surfaced it. How the multiple
-                // contributions combine is configurable:
-                // `noisy_or` accumulates evidence (agreement between
-                // sub-queries raises the score), `max` keeps the historical
-                // strongest-contribution-wins behaviour.
-                let strategy = agg_options.global_config.aggregation.score_strategy;
-                let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
-                // Strongest single contribution per key; the entry carrying it
-                // stays the representative so content and metadata come from
-                // the sub-query that scored it highest.
-                let mut best_contribution: HashMap<String, f32> = HashMap::new();
-                let mut unkeyed: Vec<crate::query::types::SearchResult> = Vec::new();
-                for item in all_results {
-                    let Some(key) = crate::query::retrieval::primitives::unified_dedup_key(&item)
-                    else {
-                        unkeyed.push(item);
-                        continue;
-                    };
-                    match dedup.get_mut(&key) {
-                        Some(existing) => {
-                            let combined =
-                                combine_aggregate_scores(existing.score, item.score, strategy);
-                            let is_stronger = item.score
-                                > best_contribution.get(&key).copied().unwrap_or(f32::MIN);
-                            if is_stronger {
-                                let mut replacement = item.clone();
-                                replacement.score = combined;
-                                replacement.original_score = combined;
-                                merge_sources(&mut replacement, existing);
-                                *existing = replacement;
-                                best_contribution.insert(key, item.score);
-                            } else {
-                                existing.score = combined;
-                                existing.original_score = combined;
-                                merge_sources(existing, &item);
-                            }
-                        }
-                        None => {
-                            best_contribution.insert(key.clone(), item.score);
-                            dedup.insert(key, item);
-                        }
-                    }
-                }
-
-                let mut merged: Vec<crate::query::types::SearchResult> =
-                    dedup.into_values().collect();
-                merged.extend(unkeyed);
-                // Single global threshold on weighted scores; sub-queries run
-                // threshold-free (see build_sub_query_options).
-                let min_score = agg_options.global_config.result.min_score;
-                if min_score > 0.0 {
-                    merged.retain(|item| item.score >= min_score);
-                }
-                merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
-
-                let limit = agg_options.global_config.result.limit;
-                if merged.len() > limit {
-                    merged.truncate(limit);
-                }
-
-                // Relation expansion runs once on the merged hits so budget,
-                // shared dedup and single wrapping observe the final Top-N instead of
-                // each sub-query's intermediate list. Sub-queries run without
-                // annotation when a resolver is present (see build_sub_query_options).
-                if let Some(resolver) = agg_options.neighbour_resolver.as_ref() {
-                    if agg_options.global_config.annotation.expansion_enabled {
-                        crate::query::expansion::annotate_hits_with_resolver(
-                            resolver,
-                            &mut merged,
-                            &agg_options.global_config.annotation,
-                        )
-                        .await;
-                    }
-                }
-
-                let total = merged.len();
-
-                Ok(QueryResult {
-                    items: merged,
-                    total,
-                    elapsed_ms: start.elapsed().as_millis() as u64,
-                    sources: sources_used,
-                    sub_queries_count,
-                    failed_sub_queries,
-                    from_cache: false,
                 })
+                .collect();
+            let attempts = futures::future::join_all(attempts).await;
+
+            let mut all_results: Vec<(usize, crate::query::types::SearchResult)> = Vec::new();
+            let mut sources_used: Vec<String> = Vec::new();
+            let mut failed_sub_queries: Vec<String> = Vec::new();
+
+            for (sub_index, (sub_query, attempt)) in
+                agg_options.sub_queries.iter().zip(attempts).enumerate()
+            {
+                match attempt {
+                    Ok(mut result) => {
+                        for source in &result.sources {
+                            if !sources_used.contains(source) {
+                                sources_used.push(source.clone());
+                            }
+                        }
+                        // Weights are validated upfront; scale here unconditionally.
+                        let weight = sub_query.weight;
+                        if weight != 1.0 {
+                            for item in &mut result.items {
+                                item.score *= weight;
+                                item.original_score *= weight;
+                            }
+                        }
+                        all_results.extend(result.items.into_iter().map(|item| (sub_index, item)));
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            query = %sub_query.text,
+                            error = %e,
+                            "Sub-query failed in aggregated search"
+                        );
+                        failed_sub_queries.push(sub_query.text.clone());
+                    }
+                }
+            }
+
+            if failed_sub_queries.len() == sub_queries_count {
+                return Err(QueryError::InvalidQuery(format!(
+                    "all {sub_queries_count} sub-queries failed: {}",
+                    failed_sub_queries.join("; ")
+                )));
+            }
+
+            // Merge by unified key (alignment key, else content weak key).
+            // The key space is shared with hybrid fusion and single-search
+            // post-processing, so one entity collapses to one entry no
+            // matter how many sub-queries surfaced it. How the multiple
+            // contributions combine is configurable:
+            // `noisy_or` accumulates evidence (agreement between
+            // sub-queries raises the score), `max` keeps the historical
+            // strongest-contribution-wins behaviour.
+            let strategy = agg_options.global_config.aggregation.score_strategy;
+            let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
+            // Strongest single contribution per key; the entry carrying it
+            // stays the representative so content and metadata come from
+            // the sub-query that scored it highest.
+            let mut best_contribution: HashMap<String, f32> = HashMap::new();
+            let mut contributors: HashMap<String, HashSet<usize>> = HashMap::new();
+            let mut unkeyed: Vec<crate::query::types::SearchResult> = Vec::new();
+            for (sub_index, mut item) in all_results {
+                let Some(key) = crate::query::retrieval::primitives::unified_dedup_key(&item)
+                else {
+                    item.contributing_sub_queries = 1;
+                    unkeyed.push(item);
+                    continue;
+                };
+                contributors
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(sub_index);
+                let contribution_count = contributors.get(&key).map_or(1, HashSet::len);
+                match dedup.get_mut(&key) {
+                    Some(existing) => {
+                        let combined =
+                            combine_aggregate_scores(existing.score, item.score, strategy);
+                        let is_stronger =
+                            item.score > best_contribution.get(&key).copied().unwrap_or(f32::MIN);
+                        if is_stronger {
+                            let mut replacement = item.clone();
+                            replacement.score = combined;
+                            replacement.original_score = combined;
+                            replacement.contributing_sub_queries = contribution_count;
+                            merge_sources(&mut replacement, existing);
+                            *existing = replacement;
+                            best_contribution.insert(key, item.score);
+                        } else {
+                            existing.score = combined;
+                            existing.original_score = combined;
+                            existing.contributing_sub_queries = contribution_count;
+                            merge_sources(existing, &item);
+                        }
+                    }
+                    None => {
+                        best_contribution.insert(key.clone(), item.score);
+                        item.contributing_sub_queries = contribution_count;
+                        dedup.insert(key, item);
+                    }
+                }
+            }
+
+            let mut merged: Vec<crate::query::types::SearchResult> = dedup.into_values().collect();
+            merged.extend(unkeyed);
+            // Single global threshold on weighted scores; sub-queries run
+            // threshold-free (see build_sub_query_options).
+            let min_score = agg_options.global_config.result.min_score;
+            if min_score > 0.0 {
+                merged.retain(|item| item.score >= min_score);
+            }
+            merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
+
+            let limit = agg_options.global_config.result.limit;
+            if merged.len() > limit {
+                merged.truncate(limit);
+            }
+
+            // Relation expansion runs once on the merged hits so budget,
+            // shared dedup and single wrapping observe the final Top-N instead of
+            // each sub-query's intermediate list. Sub-queries run without
+            // annotation when a resolver is present (see build_sub_query_options).
+            if let Some(resolver) = agg_options.neighbour_resolver.as_ref() {
+                if agg_options.global_config.annotation.expansion_enabled {
+                    crate::query::expansion::annotate_hits_with_resolver(
+                        resolver,
+                        &mut merged,
+                        &agg_options.global_config.annotation,
+                    )
+                    .await;
+                }
+            }
+
+            let total = merged.len();
+
+            Ok(QueryResult {
+                items: merged,
+                total,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                sources: sources_used,
+                sub_queries_count,
+                failed_sub_queries,
+                from_cache: false,
             })
-            .await
+        });
+
+        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), aggregated).await {
+            Ok(result) => result,
+            Err(_) => Err(QueryError::Timeout { timeout_ms }),
+        }
     }
 
     /// Decompose one sub-query's options out of the aggregated options.

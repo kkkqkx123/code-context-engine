@@ -156,6 +156,7 @@ mod tests {
             stable_symbol_ids,
             score: 0.5,
             sources: Vec::new(),
+            contributing_sub_queries: 0,
             content_state: ContentStateDto::Full,
             expanded: false,
             expanded_nodes: 0,

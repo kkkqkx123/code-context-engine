@@ -2,202 +2,99 @@
 
 ## POST /api/search/aggregated
 
-执行多查询并行检索，支持同时执行多个子查询并使用RRF（Reciprocal Rank Fusion）算法融合结果。
+执行多路子查询检索，并把命中按统一对齐键合并成一份结果。与单查询端点不同，子查询由调用方显式给出，服务端不负责把一句自然语言自动拆分。
+
+项目配置 `[search.aggregation].score_strategy` 控制同一对齐键上多条命中如何合并：
+
+- `noisy_or`（默认）：按 `1 - Π(1 - score)` 累积一致性证据，结果保持在 `[0, 1]`；
+- `max`：只保留最强的一条贡献。
+
+策略通过共享查询服务进入执行层，并计入缓存键；修改策略后不会复用旧策略的结果。
 
 ### 与单一查询端点的对比
 
-Code Context Engine 提供两个搜索 API 端点：
-
-- **`POST /api/search`** - 单一查询端点（默认），适合简单的关键词或语义搜索
-- **`POST /api/search/aggregated`** - 多查询聚合端点（高级），适合复杂的多路召回场景
-
-**选择建议**：
-
 | 场景 | 推荐端点 |
-|------|----------|
-| 新用户快速上手 | `/api/search` |
-| 简单搜索需求 | `/api/search` |
-| 需要精细控制检索策略 | `/api/search/aggregated` |
-| 跨语言/跨技术栈搜索 | `/api/search/aggregated` |
-| 追求极致检索质量 | `/api/search/aggregated` |
+|---|---|
+| 简单关键词或语义搜索 | `POST /api/search` |
+| 多意图、词面互补的复杂查询 | `POST /api/search/aggregated` |
 
-**性能对比**：
-
-| 指标 | `/api/search` (hybrid) | `/api/search/aggregated` |
-|------|------------------------|--------------------------|
-| 延迟 | ~100-200ms | ~120-250ms（并行后接近单查询） |
-| 查全率 | 中等 | 高（多路召回） |
-| 查准率 | 良好 | 优秀（RRF 融合） |
-| 复杂度 | 低 | 中（需要设计子查询） |
+聚合不是全局增益开关。离线评测显示收益高度依赖子查询组合；同类语义子查询可能降低召回质量。建议先用少量子查询做评测，再决定是否启用。
 
 ### 请求
 
-**方法**: `POST`
+**方法**：`POST`
 
-**Content-Type**: `application/json`
+**Content-Type**：`application/json`
 
-```json
-{
-  "project_id": 1,
-  "project_path": "/path/to/project",
-  "sub_queries": [
-    {
-      "text": "authentication function",
-      "query_type": "vector",
-      "weight": 1.5
-    },
-    {
-      "text": "login auth",
-      "query_type": "bm25",
-      "weight": 1.0
-    }
-  ],
-  "limit": 20,
-  "min_score": 0.5,
-  "directory_prefix": "src/",
-  "exclude_content_types": ["test", "generated"],
-  "exclude_patterns": ["**/tests/**"],
-  "include_patterns": ["**/auth/**"]
-}
-```
+请求体主要字段：
 
-**注意**: `project_id` 和 `project_path` 必须提供其中一个，但不能同时提供。
-- 使用 `project_id`：直接通过内部项目ID访问（需要先查询获取ID）
-- 使用 `project_path`：直接通过项目根目录路径访问（更方便，系统会自动归一化路径并查找对应的项目）
-
-**请求字段**:
-
-| 字段 | 类型 | 必填 | 描述 |
-|-----|------|------|------|
-| `project_id` | number? | 二选一 | 项目 ID，用于应用项目级配置 |
-| `project_path` | string? | 二选一 | 项目根目录路径（与 project_id 二选一） |
-| `sub_queries` | array | 是 | 子查询列表 |
-| `limit` | number | 否 | 返回结果数量限制，默认20 |
-| `min_score` | number | 否 | 最小分数阈值 |
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `project_id` / `project_path` | number / string | 二选一 | 项目定位，不可同时提供 |
+| `sub_queries` | array | 是 | 子查询列表，1 到 10 条 |
+| `limit` | number | 否 | 最终返回数量，默认 10，最大 100 |
+| `min_score` | number | 否 | 合并后的全局分数阈值 |
 | `directory_prefix` | string | 否 | 目录前缀过滤 |
-| `exclude_content_types` | string[] | 否 | 排除的内容类型（test, generated, vendor） |
-| `exclude_patterns` | string[] | 否 | 排除的文件模式（glob格式） |
-| `include_patterns` | string[] | 否 | 包含的文件模式（glob格式） |
+| `exclude_content_types` | string[] | 否 | 排除 test、generated、dependency 等内容 |
+| `include_categories` / `exclude_categories` | string[] | 否 | 文件分类过滤 |
+| `include_patterns` / `exclude_patterns` | string[] | 否 | glob 路径过滤 |
+| `enable_rerank` / `rerank_max_candidates` | bool / number | 否 | 重排覆盖 |
+| `query_intent` | string | 否 | 应用到所有子查询的意图，留空则逐条自动识别 |
+| `expand` | bool | 否 | 是否在合并后的 Top-N 上做关系扩展 |
 
-**sub_queries 字段**:
+`sub_queries` 每项：
 
-| 字段 | 类型 | 必填 | 描述 |
-|-----|------|------|------|
-| `text` | string | 是 | 查询文本 |
-| `query_type` | string | 否 | 查询类型（vector, bm25, hybrid），默认hybrid |
-| `weight` | number | 否 | RRF融合权重，默认1.0 |
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `text` | string | 是 | 非空查询文本 |
+| `query_type` | string | 否 | `vector`、`bm25`、`hybrid`，默认 `hybrid` |
+| `weight` | number | 否 | 合并前的分数缩放，必须有限且非负，默认 1.0 |
 
-### 响应
-
-**Content-Type**: `application/json`
-
-```json
-{
-  "success": true,
-  "total": 15,
-  "items": [
-    {
-      "id": "abc123",
-      "score": 0.95,
-      "file_path": "src/auth/login.rs",
-      "start_line": 10,
-      "end_line": 45,
-      "language": "rust",
-      "entity_type": "function",
-      "entity_name": "authenticate_user",
-      "snippet": "fn authenticate_user(username: &str, password: &str) -> Result<User> { ... }",
-      "metadata": {
-        "signature": "fn authenticate_user(username: &str, password: &str) -> Result<User>",
-        "description": "Authenticates a user with username and password"
-      }
-    }
-  ],
-  "elapsed_ms": 85,
-  "sources_used": ["vector", "bm25"]
-}
-```
-
-**响应字段**:
-
-| 字段 | 类型 | 描述 |
-|-----|------|------|
-| `success` | boolean | 操作是否成功 |
-| `total` | number | 返回的结果总数 |
-| `items` | array | 搜索结果列表 |
-| `elapsed_ms` | number | 查询耗时（毫秒） |
-| `sources_used` | string[] | 使用的搜索源 |
-
-**items 字段**:
-
-| 字段 | 类型 | 描述 |
-|-----|------|------|
-| `id` | string | 结果ID |
-| `score` | number | 相关性分数（0-1） |
-| `file_path` | string | 文件路径 |
-| `start_line` | number | 起始行号 |
-| `end_line` | number | 结束行号 |
-| `language` | string | 编程语言 |
-| `entity_type` | string | 实体类型 |
-| `entity_name` | string | 实体名称 |
-| `snippet` | string | 代码片段 |
-| `metadata` | object | 元数据 |
-
-### 示例
+调用示例：
 
 ```bash
-# 使用 project_path（推荐，更直观）
-curl -X POST "http://localhost:9000/api/search/aggregated" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "project_path": "/path/to/my/project",
-    "sub_queries": [
-      {
-        "text": "user authentication",
-        "query_type": "vector",
-        "weight": 1.5
-      },
-      {
-        "text": "login validate",
-        "query_type": "bm25",
-        "weight": 1.0
-      }
-    ],
-    "limit": 10
-  }'
-
-# 或使用 project_id
 curl -X POST "http://localhost:9000/api/search/aggregated" \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": 1,
     "sub_queries": [
-      {
-        "text": "user authentication",
-        "query_type": "vector",
-        "weight": 1.5
-      },
-      {
-        "text": "login validate",
-        "query_type": "bm25",
-        "weight": 1.0
-      }
+      { "text": "user authentication", "query_type": "vector", "weight": 1.0 },
+      { "text": "login validate", "query_type": "bm25", "weight": 1.0 }
     ],
     "limit": 10
   }'
 ```
 
-### 工作原理
+### 响应
 
-1. **并行检索**: 所有子查询并行执行，提高性能
-2. **RRF融合**: 使用Reciprocal Rank Fusion算法合并多个查询结果
-   - RRF公式: `score = Σ(1 / (k + rank))`，其中k=60
-   - 权重高的查询对最终排名影响更大
-3. **去重排序**: 自动去重并按融合分数排序
-4. **统一过滤**: 所有子查询共享相同的过滤条件
+响应中的 `items` 与单查询端点共用同一结果结构，主要字段包括 `file_path`、`code_chunk`、`start_line`、`end_line`、`entity_type`、`entity_names`、`entity_ids`、`stable_symbol_ids`、`score`、`sources`、`content_state`、关系扩展计数、`secondary_evidence` 和 `entity_scores`。
 
-### 使用场景
+响应级附加字段：
 
-1. **混合语义和关键词搜索**: 同时使用向量搜索（语义）和BM25（关键词）
-2. **多角度查询**: 从不同角度描述同一概念
-3. **加权查询**: 某些查询比其他查询更重要
-4. **复杂需求**: 需要结合多种搜索策略的场景
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `success` | bool | 是否成功 |
+| `total` | number | 本次返回的结果数量 |
+| `elapsed_ms` | number | 服务端执行耗时 |
+| `sources_used` | string[] | 所有子查询涉及的检索来源 |
+| `failed_sub_queries` | string[] | 失败的子查询文本；部分失败时仍返回其余结果 |
+| `sub_queries_count` | number | 实际执行的子查询数量；单查询为 1 |
+| `from_cache` | bool | 是否命中共享结果缓存 |
+| `relation_epoch` / `relation_stale` | number / bool | 关系快照版本与新鲜度 |
+
+结果项附加字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `contributing_sub_queries` | number | 有多少条子查询在该结果的对齐键上产生了命中；单查询为 0 |
+
+全部子查询失败时请求返回错误，不再返回 `success: true` 的空结果。部分子查询失败时请求成功，并通过 `failed_sub_queries` 暴露降解情况。
+
+### 执行语义
+
+1. 所有子查询共享同一索引 epoch view 和全局过滤条件。
+2. 每条子查询以关闭阈值、放大的候选上限运行完整检索管线；最多 4 条并发执行。
+3. 权重在合并前缩放分数，随后按统一对齐键折叠，并按配置的策略累积证据。
+4. 合并后应用一次全局阈值、排序和数量限制。
+5. 关系扩展只作用于最终 Top-N，避免每个子查询重复扩展。
+6. 整个聚合请求受项目配置的搜索超时约束；超时会取消尚未完成的子查询。

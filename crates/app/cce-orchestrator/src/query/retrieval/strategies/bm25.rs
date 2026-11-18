@@ -138,6 +138,7 @@ impl Bm25Strategy {
                     vector_score: 0.0,
                     bm25_score: Some(bm25_score),
                     sources: vec!["bm25".to_string()],
+                    contributing_sub_queries: 0,
                     content,
                     start_line: 0,
                     end_line: 0,

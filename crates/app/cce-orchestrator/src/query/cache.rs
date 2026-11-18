@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use moka::future::Cache;
 
-use super::error::Result;
+use super::error::{QueryError, Result};
 use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
 use crate::query::filter::QueryFilter;
 
@@ -36,6 +36,7 @@ fn config_fingerprint(config: &super::types::SearchConfig) -> u64 {
         &config.vector,
         &config.bm25,
         &config.fusion,
+        &config.aggregation,
         &config.result,
         &config.rerank,
         &config.score,
@@ -253,6 +254,31 @@ impl From<&cce_config::modules::GlobalCacheConfig> for CacheConfig {
     }
 }
 
+type InflightMap = Arc<std::sync::Mutex<HashMap<CacheKey, Arc<tokio::sync::Mutex<()>>>>>;
+
+/// Owns the single-flight slot until the computation finishes or is dropped.
+/// Cancellation must remove the slot: otherwise an outer deadline leaves a
+/// stale entry behind for every timed-out key.
+struct InflightGuard {
+    key: CacheKey,
+    map: InflightMap,
+    slot: Arc<tokio::sync::Mutex<()>>,
+    _lock: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = self.map.lock() {
+            if map
+                .get(&self.key)
+                .is_some_and(|slot| Arc::ptr_eq(slot, &self.slot))
+            {
+                map.remove(&self.key);
+            }
+        }
+    }
+}
+
 /// Query result cache
 ///
 /// Results are keyed by project + epoch view + query identity, so any
@@ -269,7 +295,7 @@ pub struct QueryCache {
     /// `result_cache` instead of re-running the pipeline. An entry lives only
     /// while a computation is in flight — the leader removes its own entry on
     /// completion, so idle keys never accumulate.
-    inflight: Arc<tokio::sync::Mutex<HashMap<CacheKey, Arc<tokio::sync::Mutex<()>>>>>,
+    inflight: InflightMap,
     /// Configuration
     config: CacheConfig,
 }
@@ -284,7 +310,7 @@ impl QueryCache {
 
         Self {
             result_cache,
-            inflight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            inflight: Arc::new(std::sync::Mutex::new(HashMap::new())),
             config,
         }
     }
@@ -293,7 +319,7 @@ impl QueryCache {
     pub fn disabled() -> Self {
         Self {
             result_cache: Cache::new(0),
-            inflight: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            inflight: Arc::new(std::sync::Mutex::new(HashMap::new())),
             config: CacheConfig {
                 enabled: false,
                 ..Default::default()
@@ -362,15 +388,23 @@ impl QueryCache {
             return Ok(cached);
         }
 
-        let guard = {
-            let mut inflight = self.inflight.lock().await;
+        let slot = {
+            let mut inflight = self
+                .inflight
+                .lock()
+                .map_err(|_| QueryError::config("query cache single-flight lock poisoned"))?;
             Arc::clone(
                 inflight
                     .entry(key.clone())
                     .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
             )
         };
-        let _lock = guard.lock().await;
+        let _guard = InflightGuard {
+            key: key.clone(),
+            map: Arc::clone(&self.inflight),
+            slot: Arc::clone(&slot),
+            _lock: slot.lock_owned().await,
+        };
 
         // A leader may have published while we waited for the guard.
         if let Some(mut cached) = self.result_cache.get(&key).await {
@@ -380,21 +414,12 @@ impl QueryCache {
 
         let result = compute().await;
 
-        // Publish before releasing the guard so a waiter observes the entry on
-        // its cache re-check. Drop the slot on both success and failure so
-        // errored keys never linger.
+        // Publish before the guard drops so a waiter observes the entry on
+        // its cache re-check. The guard also removes the slot when an outer
+        // timeout cancels this future before the insert.
         if let Ok(value) = &result {
             self.result_cache.insert(key.clone(), value.clone()).await;
         }
-
-        let mut inflight = self.inflight.lock().await;
-        if inflight
-            .get(&key)
-            .is_some_and(|existing| Arc::ptr_eq(existing, &guard))
-        {
-            inflight.remove(&key);
-        }
-        drop(inflight);
 
         result
     }
@@ -610,7 +635,7 @@ mod tests {
 
     #[test]
     fn test_aggregated_key_tracks_sub_queries_and_weights() {
-        use crate::query::types::{AggregatedQueryOptions, SubQuery};
+        use crate::query::types::{AggregatedQueryOptions, AggregationScoreStrategy, SubQuery};
 
         let view = crate::query::filter::QueryFilter::default();
         let agg = || AggregatedQueryOptions {
@@ -632,5 +657,36 @@ mod tests {
         let mut stricter = agg();
         stricter.global_config.result.limit = 3;
         assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &stricter));
+
+        let mut max_strategy = agg();
+        max_strategy.global_config.aggregation.score_strategy = AggregationScoreStrategy::Max;
+        assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &max_strategy));
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_compute_releases_inflight_slot() {
+        let cache = QueryCache::new(CacheConfig::default());
+        let options = QueryConfigBuilder::new(1)
+            .build("cancelled query")
+            .with_sources(SearchSources::default());
+        let key = CacheKey::from_options(&options);
+
+        let outcome = tokio::time::timeout(Duration::from_millis(10), {
+            let cache = cache.clone();
+            async move {
+                cache
+                    .get_or_compute(key, || async {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        Ok(QueryResult::default())
+                    })
+                    .await
+            }
+        })
+        .await;
+        assert!(outcome.is_err(), "compute must hit the outer deadline");
+        assert!(
+            cache.inflight.lock().expect("inflight lock").is_empty(),
+            "cancelled compute must not leave a single-flight slot"
+        );
     }
 }

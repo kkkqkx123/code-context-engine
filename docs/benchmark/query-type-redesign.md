@@ -47,7 +47,7 @@
 | `qualified`（原 `exact` 改名） | 保留 | 加自然语言结构 | 标识符消歧 + 成员-类型关系理解 | grep 需正则才能回答 |
 | `fuzzy`（新增） | 人为扰动 | 保留 | 对命名风格/同义词变换的鲁棒性 | grep 无法回答 |
 | `semantic`（现有） | 换词 | 行为级改写 | 纯语义行为匹配 | grep 无法回答 |
-| `cross_lang`（现有） | 跨语言换词 | 保留 | 跨语言对齐能力 | grep 无法回答 |
+| `cross_lang`（现有） | 跨语言换词 | 保留，但移出主 benchmark | 跨语言对齐能力 | grep 无法回答 |
 
 ### 2.2 类型定义
 
@@ -106,7 +106,14 @@
 | 3 | fuzzy 变体派生（15 个/项目，含子类型标注） | 抽样复核扰动后实体指向一致 |
 | 4 | 重新生成 bench_data + 运行基准 | 对比新旧报告，确认 qualified/fuzzy 判别力（BM25 不应再碾压词面类查询） |
 
-## 6. 风险与缓解
+## 6. 评测边界
+
+`cross_lang` 不参与主 benchmark 的聚合指标、BM25 参数扫描、分块基线结论或聚合默认配置建议。
+独立评测入口为 `cargo run --example cross_language_oncecell -p cce-e2e-tests`，
+输出 `outputs/benchmark/cross_language/{project}/`，用同目标的英文/非英文查询对计算 `language_gap`。
+主 benchmark 统一使用 `CoreRetrieval`。
+
+## 7. 风险与缓解
 
 | 风险 | 缓解 |
 |------|------|

@@ -65,6 +65,12 @@ pub struct SearchResponse {
     /// single queries); makes partial degradation visible to the caller.
     #[serde(default)]
     pub failed_sub_queries: Vec<String>,
+    /// Number of sub-queries executed by the engine.
+    #[serde(default)]
+    pub sub_queries_count: usize,
+    /// Whether the result was served from the shared query result cache.
+    #[serde(default)]
+    pub from_cache: bool,
     /// Relation epoch the backing index was at when the query ran, when a
     /// relation snapshot is available. Lets callers judge result freshness
     /// against graph query versions.
@@ -116,6 +122,10 @@ pub struct SearchResultItem {
     /// Retrieval sources that contributed to this result (e.g. "vector", "bm25").
     #[serde(default)]
     pub sources: Vec<String>,
+    /// Number of aggregated sub-queries that hit this result's alignment key.
+    /// Zero for single-query results.
+    #[serde(default)]
+    pub contributing_sub_queries: usize,
     /// Whether `code_chunk` is the full body or a reference.
     #[serde(default)]
     pub content_state: ContentStateDto,
