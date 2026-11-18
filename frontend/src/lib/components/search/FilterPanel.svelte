@@ -184,13 +184,14 @@
 					<input
 						class="text-input"
 						type="number"
-						min="0"
+						min="0.01"
+						max="1"
 						step="0.1"
-						title="Weight"
+						title="Weight (0, 1]"
 						value={sq.weight}
 						oninput={(e) => {
 							const n = parseFloat((e.target as HTMLInputElement).value);
-							if (!Number.isNaN(n) && n >= 0) updateSubQuery(i, { weight: n });
+							if (!Number.isNaN(n) && n > 0 && n <= 1) updateSubQuery(i, { weight: n });
 						}}
 					/>
 					<Button

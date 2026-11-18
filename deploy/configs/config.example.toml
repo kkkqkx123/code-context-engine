@@ -406,11 +406,14 @@ timeout_ms = 5000
 
 # [search.aggregation]
 # Multi-sub-query aggregation (decomposed queries), unrelated to path fusion.
-# score_strategy = "noisy_or"  # "noisy_or" | "max"
-# # noisy_or accumulates evidence: 1 - Π(1 - s_i), stays in [0, 1], so the
-# # global result.min_score keeps its meaning. Sub-query weights above 1
-# # saturate the contribution; keep them <= 1.
-# # "max" keeps the historical strongest-sub-query-wins behaviour.
+# score_strategy = "max"  # "max" | "noisy_or"
+# # "max" keeps the strongest weighted contribution per dedup key and is the
+# # default: it does not amplify weak hits purely through sub-query agreement.
+# # "noisy_or" accumulates evidence: 1 - Π(1 - s_i), stays in [0, 1], so the
+# # global result.min_score keeps its meaning. Enable it for complementary
+# # lexical or fuzzy sub-queries; measured results do not support it as a
+# # universal default. Sub-query weights must be in (0, 1]; the API rejects
+# # zero and out-of-range weights.
 
 # [search.boost]
 # Unified boost aggregation: per-source capped additions, globally capped.

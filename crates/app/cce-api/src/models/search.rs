@@ -65,10 +65,20 @@ pub struct SearchResponse {
     /// single queries); makes partial degradation visible to the caller.
     #[serde(default)]
     pub failed_sub_queries: Vec<String>,
-    /// Number of sub-queries executed by the engine.
+    /// Number of sub-queries supplied by the caller.
     #[serde(default)]
-    pub sub_queries_count: usize,
-    /// Whether the result was served from the shared query result cache.
+    pub planned_sub_queries: usize,
+    /// Number of sub-queries that entered the retrieval pipeline. Zero when
+    /// the whole aggregate result was served from the result cache.
+    #[serde(default)]
+    pub executed_sub_queries: usize,
+    /// Number of sub-queries whose candidate lists contributed to this result.
+    #[serde(default)]
+    pub succeeded_sub_queries: usize,
+    /// Number of executed sub-queries served by their own cached results.
+    #[serde(default)]
+    pub sub_query_cache_hits: usize,
+    /// Whether the aggregate result was served from the shared result cache.
     #[serde(default)]
     pub from_cache: bool,
     /// Relation epoch the backing index was at when the query ran, when a
@@ -204,8 +214,8 @@ pub struct SubQueryRequest {
     #[serde(default = "default_subquery_type")]
     pub query_type: String,
     /// Weight applied to this sub-query's candidate scores before the
-    /// cross-query merge (`score *= weight`, then dedup keeps the highest
-    /// weighted score per alignment key). Must be finite and >= 0.
+    /// cross-query merge (`score *= weight`, then scores are clamped to the
+    /// shared `[0, 1]` evidence domain). Must be finite and in `(0, 1]`.
     #[serde(default = "default_weight")]
     pub weight: f32,
 }

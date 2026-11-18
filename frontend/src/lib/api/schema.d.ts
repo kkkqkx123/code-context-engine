@@ -3029,7 +3029,21 @@ export interface components {
              *     single queries); makes partial degradation visible to the caller.
              */
             failed_sub_queries?: string[];
+            /** @description Whether the aggregate result was served from the shared result cache. */
+            from_cache?: boolean;
             items: components["schemas"]["SearchResultItem"][];
+            /** @description Number of sub-queries supplied by the caller. */
+            planned_sub_queries?: number;
+            /**
+             * Format: int64
+             * @description Number of sub-queries that entered the retrieval pipeline. Zero when
+             *     the whole aggregate result was served from the result cache.
+             */
+            executed_sub_queries?: number;
+            /** @description Number of sub-query results that contributed to the final list. */
+            succeeded_sub_queries?: number;
+            /** @description Number of executed sub-queries served by their own cached results. */
+            sub_query_cache_hits?: number;
             /**
              * Format: int64
              * @description Relation epoch the backing index was at when the query ran, when a

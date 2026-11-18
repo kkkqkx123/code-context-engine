@@ -164,7 +164,7 @@ impl Searcher {
         // single-flight onto one computation, so they do not each queue
         // behind the shared LLM rate limiter.
         let key = CacheKey::from_options_with_view(options, query_filter);
-        let result = self
+        let mut result = self
             .cache
             .get_or_compute(key, || async move {
                 let mut effective = options.clone();
@@ -177,9 +177,7 @@ impl Searcher {
                     .execute_search_flow(&effective, &strategy, query_filter)
                     .await?;
 
-                let elapsed_ms = start.elapsed().as_millis() as u64;
                 tracing::trace!(
-                    total_elapsed_ms = elapsed_ms,
                     strategy = %strategy,
                     result_count = results.len(),
                     "Search completed"
@@ -188,14 +186,24 @@ impl Searcher {
                 Ok(QueryResult {
                     total: results.len(),
                     items: results,
-                    elapsed_ms,
+                    elapsed_ms: 0,
                     sources: vec![strategy.to_string()],
-                    sub_queries_count: 1, // Single query by default
+                    planned_sub_queries: 1,
+                    executed_sub_queries: 1,
+                    succeeded_sub_queries: 1,
+                    sub_query_cache_hits: 0,
                     failed_sub_queries: Vec::new(),
+                    cacheable: true,
                     from_cache: false,
                 })
             })
             .await?;
+
+        result.elapsed_ms = start.elapsed().as_millis() as u64;
+        if result.from_cache {
+            result.executed_sub_queries = 0;
+            result.sub_query_cache_hits = 1;
+        }
 
         // Record search metrics with query type distribution. `sources` holds
         // the display form (hybrid includes fusion weights); the metric label

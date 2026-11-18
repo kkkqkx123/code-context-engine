@@ -159,9 +159,15 @@ pub struct SearchOutcome {
     pub sources: Vec<String>,
     /// Sub-query texts that failed during aggregated search.
     pub failed_sub_queries: Vec<String>,
-    /// Number of sub-queries executed by the engine.
-    pub sub_queries_count: usize,
-    /// Whether the engine served the result from cache.
+    /// Number of sub-queries supplied by the caller.
+    pub planned_sub_queries: usize,
+    /// Number of sub-queries that entered the retrieval pipeline.
+    pub executed_sub_queries: usize,
+    /// Number of sub-queries whose candidates contributed to the result.
+    pub succeeded_sub_queries: usize,
+    /// Number of sub-queries served by their own cached results.
+    pub sub_query_cache_hits: usize,
+    /// Whether the engine served the aggregate result from cache.
     pub from_cache: bool,
     /// Relation snapshot epoch, when available.
     pub relation_epoch: Option<i64>,
@@ -297,7 +303,10 @@ impl<'a> SearchService<'a> {
             elapsed_ms: result.elapsed_ms,
             sources: result.sources,
             failed_sub_queries: result.failed_sub_queries,
-            sub_queries_count: result.sub_queries_count,
+            planned_sub_queries: result.planned_sub_queries,
+            executed_sub_queries: result.executed_sub_queries,
+            succeeded_sub_queries: result.succeeded_sub_queries,
+            sub_query_cache_hits: result.sub_query_cache_hits,
             from_cache: result.from_cache,
             relation_epoch,
             relation_stale,
@@ -313,6 +322,7 @@ impl<'a> SearchService<'a> {
         project_id: i64,
         spec: AggregatedQuerySpec,
     ) -> Result<SearchOutcome, SearchServiceError> {
+        let (relation_epoch, relation_stale) = self.relation_version(project_id).await;
         let entry = self.load_entry(project_id).await?;
         let fields = &spec.fields;
         let mut global_config = SearchConfig::default();
@@ -355,8 +365,14 @@ impl<'a> SearchService<'a> {
             include_categories: fields.include_categories.clone(),
             exclude_categories: fields.exclude_categories.clone(),
         });
+        let original_query = spec
+            .sub_queries
+            .iter()
+            .map(|sub| sub.text.clone())
+            .collect::<Vec<_>>()
+            .join(" + ");
         let agg_options = AggregatedQueryOptions {
-            original_query: String::new(),
+            original_query,
             project_id,
             sub_queries: spec
                 .sub_queries
@@ -374,6 +390,7 @@ impl<'a> SearchService<'a> {
             enable_rerank: fields.enable_rerank,
             enable_result_filter: None,
             query_intent: fields.query_intent,
+            relation_epoch,
             neighbour_resolver: resolver,
         };
 
@@ -383,14 +400,16 @@ impl<'a> SearchService<'a> {
             .await
             .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
         let items = self.convert_items(project_id, result.items).await;
-        let (relation_epoch, relation_stale) = self.relation_version(project_id).await;
         Ok(SearchOutcome {
             total: result.total,
             items,
             elapsed_ms: result.elapsed_ms,
             sources: result.sources,
             failed_sub_queries: result.failed_sub_queries,
-            sub_queries_count: result.sub_queries_count,
+            planned_sub_queries: result.planned_sub_queries,
+            executed_sub_queries: result.executed_sub_queries,
+            succeeded_sub_queries: result.succeeded_sub_queries,
+            sub_query_cache_hits: result.sub_query_cache_hits,
             from_cache: result.from_cache,
             relation_epoch,
             relation_stale,

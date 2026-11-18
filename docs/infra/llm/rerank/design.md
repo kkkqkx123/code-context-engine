@@ -643,7 +643,10 @@ pub async fn execute_query(&self, options: &QueryOptions) -> Result<QueryResult>
         items: results,
         elapsed_ms: /* calculate */,
         sources: /* collect */,
-        sub_queries_count: 1,
+        planned_sub_queries: 1,
+        executed_sub_queries: 1,
+        succeeded_sub_queries: 1,
+        sub_query_cache_hits: 0,
     })
 }
 ```

@@ -79,6 +79,8 @@ pub struct CacheKey {
     epoch: i64,
     /// Inherited parent epoch (`-1` when the generation is full)
     parent_epoch: i64,
+    /// Relation snapshot used by expanded results (`-1` when not applicable)
+    relation_epoch: i64,
     /// Hash of the overridden-file exclusion set
     excluded_hash: u64,
     /// Hash of the query text
@@ -157,6 +159,7 @@ impl CacheKey {
             project_id: options.project_id,
             epoch: view.epoch_value(),
             parent_epoch,
+            relation_epoch: -1,
             excluded_hash,
             query_hash,
             sources_hash,
@@ -169,9 +172,9 @@ impl CacheKey {
 
     /// Build a cache key for an aggregated query over one epoch view.
     ///
-    /// Sub-query texts, sources and weights join the key alongside the
-    /// global configuration, so any merge-affecting change recomputes
-    /// instead of serving a stale union.
+    /// Sub-query texts, sources, weights, rerank context, relation snapshot
+    /// and global configuration join the key, so any merge-affecting change
+    /// recomputes instead of serving a stale union.
     pub fn for_aggregated(
         project_id: i64,
         view: &QueryFilter,
@@ -186,14 +189,25 @@ impl CacheKey {
         let parent_epoch = view.parent_epoch().unwrap_or(-1);
 
         let mut hasher = DefaultHasher::new();
+        agg.original_query.hash(&mut hasher);
         for sub in &agg.sub_queries {
             sub.text.hash(&mut hasher);
             sub.sources.hash(&mut hasher);
             sub.weight.to_bits().hash(&mut hasher);
         }
-        format!("{:?}", agg.filters).hash(&mut hasher);
+        match agg.filters.as_ref() {
+            Some(filters) => {
+                true.hash(&mut hasher);
+                filters.directory_prefix.hash(&mut hasher);
+                filters.exclude_content_types.hash(&mut hasher);
+                filters.include_categories.hash(&mut hasher);
+                filters.exclude_categories.hash(&mut hasher);
+            }
+            None => false.hash(&mut hasher),
+        }
         agg.exclude_patterns.hash(&mut hasher);
         agg.include_patterns.hash(&mut hasher);
+        agg.relation_epoch.hash(&mut hasher);
         let query_hash = hasher.finish();
 
         let mut hasher = DefaultHasher::new();
@@ -209,6 +223,7 @@ impl CacheKey {
             project_id,
             epoch: view.epoch_value(),
             parent_epoch,
+            relation_epoch: agg.relation_epoch.unwrap_or(-1),
             excluded_hash,
             query_hash,
             sources_hash,
@@ -415,10 +430,14 @@ impl QueryCache {
         let result = compute().await;
 
         // Publish before the guard drops so a waiter observes the entry on
-        // its cache re-check. The guard also removes the slot when an outer
-        // timeout cancels this future before the insert.
+        // its cache re-check. Degraded results are returned to the caller but
+        // never published: a transient sub-query failure must not become the
+        // answer to every identical request for the whole TTL. The guard also
+        // removes the slot when an outer timeout cancels this future.
         if let Ok(value) = &result {
-            self.result_cache.insert(key.clone(), value.clone()).await;
+            if value.cacheable {
+                self.result_cache.insert(key.clone(), value.clone()).await;
+            }
         }
 
         result
@@ -593,6 +612,39 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
+    #[tokio::test]
+    async fn test_degraded_result_is_not_cached() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cache = QueryCache::new(CacheConfig::default());
+        let options = QueryConfigBuilder::new(1).build("degraded query");
+        let view = crate::query::filter::QueryFilter::default();
+        let key = CacheKey::from_options_with_view(&options, &view);
+        let calls = AtomicUsize::new(0);
+
+        let first = cache
+            .get_or_compute(key.clone(), || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(QueryResult {
+                    cacheable: false,
+                    ..Default::default()
+                })
+            })
+            .await
+            .expect("degraded compute");
+        assert!(!first.from_cache);
+
+        let second = cache
+            .get_or_compute(key, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(QueryResult::default())
+            })
+            .await
+            .expect("retry compute");
+        assert!(!second.from_cache);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
     #[test]
     fn test_cache_key_differs_by_effective_config() {
         use crate::query::types::QueryIntent;
@@ -650,17 +702,28 @@ mod tests {
         let base_key = CacheKey::for_aggregated(1, &view, &agg());
         assert_eq!(base_key, CacheKey::for_aggregated(1, &view, &agg()));
 
-        let mut heavier = agg();
-        heavier.sub_queries[0].weight = 2.0;
-        assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &heavier));
+        let mut different_weight = agg();
+        different_weight.sub_queries[0].weight = 0.7;
+        assert_ne!(
+            base_key,
+            CacheKey::for_aggregated(1, &view, &different_weight)
+        );
 
         let mut stricter = agg();
         stricter.global_config.result.limit = 3;
         assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &stricter));
 
-        let mut max_strategy = agg();
-        max_strategy.global_config.aggregation.score_strategy = AggregationScoreStrategy::Max;
-        assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &max_strategy));
+        let mut noisy_or_strategy = agg();
+        noisy_or_strategy.global_config.aggregation.score_strategy =
+            AggregationScoreStrategy::NoisyOr;
+        assert_ne!(
+            base_key,
+            CacheKey::for_aggregated(1, &view, &noisy_or_strategy)
+        );
+
+        let mut newer_graph = agg();
+        newer_graph.relation_epoch = Some(9);
+        assert_ne!(base_key, CacheKey::for_aggregated(1, &view, &newer_graph));
     }
 
     #[tokio::test]

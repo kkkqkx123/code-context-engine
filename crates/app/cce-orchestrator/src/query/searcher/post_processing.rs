@@ -112,6 +112,53 @@ impl Searcher {
         Ok(final_results)
     }
 
+    /// Rank an already merged candidate list once.
+    ///
+    /// Aggregated search disables reranking and result filters on every
+    /// sub-query, then calls this entry on the cross-query union so scoring
+    /// plugins observe one list and one query context.
+    pub(crate) async fn rerank_results(
+        &self,
+        results: Vec<SearchResult>,
+        options: &QueryOptions,
+    ) -> Result<Vec<SearchResult>> {
+        let reranked = if options.enable_rerank.unwrap_or(true) {
+            match options.config.rerank.order {
+                cce_config::modules::rerank::RerankOrder::PluginOnly => {
+                    self.plugin_reranker
+                        .rerank(results, &options.query, &options.config)
+                        .await?
+                }
+                cce_config::modules::rerank::RerankOrder::LlmOnly => {
+                    self.reranker
+                        .rerank(results, &options.query, &options.config)
+                        .await?
+                }
+                cce_config::modules::rerank::RerankOrder::PluginThenLlm => {
+                    let after_plugin = self
+                        .plugin_reranker
+                        .rerank(results, &options.query, &options.config)
+                        .await?;
+                    self.reranker
+                        .rerank(after_plugin, &options.query, &options.config)
+                        .await?
+                }
+            }
+        } else {
+            results
+        };
+
+        let filter_enabled =
+            options.enable_result_filter.unwrap_or(true) && options.config.plugin.filter_enabled;
+        let filtered = if filter_enabled {
+            self.apply_result_filter(&reranked, options).await
+        } else {
+            reranked
+        };
+
+        Ok(self.score_sorter.sort(filtered))
+    }
+
     /// Annotate the top-N results with relation annotations.
     ///
     /// Runs after ranking and thresholding so it never affects ordering. Only

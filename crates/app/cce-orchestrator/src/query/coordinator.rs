@@ -33,7 +33,7 @@ use super::error::{QueryError, Result};
 use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
 use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
-use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
+use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult, SearchSources, SubQuery};
 use crate::index::vector_store::FulltextStore;
 use crate::index::vector_store::MetadataStore;
 use crate::index::vector_store::VectorStore;
@@ -45,8 +45,8 @@ use crate::index::vector_store::VectorStore;
 /// `1 - (1 - a)(1 - b)`, so a second sub-query hitting the same entity always
 /// raises its score while the result stays in `[0, 1]` — which is what keeps
 /// the single global `result.min_score` comparable with single-query scores.
-/// Contributions are clamped just below 1 because a sub-query weight above 1
-/// would otherwise push the product negative (saturation instead of wrap).
+/// Both strategies sanitize contributions into the same bounded domain; API
+/// weights are restricted to `(0, 1]` so evidence stays comparable.
 ///
 /// Public so offline evaluations can measure the shipped formula instead of
 /// keeping a copy that drifts: the benchmark baseline has to move when this
@@ -57,20 +57,39 @@ pub fn combine_aggregate_scores(
     strategy: cce_config::modules::search::AggregationScoreStrategy,
 ) -> f32 {
     use cce_config::modules::search::AggregationScoreStrategy;
-    let sanitize = |value: f32| {
-        if value.is_finite() {
-            value.clamp(0.0, 0.999)
-        } else {
-            0.0
-        }
-    };
+    let current = sanitize_aggregate_score(current);
+    let contribution = sanitize_aggregate_score(contribution);
     match strategy {
         AggregationScoreStrategy::Max => current.max(contribution),
         AggregationScoreStrategy::NoisyOr => {
-            let acc = 1.0 - (1.0 - sanitize(current)) * (1.0 - sanitize(contribution));
+            let acc = 1.0 - (1.0 - current) * (1.0 - contribution);
             acc.clamp(0.0, 1.0)
         }
     }
+}
+
+fn sanitize_aggregate_score(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 0.999)
+    } else {
+        0.0
+    }
+}
+
+/// Collapse identical sub-queries while preserving caller order.
+///
+/// Repeating one query must not be counted as independent evidence, and it
+/// must not pay the retrieval cost twice.
+fn normalize_sub_queries(sub_queries: &[SubQuery]) -> Vec<SubQuery> {
+    let mut seen = HashSet::new();
+    sub_queries
+        .iter()
+        .filter(|sub| {
+            let key = (sub.text.clone(), sub.sources, sub.weight.to_bits());
+            seen.insert(key)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Union the `sources` of two hits merged onto one dedup key.
@@ -114,6 +133,7 @@ fn merge_sources(
 /// // // Entity search (FTS5)
 /// // let entities = coordinator.search_entities("auth*", project_id, 20)?;
 /// ```
+#[derive(Clone)]
 pub struct QueryCoordinator {
     /// Unified searcher for vector/BM25 searches
     searcher: Arc<Searcher>,
@@ -606,11 +626,11 @@ impl QueryCoordinator {
 
     /// Runs sub-queries concurrently against one shared epoch view and
     /// merges the results, deduplicating by entity ID and sorting by score.
-    /// Each sub-query's `weight` scales its candidates' scores before the
-    /// merge, so a weight of 2.0 counts that sub-query's hits double against
-    /// the rest. A failed sub-query does not abort a partially successful
-    /// search; its text is reported in [`QueryResult::failed_sub_queries`].
-    /// When every sub-query fails the request itself fails.
+    /// Each sub-query's weight must be in `(0, 1]` so all contributions stay
+    /// in the same score domain as the global threshold. A failed sub-query
+    /// does not abort a partially successful search; its text is reported in
+    /// [`QueryResult::failed_sub_queries`]. When every sub-query fails the
+    /// request itself fails.
     pub async fn search_aggregated(
         &self,
         agg_options: &AggregatedQueryOptions,
@@ -620,8 +640,8 @@ impl QueryCoordinator {
             .searcher
             .load_query_filter(agg_options.project_id)
             .await?;
-        let sub_queries_count = agg_options.sub_queries.len();
-        if sub_queries_count == 0 {
+        let planned_sub_queries = agg_options.sub_queries.len();
+        if planned_sub_queries == 0 {
             return Err(QueryError::invalid(
                 "aggregated search needs at least one sub-query",
             ));
@@ -630,12 +650,24 @@ impl QueryCoordinator {
             if cce_utils::text::is_blank(&sub_query.text) {
                 return Err(QueryError::invalid("sub-query text cannot be blank"));
             }
-            if !sub_query.weight.is_finite() || sub_query.weight < 0.0 {
+            if !sub_query.weight.is_finite() || sub_query.weight <= 0.0 || sub_query.weight > 1.0 {
                 return Err(QueryError::invalid(&format!(
-                    "invalid sub-query weight {} for '{}'",
+                    "invalid sub-query weight {} for '{}': expected (0, 1]",
                     sub_query.weight, sub_query.text
                 )));
             }
+        }
+
+        let sub_queries = normalize_sub_queries(&agg_options.sub_queries);
+        let executed_sub_queries = sub_queries.len();
+        let mut planned_options = agg_options.clone();
+        planned_options.sub_queries = sub_queries.clone();
+        if cce_utils::text::is_blank(&planned_options.original_query) {
+            planned_options.original_query = sub_queries
+                .iter()
+                .map(|sub| sub.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" + ");
         }
 
         // Build every sub-query's options up front so the shared filters and
@@ -643,19 +675,19 @@ impl QueryCoordinator {
         // Sub-queries run with the business threshold disabled and an inflated
         // limit; weighting happens before the single global threshold so the
         // weight decides ranking instead of threshold luck.
-        let sub_options: Vec<QueryOptions> = agg_options
-            .sub_queries
+        let sub_options: Vec<QueryOptions> = sub_queries
             .iter()
-            .map(|sub_query| self.build_sub_query_options(agg_options, sub_query))
+            .map(|sub_query| self.build_sub_query_options(&planned_options, sub_query))
             .collect();
+        let merge_options = self.build_merge_query_options(&planned_options);
 
         // The merged union is cached under the aggregated key, which covers
-        // sub-query texts, sources, weights and the global configuration.
-        // Sub-queries keep their own single-query entries underneath; the
-        // aggregated key differs from every sub-query key, so the nested
-        // single-flight guards never re-enter on one key.
-        let key = CacheKey::for_aggregated(agg_options.project_id, &view, agg_options);
-        let timeout_ms = agg_options.global_config.timeout_ms;
+        // normalized sub-query identities, weights, the rerank context and
+        // the relation snapshot. Sub-queries keep their own single-query
+        // entries underneath; the aggregated key differs from every
+        // sub-query key, so the nested single-flight guards never re-enter.
+        let key = CacheKey::for_aggregated(planned_options.project_id, &view, &planned_options);
+        let timeout_ms = planned_options.global_config.timeout_ms;
         let aggregated = self.cache.get_or_compute(key, || async move {
             // Execute sub-queries concurrently, bounded by a semaphore: the results
             // stay aligned with the sub-query order (`join_all` preserves input
@@ -684,24 +716,23 @@ impl QueryCoordinator {
             let mut all_results: Vec<(usize, crate::query::types::SearchResult)> = Vec::new();
             let mut sources_used: Vec<String> = Vec::new();
             let mut failed_sub_queries: Vec<String> = Vec::new();
+            let mut sub_query_cache_hits = 0;
 
-            for (sub_index, (sub_query, attempt)) in
-                agg_options.sub_queries.iter().zip(attempts).enumerate()
-            {
+            for (sub_index, (sub_query, attempt)) in sub_queries.iter().zip(attempts).enumerate() {
                 match attempt {
                     Ok(mut result) => {
+                        if result.from_cache {
+                            sub_query_cache_hits += 1;
+                        }
                         for source in &result.sources {
                             if !sources_used.contains(source) {
                                 sources_used.push(source.clone());
                             }
                         }
-                        // Weights are validated upfront; scale here unconditionally.
                         let weight = sub_query.weight;
-                        if weight != 1.0 {
-                            for item in &mut result.items {
-                                item.score *= weight;
-                                item.original_score *= weight;
-                            }
+                        for item in &mut result.items {
+                            item.score = sanitize_aggregate_score(item.score * weight);
+                            item.original_score = item.score;
                         }
                         all_results.extend(result.items.into_iter().map(|item| (sub_index, item)));
                     }
@@ -716,9 +747,9 @@ impl QueryCoordinator {
                 }
             }
 
-            if failed_sub_queries.len() == sub_queries_count {
+            if failed_sub_queries.len() == executed_sub_queries {
                 return Err(QueryError::InvalidQuery(format!(
-                    "all {sub_queries_count} sub-queries failed: {}",
+                    "all {executed_sub_queries} sub-queries failed: {}",
                     failed_sub_queries.join("; ")
                 )));
             }
@@ -731,7 +762,7 @@ impl QueryCoordinator {
             // `noisy_or` accumulates evidence (agreement between
             // sub-queries raises the score), `max` keeps the historical
             // strongest-contribution-wins behaviour.
-            let strategy = agg_options.global_config.aggregation.score_strategy;
+            let strategy = planned_options.global_config.aggregation.score_strategy;
             let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
             // Strongest single contribution per key; the entry carrying it
             // stays the representative so content and metadata come from
@@ -780,53 +811,72 @@ impl QueryCoordinator {
                 }
             }
 
-            let mut merged: Vec<crate::query::types::SearchResult> = dedup.into_values().collect();
-            merged.extend(unkeyed);
-            // Single global threshold on weighted scores; sub-queries run
-            // threshold-free (see build_sub_query_options).
-            let min_score = agg_options.global_config.result.min_score;
+            let merged: Vec<crate::query::types::SearchResult> = dedup.into_values().collect();
+            let mut merged = {
+                let mut combined = merged;
+                combined.extend(unkeyed);
+                combined
+            };
+
+            // Rerank and result filters run once on the cross-query union.
+            // Sub-queries only contribute candidates, so their scores stay
+            // comparable when the global ranker observes one merged list.
+            merged = self.searcher.rerank_results(merged, &merge_options).await?;
+
+            let min_score = planned_options.global_config.result.min_score;
             if min_score > 0.0 {
                 merged.retain(|item| item.score >= min_score);
             }
             merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
 
-            let limit = agg_options.global_config.result.limit;
+            let limit = planned_options.global_config.result.limit;
             if merged.len() > limit {
                 merged.truncate(limit);
             }
 
             // Relation expansion runs once on the merged hits so budget,
-            // shared dedup and single wrapping observe the final Top-N instead of
-            // each sub-query's intermediate list. Sub-queries run without
-            // annotation when a resolver is present (see build_sub_query_options).
-            if let Some(resolver) = agg_options.neighbour_resolver.as_ref() {
-                if agg_options.global_config.annotation.expansion_enabled {
+            // shared dedup and single wrapping observe the final Top-N.
+            if let Some(resolver) = planned_options.neighbour_resolver.as_ref() {
+                if planned_options.global_config.annotation.expansion_enabled {
                     crate::query::expansion::annotate_hits_with_resolver(
                         resolver,
                         &mut merged,
-                        &agg_options.global_config.annotation,
+                        &planned_options.global_config.annotation,
                     )
                     .await;
                 }
             }
 
             let total = merged.len();
+            let succeeded_sub_queries = executed_sub_queries - failed_sub_queries.len();
+            let cacheable = failed_sub_queries.is_empty();
 
             Ok(QueryResult {
                 items: merged,
                 total,
-                elapsed_ms: start.elapsed().as_millis() as u64,
+                elapsed_ms: 0,
                 sources: sources_used,
-                sub_queries_count,
+                planned_sub_queries,
+                executed_sub_queries,
+                succeeded_sub_queries,
+                sub_query_cache_hits,
                 failed_sub_queries,
+                cacheable,
                 from_cache: false,
             })
         });
 
-        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), aggregated).await {
-            Ok(result) => result,
-            Err(_) => Err(QueryError::Timeout { timeout_ms }),
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        let mut aggregated = match tokio::time::timeout(timeout, aggregated).await {
+            Ok(result) => result?,
+            Err(_) => return Err(QueryError::Timeout { timeout_ms }),
+        };
+        aggregated.elapsed_ms = start.elapsed().as_millis() as u64;
+        if aggregated.from_cache {
+            aggregated.executed_sub_queries = 0;
+            aggregated.sub_query_cache_hits = 0;
         }
+        Ok(aggregated)
     }
 
     /// Decompose one sub-query's options out of the aggregated options.
@@ -835,22 +885,17 @@ impl QueryCoordinator {
     /// option surfaces stay in sync: global filters/config/patterns are shared,
     /// the query text and sources come from the sub-query itself, and source
     /// content is always requested for aggregated results.
-    /// When a neighbour resolver is present, sub-queries run without
-    /// annotation and without the resolver; expansion is applied once to the
-    /// merged hits in search_aggregated so budget and shared dedup observe
-    /// the final Top-N.
+    /// Sub-queries run without annotation, reranking or result filters;
+    /// those stages apply once to the merged list in search_aggregated.
     fn build_sub_query_options(
         &self,
         agg_options: &AggregatedQueryOptions,
-        sub_query: &crate::query::types::SubQuery,
+        sub_query: &SubQuery,
     ) -> QueryOptions {
         let filters = agg_options.filters.as_ref();
-        let has_expansion = agg_options.neighbour_resolver.is_some();
         let mut config = agg_options.global_config.clone();
-        if has_expansion {
-            config.annotation.enable_annotation = false;
-            config.annotation.expansion_enabled = false;
-        }
+        config.annotation.enable_annotation = false;
+        config.annotation.expansion_enabled = false;
         // Threshold-free sub-queries with inflated limit: the merged list
         // applies the single global threshold after weighting. The per-query
         // cap bounds the worst-case recall cost when many sub-queries run.
@@ -867,6 +912,39 @@ impl QueryCoordinator {
             project_id: agg_options.project_id,
             sources: sub_query.sources,
             config,
+            directory_prefix: filters.and_then(|f| f.directory_prefix.clone()),
+            exclude_content_types: filters.map_or(Vec::new(), |f| f.exclude_content_types.clone()),
+            include_categories: filters.map_or(Vec::new(), |f| f.include_categories.clone()),
+            exclude_categories: filters.map_or(Vec::new(), |f| f.exclude_categories.clone()),
+            exclude_patterns: agg_options.exclude_patterns.clone(),
+            include_patterns: agg_options.include_patterns.clone(),
+            with_source: true,
+            query_intent: agg_options.query_intent,
+            enable_rerank: Some(false),
+            enable_result_filter: Some(false),
+            neighbour_resolver: None,
+        }
+    }
+
+    /// Build the single query context used for merged-list ranking.
+    fn build_merge_query_options(&self, agg_options: &AggregatedQueryOptions) -> QueryOptions {
+        let filters = agg_options.filters.as_ref();
+        let query = if cce_utils::text::is_blank(&agg_options.original_query) {
+            agg_options
+                .sub_queries
+                .first()
+                .map_or_else(String::new, |sub| sub.text.clone())
+        } else {
+            agg_options.original_query.clone()
+        };
+        QueryOptions {
+            query,
+            project_id: agg_options.project_id,
+            sources: agg_options
+                .sub_queries
+                .first()
+                .map_or_else(SearchSources::default, |sub| sub.sources),
+            config: agg_options.global_config.clone(),
             directory_prefix: filters.and_then(|f| f.directory_prefix.clone()),
             exclude_content_types: filters.map_or(Vec::new(), |f| f.exclude_content_types.clone()),
             include_categories: filters.map_or(Vec::new(), |f| f.include_categories.clone()),
@@ -1178,8 +1256,8 @@ impl QueryCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::{combine_aggregate_scores, merge_sources};
-    use crate::query::types::SearchResult;
+    use super::{combine_aggregate_scores, merge_sources, normalize_sub_queries};
+    use crate::query::types::{SearchResult, SearchSources, SubQuery};
     use cce_config::modules::search::AggregationScoreStrategy;
 
     #[test]
@@ -1206,9 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn noisy_or_saturates_instead_of_wrapping_for_heavy_weights() {
-        // A sub-query weight above 1 pushes the contribution past 1; the
-        // combination must saturate, never go negative or above 1.
+    fn out_of_range_scores_are_clamped_before_combining() {
         let strategy = AggregationScoreStrategy::NoisyOr;
         let score = combine_aggregate_scores(0.4, 2.0, strategy);
         assert!((0.0..=1.0).contains(&score));
@@ -1220,6 +1296,25 @@ mod tests {
         let strategy = AggregationScoreStrategy::Max;
         assert!((combine_aggregate_scores(0.3, 0.6, strategy) - 0.6).abs() < 1e-6);
         assert!((combine_aggregate_scores(0.8, 0.6, strategy) - 0.8).abs() < 1e-6);
+        assert!((combine_aggregate_scores(0.2, 2.0, strategy) - 0.999).abs() < 1e-6);
+    }
+
+    #[test]
+    fn duplicate_sub_queries_are_collapsed_in_order() {
+        let sub = SubQuery {
+            text: "auth flow".to_string(),
+            sources: SearchSources::default(),
+            weight: 0.8,
+        };
+        let different = SubQuery {
+            text: "login".to_string(),
+            sources: SearchSources::default(),
+            weight: 0.8,
+        };
+        let normalized = normalize_sub_queries(&[sub.clone(), different, sub]);
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0].text, "auth flow");
+        assert_eq!(normalized[1].text, "login");
     }
 
     #[test]

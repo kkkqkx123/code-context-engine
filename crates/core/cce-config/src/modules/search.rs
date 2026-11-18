@@ -242,12 +242,14 @@ pub enum AggregationScoreStrategy {
     /// being flattened to the largest single contribution. The result stays
     /// in `[0, 1]`, which keeps the single global `result.min_score`
     /// meaningful across aggregated and single queries. Contributions are
-    /// clamped below 1, so sub-query weights above 1 saturate.
-    #[default]
+    /// clamped below 1, and API weights are restricted to `(0, 1]`.
+    ///
+    /// Enable explicitly for complementary lexical or fuzzy sub-queries;
+    /// measured results do not support it as a universal default.
     NoisyOr,
-    /// Keep the highest weighted contribution per key (the historical
-    /// behaviour). Ordering follows the strongest sub-query only, which lets
-    /// one heavy sub-query monopolise the ranking.
+    /// Keep the highest weighted contribution per key. This is the default
+    /// because it never amplifies a weak hit through agreement alone.
+    #[default]
     Max,
 }
 

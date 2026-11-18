@@ -30,13 +30,8 @@ export const QUERY_TYPES: readonly QueryType[] = [
 	'summary',
 ];
 
-/** Query types a sub-query may use (backend validates: vector, bm25, hybrid, summary) */
-export const SUB_QUERY_TYPES: readonly QueryType[] = [
-	'vector',
-	'bm25',
-	'hybrid',
-	'summary',
-];
+/** Query types a sub-query may use (backend validates: vector, bm25, hybrid) */
+export const SUB_QUERY_TYPES: readonly QueryType[] = ['vector', 'bm25', 'hybrid'];
 
 /** Pseudo query type: fan out into weighted sub-queries via /aggregated */
 export const AGGREGATED_TYPE = 'aggregated' as const;
@@ -389,7 +384,7 @@ async function buildAggregatedRequest(
 				weight: sq.weight,
 			}))
 		: [
-				{ text: query, query_type: 'bm25', weight: 1.2 },
+				{ text: query, query_type: 'bm25', weight: 1.0 },
 				{ text: query, query_type: 'vector', weight: 1.0 },
 			];
 	return searchApi.aggregatedSearch({

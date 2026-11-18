@@ -130,8 +130,12 @@ fn main() {
         total: 10,
         elapsed_ms: 3,
         sources: vec!["vector".to_string(), "bm25".to_string()],
-        sub_queries_count: 1,
+        planned_sub_queries: 1,
+        executed_sub_queries: 1,
+        succeeded_sub_queries: 1,
+        sub_query_cache_hits: 0,
         failed_sub_queries: Vec::new(),
+        cacheable: true,
         from_cache: false,
     };
     rt.block_on(async {

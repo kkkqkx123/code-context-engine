@@ -18,7 +18,7 @@ pub struct AggSearchCommand {
     #[arg(long)]
     pub project_path: Option<String>,
 
-    /// BM25 keyword queries (append @weight for a per-query override, e.g. "login flow@1.5")
+    /// BM25 keyword queries (append @weight in (0, 1], e.g. "login flow@0.8")
     #[arg(long = "bm25")]
     pub bm25_queries: Vec<String>,
 
@@ -30,8 +30,8 @@ pub struct AggSearchCommand {
     #[arg(long = "hybrid")]
     pub hybrid_queries: Vec<String>,
 
-    /// Weight applied to BM25 sub-query scores
-    #[arg(long, default_value_t = 1.2)]
+    /// Weight applied to BM25 sub-query scores, in (0, 1]
+    #[arg(long, default_value_t = 1.0)]
     pub bm25_weight: f32,
 
     /// Weight applied to vector sub-query scores
@@ -93,13 +93,13 @@ pub struct AggSearchCommand {
 
 /// Split a per-query weight suffix of the form `text@weight` from a raw
 /// sub-query value. A trailing segment after the last `@` is treated as a
-/// weight only when it parses to a finite non-negative number and the text
+/// weight only when it parses to a finite number in `(0, 1]` and the text
 /// part is non-empty; otherwise the whole value is kept as query text with
 /// the type-level fallback weight.
 fn split_weighted_query(raw: &str, fallback: f32) -> (String, f32) {
     match raw.rsplit_once('@') {
         Some((text, weight)) if !text.trim().is_empty() => match weight.trim().parse::<f32>() {
-            Ok(w) if w.is_finite() && w >= 0.0 => (text.trim().to_string(), w),
+            Ok(w) if w.is_finite() && w > 0.0 && w <= 1.0 => (text.trim().to_string(), w),
             _ => (raw.to_string(), fallback),
         },
         _ => (raw.to_string(), fallback),
@@ -158,6 +158,16 @@ impl AggSearchCommand {
         }
         if sub_queries.is_empty() {
             anyhow::bail!("at least one sub-query is required (--bm25, --vector or --hybrid)");
+        }
+        if let Some(invalid) = sub_queries
+            .iter()
+            .find(|sub| !sub.weight.is_finite() || sub.weight <= 0.0 || sub.weight > 1.0)
+        {
+            anyhow::bail!(
+                "invalid sub-query weight {} for '{}': expected (0, 1]",
+                invalid.weight,
+                invalid.text
+            );
         }
         let exclude_content_types: Vec<String> = self
             .exclude_content_types
@@ -248,16 +258,16 @@ mod tests {
 
     #[test]
     fn weighted_suffix_overrides_fallback() {
-        let (text, weight) = split_weighted_query("login flow@1.5", 1.2);
+        let (text, weight) = split_weighted_query("login flow@0.8", 1.0);
         assert_eq!(text, "login flow");
-        assert_eq!(weight, 1.5);
+        assert_eq!(weight, 0.8);
     }
 
     #[test]
     fn plain_query_keeps_fallback_weight() {
-        let (text, weight) = split_weighted_query("login flow", 1.2);
+        let (text, weight) = split_weighted_query("login flow", 1.0);
         assert_eq!(text, "login flow");
-        assert_eq!(weight, 1.2);
+        assert_eq!(weight, 1.0);
     }
 
     #[test]
@@ -269,15 +279,19 @@ mod tests {
 
     #[test]
     fn invalid_weight_falls_back_to_full_text() {
-        let (text, weight) = split_weighted_query("query@abc", 1.2);
+        let (text, weight) = split_weighted_query("query@abc", 1.0);
         assert_eq!(text, "query@abc");
-        assert_eq!(weight, 1.2);
+        assert_eq!(weight, 1.0);
     }
 
     #[test]
-    fn negative_weight_falls_back_to_full_text() {
-        let (text, weight) = split_weighted_query("query@-1.0", 1.2);
-        assert_eq!(text, "query@-1.0");
-        assert_eq!(weight, 1.2);
+    fn out_of_range_weight_falls_back_to_full_text() {
+        let (text, weight) = split_weighted_query("query@1.5", 1.0);
+        assert_eq!(text, "query@1.5");
+        assert_eq!(weight, 1.0);
+
+        let (text, weight) = split_weighted_query("query@0", 1.0);
+        assert_eq!(text, "query@0");
+        assert_eq!(weight, 1.0);
     }
 }

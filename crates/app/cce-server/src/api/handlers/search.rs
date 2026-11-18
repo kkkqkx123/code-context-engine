@@ -167,7 +167,10 @@ pub async fn handle_search(
             elapsed_ms: start.elapsed().as_millis() as u64,
             sources_used: outcome.sources,
             failed_sub_queries: outcome.failed_sub_queries,
-            sub_queries_count: outcome.sub_queries_count,
+            planned_sub_queries: outcome.planned_sub_queries,
+            executed_sub_queries: outcome.executed_sub_queries,
+            succeeded_sub_queries: outcome.succeeded_sub_queries,
+            sub_query_cache_hits: outcome.sub_query_cache_hits,
             from_cache: outcome.from_cache,
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
@@ -263,13 +266,13 @@ pub async fn handle_aggregated_search(
                 Ok(sources) => sources,
                 Err(error) => return SearchApiResponse::Error(service_error(error)),
             };
-        // The weight scales this sub-query's candidate scores before the
-        // cross-query merge; only finite non-negative weights are meaningful.
-        if !sq.weight.is_finite() || sq.weight < 0.0 {
+        // Weights stay in the shared [0, 1] evidence domain; zero-weight
+        // sub-queries would spend retrieval budget without any effect.
+        if !sq.weight.is_finite() || sq.weight <= 0.0 || sq.weight > 1.0 {
             return SearchApiResponse::Error(ErrorResponse::new(
                 error_codes::INVALID_INPUT,
                 format!(
-                    "Invalid weight in sub-query '{}': must be finite and >= 0",
+                    "Invalid weight in sub-query '{}': must be finite and in (0, 1]",
                     sq.text
                 ),
             ));
@@ -332,7 +335,10 @@ pub async fn handle_aggregated_search(
             elapsed_ms: start.elapsed().as_millis() as u64,
             sources_used: outcome.sources,
             failed_sub_queries: outcome.failed_sub_queries,
-            sub_queries_count: outcome.sub_queries_count,
+            planned_sub_queries: outcome.planned_sub_queries,
+            executed_sub_queries: outcome.executed_sub_queries,
+            succeeded_sub_queries: outcome.succeeded_sub_queries,
+            sub_query_cache_hits: outcome.sub_query_cache_hits,
             from_cache: outcome.from_cache,
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
