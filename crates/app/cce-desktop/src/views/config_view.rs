@@ -21,6 +21,7 @@ use crate::metrics::CARD_RADIUS;
 use crate::services::ops_service;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 #[derive(Debug)]
 enum ConfigAnswer {
@@ -96,7 +97,7 @@ impl ConfigView {
         });
     }
 
-    fn render_answer(&self, answer: &ConfigAnswer, cx: &Context<Self>) -> AnyElement {
+    fn render_answer(&self, answer: &ConfigAnswer, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         let theme = cx.theme().colors;
@@ -191,7 +192,13 @@ impl ConfigView {
                         .child(hint(t("config.noIssues", locale), cx))
                         .into_any_element();
                 }
-                block = block.child(data_grid(&columns, &rows, dense, cx));
+                block = block.child(data_grid(
+                    PanelKind::Config,
+                    &columns,
+                    &rows,
+                    dense,
+                    &mut *cx,
+                ));
                 block.into_any_element()
             }
         }

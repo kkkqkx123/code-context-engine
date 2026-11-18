@@ -25,6 +25,7 @@ use crate::i18n::{locale, t};
 use crate::services::request::{self, Load};
 use crate::services::storage_service::{self, ClearScope};
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 pub struct StorageView {
     file: Entity<InputState>,
@@ -241,7 +242,7 @@ impl StorageView {
         });
     }
 
-    fn render_status(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_status(&self, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match &self.status {
@@ -292,7 +293,13 @@ impl StorageView {
                         format!("{:.1} MB", status.total_disk_usage_mb),
                         cx,
                     ))
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Storage,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
         }

@@ -56,6 +56,15 @@ pub enum Locale {
     Zh,
 }
 
+/// What closing the last window does when a tray is available.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CloseBehavior {
+    #[default]
+    MinimizeToTray,
+    Quit,
+}
+
 /// Window position and size in logical pixels.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct WindowGeometry {
@@ -77,6 +86,8 @@ pub struct Settings {
     #[serde(default)]
     pub window: Option<WindowGeometry>,
     #[serde(default)]
+    pub close_behavior: CloseBehavior,
+    #[serde(default)]
     pub last_base_url: Option<String>,
     /// Recent inputs per panel, newest first and capped by the panel service.
     /// Only query text and paths live here; no token, response or snippet is
@@ -90,8 +101,13 @@ struct SettingsGlobal(Settings);
 impl Global for SettingsGlobal {}
 
 impl Settings {
+    /// Directory holding all persisted desktop state.
+    pub fn config_dir() -> Option<PathBuf> {
+        ProjectDirs::from("", "", "cce-desktop").map(|dirs| dirs.config_dir().to_path_buf())
+    }
+
     fn path() -> Option<PathBuf> {
-        ProjectDirs::from("", "", "cce-desktop").map(|dirs| dirs.config_dir().join("settings.toml"))
+        Self::config_dir().map(|dir| dir.join("settings.toml"))
     }
 
     /// Load persisted settings. A missing file means a first run and yields
@@ -177,6 +193,7 @@ mod tests {
         assert_eq!(settings.density, Density::Comfortable);
         assert_eq!(settings.locale, Locale::En);
         assert_eq!(settings.window, None);
+        assert_eq!(settings.close_behavior, CloseBehavior::MinimizeToTray);
         assert_eq!(settings.last_base_url, None);
         assert!(settings.history.is_empty());
     }
@@ -201,6 +218,7 @@ mod tests {
                 width: 1280.0,
                 height: 800.0,
             }),
+            close_behavior: CloseBehavior::Quit,
             last_base_url: Some("http://127.0.0.1:9000".to_string()),
             history: BTreeMap::from([
                 ("search".to_string(), vec!["retry budget".to_string()]),

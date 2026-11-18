@@ -1,8 +1,4 @@
 //! Desktop application entry: initialization order and main window.
-//!
-//! The tray integration waits on the gpui-kit tray submodule, which is not
-//! initialized in this checkout; until then closing the window persists the
-//! geometry and quits the process.
 
 use gpui_kit::component::ThemeMode;
 use gpui_kit::{
@@ -19,7 +15,15 @@ use crate::views::Shell;
 pub mod actions {
     gpui_kit::actions!(
         cce,
-        [Quit, ThemeLight, ThemeSystem, ToggleDensity, ToggleLocale]
+        [
+            Quit,
+            ShowWindow,
+            ToggleCloseToTray,
+            ThemeLight,
+            ThemeSystem,
+            ToggleDensity,
+            ToggleLocale
+        ]
     );
 }
 
@@ -39,10 +43,13 @@ pub fn run(settings: Settings) {
         state::AppState::init(cx);
         init_runtime(cx);
         ClientStore::init(cx);
+        crate::dock_layout::init(cx);
+        crate::dock_layout::register_panels(cx);
 
         bind_keys(cx);
         apply_saved_theme(cx);
         start_heartbeat(cx);
+        crate::tray::init(cx);
         open_main_window(cx);
     });
 }
@@ -74,7 +81,6 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-d", ToggleDensity, None),
         KeyBinding::new("secondary-l", ToggleLocale, None),
     ]);
-    cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &ThemeLight, cx| {
         crate::settings::update(cx, |settings| {
             settings.theme_mode = crate::settings::ThemeModeSetting::Light;
@@ -151,17 +157,17 @@ pub(crate) fn open_main_window(cx: &mut App) {
     })
     .expect("failed to open main window");
 
+    crate::tray::set_window(handle, cx);
     _ = handle.update(cx, |_, window, cx| {
         window.on_window_should_close(cx, |window, cx| {
-            persist_window_geometry(window, cx);
-            true
+            crate::tray::on_window_should_close(window, cx)
         });
         window.activate_window();
         window.set_window_title("Code Context Engine");
     });
 }
 
-fn persist_window_geometry(window: &mut gpui_kit::Window, cx: &mut App) {
+pub(crate) fn persist_window_geometry(window: &mut gpui_kit::Window, cx: &mut App) {
     let bounds = match window.window_bounds() {
         WindowBounds::Windowed(bounds)
         | WindowBounds::Maximized(bounds)

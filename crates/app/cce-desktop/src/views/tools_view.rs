@@ -31,6 +31,7 @@ use crate::services::history::{self, HistoryKind};
 use crate::services::request::{self, Load};
 use crate::services::tools_service;
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 const TOOL_TABS: [&str; 7] = [
     "tools.tab.fold",
@@ -297,7 +298,7 @@ impl ToolsView {
             .into_any_element()
     }
 
-    fn render_answer(&self, answer: &ToolAnswer, cx: &Context<Self>) -> AnyElement {
+    fn render_answer(&self, answer: &ToolAnswer, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match answer {
@@ -384,7 +385,13 @@ impl ToolsView {
                 }
                 surface(dense, cx)
                     .child(hint(SharedString::from(summary), cx))
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Tools,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
             ToolAnswer::Keyword(response) => {
@@ -418,7 +425,13 @@ impl ToolsView {
                         SharedString::from(format!("{} {}", result.total, t("tools.hits", locale))),
                         cx,
                     ))
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Tools,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
             ToolAnswer::Symbols(response) => {
@@ -452,7 +465,13 @@ impl ToolsView {
                         .into_any_element();
                 }
                 surface(dense, cx)
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Tools,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
             ToolAnswer::References(response) => {
@@ -497,7 +516,13 @@ impl ToolsView {
                         )),
                         cx,
                     ))
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Tools,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
             ToolAnswer::Definition(response) => {

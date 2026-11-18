@@ -24,6 +24,7 @@ use crate::i18n::{locale, t};
 use crate::services::ops_service;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 pub struct TasksView {
     file: Entity<InputState>,
@@ -212,7 +213,7 @@ impl TasksView {
         });
     }
 
-    fn render_dead(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_dead(&self, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match &self.dead {
@@ -256,13 +257,19 @@ impl TasksView {
                     })
                     .collect();
                 surface(dense, cx)
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Tasks,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
         }
     }
 
-    fn render_queue(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_queue(&self, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match &self.queue {
@@ -298,7 +305,13 @@ impl TasksView {
                             ]
                         })
                         .collect();
-                    block = block.child(data_grid(&columns, &rows, dense, cx));
+                    block = block.child(data_grid(
+                        PanelKind::Tasks,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ));
                 }
                 block.into_any_element()
             }

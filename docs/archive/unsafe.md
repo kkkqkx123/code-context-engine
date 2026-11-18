@@ -99,3 +99,16 @@ proceed and surface the real I/O error instead of refusing on a probe failure.
 
 **Status:** Necessary — mmap and raw byte views are the storage engine's
 I/O substrate, and `statvfs` is the only portable free-space query.
+
+## 6. Windows Tray Window Visibility
+
+**File:** `crates/app/cce-desktop/src/tray.rs`
+
+`gpui-pre`'s Windows platform implements application-level `hide` as a no-op,
+so closing a window to the tray must hide the native HWND directly. The HWND
+is resolved from the live `Window` through `raw-window-handle`, checked against
+the Win32 variant, and passed to `ShowWindow(SW_HIDE/SW_SHOW)`. No pointer is
+dereferenced, stored, or used after the callback that obtained it. All other
+platforms use the safe application-level hide/activate path.
+
+**Status:** Necessary — direct native window handle operation.

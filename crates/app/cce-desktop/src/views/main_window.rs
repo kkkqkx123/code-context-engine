@@ -1,15 +1,15 @@
-//! Main workspace window: sidebar navigation, the active panel and the status
-//! bar.
+//! Main workspace window: sidebar navigation, a dock area and the status bar.
 //!
-//! Panels are created lazily and dropped when the project scope changes, so a
-//! panel never shows an answer that belongs to another project. A search hit
-//! delivered through the global slot switches to the graph panel exactly once
-//! per delivery number.
+//! The dock owns every panel entity. Navigation opens or focuses a stable
+//! panel identity, and a project-scope change rebuilds all panels from the
+//! current layout so no panel can keep another project's results.
 
-use gpui_kit::assets::IconName;
+use std::{rc::Rc, sync::Mutex, time::Duration};
+
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
     button::{Button, ButtonVariants as _},
+    dock::{DockArea, DockEvent, DockPlacement, DockSkin},
     h_flex,
     sidebar::{
         Sidebar, SidebarCollapsible, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu,
@@ -19,147 +19,91 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Window, div, px,
+    App, Context, Entity, IntoElement, ParentElement as _, Render, SharedString, Styled as _, Task,
+    Window, div, px,
 };
 
-use crate::components::{empty_state, page_body, panel_header};
+use crate::dock_layout::{self, LAYOUT_VERSION};
 use crate::i18n::{locale, set_locale, t};
 use crate::metrics::SIDEBAR_W;
 use crate::services::connection_service;
 use crate::settings::{Density, Locale, ThemeModeSetting};
 use crate::state::{AppState, ConnectionStatus};
-use crate::views::{
-    ConfigView, EntityView, GraphView, HealthView, IndexView, MetricsView, ProjectsView,
-    SearchView, StorageView, TasksView, ToolsView, WatchView,
-};
+use crate::views::PanelKind;
 
-/// Navigation entries, split into the two sidebar groups.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NavItem {
-    Search,
-    Graph,
-    Entities,
-    Index,
-    Projects,
-    Tools,
-    Storage,
-    Watch,
-    Health,
-    Metrics,
-    Config,
-    Tasks,
-}
-
-impl NavItem {
-    const WORKSPACE: [NavItem; 5] = [
-        NavItem::Search,
-        NavItem::Graph,
-        NavItem::Entities,
-        NavItem::Index,
-        NavItem::Projects,
-    ];
-
-    const OPERATIONS: [NavItem; 7] = [
-        NavItem::Tools,
-        NavItem::Storage,
-        NavItem::Watch,
-        NavItem::Health,
-        NavItem::Metrics,
-        NavItem::Config,
-        NavItem::Tasks,
-    ];
-
-    fn label_key(self) -> &'static str {
-        match self {
-            NavItem::Search => "nav.search",
-            NavItem::Graph => "nav.graph",
-            NavItem::Entities => "nav.entities",
-            NavItem::Index => "nav.index",
-            NavItem::Projects => "nav.projects",
-            NavItem::Tools => "nav.tools",
-            NavItem::Storage => "nav.storage",
-            NavItem::Watch => "nav.watch",
-            NavItem::Health => "nav.health",
-            NavItem::Metrics => "nav.metrics",
-            NavItem::Config => "nav.config",
-            NavItem::Tasks => "nav.tasks",
-        }
-    }
-
-    fn icon(self) -> IconName {
-        match self {
-            NavItem::Search => IconName::Search,
-            NavItem::Graph => IconName::Network,
-            NavItem::Entities => IconName::Database,
-            NavItem::Index => IconName::Layers,
-            NavItem::Projects => IconName::Folder,
-            NavItem::Tools => IconName::Wrench,
-            NavItem::Storage => IconName::HardDrive,
-            NavItem::Watch => IconName::Activity,
-            NavItem::Health => IconName::Gauge,
-            NavItem::Metrics => IconName::ChartColumn,
-            NavItem::Config => IconName::Settings,
-            NavItem::Tasks => IconName::ListChecks,
-        }
-    }
-
-    /// `true` when the panel needs a project scope to run.
-    fn needs_project(self) -> bool {
-        !matches!(
-            self,
-            NavItem::Health | NavItem::Metrics | NavItem::Config | NavItem::Projects
-        )
-    }
-}
-
-/// Lazily created panels, all built for the current project scope.
-#[derive(Default)]
-struct Panels {
-    search: Option<Entity<SearchView>>,
-    graph: Option<Entity<GraphView>>,
-    entities: Option<Entity<EntityView>>,
-    index: Option<Entity<IndexView>>,
-    projects: Option<Entity<ProjectsView>>,
-    tools: Option<Entity<ToolsView>>,
-    storage: Option<Entity<StorageView>>,
-    watch: Option<Entity<WatchView>>,
-    health: Option<Entity<HealthView>>,
-    metrics: Option<Entity<MetricsView>>,
-    config: Option<Entity<ConfigView>>,
-    tasks: Option<Entity<TasksView>>,
-}
-
-impl Panels {
-    fn clear(&mut self) {
-        *self = Self::default();
-    }
-}
-
+/// One active dock layout, held for the lifetime of the window.
 pub struct MainWindow {
-    selected: NavItem,
-    /// Project scope the cached panels were built for.
+    dock_area: Entity<DockArea>,
+    _skin: Rc<DockSkin>,
+    selected: PanelKind,
     scope: Option<i64>,
     applied_seed: u64,
-    panels: Panels,
+    save_generation: u64,
+    _save_task: Option<Task<()>>,
 }
 
 impl MainWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (dock_area, skin) = DockSkin::dock_area("cce-main", Some(LAYOUT_VERSION), window, cx);
+        let layout = dock_layout::load_or_default(cx);
+
         let state = AppState::global(cx);
         let (scope, applied_seed) = {
             let snapshot = state.read(cx);
             let seed = snapshot.graph_seed().map(|seed| seed.generation);
             (snapshot.active_project_id(), seed.unwrap_or_default())
         };
+        let selected = if PanelKind::ALL.contains(&layout.active_panel) {
+            layout.active_panel
+        } else {
+            PanelKind::Search
+        };
+
         cx.observe_in(&state, window, |this, _, window, cx| this.sync(window, cx))
             .detach();
-        Self {
-            selected: NavItem::Search,
+        cx.subscribe_in(&dock_area, window, |this, _, event, window, cx| {
+            if matches!(event, DockEvent::LayoutChanged) {
+                this.schedule_save(window, cx);
+            }
+        })
+        .detach();
+
+        dock_area.update(cx, |area, cx| {
+            if let Err(err) = area.load(layout.dock, window, cx) {
+                log::warn!("failed to load the saved layout: {err}");
+                return;
+            }
+            for placement in [
+                DockPlacement::Left,
+                DockPlacement::Bottom,
+                DockPlacement::Right,
+            ] {
+                area.set_dock_collapsible(placement, true, window, cx);
+            }
+        });
+
+        let mut this = Self {
+            dock_area,
+            _skin: skin,
+            selected,
             scope,
             applied_seed,
-            panels: Panels::default(),
-        }
+            save_generation: 0,
+            _save_task: None,
+        };
+        this.remember_layout(cx);
+        this.select_tab(selected, window, cx);
+        this
+    }
+
+    fn remember_layout(&self, cx: &mut App) {
+        dock_layout::set_layout_handle(
+            dock_layout::LayoutHandle {
+                area: self.dock_area.downgrade(),
+                active: self.selected,
+            },
+            cx,
+        );
     }
 
     /// React to scope and hand-off changes.
@@ -171,175 +115,117 @@ impl MainWindow {
         };
         if scope != self.scope {
             self.scope = scope;
-            self.panels.clear();
+            let saved = self.dock_area.read(cx).dump(cx);
+            dock_layout::clear_panels(cx);
+            let area = self.dock_area.clone();
+            area.update(cx, |dock, cx| {
+                if let Err(err) = dock.load(saved, window, cx) {
+                    log::warn!("failed to rebuild panels for a new scope: {err}");
+                }
+            });
+            self.select_tab(self.selected, window, cx);
         }
 
         if let Some(seed) = seed
             && seed.generation > self.applied_seed
         {
             self.applied_seed = seed.generation;
-            self.selected = NavItem::Graph;
-            let graph = self.graph(window, cx);
-            graph.update(cx, |view, cx| {
-                view.apply_seed(&seed, window, cx);
-            });
+            self.open(PanelKind::Graph, window, cx);
+            if let Some(graph) = dock_layout::graph(cx) {
+                graph.update(cx, |view, cx| {
+                    view.apply_seed(&seed, window, cx);
+                });
+            }
         }
         cx.notify();
     }
 
-    fn menu_items(&self, items: &[NavItem], locale: Locale, cx: &Context<Self>) -> SidebarMenu {
+    fn select_tab(&mut self, kind: PanelKind, window: &mut Window, cx: &mut App) {
+        if let Some(entry) = dock_layout::panel(kind, cx) {
+            self.dock_area.update(cx, |dock, cx| {
+                dock.select_panel(entry.id, window, cx);
+            });
+        }
+    }
+
+    /// Open a panel as a centre tab, or focus the existing tab.
+    fn open(&mut self, kind: PanelKind, window: &mut Window, cx: &mut App) {
+        let id = match dock_layout::panel(kind, cx) {
+            Some(entry) => entry.id,
+            None => {
+                let (id, handle) = dock_layout::build_panel(kind, window, cx);
+                self.dock_area.update(cx, |dock, cx| {
+                    dock.add_panel_view(handle, DockPlacement::Center, None, window, cx);
+                });
+                id
+            }
+        };
+        self.selected = kind;
+        self.dock_area.update(cx, |dock, cx| {
+            dock.select_panel(id, window, cx);
+        });
+        self.remember_layout(cx);
+        self.schedule_save_in(cx);
+    }
+
+    fn schedule_save(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.schedule_save_in(cx);
+    }
+
+    fn schedule_save_in(&mut self, cx: &mut App) {
+        self.save_generation = self.save_generation.wrapping_add(1);
+        let generation = self.save_generation;
+        let area = self.dock_area.clone();
+        self._save_task = Some(cx.spawn(async move |cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(800))
+                .await;
+            cx.update(|cx| {
+                let current = cx
+                    .global::<dock_layout::SaveGenerationGlobal>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner());
+                if *current != generation {
+                    return;
+                }
+                drop(current);
+                let active = cx
+                    .global::<dock_layout::LayoutHandleGlobal>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner())
+                    .as_ref()
+                    .map(|handle| handle.active)
+                    .unwrap_or(PanelKind::Search);
+                dock_layout::save(&area, active, cx);
+            });
+        }));
+        if let Some(global) = cx.try_global::<dock_layout::SaveGenerationGlobal>() {
+            let mut current = global.0.lock().unwrap_or_else(|err| err.into_inner());
+            *current = generation;
+        } else {
+            cx.set_global(dock_layout::SaveGenerationGlobal(Mutex::new(generation)));
+        }
+    }
+
+    fn menu_items(&self, items: &[PanelKind], locale: Locale, cx: &Context<Self>) -> SidebarMenu {
         let entity = cx.entity();
         let selected = self.selected;
         let mut menu = SidebarMenu::new();
-        for item in items {
-            let nav = *item;
+        for kind in items {
+            let nav = *kind;
             let view = entity.clone();
             menu = menu.child(
-                SidebarMenuItem::new(t(nav.label_key(), locale))
+                SidebarMenuItem::new(nav.label(locale))
                     .icon(nav.icon())
                     .active(selected == nav)
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.selected = nav;
-                            cx.notify();
-                        });
+                    .on_click(move |_, window, cx| {
+                        view.update(cx, |this, cx| this.open(nav, window, cx));
                     }),
             );
         }
         menu
-    }
-
-    fn search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<SearchView> {
-        self.panels
-            .search
-            .get_or_insert_with(|| cx.new(|cx| SearchView::new(window, cx)))
-            .clone()
-    }
-
-    fn graph(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<GraphView> {
-        self.panels
-            .graph
-            .get_or_insert_with(|| cx.new(|cx| GraphView::new(window, cx)))
-            .clone()
-    }
-
-    fn entities(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<EntityView> {
-        self.panels
-            .entities
-            .get_or_insert_with(|| cx.new(|cx| EntityView::new(window, cx)))
-            .clone()
-    }
-
-    fn index(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<IndexView> {
-        self.panels
-            .index
-            .get_or_insert_with(|| cx.new(|cx| IndexView::new(window, cx)))
-            .clone()
-    }
-
-    fn projects(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<ProjectsView> {
-        self.panels
-            .projects
-            .get_or_insert_with(|| cx.new(|cx| ProjectsView::new(window, cx)))
-            .clone()
-    }
-
-    fn tools(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<ToolsView> {
-        self.panels
-            .tools
-            .get_or_insert_with(|| cx.new(|cx| ToolsView::new(window, cx)))
-            .clone()
-    }
-
-    fn storage(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<StorageView> {
-        self.panels
-            .storage
-            .get_or_insert_with(|| cx.new(|cx| StorageView::new(window, cx)))
-            .clone()
-    }
-
-    fn watch(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<WatchView> {
-        self.panels
-            .watch
-            .get_or_insert_with(|| cx.new(|cx| WatchView::new(window, cx)))
-            .clone()
-    }
-
-    /// The health panel probes on first open so the panel is never blank.
-    fn health(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<HealthView> {
-        if let Some(panel) = &self.panels.health {
-            return panel.clone();
-        }
-        let panel = cx.new(|cx| HealthView::new(window, cx));
-        panel.update(cx, |view, cx| view.load(cx));
-        self.panels.health = Some(panel.clone());
-        panel
-    }
-
-    fn metrics(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<MetricsView> {
-        self.panels
-            .metrics
-            .get_or_insert_with(|| cx.new(|cx| MetricsView::new(window, cx)))
-            .clone()
-    }
-
-    fn config(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<ConfigView> {
-        self.panels
-            .config
-            .get_or_insert_with(|| cx.new(|cx| ConfigView::new(window, cx)))
-            .clone()
-    }
-
-    fn tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<TasksView> {
-        self.panels
-            .tasks
-            .get_or_insert_with(|| cx.new(|cx| TasksView::new(window, cx)))
-            .clone()
-    }
-
-    fn render_content(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
-        let locale = locale(cx);
-        let scoped = AppState::global(cx).read(cx).active_project_id().is_some();
-        if self.selected.needs_project() && !scoped {
-            return page_body("no-scope")
-                .child(panel_header(
-                    t(self.selected.label_key(), locale),
-                    None,
-                    None,
-                    cx,
-                ))
-                .child(empty_state(
-                    t("panel.noProjectTitle", locale),
-                    Some(SharedString::from(t("panel.noProjectHint", locale))),
-                    None,
-                    cx,
-                ))
-                .into_any_element();
-        }
-
-        let panel: gpui_kit::AnyElement = match self.selected {
-            NavItem::Search => self.search(window, cx).into_any_element(),
-            NavItem::Graph => self.graph(window, cx).into_any_element(),
-            NavItem::Entities => self.entities(window, cx).into_any_element(),
-            NavItem::Index => self.index(window, cx).into_any_element(),
-            NavItem::Projects => self.projects(window, cx).into_any_element(),
-            NavItem::Tools => self.tools(window, cx).into_any_element(),
-            NavItem::Storage => self.storage(window, cx).into_any_element(),
-            NavItem::Watch => self.watch(window, cx).into_any_element(),
-            NavItem::Health => self.health(window, cx).into_any_element(),
-            NavItem::Metrics => self.metrics(window, cx).into_any_element(),
-            NavItem::Config => self.config(window, cx).into_any_element(),
-            NavItem::Tasks => self.tasks(window, cx).into_any_element(),
-        };
-        v_flex()
-            .size_full()
-            .min_h_0()
-            .child(panel)
-            .into_any_element()
     }
 
     fn render_sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -357,14 +243,14 @@ impl MainWindow {
             )
             .child(
                 SidebarGroup::new(t("nav.workspace", locale)).child(self.menu_items(
-                    &NavItem::WORKSPACE,
+                    &PanelKind::WORKSPACE,
                     locale,
                     cx,
                 )),
             )
             .child(
                 SidebarGroup::new(t("nav.system", locale)).child(self.menu_items(
-                    &NavItem::OPERATIONS,
+                    &PanelKind::OPERATIONS,
                     locale,
                     cx,
                 )),
@@ -494,8 +380,8 @@ fn status_base_url(cx: &Context<MainWindow>) -> SharedString {
 }
 
 impl Render for MainWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = self.render_content(window, cx);
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = self.dock_area.clone().into_any_element();
         v_flex()
             .size_full()
             .bg(cx.theme().background)

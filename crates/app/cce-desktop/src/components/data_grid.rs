@@ -10,6 +10,8 @@ use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::{App, Div, Hsla, ParentElement as _, SharedString, Styled as _, div, px};
 
 use crate::metrics::{CARD_RADIUS, SECTION_GAP, card_pad};
+use crate::services::export_service;
+use crate::views::PanelKind;
 
 /// Semantic tone of a cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,7 +112,14 @@ fn render_cell(cell: &Cell, column: &Column, theme: &gpui_kit::component::ThemeC
 ///
 /// `rows` shorter than the column count is padded with empty cells and longer
 /// rows are truncated, so a malformed row cannot shift the grid.
-pub fn data_grid(columns: &[Column], rows: &[Vec<Cell>], dense: bool, cx: &App) -> Div {
+pub fn data_grid(
+    kind: PanelKind,
+    columns: &[Column],
+    rows: &[Vec<Cell>],
+    dense: bool,
+    cx: &mut App,
+) -> Div {
+    export_service::capture(kind, columns, rows, cx);
     let theme = cx.theme();
     let row_pad = if dense { 4.0 } else { 8.0 };
 

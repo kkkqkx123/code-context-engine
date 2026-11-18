@@ -5,8 +5,6 @@
 //! commands take no project scope; the dead-letter commands do, because dead
 //! letters are recorded per project.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use cce_api::models::{
     AdmissionStatsResponse, Bm25HealthResponse, ConfigInfoResponse, ConfigReloadQuery,
     ConfigReloadResponse, ConfigValidateResponse, DeadLetterActionResponse, DeadLetterListResponse,
@@ -18,6 +16,7 @@ use cce_client::{Client, ClientError};
 use gpui_kit::{App, Task};
 
 use crate::runtime;
+use crate::services::time;
 
 pub fn health(cx: &App, client: Client) -> Task<Result<HealthStatus, ClientError>> {
     runtime::spawn(cx, async move { client.health().await })
@@ -212,61 +211,14 @@ pub fn acknowledge_dead_letter(
 
 /// Time window for a metrics history query: the last `hours` hours up to now.
 pub fn history_window(hours: u64) -> (String, String) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or_default();
+    let now = time::unix_seconds();
     let span = hours.saturating_mul(3600);
-    (rfc3339(now.saturating_sub(span)), rfc3339(now))
-}
-
-/// RFC 3339 timestamp in UTC for a unix second count.
-fn rfc3339(secs: u64) -> String {
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let (year, month, day) = civil_from_days(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
-}
-
-/// Civil date from days since the unix epoch (proleptic Gregorian).
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let shifted = days + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * month_index + 2) / 5 + 1) as u32;
-    let month = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    } as u32;
-    let year = if month <= 2 { year + 1 } else { year };
-    (year, month, day)
+    (time::rfc3339(now.saturating_sub(span)), time::rfc3339(now))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn epoch_formats_as_rfc3339() {
-        assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
-        assert_eq!(rfc3339(1_700_000_000), "2023-11-14T22:13:20Z");
-    }
-
-    #[test]
-    fn leap_day_formats() {
-        assert_eq!(rfc3339(1_709_164_800), "2024-02-29T00:00:00Z");
-    }
 
     #[test]
     fn window_orders_from_before_to() {

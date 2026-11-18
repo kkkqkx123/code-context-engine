@@ -30,6 +30,7 @@ use crate::services::graph_service::{self, CYCLE_LEVELS, EGO_DIRECTIONS, STRUCTU
 use crate::services::history::{self, HistoryKind};
 use crate::services::request::{self, Load};
 use crate::state::{AppState, GraphSeed};
+use crate::views::PanelKind;
 
 /// Graph answer families, one per operation tab.
 #[derive(Debug)]
@@ -279,7 +280,7 @@ impl GraphView {
         });
     }
 
-    fn render_answer(&self, answer: &GraphAnswer, cx: &Context<Self>) -> AnyElement {
+    fn render_answer(&self, answer: &GraphAnswer, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         match answer {
             GraphAnswer::Subgraph(response) => {
@@ -441,7 +442,7 @@ impl GraphView {
         columns: &[Column],
         rows: &[Vec<Cell>],
         summary: Option<String>,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let dense = AppState::global(cx).read(cx).density.is_dense();
         let locale = locale(cx);
@@ -459,7 +460,7 @@ impl GraphView {
             block = block.child(hint(SharedString::from(summary), cx));
         }
         block
-            .child(data_grid(columns, rows, dense, cx))
+            .child(data_grid(PanelKind::Graph, columns, rows, dense, &mut *cx))
             .into_any_element()
     }
 
@@ -468,7 +469,7 @@ impl GraphView {
         nodes: &[cce_api::models::GraphNode],
         edges: &[cce_api::models::GraphEdge],
         truncated: bool,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
@@ -518,8 +519,20 @@ impl GraphView {
             .gap_3()
             .w_full()
             .child(hint(SharedString::from(summary), cx))
-            .child(surface(dense, cx).child(data_grid(&node_columns, &node_rows, dense, cx)))
-            .child(surface(dense, cx).child(data_grid(&edge_columns, &edge_rows, dense, cx)))
+            .child(surface(dense, cx).child(data_grid(
+                PanelKind::Graph,
+                &node_columns,
+                &node_rows,
+                dense,
+                &mut *cx,
+            )))
+            .child(surface(dense, cx).child(data_grid(
+                PanelKind::Graph,
+                &edge_columns,
+                &edge_rows,
+                dense,
+                &mut *cx,
+            )))
             .into_any_element()
     }
 

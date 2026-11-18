@@ -441,5 +441,14 @@
   "tasks.clearDeadQueue": "清空死信条目",
   "tasks.queueCleared": "队列已清空。",
   "tasks.clearFailed": "清空队列失败。",
-  "tasks.scopeNote": "选中项目时，队列操作作用于活动项目。"
+  "tasks.scopeNote": "选中项目时，队列操作作用于活动项目。",
+  "tray.tooltip": "Code Context Engine",
+  "tray.show": "显示窗口",
+  "tray.closeToTray": "关闭时常驻托盘",
+  "tray.quit": "退出",
+  "export.current": "导出当前结果",
+  "export.saved": "已导出：",
+  "export.idle": "当前没有可导出的结果。",
+  "export.empty": "当前结果没有数据行。",
+  "export.failed": "导出文件写入失败。"
 }

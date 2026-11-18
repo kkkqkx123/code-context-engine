@@ -32,6 +32,7 @@ use crate::services::history::{self, HistoryKind};
 use crate::services::request::{self, Load};
 use crate::services::search_service;
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 const ENTITY_TABS: [&str; 8] = [
     "entity.tab.detail",
@@ -286,7 +287,7 @@ impl EntityView {
         cx.notify();
     }
 
-    fn render_matches(&self, cx: &Context<Self>) -> Option<AnyElement> {
+    fn render_matches(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let response = self.matches.ready()?;
         if response.items.is_empty() {
             return None;
@@ -319,7 +320,7 @@ impl EntityView {
         )
     }
 
-    fn render_answer(&self, answer: &EntityAnswer, cx: &Context<Self>) -> AnyElement {
+    fn render_answer(&self, answer: &EntityAnswer, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match answer {
@@ -477,7 +478,7 @@ impl EntityView {
         columns: &[Column],
         rows: &[Vec<Cell>],
         summary: String,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let dense = AppState::global(cx).read(cx).density.is_dense();
         let locale = locale(cx);
@@ -487,7 +488,13 @@ impl EntityView {
         }
         surface(dense, cx)
             .child(hint(SharedString::from(summary), cx))
-            .child(data_grid(columns, rows, dense, cx))
+            .child(data_grid(
+                PanelKind::Entities,
+                columns,
+                rows,
+                dense,
+                &mut *cx,
+            ))
             .into_any_element()
     }
 }

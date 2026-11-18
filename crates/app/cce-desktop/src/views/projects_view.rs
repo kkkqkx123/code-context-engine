@@ -27,6 +27,7 @@ use crate::metrics::CARD_RADIUS;
 use crate::services::project_service;
 use crate::services::request::{self, Load};
 use crate::state::{AppState, ProjectEntry};
+use crate::views::PanelKind;
 
 pub struct ProjectsView {
     name: Entity<InputState>,
@@ -269,7 +270,7 @@ impl ProjectsView {
         row.into_any_element()
     }
 
-    fn render_rows(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_rows(&self, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         let active = AppState::global(cx).read(cx).active_project_id();
@@ -304,7 +305,13 @@ impl ProjectsView {
             })
             .collect();
         surface(dense, cx)
-            .child(data_grid(&columns, &rows, dense, cx))
+            .child(data_grid(
+                PanelKind::Projects,
+                &columns,
+                &rows,
+                dense,
+                &mut *cx,
+            ))
             .into_any_element()
     }
 

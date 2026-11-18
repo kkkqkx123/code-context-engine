@@ -26,6 +26,7 @@ use crate::services::history::{self, HistoryKind};
 use crate::services::index_service;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 const INDEX_TABS: [&str; 5] = [
     "index.tab.full",
@@ -206,7 +207,7 @@ impl IndexView {
         }
     }
 
-    fn render_answer(&self, answer: &IndexAnswer, cx: &Context<Self>) -> AnyElement {
+    fn render_answer(&self, answer: &IndexAnswer, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match answer {
@@ -310,7 +311,13 @@ impl IndexView {
                         )),
                         cx,
                     ))
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Index,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
             IndexAnswer::Summary(response) => {
@@ -354,7 +361,13 @@ impl IndexView {
                         )),
                         cx,
                     ))
-                    .child(data_grid(&columns, &rows, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Index,
+                        &columns,
+                        &rows,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
             IndexAnswer::Stats(response) => surface(dense, cx)

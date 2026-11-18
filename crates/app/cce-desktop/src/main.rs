@@ -2,6 +2,7 @@ mod app;
 mod components;
 mod connection;
 mod design_tokens;
+mod dock_layout;
 mod i18n;
 mod metrics;
 mod runtime;
@@ -9,6 +10,7 @@ mod services;
 mod settings;
 mod state;
 mod theme;
+mod tray;
 mod views;
 
 fn main() {

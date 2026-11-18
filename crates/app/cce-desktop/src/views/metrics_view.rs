@@ -22,6 +22,7 @@ use crate::metrics::CARD_RADIUS;
 use crate::services::ops_service;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
+use crate::views::PanelKind;
 
 const METRICS_TABS: [&str; 3] = [
     "metrics.tab.text",
@@ -151,7 +152,7 @@ impl MetricsView {
             .into_any_element()
     }
 
-    fn render_answer(&self, answer: &MetricsAnswer, cx: &Context<Self>) -> AnyElement {
+    fn render_answer(&self, answer: &MetricsAnswer, cx: &mut Context<Self>) -> AnyElement {
         let locale = locale(cx);
         let dense = AppState::global(cx).read(cx).density.is_dense();
         match answer {
@@ -194,7 +195,13 @@ impl MetricsView {
                     })
                     .collect();
                 surface(dense, cx)
-                    .child(data_grid(&columns, &cells, dense, cx))
+                    .child(data_grid(
+                        PanelKind::Metrics,
+                        &columns,
+                        &cells,
+                        dense,
+                        &mut *cx,
+                    ))
                     .into_any_element()
             }
         }

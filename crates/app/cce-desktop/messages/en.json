@@ -441,5 +441,14 @@
   "tasks.clearDeadQueue": "Clear dead entries",
   "tasks.queueCleared": "Queue cleared.",
   "tasks.clearFailed": "Clearing the queue failed.",
-  "tasks.scopeNote": "Queue actions apply to the active project when one is selected."
+  "tasks.scopeNote": "Queue actions apply to the active project when one is selected.",
+  "tray.tooltip": "Code Context Engine",
+  "tray.show": "Show Window",
+  "tray.closeToTray": "Close to tray",
+  "tray.quit": "Quit",
+  "export.current": "Export current result",
+  "export.saved": "Exported:",
+  "export.idle": "No result has been rendered yet.",
+  "export.empty": "There are no rows to export.",
+  "export.failed": "The export could not be written."
 }

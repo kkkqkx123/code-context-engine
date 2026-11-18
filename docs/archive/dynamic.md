@@ -252,3 +252,16 @@ layer boundary. Both ports have a built-in default (neutral renderer /
 no check), so dispatch only happens at explicitly injected boundaries.
 
 **Status:** Necessary — layer-boundary injection ports with defaults.
+
+### Desktop Dock Panel Handles
+
+**Files:**
+- `crates/app/cce-desktop/src/dock_layout.rs` (`DockPanelHandle`)
+
+`gpui_kit::component::dock` stores heterogeneous panels behind its own
+`Arc<dyn BasePanelView>` and rebuilds them by name through a global panel
+registry. The desktop wrapper only names the library alias and hands concrete
+`Entity<DockPanel<V>>` handles to it; panel lookup in application code uses the
+deterministic `WorkspacePanel` enum instead of a trait object.
+
+**Status:** Necessary — external library API constraint.

@@ -17,18 +17,19 @@ Plain `cargo build` from the repository root does **not** cover this crate.
 
 ## Prerequisites
 
-- Rust 1.100+ (see `rust-version` in `Cargo.toml`). The floor is set by
+- Rust 1.97+ (see `rust-version` in `Cargo.toml`). The floor is set by
   `gpui-pre`, which calls `std::hint::cold_path`; older toolchains fail with
   `error[E0658]` inside that dependency, not inside this crate.
-- The `crates/gpui-kit` checkout (already vendored; the `tray`, `autostart`,
-  `compograph`, `global-hotkey` and `gpui-image` submodules are not
-  initialized and therefore unavailable — closing the window quits the process
-  instead of minimising to a tray icon).
+- The `crates/gpui-kit` checkout (already vendored) and its `tray` submodule.
+  The tray never blocks startup: without a usable desktop tray host, closing
+  the window still quits the app.
 - A C toolchain plus `pkg-config`.
 - System libraries for font rendering and Linux windowing:
-  `fontconfig`, `xcb`, `xkbcommon`, `xkbcommon-x11`, `wayland`.
-  `xkbcommon-dev` alone is not enough: the renderer links `xkbcommon-x11`,
-  which ships separately.
+  `fontconfig`, `xcb`, `xkbcommon`, `xkbcommon-x11`, `wayland`, plus the
+  platform tray/desktop integration used by `ksni`. `xkbcommon-dev` alone is
+  not enough: the renderer links `xkbcommon-x11`, which ships separately.
+  KDE Plasma provides a StatusNotifier host; GNOME needs an AppIndicator
+  extension for tray icons.
 
 Per-distro install commands (require root):
 
@@ -59,8 +60,9 @@ cargo fmt --check
 
 Tests cover the pure layers only — parameter assembly in `services/`, the
 scope and delivery rules in `state.rs`, settings round-trips, catalogue parity
-in `i18n.rs`, design tokens, and the small helpers behind the shared widgets.
-Nothing asserts rendered pixels; layout behaviour is verified by running the
+in `i18n.rs`, design tokens, close decisions, layout validation, CSV rendering
+and filename rules, and the small helpers behind the shared widgets. Nothing
+asserts rendered pixels; dock and tray behaviour is verified by running the
 binary.
 
 ## Panels
@@ -84,6 +86,14 @@ no panel can keep showing another project's results.
 | Operations | Config | `views/config_view.rs` | Server config snapshot, validation, reload |
 | Operations | Tasks | `views/tasks_view.rs` | Dead letters, retry and acknowledge, retry-queue status, process, clear, clear dead |
 
+Panels live in a dock area. The default layout keeps the four workspace
+panels as centre tabs; operations panels open as tabs on demand. Layout,
+active tab and dock sizes are saved to `layout.json` next to `settings.toml`.
+A layout version change, an unknown panel name or a duplicate panel name
+discards the saved layout and restores the default. Changing the project scope
+rebuilds every panel from the current layout so no panel can keep another
+project's results.
+
 Shared behaviour, so a new panel does not reinvent it:
 
 - `services::request::Load<T>` holds the four states every panel renders
@@ -95,6 +105,12 @@ Shared behaviour, so a new panel does not reinvent it:
   scope they render an empty state telling the user to pick one first.
 - Recent inputs are persisted per panel kind through `services::history`
   (capped), so a restart keeps the last queries.
+- A panel's rendered grid is captured by `services::export_service`. The
+  export button in the dock title bar writes the current result as CSV (UTF-8
+  BOM, CRLF, every field quoted) to the system download directory, falling
+  back to the config directory's `exports` folder. File names combine the
+  panel identity, project scope or `global`, and a UTC stamp; existing files
+  are never overwritten.
 
 ## Running
 
@@ -114,3 +130,5 @@ machines only `cargo build` and `cargo test` are meaningful.
 | `error[E0658]: use of unstable library feature 'cold_path'` in `gpui-pre` | Toolchain below the floor | `rustup update stable` |
 | Binary starts but windows stay blank | No Wayland/X11 session | Run inside a desktop session or nested compositor |
 | Panels show an empty state after connecting | No project selected | Open the Projects panel and switch to one |
+| Closing the window quits even with "Close to tray" enabled | No StatusNotifier host in the session | Install the desktop's AppIndicator support; otherwise closing falls back to quit |
+| Layout resets after an upgrade | Layout version changed or panel identity set changed | Expected: the default layout is restored and overwritten |
