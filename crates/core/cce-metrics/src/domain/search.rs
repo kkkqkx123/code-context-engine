@@ -17,6 +17,8 @@ pub struct SearchMetrics {
     pub queries_by_type: Arc<DashMap<String, LabeledCounter>>,
     /// Share of vector keys that also exist on the BM25 path.
     pub hybrid_alignment_match_ratio: LabeledHistogram,
+    /// Share of distinct alignment keys returned by exactly one recall path.
+    pub hybrid_alignment_single_path_ratio: LabeledHistogram,
     /// Share of candidates that carry no cross-path alignment key (either no
     /// key at all or the intentional chunk-id fallback).
     pub hybrid_alignment_unalignable_ratio: LabeledHistogram,
@@ -34,6 +36,10 @@ impl SearchMetrics {
             queries_by_type: Arc::new(DashMap::new()),
             hybrid_alignment_match_ratio: registry.histogram_default(
                 "search_hybrid_alignment_match_ratio",
+                &[("project_id", &proj_val)],
+            ),
+            hybrid_alignment_single_path_ratio: registry.histogram_default(
+                "search_hybrid_alignment_single_path_ratio",
                 &[("project_id", &proj_val)],
             ),
             hybrid_alignment_unalignable_ratio: registry.histogram_default(
@@ -72,6 +78,8 @@ impl SearchMetrics {
     /// path is the primary semantic recall). `unalignable_ratio` uses every
     /// observed entry as the denominator, so it reports how much of the
     /// candidate set could never align rather than how much failed to align.
+    /// `single_path_ratio` uses distinct alignable keys as its denominator;
+    /// path-local entries stay in the unalignable ratio instead.
     pub fn record_hybrid_alignment(
         &self,
         vector_keys: usize,
@@ -85,6 +93,14 @@ impl SearchMetrics {
             matched as f64 / vector_keys as f64
         };
         self.hybrid_alignment_match_ratio.observe(ratio);
+
+        let distinct_keys = vector_keys + bm25_keys - matched;
+        let single_path = if distinct_keys == 0 {
+            0.0
+        } else {
+            (distinct_keys - matched) as f64 / distinct_keys as f64
+        };
+        self.hybrid_alignment_single_path_ratio.observe(single_path);
 
         let total = vector_keys + bm25_keys + unalignable;
         let unalignable_ratio = if total == 0 {
@@ -109,6 +125,27 @@ mod tests {
 
         assert_eq!(metrics.queries_total.get(), 0);
         assert_eq!(metrics.query_latency_ms.get_count(), 0);
+    }
+
+    #[test]
+    fn test_hybrid_alignment_records_all_three_ratios() {
+        let registry = MetricsRegistry::new();
+        let metrics = SearchMetrics::new(&registry, 1);
+
+        // Two vector keys and one BM25 key share one key: one single-path key
+        // out of two distinct keys.
+        metrics.record_hybrid_alignment(2, 1, 1, 1);
+        assert_eq!(metrics.hybrid_alignment_match_ratio.get_count(), 1);
+        assert_eq!(metrics.hybrid_alignment_single_path_ratio.get_count(), 1);
+        assert_eq!(metrics.hybrid_alignment_unalignable_ratio.get_count(), 1);
+        assert!((metrics.hybrid_alignment_single_path_ratio.get_average() - 0.5).abs() < 1e-9);
+        assert!((metrics.hybrid_alignment_unalignable_ratio.get_average() - 0.25).abs() < 1e-9);
+
+        metrics.record_hybrid_alignment(0, 0, 0, 0);
+        assert_eq!(
+            metrics.hybrid_alignment_single_path_ratio.get_average(),
+            0.25
+        );
     }
 
     #[test]

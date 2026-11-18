@@ -105,6 +105,16 @@ fused = (alpha * norm_v + beta * norm_bm25) / (alpha + beta)
 
 约束：每条路径最多 200 个候选（`MAX_KEY_COMPLETION_CANDIDATES`）；只改标识，不动正文、分数与行号；无元数据存储、查询失败或记录缺字段时整体降级为原行为并记录 trace。补全只会把"永不匹配"变成"可能匹配"，不会把已可对齐的键改坏。
 
+## 跨路径对齐指标
+
+每次 hybrid 融合通过 `FusionAlignmentStats` 记录三项比率，分别进入 `search_hybrid_alignment_match_ratio`、`search_hybrid_alignment_single_path_ratio` 与 `search_hybrid_alignment_unalignable_ratio` 直方图：
+
+- 匹配率 = 双路共有键数 / 向量路键数，延续向量主路的口径；
+- 单路键占比 = 仅一路返回的键数 / 去重后的键总数，路径内兜底键不计入分子与分母，避免与下一项重复计数；
+- 不可对齐占比 = 路径内兜底条目数 / 所有候选条目数，覆盖“完全没有键”和“键退化为块 id”两种情形。
+
+离线侧复用同一统计结构：`alignment_report` 输出逐查询与跨查询汇总的三项比率，`retrieval_method` 基准的 `alignment_coverage.md` 输出语料级键计数与单路键、不可对齐条目占比。两者口径一致，分母分别为逐查询观测与全语料，不可直接混读。
+
 ## 聚合检索去重
 
 `search_aggregated()` 运行多个子查询并合并结果，去重使用与融合相同的对齐键：`entity_id` → `segment_id` → chunk `id`。

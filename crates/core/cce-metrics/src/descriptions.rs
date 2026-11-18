@@ -511,6 +511,10 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "Hybrid search alignment match ratio",
     ),
     (
+        "search_hybrid_alignment_single_path_ratio",
+        "Share of hybrid search alignment keys returned by only one recall path",
+    ),
+    (
         "search_hybrid_alignment_unalignable_ratio",
         "Share of hybrid search candidates with no cross-path alignment key",
     ),

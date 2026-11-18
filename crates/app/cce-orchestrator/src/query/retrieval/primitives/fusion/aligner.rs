@@ -160,6 +160,25 @@ impl FusionAlignmentStats {
             self.matched_keys as f64 / self.vector_keys as f64
         }
     }
+
+    /// Number of distinct keys returned by exactly one path.
+    pub fn single_path_keys(&self) -> usize {
+        self.vector_keys + self.bm25_keys - 2 * self.matched_keys
+    }
+
+    /// Share of distinct keys returned by exactly one path, in `[0, 1]`.
+    ///
+    /// Path-local keys are excluded from both the numerator and the
+    /// denominator: they are counted by `unalignable_ratio` instead, so the two
+    /// ratios remain additive views of the same candidate set.
+    pub fn single_path_ratio(&self) -> f64 {
+        let distinct = self.vector_keys + self.bm25_keys - self.matched_keys;
+        if distinct == 0 {
+            0.0
+        } else {
+            self.single_path_keys() as f64 / distinct as f64
+        }
+    }
 }
 
 /// Compute cross-path alignment coverage for a pair of result sets.
@@ -363,6 +382,21 @@ mod tests {
         assert_eq!(outcome.candidates, 2);
         assert_eq!(outcome.completed, 0);
         assert_eq!(outcome.still_unalignable, 2);
+    }
+
+    #[test]
+    fn single_path_ratio_counts_keys_present_on_one_path() {
+        let keyed = |chunk_id: &str, entity: u64| SearchResult {
+            id: chunk_id.to_string(),
+            entity_ids: vec![cce_types::EntityId(entity)],
+            ..Default::default()
+        };
+        let vector = vec![keyed("emb_a", 1), keyed("emb_b", 2), keyed("emb_c", 3)];
+        let bm25 = vec![keyed("bm25_a", 1), keyed("bm25_d", 4)];
+        let stats = compute_alignment_coverage(&vector, &bm25);
+        assert_eq!(stats.single_path_keys(), 3);
+        assert!((stats.single_path_ratio() - 0.75).abs() < 1e-9);
+        assert!(compute_alignment_coverage(&[], &[]).single_path_ratio() == 0.0);
     }
 
     #[test]
