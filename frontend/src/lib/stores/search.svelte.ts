@@ -389,6 +389,9 @@ async function buildAggregatedRequest(
 			];
 	return searchApi.aggregatedSearch({
 		project_id: projectId,
+		// The main input is the user's own question; the backend prefers it as
+		// the rerank context over a join of the sub-query texts.
+		query: query.trim() || undefined,
 		sub_queries: subQueries,
 		limit,
 		...filterFields,

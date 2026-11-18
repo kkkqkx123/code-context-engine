@@ -89,6 +89,60 @@ pub struct SearchResponse {
     /// True when the serving relation snapshot reports itself stale.
     #[serde(default)]
     pub relation_stale: bool,
+    /// Per-sub-query accounting in caller order (empty for single queries and
+    /// for a fully cached aggregate answer, where nothing ran).
+    ///
+    /// `failed_sub_queries` says a sub-query did not contribute; this says
+    /// whether it erred, timed out or simply matched nothing, and how much of
+    /// what it recalled survived the merge.
+    #[serde(default)]
+    pub sub_query_stats: Vec<SubQueryStatDto>,
+}
+
+/// Terminal state of one sub-query inside an aggregated request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubQueryStatusDto {
+    /// Recalled a non-empty candidate list.
+    Succeeded,
+    /// Ran to completion and recalled nothing.
+    Empty,
+    /// Failed before producing a candidate list.
+    Failed,
+    /// Cut off by the aggregate request's sub-query deadline.
+    TimedOut,
+}
+
+impl SubQueryStatusDto {
+    /// Stable wire label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Empty => "empty",
+            Self::Failed => "failed",
+            Self::TimedOut => "timed_out",
+        }
+    }
+}
+
+/// Per-sub-query execution accounting for aggregated search.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SubQueryStatDto {
+    /// Zero-based position in the request's sub-query list.
+    pub index: usize,
+    /// Query text as executed.
+    pub text: String,
+    /// Terminal state.
+    pub status: SubQueryStatusDto,
+    /// Candidates recalled before alignment and merging.
+    pub candidates: usize,
+    /// Final hits this sub-query contributed to.
+    pub contributed: usize,
+    /// Wall-clock time spent in this sub-query.
+    pub elapsed_ms: u64,
+    /// Failure detail for `failed` and `timed_out`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Whether a result carries its full body or a file-and-range reference.
@@ -229,6 +283,13 @@ pub struct AggregatedSearchRequest {
     /// Project root path (optional if project_id is provided)
     #[serde(default)]
     pub project_path: Option<String>,
+    /// Original user question the sub-queries were derived from.
+    ///
+    /// Aggregation uses it as the rerank context and for logging. When absent
+    /// the caller's sub-query texts are joined, which reads as a synthetic
+    /// query to a semantic reranker.
+    #[serde(default)]
+    pub query: Option<String>,
     /// Decomposed sub-queries
     pub sub_queries: Vec<SubQueryRequest>,
     #[serde(default = "default_limit")]

@@ -7,9 +7,11 @@
 
 use cce_api::models::{
     ContentStateDto, EntityScoreDto, RecallPathDto, SearchResultItem, SecondaryEvidenceDto,
+    SubQueryStatDto, SubQueryStatusDto,
 };
 use cce_config::modules::search::RelationAnnotationConfig;
 use cce_orchestrator::SearchResult as OrchestratorResultItem;
+use cce_orchestrator::query::aggregation::validate_plan;
 use cce_orchestrator::query::expansion::{ExpansionPathFilter, NeighbourResolver, stable_id_of};
 use cce_orchestrator::query::types::{
     ContentState, DowngradeReason, ExcludableContentType, QueryConfigBuilder, RecallPath,
@@ -101,6 +103,9 @@ pub struct SubQuerySpec {
 /// One aggregated-query request described without transport types.
 #[derive(Debug, Clone)]
 pub struct AggregatedQuerySpec {
+    /// Original user question the sub-queries were derived from, if the caller
+    /// supplied one.
+    pub query: Option<String>,
     /// Sub-queries to run in parallel and merge.
     pub sub_queries: Vec<SubQuerySpec>,
     /// Shared knobs.
@@ -173,6 +178,36 @@ pub struct SearchOutcome {
     pub relation_epoch: Option<i64>,
     /// Whether the relation snapshot is stale.
     pub relation_stale: bool,
+    /// Per-sub-query accounting in caller order (empty for single queries).
+    pub sub_query_stats: Vec<SubQueryStatDto>,
+}
+
+/// Convert engine-side sub-query accounting into its wire shape.
+///
+/// Kept here (rather than in the transport) so the HTTP and MCP surfaces render
+/// the same numbers from the same mapping.
+fn convert_sub_query_stats(
+    stats: Vec<cce_orchestrator::query::types::SubQueryStat>,
+) -> Vec<SubQueryStatDto> {
+    use cce_orchestrator::query::types::SubQueryStatus;
+
+    stats
+        .into_iter()
+        .map(|stat| SubQueryStatDto {
+            index: stat.index,
+            text: stat.text,
+            status: match stat.status {
+                SubQueryStatus::Succeeded => SubQueryStatusDto::Succeeded,
+                SubQueryStatus::Empty => SubQueryStatusDto::Empty,
+                SubQueryStatus::Failed => SubQueryStatusDto::Failed,
+                SubQueryStatus::TimedOut => SubQueryStatusDto::TimedOut,
+            },
+            candidates: stat.candidates,
+            contributed: stat.contributed,
+            elapsed_ms: stat.elapsed_ms,
+            error: stat.error,
+        })
+        .collect()
 }
 
 /// Shared query service over one application state.
@@ -310,6 +345,7 @@ impl<'a> SearchService<'a> {
             from_cache: result.from_cache,
             relation_epoch,
             relation_stale,
+            sub_query_stats: convert_sub_query_stats(result.sub_query_stats),
         })
     }
 
@@ -365,12 +401,22 @@ impl<'a> SearchService<'a> {
             include_categories: fields.include_categories.clone(),
             exclude_categories: fields.exclude_categories.clone(),
         });
+        // A caller-supplied question is the only context a semantic reranker can
+        // score against. Joining the sub-query texts is the fallback, kept for
+        // callers that only ever had a decomposition at hand.
         let original_query = spec
-            .sub_queries
-            .iter()
-            .map(|sub| sub.text.clone())
-            .collect::<Vec<_>>()
-            .join(" + ");
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                spec.sub_queries
+                    .iter()
+                    .map(|sub| sub.text.clone())
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            });
         let agg_options = AggregatedQueryOptions {
             original_query,
             project_id,
@@ -394,6 +440,17 @@ impl<'a> SearchService<'a> {
             neighbour_resolver: resolver,
         };
 
+        // Reject plans that cannot produce a result before any retrieval is
+        // spent on them. The engine repeats the check as its own guard; doing it
+        // here maps the failure onto the request-validation error the transport
+        // already knows how to report.
+        validate_plan(
+            &agg_options.sub_queries,
+            agg_options.global_config.result.min_score,
+            agg_options.global_config.aggregation.score_strategy,
+        )
+        .map_err(SearchServiceError::InvalidInput)?;
+
         let coordinator = self.build_coordinator(project_id, &entry).await?;
         let result = coordinator
             .search_aggregated(&agg_options)
@@ -413,6 +470,7 @@ impl<'a> SearchService<'a> {
             from_cache: result.from_cache,
             relation_epoch,
             relation_stale,
+            sub_query_stats: convert_sub_query_stats(result.sub_query_stats),
         })
     }
 

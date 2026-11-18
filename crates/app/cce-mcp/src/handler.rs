@@ -9,14 +9,14 @@
 //! Item shapes reuse the shared API DTO field names so HTTP and MCP callers
 //! observe the same `SearchResultItem`, `KeywordSearchItem`, and fold payloads.
 //! The MCP transport returns tool payloads without the HTTP success envelope.
-//! Covered here: search, file search, keyword search, entity callees/callers,
+//! Covered here: search, aggregated search, file search, keyword search, entity callees/callers,
 //! call chain, project listing, full and incremental indexing, single and
 //! batch fold, and engine health. Graph traversal, storage management,
 //! metrics history, watch, configuration, and ingest entries remain HTTP-only
 //! and are not exposed here.
 //!
 //! The tool implementations are grouped by domain in submodules:
-//! `search` (hybrid, file-path, and keyword search), `relations` (entity
+//! `search` (hybrid, aggregated, file-path, and keyword search), `relations` (entity
 //! callees/callers and call chains), `project` (project listing, indexing,
 //! health), `fold` (stateless folding), and `support` (shared helpers). This
 //! module keeps the
@@ -42,7 +42,7 @@ use rmcp::{
 pub use fold::{FoldArgs, FoldBatchArgs, FoldBatchItemArgs};
 pub use project::{IncrementalIndexArgs, IndexProjectArgs, ProjectArgs};
 pub use relations::{CallChainArgs, EntityArgs};
-pub use search::{FileSearchArgs, KeywordSearchArgs, SearchArgs};
+pub use search::{AggregatedSearchArgs, FileSearchArgs, KeywordSearchArgs, SearchArgs};
 
 /// MCP server handler. Cloned per session by the streamable-HTTP transport, so
 /// it only holds cheap `Arc`s.
@@ -90,6 +90,17 @@ impl McpServerHandler {
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("search")?;
         search::search(&self.state, args).await
+    }
+
+    #[tool(
+        description = "Aggregated search: run several sub-queries against one index snapshot, merge them by code identity and rerank once. Use it when a question decomposes into independent intents (e.g. a symbol plus its usage). Returns merged chunks plus per-sub-query accounting (candidates, contributed hits, status) so a weak intent is visible."
+    )]
+    async fn aggregated_search(
+        &self,
+        Parameters(args): Parameters<AggregatedSearchArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_enabled("aggregated_search")?;
+        search::aggregated_search(&self.state, args).await
     }
 
     #[tool(
@@ -249,16 +260,17 @@ mod tests {
         let stdio_names = names_of(McpServerHandler::tool_router().list_all());
         let http_names = names_of(McpServerHandler::tool_router().list_all());
         assert_eq!(stdio_names, http_names);
-        assert_eq!(stdio_names.len(), 13);
+        assert_eq!(stdio_names.len(), 14);
     }
 
     #[test]
-    fn tool_router_exposes_thirteen_tools_without_http_only_entries() {
+    fn tool_router_exposes_fourteen_tools_without_http_only_entries() {
         let router = McpServerHandler::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), 14);
         for name in [
             "search",
+            "aggregated_search",
             "file_search",
             "keyword_search",
             "entity_callees",

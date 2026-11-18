@@ -20,7 +20,9 @@ pub use execution_strategy::ExecutionStrategy;
 pub use query_options::{
     ExcludableContentType, QueryConfigBuilder, QueryIntent, QueryOptions, SearchSources,
 };
-pub use query_result::{AggregatedQueryOptions, QueryResult, SubQuery};
+pub use query_result::{
+    AggregatedQueryOptions, QueryResult, SubQuery, SubQueryStat, SubQueryStatus,
+};
 pub use search_config::{
     AggregationConfig, AggregationScoreStrategy, Bm25RetrievalConfig, HybridFusionConfig,
     HybridWeightConfig, QueryIntentWeights, RelationAnnotationConfig, RerankConfig,

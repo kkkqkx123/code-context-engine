@@ -6,8 +6,8 @@ use axum::{Json, http::StatusCode};
 
 use cce_api::models::{
     AggregatedSearchRequest, BatchDeleteRequest, ClearIndexRequest, EntitySearchRequest,
-    ProjectConfigUpdateRequest, SearchRequest, StorageQuery, SubQueryRequest, SummaryRequest,
-    error_codes,
+    ProjectConfigUpdateRequest, SearchRequest, StorageQuery, SubQueryRequest, SubQueryStatusDto,
+    SummaryRequest, error_codes,
 };
 use cce_server::api::handlers::project::indexing as project_indexing;
 use cce_server::api::handlers::{
@@ -41,6 +41,7 @@ fn aggregated_request(sub_queries: Vec<SubQueryRequest>) -> AggregatedSearchRequ
     AggregatedSearchRequest {
         project_id: Some(1),
         project_path: None,
+        query: None,
         sub_queries,
         limit: 10,
         min_score: None,
@@ -230,6 +231,26 @@ async fn aggregated_search_rejects_unknown_subquery_type() {
     match search::handle_aggregated_search(State(env.state), Json(request)).await {
         ApiResult::Error(_) => {}
         ApiResult::Success(_) => panic!("unknown sub-query type must be rejected"),
+    }
+}
+
+#[tokio::test]
+async fn aggregated_search_rejects_weight_below_result_threshold() {
+    let env = test_env().await;
+    let root = tempfile::TempDir::new().expect("project root");
+    let id = create_project(&env.state, &root.path().to_string_lossy()).await;
+    let mut request = aggregated_request(vec![SubQueryRequest {
+        text: "fold".to_string(),
+        query_type: "bm25".to_string(),
+        weight: 0.2,
+    }]);
+    request.project_id = Some(id);
+    // Under the default `max` strategy a contribution is bounded by its weight,
+    // so this sub-query can never clear the merged threshold.
+    request.min_score = Some(0.5);
+    match search::handle_aggregated_search(State(env.state), Json(request)).await {
+        ApiResult::Error(err) => assert_eq!(err.error.code, error_codes::INVALID_INPUT),
+        ApiResult::Success(_) => panic!("weight below the result threshold must be rejected"),
     }
 }
 
@@ -469,7 +490,27 @@ async fn aggregated_bm25_search_succeeds_on_indexed_project() {
     }]);
     request.project_id = Some(id);
     match search::handle_aggregated_search(State(env.state), Json(request)).await {
-        ApiResult::Success(response) => assert!(response.success),
+        ApiResult::Success(response) => {
+            assert!(response.success);
+            // The per-sub-query accounting must describe the intent that ran,
+            // and attribute every returned hit back to it.
+            assert_eq!(response.sub_query_stats.len(), 1);
+            let stat = &response.sub_query_stats[0];
+            assert_eq!(stat.index, 0);
+            assert_eq!(stat.text, "fixture_caller");
+            assert_eq!(stat.status, SubQueryStatusDto::Succeeded);
+            assert!(
+                stat.candidates > 0,
+                "the sub-query must have recalled the fixture symbol"
+            );
+            if !response.items.is_empty() {
+                assert_eq!(
+                    stat.contributed,
+                    response.items.len(),
+                    "a single sub-query owns every merged hit"
+                );
+            }
+        }
         ApiResult::Error(err) => panic!("aggregated search must succeed: {}", err.error.message),
     }
 }

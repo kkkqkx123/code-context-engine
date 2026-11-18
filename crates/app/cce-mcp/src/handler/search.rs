@@ -61,6 +61,70 @@ pub struct SearchArgs {
     pub expand: Option<bool>,
 }
 
+/// One sub-query of an aggregated search.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AggregatedSubQueryArg {
+    /// Query text (must not be blank).
+    pub text: String,
+    /// Retrieval source for this sub-query: vector, bm25, or hybrid (default).
+    #[serde(default)]
+    pub query_type: Option<String>,
+    /// Share of the merged score this sub-query can contribute, in (0, 1].
+    /// Defaults to 1.0.
+    #[serde(default)]
+    pub weight: Option<f32>,
+}
+
+/// Arguments for aggregated (multi sub-query) search.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AggregatedSearchArgs {
+    /// Project ID to search within (required).
+    pub project_id: i64,
+    /// Original question the sub-queries were derived from. Used as the rerank
+    /// context; when absent the sub-query texts are joined, which a semantic
+    /// reranker reads as a synthetic query.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Sub-queries to run concurrently and merge (1 to 10).
+    pub sub_queries: Vec<AggregatedSubQueryArg>,
+    /// Maximum number of merged results (default 10).
+    #[serde(default)]
+    pub limit: Option<usize>,
+    /// Minimum merged score; results below are dropped.
+    #[serde(default)]
+    pub min_score: Option<f32>,
+    /// Optional directory prefix to restrict results (e.g. "src/parser").
+    #[serde(default)]
+    pub directory_prefix: Option<String>,
+    /// Glob exclude patterns.
+    #[serde(default)]
+    pub exclude_patterns: Option<Vec<String>>,
+    /// Glob include patterns.
+    #[serde(default)]
+    pub include_patterns: Option<Vec<String>>,
+    /// Content types to exclude (test, generated, dependency).
+    #[serde(default)]
+    pub exclude_content_types: Option<Vec<String>>,
+    /// File categories to include (code, config, documentation, schema, other).
+    #[serde(default)]
+    pub include_categories: Option<Vec<String>>,
+    /// File categories to exclude.
+    #[serde(default)]
+    pub exclude_categories: Option<Vec<String>>,
+    /// Rerank master switch override.
+    #[serde(default)]
+    pub enable_rerank: Option<bool>,
+    /// Rerank candidate budget override.
+    #[serde(default)]
+    pub rerank_max_candidates: Option<usize>,
+    /// Query intent override: semantic, keyword, hybrid, entity.
+    #[serde(default)]
+    pub query_intent: Option<String>,
+    /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
+    #[serde(default)]
+    pub expand: Option<bool>,
+}
+
 /// Arguments for fuzzy file-path search.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FileSearchArgs {
@@ -210,6 +274,112 @@ pub async fn search(
     }
 }
 
+/// Run an aggregated (multi sub-query) search tool call.
+///
+/// Exposes the aggregated endpoint to agents that decompose a question
+/// themselves: one shared epoch view, one rerank pass over the merged union and
+/// one relation expansion. Unlike N independent `search` calls, duplicate
+/// bodies collapse and `sub_query_stats` shows which intent paid off.
+pub async fn aggregated_search(
+    state: &Arc<SharedContext>,
+    args: AggregatedSearchArgs,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    use cce_server_shared::services::search::{AggregatedQuerySpec, SubQuerySpec};
+
+    let fail = |message: String| -> Result<CallToolResult, rmcp::ErrorData> {
+        Ok(super::support::tool_failure(format!(
+            "aggregated_search failed: {message}"
+        )))
+    };
+
+    let mut sub_queries = Vec::with_capacity(args.sub_queries.len());
+    for sub in &args.sub_queries {
+        if sub.text.trim().is_empty() {
+            return fail("sub-query text must not be blank".to_string());
+        }
+        let sources = match SearchService::parse_search_sources(
+            sub.query_type.as_deref().unwrap_or("hybrid"),
+            "query type in sub-query",
+        ) {
+            Ok(sources) => sources,
+            Err(error) => return fail(error.to_string()),
+        };
+        sub_queries.push(SubQuerySpec {
+            text: sub.text.clone(),
+            sources,
+            weight: sub.weight.unwrap_or(1.0),
+        });
+    }
+    let mut exclude_content_types = Vec::new();
+    for raw in args.exclude_content_types.clone().unwrap_or_default() {
+        match SearchService::parse_exclude_content_type(&raw) {
+            Ok(content_type) => exclude_content_types.push(content_type),
+            Err(error) => return fail(error.to_string()),
+        }
+    }
+    let mut include_categories = Vec::new();
+    for raw in args.include_categories.clone().unwrap_or_default() {
+        match SearchService::parse_file_category(&raw, "include") {
+            Ok(category) => include_categories.push(category),
+            Err(error) => return fail(error.to_string()),
+        }
+    }
+    let mut exclude_categories = Vec::new();
+    for raw in args.exclude_categories.clone().unwrap_or_default() {
+        match SearchService::parse_file_category(&raw, "exclude") {
+            Ok(category) => exclude_categories.push(category),
+            Err(error) => return fail(error.to_string()),
+        }
+    }
+    let query_intent = match SearchService::parse_query_intent(args.query_intent.as_deref()) {
+        Ok(intent) => intent,
+        Err(error) => return fail(error.to_string()),
+    };
+
+    let spec = AggregatedQuerySpec {
+        query: args.query.clone(),
+        sub_queries,
+        fields: SharedQueryFields {
+            limit: args.limit,
+            min_score: args.min_score,
+            enable_rerank: args.enable_rerank,
+            rerank_max_candidates: args.rerank_max_candidates,
+            directory_prefix: args.directory_prefix.clone(),
+            exclude_content_types,
+            include_categories,
+            exclude_categories,
+            exclude_patterns: args.exclude_patterns.clone().unwrap_or_default(),
+            include_patterns: args.include_patterns.clone().unwrap_or_default(),
+            query_intent,
+            expand: args.expand.unwrap_or(false),
+        },
+    };
+    match SearchService::new(state)
+        .run_aggregated(args.project_id, spec)
+        .await
+    {
+        Ok(outcome) => Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({
+                "total": outcome.total,
+                "elapsed_ms": outcome.elapsed_ms,
+                "sources": outcome.sources,
+                "failed_sub_queries": outcome.failed_sub_queries,
+                "planned_sub_queries": outcome.planned_sub_queries,
+                "executed_sub_queries": outcome.executed_sub_queries,
+                "succeeded_sub_queries": outcome.succeeded_sub_queries,
+                "sub_query_cache_hits": outcome.sub_query_cache_hits,
+                "from_cache": outcome.from_cache,
+                "relation_epoch": outcome.relation_epoch,
+                "relation_stale": outcome.relation_stale,
+                "sub_query_stats": outcome.sub_query_stats,
+                "items": outcome.items,
+            })
+            .to_string(),
+        )])),
+        Err(error) => fail(error.to_string()),
+    }
+}
+
 /// Run a fuzzy file-path search tool call.
 ///
 /// Delegates to the shared query service so MCP and future HTTP callers
@@ -333,6 +503,22 @@ mod tests {
         assert_eq!(args.project_id, 3);
         assert!(args.limit.is_none());
         assert!(args.query_type.is_none());
+        assert!(args.expand.is_none());
+    }
+
+    #[test]
+    fn aggregated_args_default_optionals() {
+        let args: AggregatedSearchArgs = serde_json::from_value(serde_json::json!({
+            "project_id": 3,
+            "sub_queries": [{"text": "fold"}, {"text": "cache", "weight": 0.5}],
+        }))
+        .expect("minimal aggregated args deserialize");
+        assert_eq!(args.sub_queries.len(), 2);
+        assert!(args.sub_queries[0].query_type.is_none());
+        assert!(args.sub_queries[0].weight.is_none());
+        assert_eq!(args.sub_queries[1].weight, Some(0.5));
+        assert!(args.query.is_none());
+        assert!(args.limit.is_none());
         assert!(args.expand.is_none());
     }
 

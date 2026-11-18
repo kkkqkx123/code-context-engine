@@ -82,6 +82,9 @@ pub mod relation_searcher;
 // Query coordinator (unified entry point)
 pub mod coordinator;
 
+// Cross sub-query aggregation helpers (score alignment, plan rules, merge key)
+pub mod aggregation;
+
 // Score normalization shared by all recall modes
 pub mod boost;
 

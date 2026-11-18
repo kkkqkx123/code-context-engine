@@ -1488,6 +1488,14 @@ export interface components {
             /** @description Project root path (optional if project_id is provided) */
             project_path?: string | null;
             /**
+             * @description Original user question the sub-queries were derived from.
+             *
+             *     Aggregation uses it as the rerank context and for logging. When absent
+             *     the caller's sub-query texts are joined, which reads as a synthetic
+             *     query to a semantic reranker.
+             */
+            query?: string | null;
+            /**
              * @description Query intent override applied to every sub-query.
              *     Empty means auto-detect per sub-query text.
              */
@@ -3054,9 +3062,49 @@ export interface components {
             /** @description True when the serving relation snapshot reports itself stale. */
             relation_stale?: boolean;
             sources_used?: string[];
+            /**
+             * @description Per-sub-query accounting in caller order (empty for single queries and
+             *     for a fully cached aggregate answer, where nothing ran).
+             *
+             *     `failed_sub_queries` says a sub-query did not contribute; this says
+             *     whether it erred, timed out or simply matched nothing, and how much of
+             *     what it recalled survived the merge.
+             */
+            sub_query_stats?: components["schemas"]["SubQueryStatDto"][];
             success: boolean;
             total: number;
         };
+        /** @description Per-sub-query execution accounting for aggregated search. */
+        SubQueryStatDto: {
+            /** @description Candidates recalled before alignment and merging. */
+            candidates: number;
+            /**
+             * Format: int64
+             * @description Final hits this sub-query contributed to.
+             */
+            contributed: number;
+            /**
+             * Format: int64
+             * @description Wall-clock time spent in this sub-query.
+             */
+            elapsed_ms: number;
+            /** @description Failure detail for `failed` and `timed_out`. */
+            error?: string | null;
+            /**
+             * Format: int64
+             * @description Zero-based position in the request's sub-query list.
+             */
+            index: number;
+            /** @description Terminal state. */
+            status: components["schemas"]["SubQueryStatusDto"];
+            /** @description Query text as executed. */
+            text: string;
+        };
+        /**
+         * @description Terminal state of one sub-query inside an aggregated request.
+         * @enum {string}
+         */
+        SubQueryStatusDto: "succeeded" | "empty" | "failed" | "timed_out";
         /** @description Search result item */
         SearchResultItem: {
             /** @description Attached caller (backward) units. */

@@ -103,6 +103,7 @@ pub fn run_aggregated(
         let request = AggregatedSearchRequest {
             project_id: Some(project_id),
             project_path: None,
+            query: None,
             sub_queries: queries,
             limit,
             min_score: None,

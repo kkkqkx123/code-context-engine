@@ -135,6 +135,7 @@ fn main() {
         succeeded_sub_queries: 1,
         sub_query_cache_hits: 0,
         failed_sub_queries: Vec::new(),
+        sub_query_stats: Vec::new(),
         cacheable: true,
         from_cache: false,
     };

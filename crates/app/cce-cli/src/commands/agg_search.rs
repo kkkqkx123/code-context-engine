@@ -197,6 +197,7 @@ impl AggSearchCommand {
         Ok(AggregatedSearchRequest {
             project_id: self.project_id,
             project_path: self.project_path.clone(),
+            query: None,
             sub_queries,
             limit: self.limit,
             min_score: self.min_score,

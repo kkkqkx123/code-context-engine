@@ -174,6 +174,7 @@ pub async fn handle_search(
             from_cache: outcome.from_cache,
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
+            sub_query_stats: outcome.sub_query_stats,
         }),
         Err(error) => {
             tracing::error!("Search failed: {}", error);
@@ -311,6 +312,7 @@ pub async fn handle_aggregated_search(
     };
 
     let spec = AggregatedQuerySpec {
+        query: request.query,
         sub_queries,
         fields: SharedQueryFields {
             limit: Some(request.limit),
@@ -342,6 +344,7 @@ pub async fn handle_aggregated_search(
             from_cache: outcome.from_cache,
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
+            sub_query_stats: outcome.sub_query_stats,
         }),
         Err(error) => {
             tracing::error!("Aggregated search failed: {}", error);

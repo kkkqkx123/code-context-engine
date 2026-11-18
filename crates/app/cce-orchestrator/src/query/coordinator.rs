@@ -27,13 +27,19 @@ use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
 use cce_types::error::common::ErrorClassify;
 
 use super::SearcherBuilder;
+use super::aggregation::{
+    aggregate_dedup_key, align_sub_query_scores, post_processing_reserve_ms, validate_plan,
+};
 use super::cache::{CacheConfig, CacheKey, QueryCache};
 use super::capabilities::IndexCapabilities;
 use super::error::{QueryError, Result};
 use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
 use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
-use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult, SearchSources, SubQuery};
+use super::types::{
+    AggregatedQueryOptions, QueryOptions, QueryResult, SearchSources, SubQuery, SubQueryStat,
+    SubQueryStatus,
+};
 use crate::index::vector_store::FulltextStore;
 use crate::index::vector_store::MetadataStore;
 use crate::index::vector_store::VectorStore;
@@ -501,6 +507,31 @@ impl QueryCoordinator {
         options: &QueryOptions,
         view: &crate::query::filter::QueryFilter,
     ) -> Result<QueryResult> {
+        self.search_with_view_inner(options, view, true).await
+    }
+
+    /// Execute one sub-query of an aggregated request.
+    ///
+    /// Identical to [`Self::search_with_view`] except that a retryable failure
+    /// is not queued for reprocessing: a sub-query is only meaningful as part
+    /// of its merge, so replaying it alone would warm a result the caller never
+    /// asked for and multiply one aggregated failure into N queued retries.
+    /// The aggregated request as a whole is not retried either — its partial
+    /// output is a valid answer.
+    async fn search_sub_query_with_view(
+        &self,
+        options: &QueryOptions,
+        view: &crate::query::filter::QueryFilter,
+    ) -> Result<QueryResult> {
+        self.search_with_view_inner(options, view, false).await
+    }
+
+    async fn search_with_view_inner(
+        &self,
+        options: &QueryOptions,
+        view: &crate::query::filter::QueryFilter,
+        enqueue_retry: bool,
+    ) -> Result<QueryResult> {
         let start = std::time::Instant::now();
 
         // Check capabilities before executing
@@ -535,7 +566,7 @@ impl QueryCoordinator {
                 }
                 Ok(result)
             }
-            Err(e) if e.is_retryable() => {
+            Err(e) if e.is_retryable() && enqueue_retry => {
                 // Preserve the query progress in the retry queue
                 self.retry_queue.push(options.clone()).await;
                 let queue_len = self.retry_queue.len().await;
@@ -641,22 +672,16 @@ impl QueryCoordinator {
             .load_query_filter(agg_options.project_id)
             .await?;
         let planned_sub_queries = agg_options.sub_queries.len();
-        if planned_sub_queries == 0 {
-            return Err(QueryError::invalid(
-                "aggregated search needs at least one sub-query",
-            ));
-        }
-        for sub_query in &agg_options.sub_queries {
-            if cce_utils::text::is_blank(&sub_query.text) {
-                return Err(QueryError::invalid("sub-query text cannot be blank"));
-            }
-            if !sub_query.weight.is_finite() || sub_query.weight <= 0.0 || sub_query.weight > 1.0 {
-                return Err(QueryError::invalid(&format!(
-                    "invalid sub-query weight {} for '{}': expected (0, 1]",
-                    sub_query.weight, sub_query.text
-                )));
-            }
-        }
+        // Shape, weight and feasibility checks live in the aggregation module so
+        // the HTTP surface, the engine and the CLI cannot drift apart. The rule
+        // that rejects weights below the result threshold needs the effective
+        // project config, which only reaches the engine here.
+        validate_plan(
+            &agg_options.sub_queries,
+            agg_options.global_config.result.min_score,
+            agg_options.global_config.aggregation.score_strategy,
+        )
+        .map_err(|message| QueryError::invalid(&message))?;
 
         let sub_queries = normalize_sub_queries(&agg_options.sub_queries);
         let executed_sub_queries = sub_queries.len();
@@ -688,6 +713,18 @@ impl QueryCoordinator {
         // sub-query key, so the nested single-flight guards never re-enter.
         let key = CacheKey::for_aggregated(planned_options.project_id, &view, &planned_options);
         let timeout_ms = planned_options.global_config.timeout_ms;
+        // Absolute deadline of the whole request. Sub-queries stop earlier by
+        // the post-merge reserve so the merge, rerank and expansion still have
+        // a budget: a slow recall then yields a partial answer instead of the
+        // request-level deadline firing mid-merge and discarding everything the
+        // surviving sub-queries already produced.
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(1));
+        let sub_query_deadline = deadline
+            .checked_sub(std::time::Duration::from_millis(
+                post_processing_reserve_ms(timeout_ms),
+            ))
+            .unwrap_or(deadline);
         let aggregated = self.cache.get_or_compute(key, || async move {
             // Execute sub-queries concurrently, bounded by a semaphore: the results
             // stay aligned with the sub-query order (`join_all` preserves input
@@ -707,7 +744,13 @@ impl QueryCoordinator {
                             .acquire_owned()
                             .await
                             .expect("aggregated search semaphore closed");
-                        self.search_with_view(&options, &view).await
+                        let started = std::time::Instant::now();
+                        let outcome = tokio::time::timeout_at(
+                            sub_query_deadline,
+                            self.search_sub_query_with_view(&options, &view),
+                        )
+                        .await;
+                        (outcome, started.elapsed().as_millis() as u64)
                     }
                 })
                 .collect();
@@ -717,10 +760,23 @@ impl QueryCoordinator {
             let mut sources_used: Vec<String> = Vec::new();
             let mut failed_sub_queries: Vec<String> = Vec::new();
             let mut sub_query_cache_hits = 0;
+            let mut succeeded_sub_queries = 0;
+            let mut stats: Vec<SubQueryStat> = Vec::with_capacity(executed_sub_queries);
 
-            for (sub_index, (sub_query, attempt)) in sub_queries.iter().zip(attempts).enumerate() {
+            for (sub_index, (sub_query, (attempt, elapsed_ms))) in
+                sub_queries.iter().zip(attempts).enumerate()
+            {
+                let mut stat = SubQueryStat {
+                    index: sub_index,
+                    text: sub_query.text.clone(),
+                    status: SubQueryStatus::Succeeded,
+                    candidates: 0,
+                    contributed: 0,
+                    elapsed_ms,
+                    error: None,
+                };
                 match attempt {
-                    Ok(mut result) => {
+                    Ok(Ok(mut result)) => {
                         if result.from_cache {
                             sub_query_cache_hits += 1;
                         }
@@ -729,40 +785,75 @@ impl QueryCoordinator {
                                 sources_used.push(source.clone());
                             }
                         }
+                        stat.candidates = result.items.len();
+                        if result.items.is_empty() {
+                            // A sub-query that recalled nothing contributes
+                            // nothing; reporting it as succeeded would hide a
+                            // dead intent behind a healthy counter.
+                            stat.status = SubQueryStatus::Empty;
+                            stats.push(stat);
+                            continue;
+                        }
+                        succeeded_sub_queries += 1;
+                        // Recall normalizes a single-path list (head 1.0) but
+                        // leaves a hybrid list carrying the weighted fusion sum
+                        // (head at the path weight), so align every list to a
+                        // shared ceiling before weights and merging apply.
+                        align_sub_query_scores(&mut result.items);
                         let weight = sub_query.weight;
                         for item in &mut result.items {
                             item.score = sanitize_aggregate_score(item.score * weight);
                             item.original_score = item.score;
                         }
                         all_results.extend(result.items.into_iter().map(|item| (sub_index, item)));
+                        stats.push(stat);
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         tracing::warn!(
                             query = %sub_query.text,
                             error = %e,
                             "Sub-query failed in aggregated search"
                         );
+                        stat.status = SubQueryStatus::Failed;
+                        stat.error = Some(e.to_string());
                         failed_sub_queries.push(sub_query.text.clone());
+                        stats.push(stat);
+                    }
+                    Err(_elapsed) => {
+                        // The request keeps its partial answer: a deadline hit
+                        // by one sub-query is the same degradation as a failed
+                        // sub-query, not a reason to discard the merge.
+                        tracing::warn!(
+                            query = %sub_query.text,
+                            elapsed_ms,
+                            timeout_ms,
+                            "Sub-query hit the aggregated deadline, returning partial results"
+                        );
+                        stat.status = SubQueryStatus::TimedOut;
+                        stat.error = Some(format!(
+                            "sub-query deadline reached after {elapsed_ms} ms (request budget {timeout_ms} ms)"
+                        ));
+                        failed_sub_queries.push(sub_query.text.clone());
+                        stats.push(stat);
                     }
                 }
             }
 
             if failed_sub_queries.len() == executed_sub_queries {
                 return Err(QueryError::InvalidQuery(format!(
-                    "all {executed_sub_queries} sub-queries failed: {}",
+                    "all {executed_sub_queries} sub-queries failed or timed out: {}",
                     failed_sub_queries.join("; ")
                 )));
             }
 
             // Merge by unified key (alignment key, else content weak key).
-            // The key space is shared with hybrid fusion and single-search
-            // post-processing, so one entity collapses to one entry no
-            // matter how many sub-queries surfaced it. How the multiple
-            // contributions combine is configurable:
-            // `noisy_or` accumulates evidence (agreement between
-            // sub-queries raises the score), `max` keeps the historical
-            // strongest-contribution-wins behaviour.
+            // Chunk grouping is on by default; it keeps one entry per physical
+            // chunk inside a sub-query but picks the highest-scoring entity as
+            // the representative, so the same chunk can arrive under different
+            // entity ids from different sub-queries. Keying on the chunk in that
+            // case keeps one entry per body instead of repeating it.
             let strategy = planned_options.global_config.aggregation.score_strategy;
+            let group_by_chunk = planned_options.global_config.fusion.dedup_by_chunk;
             let mut dedup: HashMap<String, crate::query::types::SearchResult> = HashMap::new();
             // Strongest single contribution per key; the entry carrying it
             // stays the representative so content and metadata come from
@@ -771,8 +862,7 @@ impl QueryCoordinator {
             let mut contributors: HashMap<String, HashSet<usize>> = HashMap::new();
             let mut unkeyed: Vec<crate::query::types::SearchResult> = Vec::new();
             for (sub_index, mut item) in all_results {
-                let Some(key) = crate::query::retrieval::primitives::unified_dedup_key(&item)
-                else {
+                let Some(key) = aggregate_dedup_key(&item, group_by_chunk) else {
                     item.contributing_sub_queries = 1;
                     unkeyed.push(item);
                     continue;
@@ -828,10 +918,49 @@ impl QueryCoordinator {
                 merged.retain(|item| item.score >= min_score);
             }
             merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
+            // Same near-tie rule as the single-query path: a full body outranks
+            // a file-and-range reference when their scores are within tolerance,
+            // so both endpoints order an equal-score pair identically.
+            merged = crate::query::searcher::post_processing::demote_references_for_sort(merged);
 
             let limit = planned_options.global_config.result.limit;
             if merged.len() > limit {
                 merged.truncate(limit);
+            }
+
+            // Attribution runs on the final cut: a candidate only counts as
+            // contributed when it survives the merge, the threshold and the
+            // limit, which is what separates a productive sub-query from one
+            // that recalls a lot and loses every key to a stronger neighbour.
+            for item in &merged {
+                let Some(key) = aggregate_dedup_key(item, group_by_chunk) else {
+                    continue;
+                };
+                let Some(indices) = contributors.get(&key) else {
+                    continue;
+                };
+                for index in indices {
+                    if let Some(stat) = stats.iter_mut().find(|stat| stat.index == *index) {
+                        stat.contributed += 1;
+                    }
+                }
+            }
+
+            // A sub-query that recalled candidates and still placed none is the
+            // silent cost this accounting exists to surface: it paid for
+            // embedding and recall, then lost every merge key to a stronger
+            // neighbour. Failures and empty recalls already log on their own.
+            for stat in stats
+                .iter()
+                .filter(|stat| stat.status == SubQueryStatus::Succeeded && stat.is_wasted())
+            {
+                tracing::warn!(
+                    index = stat.index,
+                    query = %stat.text,
+                    candidates = stat.candidates,
+                    elapsed_ms = stat.elapsed_ms,
+                    "Sub-query recalled candidates but contributed no final hit"
+                );
             }
 
             // Relation expansion runs once on the merged hits so budget,
@@ -848,7 +977,6 @@ impl QueryCoordinator {
             }
 
             let total = merged.len();
-            let succeeded_sub_queries = executed_sub_queries - failed_sub_queries.len();
             let cacheable = failed_sub_queries.is_empty();
 
             Ok(QueryResult {
@@ -861,6 +989,7 @@ impl QueryCoordinator {
                 succeeded_sub_queries,
                 sub_query_cache_hits,
                 failed_sub_queries,
+                sub_query_stats: stats,
                 cacheable,
                 from_cache: false,
             })
@@ -873,8 +1002,14 @@ impl QueryCoordinator {
         };
         aggregated.elapsed_ms = start.elapsed().as_millis() as u64;
         if aggregated.from_cache {
+            // Nothing ran for this request: no sub-query executed, contributed
+            // or hit its own cache entry. The per-sub-query accounting belongs
+            // to the run that produced the entry, so it is dropped together
+            // with the counters instead of describing work this call did not do.
             aggregated.executed_sub_queries = 0;
+            aggregated.succeeded_sub_queries = 0;
             aggregated.sub_query_cache_hits = 0;
+            aggregated.sub_query_stats.clear();
         }
         Ok(aggregated)
     }

@@ -52,6 +52,68 @@ pub struct AggregatedQueryOptions {
     pub neighbour_resolver: Option<crate::query::expansion::NeighbourResolver>,
 }
 
+/// Terminal state of one sub-query inside an aggregated request.
+///
+/// Aggregated search degrades instead of failing: a sub-query that errored or
+/// ran out of budget is reported rather than silently dropped, so a caller can
+/// tell "no match" from "never ran".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubQueryStatus {
+    /// Recalled a non-empty candidate list.
+    Succeeded,
+    /// Ran to completion and recalled nothing.
+    Empty,
+    /// Failed before producing a candidate list.
+    Failed,
+    /// Cut off by the aggregated request's sub-query deadline.
+    TimedOut,
+}
+
+impl SubQueryStatus {
+    /// Stable lowercase label used by the transport layer.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Empty => "empty",
+            Self::Failed => "failed",
+            Self::TimedOut => "timed_out",
+        }
+    }
+}
+
+/// Per-sub-query execution accounting.
+///
+/// Weight and budget tuning needs to see which sub-query actually paid off;
+/// candidate and contribution counts are what separates "recalled a lot but
+/// nothing survived the merge" from "never recalled anything".
+#[derive(Debug, Clone)]
+pub struct SubQueryStat {
+    /// Zero-based position in the caller's sub-query list.
+    pub index: usize,
+    /// Query text as executed.
+    pub text: String,
+    /// Terminal state.
+    pub status: SubQueryStatus,
+    /// Candidates recalled before alignment and merging.
+    pub candidates: usize,
+    /// Final hits this sub-query contributed to.
+    pub contributed: usize,
+    /// Wall-clock time spent in this sub-query.
+    pub elapsed_ms: u64,
+    /// Failure detail for [`SubQueryStatus::Failed`] /
+    /// [`SubQueryStatus::TimedOut`].
+    pub error: Option<String>,
+}
+
+impl SubQueryStat {
+    /// Whether this sub-query consumed retrieval budget without contributing a
+    /// single final hit: either it never produced a candidate list, or every
+    /// candidate it produced lost its merge key to a stronger neighbour.
+    pub fn is_wasted(&self) -> bool {
+        self.contributed == 0
+    }
+}
+
 /// Query execution result
 #[derive(Debug, Clone)]
 pub struct QueryResult {
@@ -75,6 +137,11 @@ pub struct QueryResult {
     /// queries). Makes partial degradation visible to the caller instead of a
     /// silent union of the surviving sub-queries.
     pub failed_sub_queries: Vec<String>,
+    /// Per-sub-query accounting in caller order (empty for single queries).
+    /// Carries the detail `failed_sub_queries` cannot: how much each
+    /// sub-query recalled, how much of it survived the merge, and whether a
+    /// miss was an error or a deadline.
+    pub sub_query_stats: Vec<SubQueryStat>,
     /// False when the request degraded and must not populate the result cache.
     pub cacheable: bool,
     /// True when this result was served from the aggregate query cache.
@@ -93,6 +160,7 @@ impl Default for QueryResult {
             succeeded_sub_queries: 1,
             sub_query_cache_hits: 0,
             failed_sub_queries: Vec::new(),
+            sub_query_stats: Vec::new(),
             cacheable: true,
             from_cache: false,
         }

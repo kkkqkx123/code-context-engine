@@ -407,7 +407,7 @@ const REFERENCE_SCORE_TOLERANCE: f32 = 0.01;
 /// the tolerance; larger gaps still follow score order. Threshold filtering
 /// runs on the same scores, so demotion only affects near-tie order, never
 /// exclusion.
-fn demote_references_for_sort(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
+pub(crate) fn demote_references_for_sort(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
     results.sort_by(|a, b| {
         let a_reference = a.content_state.is_reference();
         let b_reference = b.content_state.is_reference();
