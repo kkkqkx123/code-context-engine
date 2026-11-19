@@ -9,13 +9,24 @@
 //! - Dense-only search mode
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::retrieval::core::dense::DenseRetrieval;
 use crate::query::types::{QueryOptions, SearchResult};
+use cce_llm::EmbeddingProvider as _;
 use cce_storage_common::SearchFilter;
 use cce_types::PointKind;
+
+/// Raw dense retrieval result with per-call timing.
+pub(super) struct DenseRetrievalOutcome {
+    pub results: Result<Vec<SearchResult>>,
+    pub embedding_ms: u64,
+    pub embedding_provider_ms: u64,
+    pub embedding_overhead_ms: u64,
+    pub vector_search_ms: u64,
+}
 
 /// Dense retrieval strategy — orchestrates embedder + vector search
 ///
@@ -43,18 +54,27 @@ impl DenseStrategy {
     /// Returns raw search results with basic fields populated. Enrichment
     /// (content, snippet, line numbers, entity mapping) is applied later in
     /// the search pipeline.
-    pub async fn retrieve(
+    pub(super) async fn retrieve(
         &self,
         options: &QueryOptions,
         query_filter: &QueryFilter,
-    ) -> Result<Vec<SearchResult>> {
+    ) -> DenseRetrievalOutcome {
         // Step 1: Compute query embedding
-        let query_embedding = self
-            .searcher
-            .embedder
-            .embed_one(&options.query)
-            .await
-            .map_err(crate::query::error::QueryError::Vector)?;
+        let embedding_started = Instant::now();
+        let query_embedding = match self.searcher.embedder.embed_one(&options.query).await {
+            Ok(embedding) => embedding,
+            Err(error) => {
+                return DenseRetrievalOutcome {
+                    results: Err(crate::query::error::QueryError::Vector(error)),
+                    embedding_ms: embedding_started.elapsed().as_millis() as u64,
+                    embedding_provider_ms: 0,
+                    embedding_overhead_ms: 0,
+                    vector_search_ms: 0,
+                };
+            }
+        };
+        let embedding_ms = embedding_started.elapsed().as_millis() as u64;
+        let embedding_timing = self.searcher.embedder.last_embedding_timing();
 
         // Step 2: Build filter from options and apply epoch filtering
         let mut filter = build_search_filter(options, self.searcher.scope.project_group_id());
@@ -71,7 +91,8 @@ impl DenseStrategy {
         } else {
             config.top_k
         };
-        let raw = self
+        let search_started = Instant::now();
+        let raw = match self
             .dense_retrieval
             .search(
                 query_embedding,
@@ -80,8 +101,27 @@ impl DenseStrategy {
                 Some(config.hnsw_ef as usize),
                 filter,
             )
-            .await?;
-        Ok(apply_strategy_filters(raw, options, config.top_k))
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) => {
+                return DenseRetrievalOutcome {
+                    results: Err(error),
+                    embedding_ms,
+                    embedding_provider_ms: embedding_timing.provider_ms,
+                    embedding_overhead_ms: embedding_timing.overhead_ms,
+                    vector_search_ms: search_started.elapsed().as_millis() as u64,
+                };
+            }
+        };
+        let vector_search_ms = search_started.elapsed().as_millis() as u64;
+        DenseRetrievalOutcome {
+            results: Ok(apply_strategy_filters(raw, options, config.top_k)),
+            embedding_ms,
+            embedding_provider_ms: embedding_timing.provider_ms,
+            embedding_overhead_ms: embedding_timing.overhead_ms,
+            vector_search_ms,
+        }
     }
 }
 

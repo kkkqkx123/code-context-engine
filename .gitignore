@@ -51,6 +51,7 @@ Thumbs.db
 test_output/
 
 # Benchmark results and fixtures
+.bench_logs/
 **/__pycache__
 **/.pyc
 

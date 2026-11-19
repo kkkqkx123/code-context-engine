@@ -637,6 +637,15 @@ macro_rules! remote_unimplemented {
             ))
         }
 
+        async fn projection_upsert_batch(
+            &self,
+            _rows: &[IndexStateProjection],
+        ) -> Result<(), StorageError> {
+            Err(StorageError::validation(
+                "remote relation branch is not wired yet".to_string(),
+            ))
+        }
+
         async fn projection_delete(
             &self,
             _project_id: i64,

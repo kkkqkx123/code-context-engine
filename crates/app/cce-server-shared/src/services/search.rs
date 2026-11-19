@@ -5,9 +5,11 @@
 //! here exactly once: project config merge, expansion resolver injection,
 //! coordinator assembly, execution, DTO conversion, and relation stamping.
 
+use std::time::Instant;
+
 use cce_api::models::{
-    ContentStateDto, EntityScoreDto, RecallPathDto, SearchResultItem, SecondaryEvidenceDto,
-    SubQueryStatDto, SubQueryStatusDto,
+    ContentStateDto, EntityScoreDto, QueryStageTimingsDto, RecallPathDto, SearchResultItem,
+    SecondaryEvidenceDto, SubQueryStatDto, SubQueryStatusDto,
 };
 use cce_config::modules::search::RelationAnnotationConfig;
 use cce_orchestrator::SearchResult as OrchestratorResultItem;
@@ -180,6 +182,25 @@ pub struct SearchOutcome {
     pub relation_stale: bool,
     /// Per-sub-query accounting in caller order (empty for single queries).
     pub sub_query_stats: Vec<SubQueryStatDto>,
+    /// Per-call stage accounting.
+    pub stages: QueryStageTimingsDto,
+}
+
+/// Convert engine-side stage accounting into its wire shape.
+fn convert_query_stages(stages: cce_orchestrator::QueryStageTimings) -> QueryStageTimingsDto {
+    QueryStageTimingsDto {
+        coordinator_ms: stages.coordinator_ms,
+        filter_ms: stages.filter_ms,
+        cache_key_ms: stages.cache_key_ms,
+        rewrite_ms: stages.rewrite_ms,
+        embedding_ms: stages.embedding_ms,
+        embedding_provider_ms: stages.embedding_provider_ms,
+        embedding_overhead_ms: stages.embedding_overhead_ms,
+        vector_search_ms: stages.vector_search_ms,
+        bm25_retrieval_ms: stages.bm25_retrieval_ms,
+        fusion_ms: stages.fusion_ms,
+        post_process_ms: stages.post_process_ms,
+    }
 }
 
 /// Convert engine-side sub-query accounting into its wire shape.
@@ -284,6 +305,7 @@ impl<'a> SearchService<'a> {
         project_id: i64,
         spec: SingleQuerySpec,
     ) -> Result<SearchOutcome, SearchServiceError> {
+        let service_started = Instant::now();
         let entry = self.load_entry(project_id).await?;
         let fields = &spec.fields;
         let mut query_opts = QueryConfigBuilder::new(project_id)
@@ -326,10 +348,12 @@ impl<'a> SearchService<'a> {
             .await;
 
         let coordinator = self.build_coordinator(project_id, &entry).await?;
-        let result = coordinator
+        let coordinator_ms = service_started.elapsed().as_millis() as u64;
+        let mut result = coordinator
             .search(&query_opts)
             .await
             .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
+        result.stages.coordinator_ms = coordinator_ms;
         let items = self.convert_items(project_id, result.items).await;
         let (relation_epoch, relation_stale) = self.relation_version(project_id).await;
         Ok(SearchOutcome {
@@ -346,6 +370,7 @@ impl<'a> SearchService<'a> {
             relation_epoch,
             relation_stale,
             sub_query_stats: convert_sub_query_stats(result.sub_query_stats),
+            stages: convert_query_stages(result.stages),
         })
     }
 
@@ -358,6 +383,7 @@ impl<'a> SearchService<'a> {
         project_id: i64,
         spec: AggregatedQuerySpec,
     ) -> Result<SearchOutcome, SearchServiceError> {
+        let service_started = Instant::now();
         let (relation_epoch, relation_stale) = self.relation_version(project_id).await;
         let entry = self.load_entry(project_id).await?;
         let fields = &spec.fields;
@@ -452,10 +478,12 @@ impl<'a> SearchService<'a> {
         .map_err(SearchServiceError::InvalidInput)?;
 
         let coordinator = self.build_coordinator(project_id, &entry).await?;
-        let result = coordinator
+        let coordinator_ms = service_started.elapsed().as_millis() as u64;
+        let mut result = coordinator
             .search_aggregated(&agg_options)
             .await
             .map_err(|error| SearchServiceError::Execution(error.to_string()))?;
+        result.stages.coordinator_ms = coordinator_ms;
         let items = self.convert_items(project_id, result.items).await;
         Ok(SearchOutcome {
             total: result.total,
@@ -471,6 +499,7 @@ impl<'a> SearchService<'a> {
             relation_epoch,
             relation_stale,
             sub_query_stats: convert_sub_query_stats(result.sub_query_stats),
+            stages: convert_query_stages(result.stages),
         })
     }
 

@@ -8,6 +8,7 @@
 | ---- | ---- |
 | `performance_hotspots.md` | 开销较大环节清单，按索引构建、热更新、代码解析、中断恢复、本地检索五类整理，标注关键位置与风险特征 |
 | `benchmark_gaps.md` | 需要补充的性能基准测试清单，每个基准说明目的、输入规模、度量指标与通过标准，区分微基准与端到端基准 |
+| `performance_benchmark_supplement.md` | 本轮补充方案：完整索引流水线、服务检索矩阵与进程资源指标的落地范围和结果说明 |
 | `hot_update_recovery_workflow.md` | 已有文档，覆盖热更新与断点恢复的功能正确性与回归用例，不含性能断言 |
 
 ## 范围说明
@@ -19,11 +20,11 @@
 ## 使用方式
 
 1. 先读 `performance_hotspots.md` 确认待优化环节与度量重点。
-2. 再读 `benchmark_gaps.md` 选择要补的基准，按文件中建议的存放位置与运行方式落地。
+2. 再读 `benchmark_gaps.md` 和 `performance_benchmark_supplement.md` 选择要补的基准，按文件中建议的存放位置与运行方式落地。
 3. 功能正确性回归仍以 `hot_update_recovery_workflow.md` 为准，性能基准不得与其用例耦合断言。
 
 ## 基准存放约定
 
 - 微基准优先放在各归属 crate 的 `benches/` 下，随 crate 演进。
-- 端到端基准放在根目录 `benches/` 的脚本体系下，复用现有配置与 fixtures 约定。
-- 趋势追踪文件统一写入 `benches/results/`，该目录已忽略版本控制，基线对比方法见根目录 `benches/README.md`。
+- 工作流级基准放在 `cce-e2e-tests/examples/` 下，复用现有 fixtures 与 Mock 嵌入约定。
+- 微基准趋势文件写入各 crate 的 `benches/results/`，工作流趋势文件写入 `cce-e2e-tests/outputs/benchmark/`；两者均追加写入，对比时固定机器、构建模式和输入档位。

@@ -37,8 +37,8 @@ use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationS
 use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
 use super::types::{
-    AggregatedQueryOptions, QueryOptions, QueryResult, SearchSources, SubQuery, SubQueryStat,
-    SubQueryStatus,
+    AggregatedQueryOptions, QueryOptions, QueryResult, QueryStageTimings, SearchSources, SubQuery,
+    SubQueryStat, SubQueryStatus,
 };
 use crate::index::vector_store::FulltextStore;
 use crate::index::vector_store::MetadataStore;
@@ -496,8 +496,12 @@ impl QueryCoordinator {
     /// when the service recovers. The error is still propagated to the
     /// caller so the degradation is visible.
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
+        let filter_started = Instant::now();
         let view = self.searcher.load_query_filter(options.project_id).await?;
-        self.search_with_view(options, &view).await
+        let filter_ms = filter_started.elapsed().as_millis() as u64;
+        let mut result = self.search_with_view(options, &view).await?;
+        result.stages.filter_ms = filter_ms;
+        Ok(result)
     }
 
     /// Execute a search against a pre-resolved epoch view, sharing it with
@@ -759,6 +763,7 @@ impl QueryCoordinator {
             let mut all_results: Vec<(usize, crate::query::types::SearchResult)> = Vec::new();
             let mut sources_used: Vec<String> = Vec::new();
             let mut failed_sub_queries: Vec<String> = Vec::new();
+            let mut aggregate_stages = QueryStageTimings::default();
             let mut sub_query_cache_hits = 0;
             let mut succeeded_sub_queries = 0;
             let mut stats: Vec<SubQueryStat> = Vec::with_capacity(executed_sub_queries);
@@ -777,6 +782,19 @@ impl QueryCoordinator {
                 };
                 match attempt {
                     Ok(Ok(mut result)) => {
+                        aggregate_stages.embedding_ms =
+                            aggregate_stages.embedding_ms.saturating_add(result.stages.embedding_ms);
+                        aggregate_stages.vector_search_ms = aggregate_stages
+                            .vector_search_ms
+                            .saturating_add(result.stages.vector_search_ms);
+                        aggregate_stages.bm25_retrieval_ms = aggregate_stages
+                            .bm25_retrieval_ms
+                            .saturating_add(result.stages.bm25_retrieval_ms);
+                        aggregate_stages.fusion_ms =
+                            aggregate_stages.fusion_ms.saturating_add(result.stages.fusion_ms);
+                        aggregate_stages.post_process_ms = aggregate_stages
+                            .post_process_ms
+                            .saturating_add(result.stages.post_process_ms);
                         if result.from_cache {
                             sub_query_cache_hits += 1;
                         }
@@ -992,6 +1010,7 @@ impl QueryCoordinator {
                 sub_query_stats: stats,
                 cacheable,
                 from_cache: false,
+                stages: aggregate_stages,
             })
         });
 

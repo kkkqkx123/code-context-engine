@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::CheckpointManager;
 use crate::operation::checkpoint::{ParsedCheckpointPayload, decode_parsed_checkpoint};
@@ -39,8 +40,12 @@ impl IndexOrchestrator {
         let operation_id = ctx.operation_id.clone();
         let batch_size = self.batch_config.scan_batch_size;
         let root_dir = options.root_dir.to_string_lossy().to_string();
+        let batch_loop_started = Instant::now();
 
         for batch_idx in ctx.start_batch..ctx.total_batches {
+            ctx.stages.batches += 1;
+            self.state_tracker.flush_deferred_persistence().await;
+            let setup_started = Instant::now();
             let batch = match ctx.file_indexer.get_batch(batch_idx) {
                 Ok(b) => b,
                 Err(e) => {
@@ -132,7 +137,9 @@ impl IndexOrchestrator {
                 } else {
                     HashMap::new()
                 };
+            ctx.stages.batch_setup_ms += setup_started.elapsed().as_millis() as u64;
 
+            let stage_started = Instant::now();
             let batch_result = self
                 .process_batch_with_mode(
                     batch,
@@ -144,6 +151,7 @@ impl IndexOrchestrator {
                     &operation_id,
                 )
                 .await;
+            ctx.stages.batch_process_ms += stage_started.elapsed().as_millis() as u64;
             ctx.errors.extend(batch_result.errors.iter().cloned());
             ctx.total_skipped_permanent += batch_result.skipped_permanent.len();
             // Baseline for batch-level (infrastructure) errors: per-file
@@ -167,6 +175,7 @@ impl IndexOrchestrator {
             ctx.total_failed += batch_result.failed_count;
             ctx.total_degraded += batch_result.degraded_files;
             ctx.total_entities += batch_result.entity_count;
+            let spool_started = Instant::now();
             if let Some(spool) = ctx.relation_spool.as_mut() {
                 for parsed in &batch_result.parsed_files {
                     // Build-config files are injected later as synthetic `Module`
@@ -179,15 +188,18 @@ impl IndexOrchestrator {
                     if cce_types::path::is_build_config_name(file_name) {
                         continue;
                     }
+                    let write_started = Instant::now();
                     spool.append(parsed).map_err(|error| {
                         OrchestratorError::index(
                             "relation_build_spool",
                             format!("Failed to store relation input: {error}"),
                         )
                     })?;
-                    self.append_spool_symbols(spool, parsed);
+                    ctx.stages.relation_spool_write_ms +=
+                        write_started.elapsed().as_millis() as u64;
                 }
             }
+            ctx.stages.relation_spool_ms += spool_started.elapsed().as_millis() as u64;
 
             // Mark batch as completing Parsing phase (after actual processing)
             self.state_tracker
@@ -204,6 +216,7 @@ impl IndexOrchestrator {
             // these rows, so continuing after an entity failure only amplifies
             // one fault into entity-mapping errors downstream.
             let mut entity_store_ok = true;
+            let stage_started = Instant::now();
             if !batch_result.parsed_files.is_empty() {
                 if let Err(error) = self
                     .storage
@@ -222,6 +235,7 @@ impl IndexOrchestrator {
                     ));
                 }
             }
+            ctx.stages.entity_store_ms += stage_started.elapsed().as_millis() as u64;
 
             if !batch_result.chunks.is_empty() && entity_store_ok {
                 let mut embedding_store_ok = true;
@@ -249,15 +263,18 @@ impl IndexOrchestrator {
                         .filter(|c| c.path == cce_parser::ast_to_nl::chunker::ChunkPath::Embedding)
                         .cloned()
                         .collect();
-                    match self
+                    let stage_started = Instant::now();
+                    let vector_result = self
                         .storage
                         .store_vectors_batched(
                             &embedding_chunks,
                             self.batch_config.embedding_batch_size,
                             self.batch_config.embedding_batch_delay_ms,
                         )
-                        .await
-                    {
+                        .await;
+                    ctx.stages.vector_store_ms += stage_started.elapsed().as_millis() as u64;
+                    ctx.stages.vector_store_calls += 1;
+                    match vector_result {
                         Ok(stored) => {
                             ctx.total_vectors += stored;
                             for path in &success_paths {
@@ -339,7 +356,11 @@ impl IndexOrchestrator {
                         .filter(|c| c.path == cce_parser::ast_to_nl::chunker::ChunkPath::Bm25)
                         .cloned()
                         .collect();
-                    match self.storage.store_bm25(&bm25_chunks).await {
+                    let stage_started = Instant::now();
+                    let bm25_result = self.storage.store_bm25(&bm25_chunks).await;
+                    ctx.stages.bm25_store_ms += stage_started.elapsed().as_millis() as u64;
+                    ctx.stages.bm25_store_calls += 1;
+                    match bm25_result {
                         Ok(()) => {
                             for path in &success_paths {
                                 self.state_tracker
@@ -426,6 +447,7 @@ impl IndexOrchestrator {
                         });
                 }
 
+                let stage_started = Instant::now();
                 let summaries: Vec<cce_parser::summary::FileSummary> =
                     if batch_result.processing_results.len() == batch_result.parsed_files.len() {
                         self.summary_generator
@@ -439,6 +461,7 @@ impl IndexOrchestrator {
                             .generate_batch(&batch_result.parsed_files)
                             .await
                     };
+                ctx.stages.summary_ms += stage_started.elapsed().as_millis() as u64;
 
                 // Populate summary map for NL document export
                 for (pf, summary) in batch_result.parsed_files.iter().zip(summaries.iter()) {
@@ -534,6 +557,7 @@ impl IndexOrchestrator {
             // NL document export. Documents are exported once all batches
             // complete and the relation index is finalized, so relation
             // enhancement is active.
+            let export_spool_started = Instant::now();
             if self.nl_exporter.is_some() {
                 let Some(spool) = ctx.export_spool.as_mut() else {
                     return Err(OrchestratorError::index(
@@ -562,6 +586,7 @@ impl IndexOrchestrator {
                         .or_insert_with(|| summary.clone());
                 }
             }
+            ctx.stages.export_spool_ms += export_spool_started.elapsed().as_millis() as u64;
 
             // Mark phase as Completed
             self.state_tracker
@@ -623,6 +648,19 @@ impl IndexOrchestrator {
                 }
             }
         }
+
+        self.state_tracker.flush_deferred_persistence().await;
+
+        let timed_ms = ctx.stages.batch_process_ms
+            + ctx.stages.batch_setup_ms
+            + ctx.stages.entity_store_ms
+            + ctx.stages.vector_store_ms
+            + ctx.stages.bm25_store_ms
+            + ctx.stages.summary_ms
+            + ctx.stages.relation_spool_ms
+            + ctx.stages.export_spool_ms;
+        let loop_ms = batch_loop_started.elapsed().as_millis() as u64;
+        ctx.stages.batch_overhead_ms = loop_ms.saturating_sub(timed_ms);
 
         Ok(())
     }

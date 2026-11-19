@@ -175,6 +175,7 @@ pub async fn handle_search(
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
             sub_query_stats: outcome.sub_query_stats,
+            stages: outcome.stages,
         }),
         Err(error) => {
             tracing::error!("Search failed: {}", error);
@@ -345,6 +346,7 @@ pub async fn handle_aggregated_search(
             relation_epoch: outcome.relation_epoch,
             relation_stale: outcome.relation_stale,
             sub_query_stats: outcome.sub_query_stats,
+            stages: outcome.stages,
         }),
         Err(error) => {
             tracing::error!("Aggregated search failed: {}", error);

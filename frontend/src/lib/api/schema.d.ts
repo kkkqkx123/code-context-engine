@@ -3157,6 +3157,31 @@ export interface components {
             managed: boolean;
             status: components["schemas"]["QdrantProcessStatus"];
         };
+        /** @description Per-call query stage accounting shared by single and aggregated search. */
+        QueryStageTimingsDto: {
+            /** @description Wall-clock time spent in BM25 recall. */
+            bm25_retrieval_ms: number;
+            /** @description Wall-clock time spent resolving the project and building the query coordinator. */
+            coordinator_ms: number;
+            /** @description Wall-clock time spent loading the epoch view for the query. */
+            filter_ms: number;
+            /** @description Wall-clock time spent building the query cache key. */
+            cache_key_ms: number;
+            /** @description Time spent in embedding batching and resilience orchestration. */
+            embedding_overhead_ms: number;
+            /** @description Wall-clock time spent producing the query embedding. */
+            embedding_ms: number;
+            /** @description Time spent inside the embedding transport, including connection setup. */
+            embedding_provider_ms: number;
+            /** @description Wall-clock time spent fusing recall paths, including key completion. */
+            fusion_ms: number;
+            /** @description Wall-clock time spent enriching and post-processing results. */
+            post_process_ms: number;
+            /** @description Wall-clock time spent rewriting the query before recall. */
+            rewrite_ms: number;
+            /** @description Wall-clock time spent in the vector engine search. */
+            vector_search_ms: number;
+        };
         /**
          * @description Recall path of a secondary evidence reference.
          * @enum {string}
@@ -3306,6 +3331,8 @@ export interface components {
             /** @description True when the serving relation snapshot reports itself stale. */
             relation_stale?: boolean;
             sources_used?: string[];
+            /** @description Per-call stage accounting (zero when the answer came from cache). */
+            stages?: components["schemas"]["QueryStageTimingsDto"];
             /** @description Number of executed sub-queries served by their own cached results. */
             sub_query_cache_hits?: number;
             /**

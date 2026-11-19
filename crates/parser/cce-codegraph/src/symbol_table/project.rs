@@ -30,6 +30,7 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Simple-name index entry.
 ///
@@ -198,6 +199,9 @@ pub struct ProjectSymbolTable {
     /// kept consistent via incremental updates.
     cross_file_propagator: CrossFilePropagator,
 
+    /// Whether incremental type changes invalidated the derived overload sets.
+    overload_sets_dirty: Arc<AtomicBool>,
+
     /// Overload sets indexed by (owner_type, method_name)
     overload_sets: DashMap<(String, String), OverloadSet>,
 
@@ -310,6 +314,7 @@ impl ProjectSymbolTable {
             type_inference_contexts: DashMap::new(),
             wildcard_expansion_cache: DashMap::new(),
             cross_file_propagator: CrossFilePropagator::new(),
+            overload_sets_dirty: Arc::new(AtomicBool::new(false)),
             overload_sets: DashMap::new(),
             overload_by_name: DashMap::new(),
             inference_cache: DashMap::new(),
@@ -519,8 +524,20 @@ impl ProjectSymbolTable {
         self.call_frequency.get(&entity_id).map(|r| *r).unwrap_or(0)
     }
 
+    /// Rebuild derived overload sets once after incremental type changes.
+    fn ensure_overload_sets(&self) {
+        if self
+            .overload_sets_dirty
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            self.rebuild_overload_sets();
+        }
+    }
+
     /// Get an overload set for a given owner and method.
     pub fn get_overload_set(&self, owner_type: &str, method_name: &str) -> Option<OverloadSet> {
+        self.ensure_overload_sets();
         self.overload_sets
             .get(&(owner_type.to_string(), method_name.to_string()))
             .map(|s| s.clone())
@@ -532,6 +549,7 @@ impl ProjectSymbolTable {
     /// `OverloadSet` containing `OverloadCandidate` entries with populated
     /// `parameter_types` (from the type inference context) and `return_type`.
     pub fn rebuild_overload_sets(&self) {
+        self.overload_sets_dirty.store(false, Ordering::Release);
         self.overload_sets.clear();
         self.overload_by_name.clear();
         let global = self
@@ -571,6 +589,7 @@ impl ProjectSymbolTable {
 
     /// Get overload sets by simple name
     pub fn get_overload_sets_by_name(&self, name: &str) -> Vec<OverloadSet> {
+        self.ensure_overload_sets();
         self.overload_by_name
             .get(name)
             .map(|sets| sets.clone())
@@ -799,6 +818,80 @@ impl ProjectSymbolTable {
         self.invalidate_cache_for_symbol(&simple_name, &file_path);
     }
 
+    /// Insert a complete set of file symbols in one pass.
+    ///
+    /// Bulk construction keeps one vector per simple name, removes
+    /// same-file duplicates before insertion, and sorts each vector once.
+    /// This avoids repeated full-vector scans when the same name recurs in
+    /// many files.
+    pub fn insert_symbols_bulk<I>(&self, symbols: I)
+    where
+        I: IntoIterator<Item = (String, EntityId, String, String)>,
+    {
+        let mut by_name: HashMap<String, Vec<SimpleNameEntry>> = HashMap::new();
+        let mut names_by_file: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut deduped: HashMap<(String, String), (String, EntityId, String)> = HashMap::new();
+
+        for (qualified_name, entity_id, file_path, module_path) in symbols {
+            let file_path = normalize_project_path(&file_path);
+            let simple_name = qualified_name
+                .rsplit("::")
+                .next()
+                .unwrap_or(&qualified_name)
+                .to_string();
+            deduped.insert(
+                (simple_name, file_path),
+                (qualified_name, entity_id, module_path),
+            );
+        }
+
+        for ((simple_name, file_path), (qualified_name, entity_id, module_path)) in deduped {
+            by_name
+                .entry(simple_name.clone())
+                .or_default()
+                .push(SimpleNameEntry::FileSymbol {
+                    file_path: file_path.clone(),
+                    module_path: module_path.clone(),
+                    entity_id,
+                });
+            names_by_file
+                .entry(file_path.clone())
+                .or_default()
+                .insert(simple_name.clone());
+
+            {
+                use cce_types::NamespacePath;
+                let ns_path = NamespacePath::parse(&qualified_name);
+                if let Some(ns_prefix) = ns_path.namespace_prefix()
+                    && let Some(pkg_name) = module_path.split("::").next()
+                    && !pkg_name.is_empty()
+                {
+                    let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
+                    self.namespace_index.insert(ns_key, entity_id);
+                }
+            }
+            let file_qualified = format!("{}::{}", file_path, simple_name);
+            self.global_index.insert(file_qualified, entity_id);
+        }
+
+        for (name, mut entries) in by_name {
+            entries.sort_by(|left, right| {
+                let left_freq = self.get_call_frequency(left.entity_id());
+                let right_freq = self.get_call_frequency(right.entity_id());
+                left.sort_key(Some(left_freq))
+                    .cmp(&right.sort_key(Some(right_freq)))
+            });
+            self.simple_name_index.insert(name, entries);
+        }
+        for (file_path, names) in names_by_file {
+            self.file_symbol_contrib
+                .entry(file_path.clone())
+                .or_default()
+                .extend(names.iter().cloned());
+            self.invalidate_cache_for_symbols(&names, &file_path);
+        }
+    }
+
     pub fn register_workspace_member(
         &self,
         member_name: &str,
@@ -825,7 +918,9 @@ impl ProjectSymbolTable {
             .get(&normalized)
             .map(|s| s.clone())
             .unwrap_or_default();
-        for name in old_set.difference(new_simple_names) {
+        let removed: Vec<&String> = old_set.difference(new_simple_names).collect();
+        let had_removals = !removed.is_empty();
+        for name in removed {
             if let Some(mut entries) = self.simple_name_index.get_mut(name) {
                 entries.retain(|e| e.file_path() != Some(normalized.as_str()));
                 if entries.is_empty() {
@@ -841,8 +936,13 @@ impl ProjectSymbolTable {
         // Use fine-grained cache invalidation: only invalidate entries for this file
         // since we're only removing symbols for this specific file.
         self.invalidate_cache_for_file(file_path);
-        // Rebuild global index to keep it consistent after symbol removal
-        self.rebuild_global_indices();
+        // A fresh incremental addition cannot make an existing global entry
+        // stale. Rebuilding the whole index is only needed when symbols were
+        // actually removed, otherwise every added file pays an O(all symbols)
+        // pass.
+        if had_removals {
+            self.rebuild_global_indices();
+        }
     }
 
     // === TypeMemberIndex Management ===
@@ -918,6 +1018,7 @@ impl ProjectSymbolTable {
         }
         self.file_type_contrib
             .insert(normalized, new_qualified.clone());
+        self.overload_sets_dirty.store(true, Ordering::Release);
         // Use fine-grained cache invalidation: only invalidate entries for this file
         // since we're only removing type information for this specific file.
         self.invalidate_cache_for_file(file_path);
@@ -950,6 +1051,7 @@ impl ProjectSymbolTable {
             set.insert(k.qualified.clone());
         }
         self.file_type_contrib.insert(normalized, set);
+        self.overload_sets_dirty.store(true, Ordering::Release);
         // Use fine-grained cache invalidation: only invalidate entries for this file
         // since we're only updating type information for this specific file.
         self.invalidate_cache_for_file(file_path);

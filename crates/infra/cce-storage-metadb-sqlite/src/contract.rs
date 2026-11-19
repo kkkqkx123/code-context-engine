@@ -1903,6 +1903,40 @@ impl MetadataStorage for SqliteClient {
         })
     }
 
+    async fn projection_upsert_batch(
+        &self,
+        rows: &[IndexStateProjection],
+    ) -> Result<(), StorageError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        self.with_transaction(|tx| {
+            for row in rows {
+                tx.execute(
+                    "INSERT INTO index_state_projection
+                        (project_id, operation_id, file_path, version, state_json, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(project_id, operation_id, file_path) DO UPDATE SET
+                        version = excluded.version, state_json = excluded.state_json,
+                        updated_at = excluded.updated_at
+                     WHERE excluded.version >= index_state_projection.version",
+                    rusqlite::params![
+                        row.project_id,
+                        row.operation_id,
+                        row.file_path,
+                        row.version,
+                        row.state_json,
+                        row.updated_at,
+                    ],
+                )
+                .map_err(|error| {
+                    StorageError::insert("index_state_projection", error.to_string())
+                })?;
+            }
+            Ok(())
+        })
+    }
+
     async fn projection_delete(
         &self,
         project_id: i64,

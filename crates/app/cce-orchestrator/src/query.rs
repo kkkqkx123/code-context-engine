@@ -121,7 +121,8 @@ pub mod cached_embedder;
 // Re-export main types
 pub use types::{
     AggregatedQueryOptions, ExcludableContentType, ExecutionStrategy, QueryConfigBuilder,
-    QueryIntent, QueryOptions, QueryResult, SearchConfig, SearchResult, SearchSources, SubQuery,
+    QueryIntent, QueryOptions, QueryResult, QueryStageTimings, SearchConfig, SearchResult,
+    SearchSources, SubQuery,
 };
 
 // Re-export cache types

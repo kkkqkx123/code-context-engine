@@ -1,9 +1,13 @@
 //! Embedding Request Handler
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
 use crate::config::EmbeddingConfig;
 use crate::suite::{embedding_resilience, full_endpoint_url, map_embedding_error, query_string};
 use cce_config::global::ResolvedEmbeddingConfig;
-use cce_llm::{EmbeddingResult, LlmError};
+use cce_llm::{EmbeddingResult, EmbeddingTiming, LlmError};
 use cce_utils::token_estimation::estimate_tokens;
 use futures::stream::{self, StreamExt};
 use llm_suite_client::Resilience;
@@ -115,18 +119,50 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
     /// implementation); a batch that still fails after the budget is
     /// exhausted propagates to the caller.
     pub async fn embed_batch(&self, batch: Vec<String>) -> Result<EmbeddingResult, LlmError> {
-        self.resilience
+        self.embed_batch_timed(batch)
+            .await
+            .map(|(result, _)| result)
+    }
+
+    /// Send one batch and separate transport time from resilience overhead.
+    pub async fn embed_batch_timed(
+        &self,
+        batch: Vec<String>,
+    ) -> Result<(EmbeddingResult, EmbeddingTiming), LlmError> {
+        let provider_ms = Arc::new(AtomicU64::new(0));
+        let observed_ms = Arc::clone(&provider_ms);
+        let started = Instant::now();
+        let result = self
+            .resilience
             .execute(
                 || llm_suite_embedding::EmbeddingError::CircuitOpen,
-                || self.provider.embed(&batch),
+                || async {
+                    let provider_started = Instant::now();
+                    let result = self.provider.embed(&batch).await;
+                    observed_ms.store(
+                        provider_started.elapsed().as_millis() as u64,
+                        Ordering::Relaxed,
+                    );
+                    result
+                },
             )
-            .await
+            .await;
+        let total_ms = started.elapsed().as_millis() as u64;
+        let provider_ms = provider_ms.load(Ordering::Relaxed);
+        let result = result
             .map(|result| EmbeddingResult {
                 embeddings: result.embeddings,
                 prompt_tokens: result.prompt_tokens,
                 total_tokens: result.total_tokens,
             })
-            .map_err(map_embedding_error)
+            .map_err(map_embedding_error)?;
+        Ok((
+            result,
+            EmbeddingTiming {
+                provider_ms,
+                overhead_ms: total_ms.saturating_sub(provider_ms),
+            },
+        ))
     }
 
     /// Builds a transport around an injected provider for tests.
@@ -159,17 +195,38 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
 pub struct EmbeddingRequestHandler<P = llm_suite_embedding::OpenAICompatibleProvider> {
     /// Suite-backed batch transport
     inner: SuiteEmbeddingTransport<P>,
+    /// Timing of the most recent completed request.
+    timing: Mutex<EmbeddingTiming>,
 }
 
 impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
     /// Create a new request handler
     pub fn new(transport: SuiteEmbeddingTransport<P>) -> Self {
-        Self { inner: transport }
+        Self {
+            inner: transport,
+            timing: Mutex::new(EmbeddingTiming::default()),
+        }
     }
 
     /// Accesses the underlying transport (used by tests to inspect mocks).
     pub fn transport(&self) -> &SuiteEmbeddingTransport<P> {
         &self.inner
+    }
+
+    /// Timing of the most recent request.
+    pub fn last_timing(&self) -> EmbeddingTiming {
+        self.timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Clear the diagnostic timing before starting a request.
+    pub fn reset_timing(&self) {
+        *self
+            .timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = EmbeddingTiming::default();
     }
 
     /// Generate embeddings with batching
@@ -187,6 +244,8 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
             return Ok(EmbeddingResult::default());
         }
 
+        self.reset_timing();
+        let mut timing = EmbeddingTiming::default();
         let concurrency = config.max_concurrency.max(1).min(batches.len());
         if concurrency <= 1 || batches.len() == 1 {
             let mut all_embeddings = Vec::new();
@@ -194,11 +253,17 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
             let mut total_tokens = 0u64;
             for batch in &batches {
                 let owned: Vec<String> = batch.iter().map(|text| (*text).to_string()).collect();
-                let result = self.inner.embed_batch(owned).await?;
+                let (result, batch_timing) = self.inner.embed_batch_timed(owned).await?;
+                timing.provider_ms += batch_timing.provider_ms;
+                timing.overhead_ms += batch_timing.overhead_ms;
                 all_embeddings.extend(result.embeddings);
                 total_prompt_tokens += result.prompt_tokens;
                 total_tokens += result.total_tokens;
             }
+            *self
+                .timing
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = timing;
             return Ok(EmbeddingResult {
                 embeddings: all_embeddings,
                 prompt_tokens: total_prompt_tokens,
@@ -212,9 +277,9 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
             .map(|(idx, batch)| (idx, batch.iter().map(|text| (*text).to_string()).collect()))
             .collect();
         let transport = &self.inner;
-        let mut ordered: Vec<(usize, Result<EmbeddingResult, LlmError>)> =
+        let mut ordered: Vec<(usize, Result<(EmbeddingResult, EmbeddingTiming), LlmError>)> =
             stream::iter(owned_batches.into_iter().map(|(idx, owned)| async move {
-                let result = transport.embed_batch(owned).await;
+                let result = transport.embed_batch_timed(owned).await;
                 (idx, result)
             }))
             .buffer_unordered(concurrency)
@@ -226,11 +291,17 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
         let mut total_prompt_tokens = 0u64;
         let mut total_tokens = 0u64;
         for (_, result) in ordered {
-            let result = result?;
+            let (result, batch_timing) = result?;
+            timing.provider_ms += batch_timing.provider_ms;
+            timing.overhead_ms += batch_timing.overhead_ms;
             all_embeddings.extend(result.embeddings);
             total_prompt_tokens += result.prompt_tokens;
             total_tokens += result.total_tokens;
         }
+        *self
+            .timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = timing;
 
         Ok(EmbeddingResult {
             embeddings: all_embeddings,

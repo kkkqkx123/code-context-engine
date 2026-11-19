@@ -264,6 +264,7 @@ pub async fn search(
                 "from_cache": outcome.from_cache,
                 "relation_epoch": outcome.relation_epoch,
                 "relation_stale": outcome.relation_stale,
+                "stages": outcome.stages,
                 "items": outcome.items,
             })
             .to_string(),
@@ -371,6 +372,7 @@ pub async fn aggregated_search(
                 "from_cache": outcome.from_cache,
                 "relation_epoch": outcome.relation_epoch,
                 "relation_stale": outcome.relation_stale,
+                "stages": outcome.stages,
                 "sub_query_stats": outcome.sub_query_stats,
                 "items": outcome.items,
             })

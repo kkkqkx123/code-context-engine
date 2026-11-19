@@ -114,6 +114,25 @@ impl SubQueryStat {
     }
 }
 
+/// Wall-clock accounting for one query execution.
+///
+/// The fields are populated by the searcher for the current call; a cached
+/// answer reports zero stage time because no retrieval work ran.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueryStageTimings {
+    pub coordinator_ms: u64,
+    pub filter_ms: u64,
+    pub cache_key_ms: u64,
+    pub rewrite_ms: u64,
+    pub embedding_ms: u64,
+    pub embedding_provider_ms: u64,
+    pub embedding_overhead_ms: u64,
+    pub vector_search_ms: u64,
+    pub bm25_retrieval_ms: u64,
+    pub fusion_ms: u64,
+    pub post_process_ms: u64,
+}
+
 /// Query execution result
 #[derive(Debug, Clone)]
 pub struct QueryResult {
@@ -146,6 +165,8 @@ pub struct QueryResult {
     pub cacheable: bool,
     /// True when this result was served from the aggregate query cache.
     pub from_cache: bool,
+    /// Per-stage wall-clock accounting for this call.
+    pub stages: QueryStageTimings,
 }
 
 impl Default for QueryResult {
@@ -163,6 +184,7 @@ impl Default for QueryResult {
             sub_query_stats: Vec::new(),
             cacheable: true,
             from_cache: false,
+            stages: QueryStageTimings::default(),
         }
     }
 }

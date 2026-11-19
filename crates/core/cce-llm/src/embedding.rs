@@ -9,6 +9,15 @@ use std::future::Future;
 
 use crate::error::LlmError;
 
+/// Timing of the most recent embedding call inside a provider.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EmbeddingTiming {
+    /// Time spent inside the transport provider, including connection setup.
+    pub provider_ms: u64,
+    /// Time spent in batching, resilience and local orchestration.
+    pub overhead_ms: u64,
+}
+
 /// Result of an embedding operation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct EmbeddingResult {
@@ -52,4 +61,12 @@ pub trait EmbeddingProvider: Send + Sync {
     /// Whether the provider is currently usable (e.g. its circuit breaker is
     /// closed); a `false` value lets callers fail fast before dispatching.
     fn is_healthy(&self) -> bool;
+
+    /// Timing of the most recent transport call, for diagnostics only.
+    fn last_embedding_timing(&self) -> EmbeddingTiming {
+        EmbeddingTiming::default()
+    }
+
+    /// Clear the diagnostic timing before a new call.
+    fn reset_embedding_timing(&self) {}
 }

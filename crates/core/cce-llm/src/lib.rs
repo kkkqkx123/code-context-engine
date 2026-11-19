@@ -7,7 +7,7 @@ pub mod rerank;
 pub mod types;
 
 pub use config::{ChatConfig, ResponseFormat};
-pub use embedding::{EmbeddingProvider, EmbeddingResult};
+pub use embedding::{EmbeddingProvider, EmbeddingResult, EmbeddingTiming};
 pub use error::{LlmConfigError, LlmError};
 pub use rerank::{RerankProvider, RerankRequest, RerankRuntimeConfig};
 pub use types::{ChatResult, Message, MessageRole};

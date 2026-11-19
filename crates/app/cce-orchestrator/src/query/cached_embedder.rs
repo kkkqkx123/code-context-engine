@@ -12,10 +12,10 @@
 //! a sufficient cache key. Batch methods are delegated uncached: the query
 //! path only uses `embed_one`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cce_llm::{EmbeddingProvider, EmbeddingResult, LlmError};
+use cce_llm::{EmbeddingProvider, EmbeddingResult, EmbeddingTiming, LlmError};
 use moka::future::Cache;
 
 /// Maximum number of cached query embeddings per searcher.
@@ -28,6 +28,7 @@ const CACHE_TTL: Duration = Duration::from_secs(600);
 pub struct CachedEmbedder<E = cce_llm_client::OpenAICompatibleProvider> {
     inner: Arc<E>,
     cache: Cache<String, Vec<f32>>,
+    last_timing: Mutex<EmbeddingTiming>,
 }
 
 impl<E: EmbeddingProvider> CachedEmbedder<E> {
@@ -36,6 +37,7 @@ impl<E: EmbeddingProvider> CachedEmbedder<E> {
         Self {
             inner,
             cache: Self::build_cache(CACHE_TTL),
+            last_timing: Mutex::new(EmbeddingTiming::default()),
         }
     }
 
@@ -45,6 +47,7 @@ impl<E: EmbeddingProvider> CachedEmbedder<E> {
         Self {
             inner,
             cache: Self::build_cache(ttl),
+            last_timing: Mutex::new(EmbeddingTiming::default()),
         }
     }
 
@@ -64,15 +67,28 @@ impl<E: EmbeddingProvider> CachedEmbedder<E> {
 
     pub async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
         let key = text.to_owned();
+        let was_cached = self.cache.get(&key).await.is_some();
+        self.inner.reset_embedding_timing();
         let inner = Arc::clone(&self.inner);
         let pending = {
             let key = key.clone();
             async move { <E as EmbeddingProvider>::embed_one(&inner, &key).await }
         };
-        self.cache
+        let result = self
+            .cache
             .try_get_with(key, pending)
             .await
-            .map_err(|err| Arc::try_unwrap(err).unwrap_or_else(|shared| (*shared).clone()))
+            .map_err(|err| Arc::try_unwrap(err).unwrap_or_else(|shared| (*shared).clone()));
+        let timing = if was_cached {
+            EmbeddingTiming::default()
+        } else {
+            self.inner.last_embedding_timing()
+        };
+        *self
+            .last_timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = timing;
+        result
     }
 
     pub async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
@@ -110,6 +126,21 @@ impl<E: EmbeddingProvider> EmbeddingProvider for CachedEmbedder<E> {
 
     fn is_healthy(&self) -> bool {
         CachedEmbedder::is_healthy(self)
+    }
+
+    fn last_embedding_timing(&self) -> EmbeddingTiming {
+        *self
+            .last_timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn reset_embedding_timing(&self) {
+        self.inner.reset_embedding_timing();
+        *self
+            .last_timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = EmbeddingTiming::default();
     }
 }
 

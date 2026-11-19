@@ -10,6 +10,15 @@ use crate::query::types::{QueryOptions, SearchResult};
 use super::bm25::Bm25Strategy;
 use super::dense::DenseStrategy;
 
+/// Raw retrieval results with dense-path timing.
+pub struct RetrievalOutcome {
+    pub results: Result<Vec<SearchResult>>,
+    pub embedding_ms: u64,
+    pub embedding_provider_ms: u64,
+    pub embedding_overhead_ms: u64,
+    pub vector_search_ms: u64,
+}
+
 /// Supported recall algorithms.
 ///
 /// Each variant maps to a concrete retrieval strategy.
@@ -52,15 +61,30 @@ pub enum RetrievalStrategy {
 }
 
 impl RetrievalStrategy {
-    /// Execute retrieval, returning raw results (before enrichment and post-processing)
+    /// Execute retrieval, returning raw results and dense-path timing.
     pub async fn retrieve(
         &self,
         options: &QueryOptions,
         query_filter: &QueryFilter,
-    ) -> Result<Vec<SearchResult>> {
+    ) -> RetrievalOutcome {
         match self {
-            Self::Dense(s) => s.retrieve(options, query_filter).await,
-            Self::Bm25(s) => s.retrieve(options, query_filter).await,
+            Self::Dense(s) => {
+                let outcome = s.retrieve(options, query_filter).await;
+                RetrievalOutcome {
+                    results: outcome.results,
+                    embedding_ms: outcome.embedding_ms,
+                    embedding_provider_ms: outcome.embedding_provider_ms,
+                    embedding_overhead_ms: outcome.embedding_overhead_ms,
+                    vector_search_ms: outcome.vector_search_ms,
+                }
+            }
+            Self::Bm25(s) => RetrievalOutcome {
+                results: s.retrieve(options, query_filter).await,
+                embedding_ms: 0,
+                embedding_provider_ms: 0,
+                embedding_overhead_ms: 0,
+                vector_search_ms: 0,
+            },
         }
     }
 

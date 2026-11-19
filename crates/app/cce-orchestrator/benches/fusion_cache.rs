@@ -138,6 +138,7 @@ fn main() {
         sub_query_stats: Vec::new(),
         cacheable: true,
         from_cache: false,
+        stages: Default::default(),
     };
     rt.block_on(async {
         let cache = QueryCache::new(CacheConfig::default());

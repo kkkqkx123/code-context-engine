@@ -193,6 +193,7 @@ mod tests {
         let config = SearchConfig::from(module_cfg);
         assert_eq!(config.vector.top_k, 50);
         assert_eq!(config.result.limit, 10);
+        assert_eq!(config.timeout_ms, 30_000);
         assert!(!config.rerank.enabled);
     }
 }

@@ -30,7 +30,7 @@ pub use dependency_graph::{DependencyGraphError, FileDependencyGraph, ImpactAnal
 pub use error::{IndexError, PersistenceError, RelationError, RelationQueryError, ResolutionError};
 pub use index::{
     LayeredSnapshotIndex, LocalCallResolver, ThreadSafeIndex,
-    builder::{IndexBuilder, SymbolTableBuilder},
+    builder::{IndexBuilder, SymbolBuildTimings, SymbolTableBuilder},
     compact::CompactRelationIndex,
     core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex},
 };

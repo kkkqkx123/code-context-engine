@@ -15,6 +15,38 @@ pub enum IndexExecutionOutcome {
     Incomplete { errors: Vec<String> },
 }
 
+/// Wall-clock accounting for one full-index run.
+///
+/// Per-batch stages accumulate across the run. `batch_overhead_ms` is the
+/// remainder of the batch loop after all explicitly timed stages, covering
+/// state tracking, checkpoints, and bookkeeping.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IndexStageTimings {
+    pub scan_ms: u64,
+    pub batch_process_ms: u64,
+    pub batch_setup_ms: u64,
+    pub entity_store_ms: u64,
+    pub vector_store_ms: u64,
+    pub bm25_store_ms: u64,
+    pub summary_ms: u64,
+    pub relation_ms: u64,
+    pub export_ms: u64,
+    pub relation_spool_ms: u64,
+    pub relation_spool_write_ms: u64,
+    pub relation_symbols_ms: u64,
+    pub symbol_modules_ms: u64,
+    pub symbol_type_index_ms: u64,
+    pub symbol_overload_ms: u64,
+    pub symbol_flat_ms: u64,
+    pub symbol_cross_file_ms: u64,
+    pub export_spool_ms: u64,
+    pub manifest_ms: u64,
+    pub batch_overhead_ms: u64,
+    pub batches: usize,
+    pub vector_store_calls: usize,
+    pub bm25_store_calls: usize,
+}
+
 /// Indexing result summary
 #[derive(Debug, Clone)]
 pub struct IndexResult {
@@ -47,6 +79,8 @@ pub struct IndexResult {
     pub outcome: IndexExecutionOutcome,
     /// Elapsed time in milliseconds
     pub elapsed_ms: u64,
+    /// Per-stage wall-clock accounting for the run.
+    pub stages: IndexStageTimings,
 }
 
 impl Default for IndexResult {
@@ -64,6 +98,7 @@ impl Default for IndexResult {
             circuit_open: false,
             outcome: IndexExecutionOutcome::Success,
             elapsed_ms: 0,
+            stages: IndexStageTimings::default(),
         }
     }
 }

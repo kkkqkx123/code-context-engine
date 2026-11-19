@@ -13,6 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+mod resource;
+pub use resource::{ResourceDelta, ResourceSnapshot, cpu_ms, resource_delta, resource_snapshot};
+
 /// Fixed scale tiers aligned with the e2e fixture tiers.
 ///
 /// Small ~500 files, Medium ~5_000 files, Large ~50_000 files. Each file

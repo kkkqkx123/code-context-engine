@@ -1114,6 +1114,12 @@ pub trait MetadataStorage: Clone + Send + Sync + 'static {
         row: &IndexStateProjection,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
+    /// Upsert a batch of projection rows in one transaction.
+    fn projection_upsert_batch(
+        &self,
+        rows: &[IndexStateProjection],
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+
     /// Delete one file's projection row inside an operation.
     fn projection_delete(
         &self,

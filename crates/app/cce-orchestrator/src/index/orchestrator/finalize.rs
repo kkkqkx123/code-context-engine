@@ -9,11 +9,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use cce_codegraph::SymbolBuildTimings;
 use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndexView};
 use cce_export::NlDocumentExporter;
 
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
+use crate::index::relation_build_spool::RelationBuildSpool;
 use crate::index_state::{ModuleType, ModuleUpdateState};
 
 impl IndexOrchestrator {
@@ -83,6 +85,17 @@ impl IndexOrchestrator {
     /// index. The builder is round-local: constructed fresh per run, handed
     /// over to the publisher via shared ownership, and retired afterwards.
     /// No clearing or reuse occurs across runs.
+    fn build_spool_symbols(
+        &self,
+        spool: &RelationBuildSpool,
+        files: &[&cce_types::ParsedFile],
+    ) -> SymbolBuildTimings {
+        let mut symbol_builder =
+            cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
+        symbol_builder.with_metrics(self.relation_metrics());
+        symbol_builder.build_into(files, spool.project_symbols())
+    }
+
     pub(super) async fn build_and_publish_relations(
         &mut self,
         ctx: &mut FullIndexContext,
@@ -145,7 +158,6 @@ impl IndexOrchestrator {
                     );
                     continue;
                 }
-                self.append_spool_symbols(spool, synthetic);
                 injected += 1;
             }
             if injected > 0 {
@@ -172,6 +184,8 @@ impl IndexOrchestrator {
         const MEMORY_CACHE_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
         let use_memory_cache = spool.estimated_decoded_bytes() < MEMORY_CACHE_LIMIT_BYTES
             && spool.entry_count() < 100_000;
+        let mut symbol_build_ms = 0u64;
+        let mut symbol_timings = SymbolBuildTimings::default();
         let (registered_files, resolved_files) = if use_memory_cache {
             tracing::info!(
                 spool_entries = spool.entry_count(),
@@ -187,6 +201,15 @@ impl IndexOrchestrator {
                 )
             })?;
             record_pass(t_collect.elapsed(), total_bytes);
+            let symbols_started = Instant::now();
+            let file_refs: Vec<&cce_types::ParsedFile> = cached_files.iter().collect();
+            let timings = self.build_spool_symbols(spool, &file_refs);
+            symbol_timings.modules_ms += timings.modules_ms;
+            symbol_timings.type_index_ms += timings.type_index_ms;
+            symbol_timings.overload_ms += timings.overload_ms;
+            symbol_timings.flat_ms += timings.flat_ms;
+            symbol_timings.cross_file_ms += timings.cross_file_ms;
+            symbol_build_ms += symbols_started.elapsed().as_millis() as u64;
             let t0 = Instant::now();
             for parsed in &cached_files {
                 builder.register_file_entities(parsed);
@@ -209,9 +232,27 @@ impl IndexOrchestrator {
             record_pass(t1.elapsed(), total_bytes);
             (registered, cached_files.len())
         } else {
-            // Disk-backed two-pass replay: registration and resolution each
-            // scan the spool from disk. Required when the estimated decoded
-            // size exceeds the memory limit.
+            // Disk-backed replay: build the project symbol table once from a
+            // dedicated pass, then register and resolve from disk.
+            let symbols_started = Instant::now();
+            let mut replayed_files = Vec::new();
+            spool
+                .for_each(|parsed| replayed_files.push(parsed.clone()))
+                .map_err(|error| {
+                    OrchestratorError::index(
+                        "relation_build_spool",
+                        format!("Failed to collect replay files: {error}"),
+                    )
+                })?;
+            let replayed_refs: Vec<&cce_types::ParsedFile> = replayed_files.iter().collect();
+            let timings = self.build_spool_symbols(spool, &replayed_refs);
+            symbol_timings.modules_ms += timings.modules_ms;
+            symbol_timings.type_index_ms += timings.type_index_ms;
+            symbol_timings.overload_ms += timings.overload_ms;
+            symbol_timings.flat_ms += timings.flat_ms;
+            symbol_timings.cross_file_ms += timings.cross_file_ms;
+            symbol_build_ms += symbols_started.elapsed().as_millis() as u64;
+
             let t0 = Instant::now();
             let registered = spool
                 .for_each(|parsed| {
@@ -359,6 +400,17 @@ impl IndexOrchestrator {
                 ctx.all_batches_completed = false;
             }
         }
+        let overload_started = Instant::now();
+        spool.project_symbols().rebuild_overload_sets();
+        let final_overload_ms = overload_started.elapsed().as_millis() as u64;
+        symbol_timings.overload_ms += final_overload_ms;
+        symbol_build_ms += final_overload_ms;
+        ctx.stages.relation_symbols_ms = symbol_build_ms;
+        ctx.stages.symbol_modules_ms = symbol_timings.modules_ms;
+        ctx.stages.symbol_type_index_ms = symbol_timings.type_index_ms;
+        ctx.stages.symbol_overload_ms = symbol_timings.overload_ms;
+        ctx.stages.symbol_flat_ms = symbol_timings.flat_ms;
+        ctx.stages.symbol_cross_file_ms = symbol_timings.cross_file_ms;
         Ok(())
     }
 

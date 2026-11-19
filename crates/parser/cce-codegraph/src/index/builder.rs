@@ -14,7 +14,7 @@ mod plugin_symbol_replay;
 mod symbol_table;
 
 pub use config::BuilderConfig;
-pub use symbol_table::SymbolTableBuilder;
+pub use symbol_table::{SymbolBuildTimings, SymbolTableBuilder};
 
 use super::core::{ExportInfo, ExportType, RelationIndex};
 use crate::dependency_graph::FileDependencyGraph;

@@ -210,6 +210,14 @@ impl<P: SuiteEmbeddingProvider> cce_llm::EmbeddingProvider for OpenAICompatibleP
     fn is_healthy(&self) -> bool {
         OpenAICompatibleProvider::is_healthy(self)
     }
+
+    fn last_embedding_timing(&self) -> cce_llm::EmbeddingTiming {
+        self.handler.last_timing()
+    }
+
+    fn reset_embedding_timing(&self) {
+        self.handler.reset_timing();
+    }
 }
 
 #[cfg(test)]

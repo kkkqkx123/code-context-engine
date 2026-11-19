@@ -1040,7 +1040,7 @@ impl RelationAnnotationConfig {
 ///
 /// Aggregates all sub-configurations for the search pipeline.
 /// Placed under `[search]` in config.toml.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SearchModuleConfig {
     /// Vector retrieval configuration
@@ -1079,6 +1079,22 @@ pub struct SearchModuleConfig {
 
 fn default_search_timeout_ms() -> u64 {
     30_000
+}
+
+impl Default for SearchModuleConfig {
+    fn default() -> Self {
+        Self {
+            vector: VectorRetrievalConfig::default(),
+            bm25: Bm25RetrievalConfig::default(),
+            fusion: HybridFusionConfig::default(),
+            aggregation: AggregationConfig::default(),
+            result: ResultFilterConfig::default(),
+            score: ScoreNormalizationConfig::default(),
+            plugin: PluginSearchConfig::default(),
+            annotation: RelationAnnotationConfig::default(),
+            timeout_ms: default_search_timeout_ms(),
+        }
+    }
 }
 
 impl Validate for SearchModuleConfig {
@@ -1156,6 +1172,7 @@ mod tests {
         let config = SearchModuleConfig::default();
         assert_eq!(config.vector.top_k, 50);
         assert_eq!(config.result.limit, 10);
+        assert_eq!(config.timeout_ms, 30_000);
         assert_eq!(
             config.fusion.algorithm,
             RecallFusionAlgorithm::WeightedMinMax

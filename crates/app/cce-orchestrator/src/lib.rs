@@ -33,13 +33,13 @@ pub use query::{
     AggregatedQueryOptions, Confidence, ExecutionStrategy, GraphDirection, GraphEdge, GraphNode,
     GraphService, PathQueryOptions, QueryCoordinator, QueryError, QueryOptions,
     QueryOptions as SearchOptions, QueryResult, QueryResult as SearchQueryResult,
-    RelationQueryOptions, RelationSearcher, Result as QueryResultType, SearchConfig, SearchResult,
-    SearchSources, SubGraph, SubQuery,
+    QueryStageTimings, RelationQueryOptions, RelationSearcher, Result as QueryResultType,
+    SearchConfig, SearchResult, SearchSources, SubGraph, SubQuery,
 };
 
 pub use index::{
-    DeadLetterRetryReport, IndexOptions, IndexOrchestrator, IndexResult, RelationPublication,
-    RelationSnapshotPublisher,
+    DeadLetterRetryReport, IndexOptions, IndexOrchestrator, IndexResult, IndexStageTimings,
+    RelationPublication, RelationSnapshotPublisher,
 };
 
 pub use hot_update::{

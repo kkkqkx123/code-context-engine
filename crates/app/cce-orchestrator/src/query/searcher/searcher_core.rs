@@ -22,7 +22,7 @@
 //!   all strategies, so the final `result.min_score` threshold observes one
 //!   score scale regardless of recall mode.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cce_config::project_registry::ProjectScope;
 
@@ -34,11 +34,23 @@ use crate::query::error::QueryError;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
-use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchResult};
+use crate::query::types::{
+    ExecutionStrategy, QueryOptions, QueryResult, QueryStageTimings, SearchResult,
+};
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
 
 use super::search_builder::SearcherBuilder;
+
+fn record_query_stages(
+    stages: &Arc<Mutex<QueryStageTimings>>,
+    update: impl FnOnce(&mut QueryStageTimings),
+) {
+    let mut guard = stages
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    update(&mut guard);
+}
 
 /// Unified searcher
 ///
@@ -134,8 +146,12 @@ impl Searcher {
     /// [`QueryFilter`] (query cache, retry replay) should use
     /// [`Searcher::search_with_view`] to avoid a second manifest read.
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
+        let filter_started = std::time::Instant::now();
         let query_filter = self.load_query_filter(options.project_id).await?;
-        self.search_with_view(options, &query_filter).await
+        let filter_ms = filter_started.elapsed().as_millis() as u64;
+        let mut result = self.search_with_view(options, &query_filter).await?;
+        result.stages.filter_ms = filter_ms;
+        Ok(result)
     }
 
     /// Execute search against a caller-resolved epoch view.
@@ -163,18 +179,33 @@ impl Searcher {
         // identical request looks up). Concurrent identical queries
         // single-flight onto one computation, so they do not each queue
         // behind the shared LLM rate limiter.
+        let key_started = std::time::Instant::now();
         let key = CacheKey::from_options_with_view(options, query_filter);
+        let key_ms = key_started.elapsed().as_millis() as u64;
+        let stage_timings = Arc::new(Mutex::new(QueryStageTimings::default()));
+        {
+            let mut guard = stage_timings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.cache_key_ms = key_ms;
+        }
+        let compute_stages = Arc::clone(&stage_timings);
         let mut result = self
             .cache
             .get_or_compute(key, || async move {
+                let rewrite_started = std::time::Instant::now();
                 let mut effective = options.clone();
                 if effective.config.plugin.rewrite_enabled {
                     effective = self.apply_query_rewrite(effective).await?;
                 }
+                let rewrite_ms = rewrite_started.elapsed().as_millis() as u64;
+                record_query_stages(&compute_stages, |timings| {
+                    timings.rewrite_ms = rewrite_ms;
+                });
 
                 let strategy = effective.execution_strategy();
                 let results = self
-                    .execute_search_flow(&effective, &strategy, query_filter)
+                    .execute_search_flow(&effective, &strategy, query_filter, &compute_stages)
                     .await?;
 
                 tracing::trace!(
@@ -196,10 +227,14 @@ impl Searcher {
                     sub_query_stats: Vec::new(),
                     cacheable: true,
                     from_cache: false,
+                    stages: QueryStageTimings::default(),
                 })
             })
             .await?;
 
+        result.stages = *stage_timings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         result.elapsed_ms = start.elapsed().as_millis() as u64;
         if result.from_cache {
             result.executed_sub_queries = 0;
@@ -225,21 +260,26 @@ impl Searcher {
         options: &QueryOptions,
         strategy: &ExecutionStrategy,
         query_filter: &QueryFilter,
+        stages: &Arc<Mutex<QueryStageTimings>>,
     ) -> Result<Vec<SearchResult>> {
         tracing::trace!(
             epoch = query_filter.epoch_value(),
             "Using query filter with epoch"
         );
         match strategy {
-            ExecutionStrategy::Bm25Recall => self.run_bm25_recall(options, query_filter).await,
+            ExecutionStrategy::Bm25Recall => {
+                self.run_bm25_recall(options, query_filter, stages).await
+            }
             ExecutionStrategy::HybridRecall {
                 vector_weight,
                 bm25_weight,
             } => {
-                self.run_hybrid_recall(options, query_filter, *vector_weight, *bm25_weight)
+                self.run_hybrid_recall(options, query_filter, *vector_weight, *bm25_weight, stages)
                     .await
             }
-            ExecutionStrategy::DenseRecall => self.run_vector_recall(options, query_filter).await,
+            ExecutionStrategy::DenseRecall => {
+                self.run_vector_recall(options, query_filter, stages).await
+            }
         }
     }
 
@@ -248,6 +288,7 @@ impl Searcher {
         &self,
         options: &QueryOptions,
         query_filter: &QueryFilter,
+        stages: &Arc<Mutex<QueryStageTimings>>,
     ) -> Result<Vec<SearchResult>> {
         use crate::query::retrieval::strategies::RecallAlgorithm;
 
@@ -255,17 +296,21 @@ impl Searcher {
         let retrieval_start = std::time::Instant::now();
 
         let strategy = RecallAlgorithm::Bm25.create_strategy(self);
-        let mut results = strategy.retrieve(options, query_filter).await?;
+        let outcome = strategy.retrieve(options, query_filter).await;
+        let bm25_ms = retrieval_start.elapsed().as_millis() as u64;
+        record_query_stages(stages, |timings| timings.bm25_retrieval_ms = bm25_ms);
+        let mut results = outcome.results?;
 
         tracing::trace!(
             count = results.len(),
-            elapsed_ms = retrieval_start.elapsed().as_millis(),
+            elapsed_ms = bm25_ms,
             "BM25 recall completed"
         );
 
         // Glob and content-type filtering already runs inside the strategy
         // with over-fetch refill, so no post-retrieval filter here.
         self.apply_score_normalization(&mut results, options);
+        let post_started = std::time::Instant::now();
         self.enrich_results(
             &mut results,
             options.project_id,
@@ -273,7 +318,10 @@ impl Searcher {
             options.config.result.max_content_tokens,
         )
         .await;
-        self.post_process_results(results, options).await
+        let results = self.post_process_results(results, options).await;
+        let post_ms = post_started.elapsed().as_millis() as u64;
+        record_query_stages(stages, |timings| timings.post_process_ms = post_ms);
+        results
     }
 
     /// Hybrid recall: vector + BM25 parallel paths, fused by weighted normalization.
@@ -283,6 +331,7 @@ impl Searcher {
         query_filter: &QueryFilter,
         vector_weight: f32,
         bm25_weight: f32,
+        stages: &Arc<Mutex<QueryStageTimings>>,
     ) -> Result<Vec<SearchResult>> {
         use crate::query::retrieval::primitives::{
             HybridFusionConfig, fuse_hybrid_results_with_stats,
@@ -298,46 +347,58 @@ impl Searcher {
         let retrieve = |algo: RecallAlgorithm| async move {
             let strategy = algo.create_strategy(self);
             let start = std::time::Instant::now();
-            let results = strategy.retrieve(options, query_filter).await;
-            match &results {
+            let outcome = strategy.retrieve(options, query_filter).await;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            match &outcome.results {
                 Ok(r) => tracing::trace!(
                     path = %algo,
                     count = r.len(),
-                    elapsed_ms = start.elapsed().as_millis(),
+                    elapsed_ms,
                     "Recall path completed"
                 ),
                 Err(e) => tracing::warn!(
                     path = %algo,
                     error = %e,
-                    elapsed_ms = start.elapsed().as_millis(),
+                    elapsed_ms,
                     "Recall path failed"
                 ),
             }
-            results
+            (outcome, elapsed_ms)
         };
 
         let (vector_attempt, bm25_attempt) = tokio::join!(
             retrieve(RecallAlgorithm::Dense),
             retrieve(RecallAlgorithm::Bm25)
         );
+        let (vector_outcome, _) = vector_attempt;
+        let (bm25_outcome, bm25_elapsed) = bm25_attempt;
+        record_query_stages(stages, |timings| {
+            timings.embedding_ms = vector_outcome.embedding_ms;
+            timings.embedding_provider_ms = vector_outcome.embedding_provider_ms;
+            timings.embedding_overhead_ms = vector_outcome.embedding_overhead_ms;
+            timings.vector_search_ms = vector_outcome.vector_search_ms;
+            timings.bm25_retrieval_ms = bm25_elapsed;
+        });
 
         // Both paths must succeed — never degrade one to the other.
         // Genuine configuration errors pass through unchanged so they are
         // not mislabeled as transient; runtime failures become retryable.
-        let mut vector_results = vector_attempt.map_err(|e| {
+        let mut vector_results = vector_outcome.results.map_err(|e| {
             if e.is_config_error() {
                 e
             } else {
                 QueryError::retryable("vector", format!("Vector recall path failed: {e}"))
             }
         })?;
-        let mut bm25_results = bm25_attempt.map_err(|e| {
+        let mut bm25_results = bm25_outcome.results.map_err(|e| {
             if e.is_config_error() {
                 e
             } else {
                 QueryError::retryable("bm25", format!("BM25 recall path failed: {e}"))
             }
         })?;
+
+        let fusion_started = std::time::Instant::now();
 
         // Fusion derives alignment keys from index-carried fields only, so a
         // candidate whose payload lost its entity/segment linkage is
@@ -382,7 +443,6 @@ impl Searcher {
         } else {
             fusion_config
         };
-        let fusion_start = std::time::Instant::now();
         let (mut fused_results, alignment_stats) =
             fuse_hybrid_results_with_stats(vector_results, bm25_results, &fusion_config);
         if let Some(metrics) = &self.search_metrics {
@@ -393,12 +453,15 @@ impl Searcher {
                 alignment_stats.unalignable(),
             );
         }
+        let fusion_ms = fusion_started.elapsed().as_millis() as u64;
+        record_query_stages(stages, |timings| timings.fusion_ms = fusion_ms);
         tracing::trace!(
             count = fused_results.len(),
-            elapsed_ms = fusion_start.elapsed().as_millis(),
+            elapsed_ms = fusion_ms,
             "Hybrid fusion completed"
         );
 
+        let post_started = std::time::Instant::now();
         self.enrich_results(
             &mut fused_results,
             options.project_id,
@@ -406,7 +469,10 @@ impl Searcher {
             options.config.result.max_content_tokens,
         )
         .await;
-        self.post_process_results(fused_results, options).await
+        let results = self.post_process_results(fused_results, options).await;
+        let post_ms = post_started.elapsed().as_millis() as u64;
+        record_query_stages(stages, |timings| timings.post_process_ms = post_ms);
+        results
     }
 
     /// Upper bound on candidates per path whose alignment keys are completed
@@ -493,6 +559,7 @@ impl Searcher {
         &self,
         options: &QueryOptions,
         query_filter: &QueryFilter,
+        stages: &Arc<Mutex<QueryStageTimings>>,
     ) -> Result<Vec<SearchResult>> {
         use crate::query::retrieval::strategies::RecallAlgorithm;
 
@@ -500,15 +567,19 @@ impl Searcher {
         let retrieval = recall_algo.create_strategy(self);
         tracing::trace!(algorithm = %recall_algo, "Starting retrieval");
         let retrieval_start = std::time::Instant::now();
-        let mut results = retrieval
-            .retrieve(options, query_filter)
-            .await
-            .map_err(|e| {
-                QueryError::retryable(
-                    &recall_algo.to_string(),
-                    format!("{} retrieval failed: {}", recall_algo, e),
-                )
-            })?;
+        let outcome = retrieval.retrieve(options, query_filter).await;
+        record_query_stages(stages, |timings| {
+            timings.embedding_ms = outcome.embedding_ms;
+            timings.embedding_provider_ms = outcome.embedding_provider_ms;
+            timings.embedding_overhead_ms = outcome.embedding_overhead_ms;
+            timings.vector_search_ms = outcome.vector_search_ms;
+        });
+        let mut results = outcome.results.map_err(|e| {
+            QueryError::retryable(
+                &recall_algo.to_string(),
+                format!("{} retrieval failed: {}", recall_algo, e),
+            )
+        })?;
         tracing::trace!(
             count = results.len(),
             elapsed_ms = retrieval_start.elapsed().as_millis(),
@@ -517,6 +588,7 @@ impl Searcher {
 
         // Strategy-level filtering already refilled filtered slots.
         self.apply_score_normalization(&mut results, options);
+        let post_started = std::time::Instant::now();
         self.enrich_results(
             &mut results,
             options.project_id,
@@ -524,7 +596,10 @@ impl Searcher {
             options.config.result.max_content_tokens,
         )
         .await;
-        self.post_process_results(results, options).await
+        let results = self.post_process_results(results, options).await;
+        let post_ms = post_started.elapsed().as_millis() as u64;
+        record_query_stages(stages, |timings| timings.post_process_ms = post_ms);
+        results
     }
 
     /// Legacy glob entry kept for tests and fallback paths.

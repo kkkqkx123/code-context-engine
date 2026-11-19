@@ -20,6 +20,17 @@ use cce_types::{Entity, ParsedFile, normalize_project_path};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
+
+/// Wall-clock accounting for one bulk symbol-table build.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SymbolBuildTimings {
+    pub modules_ms: u64,
+    pub type_index_ms: u64,
+    pub overload_ms: u64,
+    pub flat_ms: u64,
+    pub cross_file_ms: u64,
+}
 
 /// Symbol table builder for project-level symbol resolution
 pub struct SymbolTableBuilder {
@@ -249,6 +260,20 @@ impl SymbolTableBuilder {
     /// - Re-export resolution via module tables
     pub fn build(&self, files: &[&ParsedFile]) -> ProjectSymbolTable {
         let project_symbols = ProjectSymbolTable::new(self.project_root.clone());
+        let _ = self.build_into(files, &project_symbols);
+        project_symbols
+    }
+
+    /// Populate an existing project symbol table in one bulk pass.
+    ///
+    /// Bulk construction defers global index rebuilds until every file has
+    /// been registered, avoiding repeated whole-project work during replay.
+    pub fn build_into(
+        &self,
+        files: &[&ParsedFile],
+        project_symbols: &ProjectSymbolTable,
+    ) -> SymbolBuildTimings {
+        let build_started = Instant::now();
 
         // Group files into packages
         // For now, all files belong to the default package derived from project_root
@@ -348,30 +373,38 @@ impl SymbolTableBuilder {
             }
         }
 
+        let modules_ms = build_started.elapsed().as_millis() as u64;
+
         // Rebuild package exports from module tables
+        let global_started = Instant::now();
         package.rebuild_exports();
         // Add package to project BEFORE rebuilding global type index,
         // so rebuild_global_type_index can see this package's modules.
         project_symbols.add_package(package);
         // Build global type-member aggregation
         project_symbols.rebuild_global_type_index();
+        let type_index_ms = global_started.elapsed().as_millis() as u64;
+        let overload_started = Instant::now();
         project_symbols.rebuild_overload_sets();
+        let overload_ms = overload_started.elapsed().as_millis() as u64;
         if let Some(metrics) = &self.metrics {
             metrics.symbol_table_rebuild_total.increment();
         }
 
         // Keep backward-compatible flat index for RelationResolver
+        let flat_started = Instant::now();
+        let mut flat_symbols = Vec::new();
         for file in files {
             for entity in &file.entities {
                 if self.is_entity_exported(entity, file.language) {
                     let qualified_name =
                         format!("{}::{}", normalize_project_path(&file.path), entity.name);
-                    project_symbols.insert_symbol(
+                    flat_symbols.push((
                         qualified_name,
                         entity.id,
                         file.path.clone(),
                         file.path.clone(),
-                    );
+                    ));
                 }
             }
 
@@ -383,29 +416,45 @@ impl SymbolTableBuilder {
                     normalize_project_path(&file.path),
                     export.function_name
                 );
-                project_symbols.insert_symbol(
+                flat_symbols.push((
                     qualified_name,
                     export.function_id,
                     file.path.clone(),
                     file.path.clone(),
-                );
+                ));
             }
         }
+        project_symbols.insert_symbols_bulk(flat_symbols);
+
+        let flat_ms = flat_started.elapsed().as_millis() as u64;
 
         if let Some(metrics) = &self.metrics {
             project_symbols.set_metrics(Arc::clone(metrics));
         }
         // Build cross-file return-type cache and propagate into variables.
+        let cross_file_started = Instant::now();
         project_symbols.rebuild_cross_file_propagator(files);
+        let cross_file_ms = cross_file_started.elapsed().as_millis() as u64;
 
         let stats = project_symbols.project_stats();
         tracing::debug!(
-            "Built project symbol table with {} symbols from {} files",
-            stats.total_symbols,
-            files.len()
+            files = files.len(),
+            total_ms = build_started.elapsed().as_millis() as u64,
+            modules_ms,
+            type_index_ms,
+            overload_ms,
+            flat_ms,
+            cross_file_ms,
+            total_symbols = stats.total_symbols,
+            "Built project symbol table"
         );
-
-        project_symbols
+        SymbolBuildTimings {
+            modules_ms,
+            type_index_ms,
+            overload_ms,
+            flat_ms,
+            cross_file_ms,
+        }
     }
 
     /// Detect entity visibility using the shared language-aware rules.
@@ -531,7 +580,6 @@ impl SymbolTableBuilder {
         }
         project.apply_package_delta(Arc::clone(&package), &delta);
         project.apply_type_delta_for_file(&file.path, &type_index_clone);
-        project.rebuild_overload_sets();
 
         // File-symbol incremental pruning: remove stale `file::symbol`
         // entries for this file that are no longer exported.

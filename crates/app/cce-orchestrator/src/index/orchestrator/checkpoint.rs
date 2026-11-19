@@ -366,7 +366,6 @@ impl IndexOrchestrator {
                         format!("Failed to store recovered relation input: {error}"),
                     )
                 })?;
-                self.append_spool_symbols(spool, &envelope.parsed_file);
             }
         }
         Ok(())

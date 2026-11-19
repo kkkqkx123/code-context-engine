@@ -97,6 +97,9 @@ pub struct SearchResponse {
     /// what it recalled survived the merge.
     #[serde(default)]
     pub sub_query_stats: Vec<SubQueryStatDto>,
+    /// Per-call stage accounting (zero when the answer came from cache).
+    #[serde(default)]
+    pub stages: QueryStageTimingsDto,
 }
 
 /// Terminal state of one sub-query inside an aggregated request.
@@ -143,6 +146,33 @@ pub struct SubQueryStatDto {
     /// Failure detail for `failed` and `timed_out`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// Per-call query stage accounting shared by single and aggregated search.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, Default)]
+pub struct QueryStageTimingsDto {
+    /// Wall-clock time spent resolving the project and building the query coordinator.
+    pub coordinator_ms: u64,
+    /// Wall-clock time spent loading the epoch view for the query.
+    pub filter_ms: u64,
+    /// Wall-clock time spent building the query cache key.
+    pub cache_key_ms: u64,
+    /// Wall-clock time spent rewriting the query before recall.
+    pub rewrite_ms: u64,
+    /// Wall-clock time spent producing the query embedding.
+    pub embedding_ms: u64,
+    /// Time spent inside the embedding transport, including connection setup.
+    pub embedding_provider_ms: u64,
+    /// Time spent in embedding batching and resilience orchestration.
+    pub embedding_overhead_ms: u64,
+    /// Wall-clock time spent in the vector engine search.
+    pub vector_search_ms: u64,
+    /// Wall-clock time spent in BM25 recall.
+    pub bm25_retrieval_ms: u64,
+    /// Wall-clock time spent fusing recall paths, including key completion.
+    pub fusion_ms: u64,
+    /// Wall-clock time spent enriching and post-processing results.
+    pub post_process_ms: u64,
 }
 
 /// Whether a result carries its full body or a file-and-range reference.

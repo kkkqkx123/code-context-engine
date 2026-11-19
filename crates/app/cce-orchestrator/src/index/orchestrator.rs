@@ -36,6 +36,7 @@ pub use dead_letter::DeadLetterRetryReport;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use cce_codegraph::IndexBuilder;
 use cce_codegraph::index::LayeredSnapshotIndex;
@@ -69,7 +70,7 @@ use super::file_processor::FileProcessor;
 use super::options::IndexOptions;
 use super::relation_build_spool::RelationBuildSpool;
 use super::relation_publisher::RelationSnapshotPublisher;
-use super::result::{IndexExecutionOutcome, IndexResult};
+use super::result::{IndexExecutionOutcome, IndexResult, IndexStageTimings};
 use super::storage_coordinator::StorageCoordinator;
 
 /// Index orchestrator
@@ -490,6 +491,7 @@ struct FullIndexContext {
     circuit_open: bool,
     all_batches_completed: bool,
     published_relation_epoch: Option<i64>,
+    stages: IndexStageTimings,
 }
 
 impl IndexOrchestrator {
@@ -504,6 +506,9 @@ impl IndexOrchestrator {
         &mut self,
         options: IndexOptions,
     ) -> Result<IndexResult, OrchestratorError> {
+        let run_started = Instant::now();
+        let mut stages = IndexStageTimings::default();
+
         // Initialize relation builder if needed (offloaded to blocking pool)
         if options.build_relations {
             self.init_relation_builder_async(&options).await?;
@@ -534,6 +539,7 @@ impl IndexOrchestrator {
         let scan_options = self.build_scan_options(&options);
         let batch_size = self.batch_config.scan_batch_size;
 
+        let scan_started = Instant::now();
         let (file_indexer, recovered_start_batch, operation_id) = self
             .recover_file_indexer(&options.root_dir, batch_size, &scan_options)
             .await?;
@@ -571,6 +577,7 @@ impl IndexOrchestrator {
         start_batch = self
             .validate_recovered_hashes(&file_indexer, &operation_id, &options, start_batch)
             .await?;
+        stages.scan_ms = scan_started.elapsed().as_millis() as u64;
 
         let total_files = file_indexer.files().len();
         let total_batches = file_indexer.total_batches();
@@ -652,6 +659,7 @@ impl IndexOrchestrator {
         if recovered_start_batch > 0 {
             self.state_tracker.restore_operation(&operation_id).await;
         }
+        self.state_tracker.begin_deferred_persistence().await;
 
         // Determine output mode based on configured storage backends
         let output_mode = self.determine_output_mode(&options)?;
@@ -676,6 +684,7 @@ impl IndexOrchestrator {
             circuit_open: false,
             all_batches_completed: true,
             published_relation_epoch: None,
+            stages,
         };
 
         // Paths the scanner skipped with errors (unreadable directories,
@@ -709,6 +718,7 @@ impl IndexOrchestrator {
         // Rebuild against one complete symbol snapshot. Parsed relation inputs
         // are replayed from the operation-local spool so peak memory remains
         // bounded by one parsed file plus the final relation index.
+        let relation_started = Instant::now();
         if ctx.all_batches_completed && options.build_relations {
             self.build_and_publish_relations(&mut ctx).await?;
         }
@@ -716,10 +726,12 @@ impl IndexOrchestrator {
         // Finalize relation index and wire up export enhancements in the correct order.
         // This guarantees relation data is fully resolved before derived consumers use it.
         let total_relations = self.finalize_index();
+        ctx.stages.relation_ms = relation_started.elapsed().as_millis() as u64;
 
         // Export NL documents after the relation index is finalized so
         // relation enhancement is active. Only runs when every batch succeeded
         // (the accumulated chunks reflect complete data).
+        let export_started = Instant::now();
         if ctx.all_batches_completed
             && ctx
                 .export_spool
@@ -728,8 +740,12 @@ impl IndexOrchestrator {
         {
             self.export_nl_documents(&mut ctx).await?;
         }
+        ctx.stages.export_ms = export_started.elapsed().as_millis() as u64;
 
+        let manifest_started = Instant::now();
         self.finalize_manifest(&mut ctx).await?;
+        ctx.stages.manifest_ms = manifest_started.elapsed().as_millis() as u64;
+        self.state_tracker.end_deferred_persistence().await;
 
         // Create result with accumulated values
         // Any collected error (scanner skips, file failures, storage faults,
@@ -755,7 +771,8 @@ impl IndexOrchestrator {
             total_tokens: 0,
             circuit_open: ctx.circuit_open,
             outcome,
-            elapsed_ms: 0,
+            elapsed_ms: run_started.elapsed().as_millis() as u64,
+            stages: ctx.stages.clone(),
         };
 
         tracing::info!(
@@ -863,17 +880,6 @@ impl IndexOrchestrator {
             builder
         };
         Ok(builder)
-    }
-
-    /// Append one parsed file's symbols to the spool's project symbol table.
-    ///
-    /// This mutates only the spool-owned symbol table, never a builder graph,
-    /// so batch and recovery phases stay decoupled from the terminal builder.
-    fn append_spool_symbols(&self, spool: &RelationBuildSpool, parsed: &cce_types::ParsedFile) {
-        let mut symbol_builder =
-            cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
-        symbol_builder.with_metrics(self.relation_metrics());
-        symbol_builder.add_file_to_project(parsed, spool.project_symbols());
     }
 
     /// Relation metrics sink for spool symbol accumulation, if configured.
