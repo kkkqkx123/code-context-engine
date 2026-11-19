@@ -253,3 +253,5 @@
 仍需外部条件：真实插件执行成本、远程 Qdrant/Elasticsearch/PostgreSQL 后端、真实高亮路径、恢复失配输入；这些项目在离线 devs 环境无法执行，不把跳过结果当作通过。
 
 50,000 文件档位的结果显示，符号表构建已不再是主要瓶颈，剩余超线性成本集中在向量写入、BM25 写入和批次剩余开销；后续基准应围绕写入批次与提交策略展开。
+
+服务缺口拆分为部署与代码两条方案：部署按需启动见 `docs/dev/devs-service-benchmark-analysis.md`，代码接线与枚举化改造见 `docs/plan/service-benchmark-code-remediation.md`。
