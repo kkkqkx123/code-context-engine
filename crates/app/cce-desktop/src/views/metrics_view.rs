@@ -14,7 +14,7 @@ use gpui_kit::{
 
 use crate::components::{
     Cell, Column, Confirm, actions, choice_row, confirm_bar, data_grid, empty_state, failure_block,
-    field, field_group, hint, loading_row, notice, page_body, panel_header, stack, surface,
+    field, field_group, hint, loading_row, notice, page_body, panel_header, stack, surface, toast,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
@@ -166,10 +166,12 @@ impl MetricsView {
         cx.notify();
         let task = ops_service::cleanup_metrics(cx, client, None);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "metrics.cleaned"),
                 Err(_) => (false, "metrics.cleanFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             cx.notify();
         });
     }

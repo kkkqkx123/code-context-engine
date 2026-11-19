@@ -14,6 +14,8 @@ use std::sync::Mutex;
 
 use gpui_kit::{App, AppContext as _, Entity, Global, SharedString};
 
+use crate::i18n::{locale, t};
+
 /// Maximum entries kept; the oldest is dropped first.
 const CAPACITY: usize = 4;
 
@@ -105,6 +107,14 @@ pub fn push(text: impl Into<SharedString>, positive: bool, cx: &mut App) {
         state.push(text, positive);
         cx.notify();
     });
+}
+
+/// Report a catalogue key above every panel.
+///
+/// Action results are keyed the same way as the panel's inline notice, so a
+/// locale switch changes both without freezing translated text in a toast.
+pub fn push_key(key: &'static str, positive: bool, cx: &mut App) {
+    push(t(key, locale(cx)), positive, cx);
 }
 
 /// Drop every entry; called when the connection drops, because the results

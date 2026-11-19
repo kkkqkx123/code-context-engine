@@ -146,9 +146,13 @@ impl AppState {
 
     /// Replace the known project list. The current scope survives when the
     /// project is still present; otherwise the first project becomes active so
-    /// project-bound panels always have a usable scope.
+    /// project-bound panels always have a usable scope. A scope change drops
+    /// the epoch: it belongs to one project's relation snapshot.
     pub fn set_projects(&mut self, projects: Vec<ProjectEntry>, cx: &mut gpui_kit::Context<Self>) {
         let keep = next_active(self.active_project, &projects);
+        if keep != self.active_project {
+            self.epoch = None;
+        }
         self.active_project = keep;
         self.projects = projects;
         cx.notify();
@@ -167,12 +171,14 @@ impl AppState {
         self.projects.iter().find(|project| project.id == id)
     }
 
+    /// Select another project and reset the epoch compared by stale-result banners.
     pub fn select_project(&mut self, id: i64, cx: &mut gpui_kit::Context<Self>) {
         if self.active_project == Some(id) {
             return;
         }
         if self.projects.iter().any(|project| project.id == id) {
             self.active_project = Some(id);
+            self.epoch = None;
             cx.notify();
         }
     }

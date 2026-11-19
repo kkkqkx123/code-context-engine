@@ -11,7 +11,7 @@ use cce_api::models::{
     ProjectLlmOverviewResponse,
 };
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
@@ -24,7 +24,7 @@ use gpui_kit::{
 
 use crate::components::{
     Cell, Column, Confirm, Tone, actions, confirm_bar, data_grid, failure_block, field, hint,
-    loading_row, notice, page_body, panel_header, stack, stat_line, surface,
+    loading_row, notice, page_body, panel_header, stack, stat_line, surface, toast,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
@@ -50,6 +50,8 @@ pub struct ConfigView {
     profile: Entity<TextareaState>,
     chat: Entity<InputState>,
     rerank: Entity<InputState>,
+    /// Rerank override; `None` leaves the server value untouched.
+    rerank_enabled: Option<bool>,
     max_candidates: Entity<InputState>,
     test_service: Entity<InputState>,
     test_model: Entity<InputState>,
@@ -75,6 +77,7 @@ impl ConfigView {
             }),
             chat: input("config.chatPlaceholder", window, cx),
             rerank: input("config.rerankPlaceholder", window, cx),
+            rerank_enabled: None,
             max_candidates: input("config.maxCandidatesPlaceholder", window, cx),
             test_service: input("config.testServicePlaceholder", window, cx),
             test_model: input("config.testModelPlaceholder", window, cx),
@@ -130,10 +133,12 @@ impl ConfigView {
         cx.notify();
         let task = ops_service::config_reload(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "config.reloaded"),
                 Err(_) => (false, "config.reloadFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             cx.notify();
         });
     }
@@ -211,10 +216,12 @@ impl ConfigView {
             cce_api::models::ProjectConfigUpdateRequest { config },
         );
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "config.saved"),
                 Err(_) => (false, "config.saveFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             cx.notify();
         });
     }
@@ -239,7 +246,10 @@ impl ConfigView {
         let task = ops_service::llm_overview(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
             this.llm = match outcome {
-                Ok(value) => Load::Ready(value),
+                Ok(value) => {
+                    this.rerank_enabled = Some(value.rerank_enabled);
+                    Load::Ready(value)
+                }
                 Err(error) => Load::Failed(request::Failure::from_error(&error)),
             };
             cx.notify();
@@ -260,7 +270,7 @@ impl ConfigView {
         let request_data = cce_api::models::ProjectLlmUpdateRequest {
             default_chat: crate::services::optional_text(&self.chat.read(cx).value()),
             default_rerank: crate::services::optional_text(&self.rerank.read(cx).value()),
-            rerank_enabled: None,
+            rerank_enabled: self.rerank_enabled,
             rerank_max_candidates: self
                 .max_candidates
                 .read(cx)
@@ -272,10 +282,12 @@ impl ConfigView {
         };
         let task = ops_service::update_llm(cx, client, project_id, request_data);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "config.llmSaved"),
                 Err(_) => (false, "config.llmSaveFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_llm(cx);
             cx.notify();
         });
@@ -545,6 +557,24 @@ impl ConfigView {
                         Input::new(&self.max_candidates),
                         cx,
                     ))
+                    .child({
+                        let label = match self.rerank_enabled {
+                            Some(enabled) => format!(
+                                "{}: {}",
+                                t("config.rerankEnabled", locale),
+                                t(if enabled { "common.yes" } else { "common.no" }, locale)
+                            ),
+                            None => t("config.rerankDefault", locale).to_string(),
+                        };
+                        Button::new("config-rerank-enabled")
+                            .small()
+                            .selected(self.rerank_enabled.unwrap_or(false))
+                            .label(SharedString::from(label))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.rerank_enabled = Some(!this.rerank_enabled.unwrap_or(false));
+                                cx.notify();
+                            }))
+                    })
                     .child(
                         Button::new("config-llm-save")
                             .small()

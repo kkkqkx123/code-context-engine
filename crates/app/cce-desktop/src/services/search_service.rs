@@ -16,6 +16,13 @@ use crate::runtime;
 /// Query types the panel offers, in display order.
 pub const QUERY_TYPES: [&str; 3] = ["hybrid", "vector", "bm25"];
 
+/// Largest `limit` the retrieval handlers accept.
+///
+/// Paging has no wire offset, so the client over-fetches and slices. The
+/// ceiling has to match the server: asking for more is rejected outright,
+/// not clamped, and would make a reachable page look like a transport failure.
+pub const MAX_FETCH: usize = 100;
+
 /// One single-query retrieval request as the panel collects it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchInput {
@@ -92,6 +99,18 @@ pub fn page(items: &[SearchResultItem], total: usize, page: usize, page_size: us
         shown,
         total,
     }
+}
+
+/// Highest page the over-fetch budget can actually reach.
+///
+/// Both the reported total and the wire limit bound the answer: `total` may
+/// promise more rows than one request may ask for, and a network page past
+/// that bound would be empty even though the result set is not.
+pub fn max_page(total: usize, page_size: usize) -> usize {
+    let size = page_size.clamp(1, MAX_FETCH);
+    let reachable = MAX_FETCH / size;
+    let reported = total.div_ceil(size);
+    reported.min(reachable).saturating_sub(1)
 }
 
 pub fn run(
@@ -286,6 +305,18 @@ mod tests {
             }
         );
         assert!(!third.has_more(), "the last page stops at total");
+    }
+
+    #[test]
+    fn reachable_pages_stop_at_the_wire_limit() {
+        assert_eq!(max_page(300, 10), 9, "the tenth page is the last one");
+        assert_eq!(
+            max_page(300, 100),
+            0,
+            "a full-size page cannot be paginated"
+        );
+        assert_eq!(max_page(120, 200), 0, "one page can hold 100 rows");
+        assert_eq!(max_page(0, 10), 0);
     }
 
     #[test]

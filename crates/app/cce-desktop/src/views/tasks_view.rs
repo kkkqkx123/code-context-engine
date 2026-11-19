@@ -19,6 +19,7 @@ use gpui_kit::{
 use crate::components::{
     Cell, Column, Confirm, actions, confirm_bar, data_grid, empty_state, failure_block, field,
     field_group, hint, loading_row, notice, page_body, panel_header, stack, stat_line, surface,
+    toast,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
@@ -27,6 +28,9 @@ use crate::services::refresh;
 use crate::services::request::{self, Load};
 use crate::state::AppState;
 use crate::views::PanelKind;
+
+const CONFIRM_CLEAR_DEAD: usize = 0;
+const CONFIRM_CLEAR_QUEUE: usize = 1;
 
 pub struct TasksView {
     file: Entity<InputState>,
@@ -133,10 +137,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::retry_dead_letters(cx, client, project_id, Vec::new());
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.retried"),
                 Err(_) => (false, "tasks.retryFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_dead(cx);
             cx.notify();
         });
@@ -176,10 +182,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::retry_dead_letters(cx, client, project_id, files);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.retried"),
                 Err(_) => (false, "tasks.retryFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.selected.clear();
             this.load_dead(cx);
             cx.notify();
@@ -208,10 +216,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::acknowledge_dead_letters(cx, client, project_id, files);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.acknowledged"),
                 Err(_) => (false, "tasks.acknowledgeFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.selected.clear();
             this.load_dead(cx);
             cx.notify();
@@ -239,10 +249,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::acknowledge_dead_letter(cx, client, project_id, file);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.acknowledged"),
                 Err(_) => (false, "tasks.acknowledgeFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_dead(cx);
             cx.notify();
         });
@@ -259,10 +271,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::retry_queue_process(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.queueProcessed"),
                 Err(_) => (false, "tasks.processFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_queue(cx);
             cx.notify();
         });
@@ -279,10 +293,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::retry_queue_clear(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.queueCleared"),
                 Err(_) => (false, "tasks.clearFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_queue(cx);
             cx.notify();
         });
@@ -299,10 +315,12 @@ impl TasksView {
         cx.notify();
         let task = ops_service::retry_queue_dead_clear(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "tasks.queueCleared"),
                 Err(_) => (false, "tasks.clearFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_queue(cx);
             cx.notify();
         });
@@ -496,17 +514,25 @@ impl Render for TasksView {
             .child(
                 Button::new("tasks-clear-queue")
                     .small()
+                    .danger()
+                    .selected(self.confirm.is_armed(CONFIRM_CLEAR_QUEUE))
                     .label(t("tasks.clearQueue", locale))
-                    .on_click(cx.listener(|this, _, _, cx| this.clear_queue(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.confirm.request(CONFIRM_CLEAR_QUEUE) {
+                            this.clear_queue(cx);
+                        } else {
+                            cx.notify();
+                        }
+                    })),
             )
             .child(
                 Button::new("tasks-clear-dead")
                     .small()
                     .danger()
-                    .selected(self.confirm.is_armed(0))
+                    .selected(self.confirm.is_armed(CONFIRM_CLEAR_DEAD))
                     .label(t("tasks.clearDeadQueue", locale))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if this.confirm.request(0) {
+                        if this.confirm.request(CONFIRM_CLEAR_DEAD) {
                             this.clear_dead_queue(cx);
                         } else {
                             cx.notify();
@@ -514,8 +540,8 @@ impl Render for TasksView {
                     })),
             );
 
-        let confirm_block = if self.confirm.is_armed(0) {
-            Some(confirm_bar(
+        let confirm_block = match self.confirm.armed() {
+            Some(CONFIRM_CLEAR_DEAD) => Some(confirm_bar(
                 "confirm-dead-cleanup",
                 SharedString::from(t("tasks.confirmCleanup", locale)),
                 locale,
@@ -528,9 +554,22 @@ impl Render for TasksView {
                     this.confirm.cancel();
                     cx.notify();
                 }),
-            ))
-        } else {
-            None
+            )),
+            Some(CONFIRM_CLEAR_QUEUE) => Some(confirm_bar(
+                "confirm-queue-clear",
+                SharedString::from(t("tasks.confirmClearQueue", locale)),
+                locale,
+                cx,
+                cx.listener(|this, _, _, cx| {
+                    this.confirm.cancel();
+                    this.clear_queue(cx);
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.confirm.cancel();
+                    cx.notify();
+                }),
+            )),
+            _ => None,
         };
 
         let outcome_row = self

@@ -6,7 +6,7 @@
 
 use cce_api::models::{LogConfig, LogFileInfo, LogsResponse, UpdateLogConfigRequest};
 use gpui_kit::component::{
-    Disableable as _, Sizable as _,
+    Disableable as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
@@ -18,7 +18,7 @@ use gpui_kit::{
 
 use crate::components::{
     Cell, Column, Confirm, Tone, actions, confirm_bar, data_grid, failure_block, field,
-    field_group, hint, loading_row, page_body, panel_header, stack, stat_line, surface,
+    field_group, hint, loading_row, page_body, panel_header, stack, stat_line, surface, toast,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
@@ -45,6 +45,8 @@ pub struct LogsView {
     config: Load<LogConfig>,
     confirm: Confirm,
     pending_file: Option<String>,
+    /// Whether the shared scheduler may replay the last query.
+    auto_refresh: bool,
     outcome: Option<(bool, &'static str)>,
 }
 
@@ -72,6 +74,7 @@ impl LogsView {
             config: Load::idle(),
             confirm: Confirm::none(),
             pending_file: None,
+            auto_refresh: true,
             outcome: None,
         }
     }
@@ -155,10 +158,12 @@ impl LogsView {
         };
         let task = logs_service::update_config(cx, client, request_data);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "logs.configSaved"),
                 Err(_) => (false, "logs.configSaveFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_config(cx);
             cx.notify();
         });
@@ -175,10 +180,12 @@ impl LogsView {
         };
         let task = logs_service::delete_file(cx, client, name);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "logs.fileDeleted"),
                 Err(_) => (false, "logs.fileDeleteFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_files(cx);
             cx.notify();
         });
@@ -192,10 +199,12 @@ impl LogsView {
         };
         let task = logs_service::rotate(cx, client);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "logs.rotated"),
                 Err(_) => (false, "logs.rotateFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load_files(cx);
             cx.notify();
         });
@@ -203,7 +212,7 @@ impl LogsView {
 
     /// Re-run the last query on the next refresh tick.
     pub fn replay(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.entries, Load::Idle) {
+        if !self.auto_refresh || matches!(self.entries, Load::Idle) {
             return;
         }
         refresh::touch(PanelKind::Logs, cx);
@@ -310,9 +319,21 @@ impl LogsView {
                 ]
             })
             .collect();
-        surface(dense, cx)
-            .child(data_grid(PanelKind::Logs, &columns, &rows, dense, &mut *cx))
-            .into_any_element()
+        let mut block =
+            surface(dense, cx).child(data_grid(PanelKind::Logs, &columns, &rows, dense, &mut *cx));
+        if let Some(client) = ClientStore::client(cx) {
+            for file in files {
+                block = block.child(hint(
+                    SharedString::from(format!(
+                        "{} · {}",
+                        t("logs.downloadUrl", locale),
+                        client.log_file_download_url(&file.name)
+                    )),
+                    cx,
+                ));
+            }
+        }
+        block.into_any_element()
     }
 
     fn render_config(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -466,7 +487,32 @@ impl Render for LogsView {
                     ))
                     .child(field(t("logs.query", locale), Input::new(&self.query), cx)),
             )
-            .child(hint(t("logs.autoRefreshHint", locale), cx));
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("logs-auto-refresh")
+                            .small()
+                            .selected(self.auto_refresh)
+                            .label(t("logs.autoRefresh", locale))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.auto_refresh = !this.auto_refresh;
+                                cx.notify();
+                            })),
+                    )
+                    .child(hint(
+                        t(
+                            if self.auto_refresh {
+                                "logs.autoRefreshHint"
+                            } else {
+                                "logs.autoRefreshOff"
+                            },
+                            locale,
+                        ),
+                        cx,
+                    )),
+            );
 
         let file_actions = if self.files.ready().is_some() {
             let mut row = h_flex().gap_2().flex_wrap();

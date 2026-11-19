@@ -292,8 +292,8 @@ impl MainWindow {
         }
         let locale = locale(cx);
         let theme = cx.theme();
-        let dock = self.dock_area.clone();
         let weak = cx.entity().downgrade();
+        let cancel_weak = weak.clone();
         let items = PanelKind::ALL.into_iter().map(|kind| {
             CommandItem::new()
                 .label(kind.label(locale))
@@ -307,17 +307,11 @@ impl MainWindow {
             )
             .placeholder(t("command.placeholder", locale))
             .max_h(px(420.))
-            .on_confirm(move |index, window, cx| {
+            .on_confirm(move |index, _window, cx| {
                 for (position, kind) in PanelKind::ALL.into_iter().enumerate() {
                     if index.eq_row(IndexPath::new(position)) {
-                        if let Some(entry) = dock_layout::panel(kind, cx) {
-                            let dock = dock.clone();
-                            dock.update(cx, |dock, cx| {
-                                dock.select_panel(entry.id, window, cx);
-                            });
-                        }
-                        weak.update(cx, |this, cx| {
-                            this.selected = kind;
+                        weak.update_in(cx, |this, window, cx| {
+                            this.open(kind, window, cx);
                             this.palette_open = false;
                             cx.notify();
                         })
@@ -325,6 +319,14 @@ impl MainWindow {
                         break;
                     }
                 }
+            })
+            .on_cancel(move |_, cx| {
+                cancel_weak
+                    .update(cx, |this, cx| {
+                        this.palette_open = false;
+                        cx.notify();
+                    })
+                    .ok();
             });
         div()
             .absolute()
@@ -401,8 +403,12 @@ impl MainWindow {
                             .ghost()
                             .small()
                             .label(t("command.open", locale))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 this.palette_open = !this.palette_open;
+                                if this.palette_open {
+                                    this.palette
+                                        .update(cx, |palette, cx| palette.focus(window, cx));
+                                }
                                 cx.notify();
                             })),
                     )

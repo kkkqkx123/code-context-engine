@@ -670,31 +670,6 @@ pub async fn function_detail(
     Ok(detail)
 }
 
-/// Resolved relations whose external classification matches `category`.
-pub async fn relations_by_classification(
-    state: &SharedContext,
-    project_id: i64,
-    category: ClassificationCategory,
-    limit: usize,
-) -> Result<Vec<ResolvedRelation>, RelationServiceError> {
-    let access = relation_access(state, project_id).await?;
-    let probe = category.into_probe();
-    let relations = access
-        .snapshot
-        .index
-        .get_relations_by_classification(&probe);
-    let matches = |external: Option<&ExternalCallType>| {
-        external
-            .map(|value| std::mem::discriminant(value) == std::mem::discriminant(&probe))
-            .unwrap_or(false)
-    };
-    Ok(relations
-        .into_iter()
-        .filter(|relation| matches(relation.external_type.as_ref()))
-        .take(limit)
-        .collect())
-}
-
 /// Typed detail rows of one external-call classification.
 ///
 /// The HTTP surface serves this projection instead of dumping the indexer's

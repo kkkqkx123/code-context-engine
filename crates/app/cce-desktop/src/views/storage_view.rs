@@ -213,6 +213,7 @@ impl StorageView {
             match outcome {
                 Ok(response) => {
                     this.outcome = Some((true, "storage.cleared"));
+                    toast::push_key("storage.cleared", true, cx);
                     log::info!(
                         "cleared storage for project {project_id}: {}",
                         response.message
@@ -222,6 +223,7 @@ impl StorageView {
                 Err(err) => {
                     log::warn!("clearing storage failed: {err}");
                     this.outcome = Some((false, "storage.clearFailed"));
+                    toast::push_key("storage.clearFailed", false, cx);
                 }
             }
             cx.notify();
@@ -249,10 +251,12 @@ impl StorageView {
         cx.notify();
         let task = storage_service::delete_file(cx, client, project_id, file);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "storage.deleted"),
                 Err(_) => (false, "storage.deleteFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             cx.notify();
         });
     }
@@ -278,10 +282,12 @@ impl StorageView {
         cx.notify();
         let task = storage_service::delete_entity(cx, client, project_id, entity_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "storage.deleted"),
                 Err(_) => (false, "storage.deleteFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             cx.notify();
         });
     }
@@ -311,10 +317,12 @@ impl StorageView {
         cx.notify();
         let task = storage_service::batch_delete(cx, client, project_id, files, entities);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "storage.deleted"),
                 Err(_) => (false, "storage.deleteFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             cx.notify();
         });
     }

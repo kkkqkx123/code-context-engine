@@ -72,7 +72,7 @@
 | 清理 | 断开连接时清空（`connection_service::disconnect`），避免提示描述的是已断开的服务端 |
 | 单测 | 3 例：id 递增、队列有界、按 id 删除 |
 
-刻意不做自动消失：会自己消失的提示，正好是用户没读完的那条。
+刻意不做自动消失：会自己消失的提示，正好是用户没读完的那条。写入、删除、配置、日志与任务动作的结果同时进入队列；输入校验错误仍留在面板内，避免刷屏。
 
 ### 2.4 P2-1 统一刷新（RefreshScheduler）
 
@@ -126,7 +126,7 @@ OpenAPI 快照不受影响：没有 `schemas(...)` 显式清单，`SymbolCandida
 | 项 | 内容 |
 |---|---|
 | 目标 | "共 300 条"可达；筛选面接近前端 |
-| 分页 | `search_service::page`（`:87`）与 `Page`（`:65`）；视图侧 `page`/`fetch_size`/`go_to_page`。因为 wire 没有 offset，第 N 页按 `limit × (N+1)` 取回再切片，上限 200 |
+| 分页 | `search_service::page` 与 `Page`；视图侧 `page`/`fetch_size`/`go_to_page`。因为 wire 没有 offset，第 N 页按 `limit × (N+1)` 取回再切片；上限对齐服务端的 100，`max_page` 同时按总数和取数预算封顶，越界页在按钮层禁用 |
 | 是否还有下一页 | 用 `total` 判断，不用已取行数——服务端截断 `limit` 时后者会误报"没有更多" |
 | 筛选 | 补齐 `min_score`、`include_patterns`、`exclude_patterns`、`rerank`；单一检索与聚合检索共用同一组字段（`AggregatedInput`），避免两条路径漂移 |
 | 单测 | 3 例：翻页切片正确、越界页为空、`total` 决定末页 |

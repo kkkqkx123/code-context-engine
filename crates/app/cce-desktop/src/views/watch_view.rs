@@ -14,7 +14,7 @@ use gpui_kit::{
 
 use crate::components::{
     Cell, Column, actions, data_grid, failure_block, field, field_group, hint, loading_row, notice,
-    page_body, panel_header, stack, stat_line, surface,
+    page_body, panel_header, stack, stat_line, surface, toast,
 };
 use crate::connection::ClientStore;
 use crate::i18n::{locale, t};
@@ -111,10 +111,12 @@ impl WatchView {
         cx.notify();
         let task = watch_service::start(cx, client, project_id, path, extensions);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "watch.started"),
                 Err(_) => (false, "watch.startFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load(cx);
             cx.notify();
         });
@@ -135,10 +137,12 @@ impl WatchView {
         cx.notify();
         let task = watch_service::stop(cx, client, project_id);
         request::spawn_into(cx, task, |this, outcome, cx| {
-            this.outcome = Some(match outcome {
+            let result = match outcome {
                 Ok(_) => (true, "watch.stopped"),
                 Err(_) => (false, "watch.stopFailed"),
-            });
+            };
+            this.outcome = Some(result);
+            toast::push_key(result.1, result.0, cx);
             this.load(cx);
             cx.notify();
         });

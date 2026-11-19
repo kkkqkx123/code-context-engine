@@ -70,11 +70,31 @@ pub fn relation_error(error: RelationServiceError) -> ErrorResponse {
 /// Map an API error code to an HTTP status code.
 fn status_for_code(code: &str) -> StatusCode {
     match code {
-        error_codes::INVALID_REQUEST | error_codes::INVALID_INPUT => StatusCode::BAD_REQUEST,
+        error_codes::INVALID_REQUEST
+        | error_codes::INVALID_INPUT
+        | error_codes::AMBIGUOUS_SYMBOL => StatusCode::BAD_REQUEST,
         error_codes::ENTITY_NOT_FOUND => StatusCode::NOT_FOUND,
         error_codes::SERVICE_UNAVAILABLE => StatusCode::SERVICE_UNAVAILABLE,
         error_codes::CONFLICT => StatusCode::CONFLICT,
         error_codes::NOT_IMPLEMENTED => StatusCode::NOT_IMPLEMENTED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ambiguous_seed_is_a_client_rejection() {
+        let response = relation_error(RelationServiceError::AmbiguousSeed {
+            seed: "run".to_string(),
+            candidates: Vec::new(),
+        });
+        assert_eq!(response.error.code, error_codes::AMBIGUOUS_SYMBOL);
+        assert_eq!(
+            status_for_code(&response.error.code),
+            StatusCode::BAD_REQUEST
+        );
     }
 }

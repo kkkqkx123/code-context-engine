@@ -6,10 +6,10 @@
 //! edges the server would have returned.
 
 use cce_api::models::{
-    ComponentsQuery, CyclesQuery, EgoQuery, ExportQuery, GraphComponentsResponse,
-    GraphCyclesResponse, GraphImpactResponse, GraphModuleResponse, GraphPathQuery,
-    GraphPathResponse, GraphStructuralResponse, GraphSubgraphResponse, ImpactQuery, ModuleQuery,
-    StructuralQuery, SubgraphQuery,
+    ComponentsQuery, CyclesQuery, EgoQuery, EntityImpactQuery, ExportQuery,
+    GraphComponentsResponse, GraphCyclesResponse, GraphEntityImpactResponse, GraphImpactResponse,
+    GraphModuleResponse, GraphPathQuery, GraphPathResponse, GraphStructuralResponse,
+    GraphSubgraphResponse, ImpactQuery, ModuleQuery, StructuralQuery, SubgraphQuery,
 };
 use cce_client::{Client, ClientError};
 use gpui_kit::{App, Task};
@@ -144,6 +144,28 @@ pub fn impact(
 ) -> Task<Result<GraphImpactResponse, ClientError>> {
     runtime::spawn(cx, async move {
         client.graph_impact(project_id, &ImpactQuery { file }).await
+    })
+}
+
+/// Dependents of one stable symbol, at entity granularity.
+pub fn entity_impact(
+    cx: &App,
+    client: Client,
+    project_id: i64,
+    entity_id: String,
+    max_depth: usize,
+) -> Task<Result<GraphEntityImpactResponse, ClientError>> {
+    runtime::spawn(cx, async move {
+        client
+            .graph_entity_impact(
+                project_id,
+                &EntityImpactQuery {
+                    entity_id,
+                    max_depth,
+                    scope: "entity".to_string(),
+                },
+            )
+            .await
     })
 }
 

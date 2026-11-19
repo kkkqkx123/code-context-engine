@@ -19,7 +19,7 @@ use gpui_kit::{
 
 use crate::components::{
     Cell, Column, Tone, actions, data_grid, empty_state, failure_block, field, field_group, hint,
-    loading_row, notice, page_body, panel_header, surface,
+    loading_row, notice, page_body, panel_header, surface, toast,
 };
 use crate::components::{Confirm, confirm_bar};
 use crate::connection::ClientStore;
@@ -129,6 +129,7 @@ impl ProjectsView {
             match outcome {
                 Ok(_) => {
                     this.outcome = Some((true, "projects.created"));
+                    toast::push_key("projects.created", true, cx);
                     this.refresh(cx);
                 }
                 Err(error) => this.projects = Load::settle(Err(error)),
@@ -157,6 +158,7 @@ impl ProjectsView {
             match outcome {
                 Ok(_) => {
                     this.outcome = Some((true, "projects.deleted"));
+                    toast::push_key("projects.deleted", true, cx);
                     this.config = Load::idle();
                     this.refresh(cx);
                 }
@@ -205,6 +207,7 @@ impl ProjectsView {
             match outcome {
                 Ok(_) => {
                     this.outcome = Some((true, "projects.updated"));
+                    toast::push_key("projects.updated", true, cx);
                     this.refresh(cx);
                     this.load_config(cx);
                 }
@@ -234,6 +237,7 @@ impl ProjectsView {
             match outcome {
                 Ok(response) => {
                     this.outcome = Some((true, "projects.indexDone"));
+                    toast::push_key("projects.indexDone", true, cx);
                     log::info!(
                         "project {project_id} indexed {} files / {} entities",
                         response.indexed_files,
@@ -284,7 +288,10 @@ impl ProjectsView {
         request::spawn_into(cx, task, |this, outcome, cx| {
             this.busy = false;
             match outcome {
-                Ok(_) => this.outcome = Some((true, "projects.reloaded")),
+                Ok(_) => {
+                    this.outcome = Some((true, "projects.reloaded"));
+                    toast::push_key("projects.reloaded", true, cx);
+                }
                 Err(error) => this.config = Load::settle(Err(error)),
             }
             cx.notify();

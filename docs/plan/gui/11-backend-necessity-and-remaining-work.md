@@ -55,10 +55,10 @@ LLM 概览/更新/测试、检索的摘要字段、画布导出所需的全部�
 
 在 `cce-api` 增加一个**投影模型** `ClassificationRelation`，只保留明细该显示的字段：
 
-- `caller_id` / `caller_name`（来源）
+- `caller_id` / `caller_stable_id` / `caller_name` / `caller_file_path`（来源与声明位置）
 - `callee_id` / `callee_name`（目标）
-- `relation_type` / `external_type` / `is_external`
-- `file_path` / `start_line`（调用点，来自 `caller` 的实体定位或 `span`）
+- `relation_type` / `classification` / `external_target` / `is_external`
+- `call_row` / `overload_signature` / `call_frequency`（调用点与调用形态）
 
 `cce-api` 不依赖 `cce-types`（其 `Cargo.toml` 只有 serde/utoipa），所以映射必须写在服务端
 handler：把 `ResolvedRelation` 显式投影成新模型，而不是让 serde 猜。这样内部类型演进不会
@@ -101,8 +101,9 @@ handler：把 `ResolvedRelation` 显式投影成新模型，而不是让 serde �
 - **项目运行时配置**：`GET` 拿到 `config_version` 与 JSON 文档，文本编辑后 `PUT`；
   写入前二次确认，因为这是会被服务端热应用的写操作。
 - **LLM**：`GET overview` 展示掩码后的 provider/model 状态；`default_chat`、
-  `default_rerank`、`rerank_enabled`、`rerank_max_candidates` 可改；对某个 model_key
-  发 `POST test` 做连通性探测。密钥永远来自响应里的 `has_api_keys` 等标志，不在桌面端出现。
+  `default_rerank`、`rerank_enabled`、`rerank_max_candidates` 可改；未加载概览时 rerank 开关
+  发送空值，让服务端保持原值。对某个 model_key 发 `POST test` 做连通性探测。密钥永远来自响应里的
+  `has_api_keys` 等标志，不在桌面端出现。
 
 服务层包装放在 `ops_service.rs`（配置类命令已在此），不新建服务。项目 id 取
 `AppState::active_project_id()`，无项目时按钮禁用并给出提示。

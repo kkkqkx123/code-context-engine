@@ -909,7 +909,7 @@ mod tests {
         .expect("active_epoch meta should be corrupted");
         let result = ProjectIndexManifestRepository::generation_gc_plan(&conn, 1, 2, i64::MAX);
         assert!(
-            matches!(result, Err(StorageError::Query(_))),
+            matches!(result, Err(StorageError::Validation(_))),
             "corrupt active_epoch meta must fail GC instead of protecting nothing"
         );
     }
@@ -938,7 +938,7 @@ mod tests {
         .expect("active_relation_epoch meta should be corrupted");
         let result = ProjectIndexManifestRepository::generation_gc_plan(&conn, 1, 2, i64::MAX);
         assert!(
-            matches!(result, Err(StorageError::Query(_))),
+            matches!(result, Err(StorageError::Validation(_))),
             "corrupt active_relation_epoch meta must fail GC instead of skipping chain protection"
         );
     }

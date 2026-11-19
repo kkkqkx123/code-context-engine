@@ -290,7 +290,6 @@ pub fn acknowledge_dead_letter(
     })
 }
 
-/// Time window for a metrics history query: the last `hours` hours up to now.
 /// Acknowledge several dead-letter files in one pass.
 ///
 /// The wire takes one file per call, so the batch is a sequential loop here

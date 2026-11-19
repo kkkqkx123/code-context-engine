@@ -5,8 +5,8 @@
 //! delivery number guards against applying the same hit twice.
 
 use cce_api::models::{
-    GraphComponentsResponse, GraphCyclesResponse, GraphImpactResponse, GraphModuleResponse,
-    GraphPathResponse, GraphStructuralResponse, GraphSubgraphResponse,
+    GraphComponentsResponse, GraphCyclesResponse, GraphEntityImpactResponse, GraphImpactResponse,
+    GraphModuleResponse, GraphPathResponse, GraphStructuralResponse, GraphSubgraphResponse,
 };
 use gpui_kit::component::{
     ActiveTheme as _, Selectable as _, Sizable as _,
@@ -45,6 +45,7 @@ enum GraphAnswer {
     Components(GraphComponentsResponse),
     Cycles(GraphCyclesResponse),
     Impact(GraphImpactResponse),
+    EntityImpact(GraphEntityImpactResponse),
     Structural(GraphStructuralResponse),
     Module(GraphModuleResponse),
 }
@@ -59,6 +60,7 @@ impl GraphAnswer {
             Self::Components(response) => Some(response.relation_epoch),
             Self::Cycles(response) => Some(response.relation_epoch),
             Self::Impact(response) => Some(response.relation_epoch),
+            Self::EntityImpact(response) => Some(response.relation_epoch),
             Self::Structural(response) => Some(response.relation_epoch),
             Self::Module(response) => Some(response.relation_epoch),
         }
@@ -66,7 +68,7 @@ impl GraphAnswer {
 }
 
 /// Operation tabs, in display order.
-const TABS: [&str; 9] = [
+const TABS: [&str; 10] = [
     "graph.tab.ego",
     "graph.tab.path",
     "graph.tab.subgraph",
@@ -75,6 +77,7 @@ const TABS: [&str; 9] = [
     "graph.tab.impact",
     "graph.tab.module",
     "graph.tab.structural",
+    "graph.tab.entityImpact",
     "graph.tab.export",
 ];
 
@@ -247,7 +250,7 @@ impl GraphView {
         let structural = STRUCTURAL_KINDS[self.structural.min(STRUCTURAL_KINDS.len() - 1)];
         let tab = self.tab;
 
-        if matches!(tab, 0 | 1 | 5 | 7) && seed.is_empty() {
+        if matches!(tab, 0 | 1 | 5 | 7 | 8) && seed.is_empty() {
             self.result = Load::Failed(request::Failure {
                 key: "graph.seedRequired",
                 detail: SharedString::default(),
@@ -314,6 +317,9 @@ impl GraphView {
                 seed,
                 structural.to_string(),
             )),
+            8 => Erased::EntityImpact(graph_service::entity_impact(
+                cx, client, project_id, seed, depth,
+            )),
             _ => Erased::Subgraph(graph_service::export(cx, client, project_id, limit)),
         };
         self.result.begin();
@@ -325,6 +331,7 @@ impl GraphView {
             Erased::Components(task) => self.await_into(cx, task, GraphAnswer::Components),
             Erased::Cycles(task) => self.await_into(cx, task, GraphAnswer::Cycles),
             Erased::Impact(task) => self.await_into(cx, task, GraphAnswer::Impact),
+            Erased::EntityImpact(task) => self.await_into(cx, task, GraphAnswer::EntityImpact),
             Erased::Module(task) => self.await_into(cx, task, GraphAnswer::Module),
             Erased::Structural(task) => self.await_into(cx, task, GraphAnswer::Structural),
         }
@@ -508,34 +515,24 @@ impl GraphView {
                     cx,
                 )
             }
-            GraphAnswer::Impact(response) => {
-                let columns = [
-                    Column::grow(t("graph.colDependent", locale)),
-                    Column::fixed(t("graph.colHop", locale), 80.0),
-                ];
-                let mut rows: Vec<Vec<Cell>> = Vec::new();
-                for dependent in &response.direct_dependents {
-                    rows.push(vec![
-                        Cell::new(SharedString::from(dependent.clone())),
-                        Cell::toned(SharedString::from("1"), Tone::Warning),
-                    ]);
-                }
-                for dependent in &response.indirect_dependents {
-                    rows.push(vec![
-                        Cell::new(SharedString::from(dependent.clone())),
-                        Cell::muted(SharedString::from("2+")),
-                    ]);
-                }
-                self.grid_block(
-                    &columns,
-                    &rows,
-                    Some(format!(
-                        "{} · impact {:.2}",
-                        response.changed_file, response.impact_score
-                    )),
-                    cx,
-                )
-            }
+            GraphAnswer::Impact(response) => self.impact_block(
+                &response.direct_dependents,
+                &response.indirect_dependents,
+                format!(
+                    "{} · impact {:.2}",
+                    response.changed_file, response.impact_score
+                ),
+                cx,
+            ),
+            GraphAnswer::EntityImpact(response) => self.impact_block(
+                &response.direct_dependents,
+                &response.indirect_dependents,
+                format!(
+                    "{} · impact {:.2}",
+                    response.changed_entity, response.impact_score
+                ),
+                cx,
+            ),
             GraphAnswer::Module(response) => {
                 let columns = [
                     Column::fixed(t("graph.colRelation", locale), 220.0),
@@ -620,6 +617,35 @@ impl GraphView {
         block
             .child(data_grid(PanelKind::Graph, columns, rows, dense, &mut *cx))
             .into_any_element()
+    }
+
+    /// Shared rendering for file and entity impact answers.
+    fn impact_block(
+        &self,
+        direct: &[String],
+        indirect: &[String],
+        caption: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let locale = locale(cx);
+        let columns = [
+            Column::grow(t("graph.colDependent", locale)),
+            Column::fixed(t("graph.colHop", locale), 80.0),
+        ];
+        let mut rows: Vec<Vec<Cell>> = Vec::new();
+        for dependent in direct {
+            rows.push(vec![
+                Cell::new(SharedString::from(dependent.clone())),
+                Cell::toned(SharedString::from("1"), Tone::Warning),
+            ]);
+        }
+        for dependent in indirect {
+            rows.push(vec![
+                Cell::new(SharedString::from(dependent.clone())),
+                Cell::muted(SharedString::from("2+")),
+            ]);
+        }
+        self.grid_block(&columns, &rows, Some(caption), cx)
     }
 
     fn render_subgraph(
@@ -974,6 +1000,7 @@ enum Erased {
     Components(gpui_kit::Task<Result<GraphComponentsResponse, cce_client::ClientError>>),
     Cycles(gpui_kit::Task<Result<GraphCyclesResponse, cce_client::ClientError>>),
     Impact(gpui_kit::Task<Result<GraphImpactResponse, cce_client::ClientError>>),
+    EntityImpact(gpui_kit::Task<Result<GraphEntityImpactResponse, cce_client::ClientError>>),
     Module(gpui_kit::Task<Result<GraphModuleResponse, cce_client::ClientError>>),
     Structural(gpui_kit::Task<Result<GraphStructuralResponse, cce_client::ClientError>>),
 }

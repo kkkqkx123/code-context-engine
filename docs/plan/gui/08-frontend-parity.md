@@ -78,7 +78,7 @@
 
 | 操作 | 能力 | 前端证据 |
 |---|---|---|
-| `graph_entity_impact` | 实体级影响分析 | `frontend/src/lib/api/graph.ts:219` |
+| `graph_entity_impact` | 实体级影响分析 | `frontend/src/lib/api/graph.ts:219`；桌面端已补实体影响页签，见 `12` |
 | `classification_relations` | 分类关系明细 | `frontend/src/lib/stores/entities.svelte.ts:212` |
 | `fold_batch` / `compress_batch` | 批量折叠/压缩 | `frontend/src/lib/api/tools.ts:79,96` |
 | `get_project` / `update_project` / `update_project_config` | 项目基线读写 | `frontend/src/routes/config/+page.svelte:127,341,370` |

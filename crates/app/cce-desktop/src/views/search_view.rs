@@ -37,9 +37,6 @@ const QUERY_TYPE_KEYS: [&str; 3] = [
 
 /// Default page size for a retrieval request.
 const DEFAULT_LIMIT: usize = 10;
-/// Ceiling for the over-fetch a deep page needs, so page 30 cannot ask the
-/// server for 300 rows on one call.
-const MAX_FETCH: usize = 200;
 
 pub struct SearchView {
     query: Entity<InputState>,
@@ -117,17 +114,21 @@ impl SearchView {
             .unwrap_or(DEFAULT_LIMIT)
     }
 
-    /// Rows wanted per page.
+    /// Rows wanted per page, capped by the wire request limit.
     fn page_size(&self, cx: &Context<Self>) -> usize {
-        self.limit_value(cx)
+        self.limit_value(cx).min(search_service::MAX_FETCH)
     }
 
     /// Rows to request for the current page: the wire request has no offset,
     /// so a deep page over-fetches and is sliced client-side.
     fn fetch_size(&self, cx: &Context<Self>) -> usize {
-        self.page_size(cx)
-            .saturating_mul(self.page + 1)
-            .min(MAX_FETCH)
+        self.page_size(cx).saturating_mul(self.page + 1)
+    }
+
+    /// Highest page this answer can reach within the wire limit.
+    fn max_page(&self, cx: &Context<Self>) -> usize {
+        let total = self.result.ready().map_or(0, |response| response.total);
+        search_service::max_page(total, self.page_size(cx))
     }
 
     fn min_score_value(&self, cx: &Context<Self>) -> Option<f32> {
@@ -141,6 +142,7 @@ impl SearchView {
     }
 
     fn go_to_page(&mut self, page: usize, cx: &mut Context<Self>) {
+        let page = page.min(self.max_page(cx));
         if page == self.page {
             return;
         }
@@ -164,6 +166,8 @@ impl SearchView {
             return;
         };
 
+        let max_page = self.max_page(cx);
+        self.page = self.page.min(max_page);
         let limit = self.fetch_size(cx);
         let prefix = crate::services::optional_text(&self.prefix.read(cx).value());
         let aggregated = self.mode == 1;
@@ -657,7 +661,7 @@ impl Render for SearchView {
                             .small()
                             .ghost()
                             .label(t("common.next", locale))
-                            .disabled(!page.has_more())
+                            .disabled(!page.has_more() || self.page >= self.max_page(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let page = this.page + 1;
                                 this.go_to_page(page, cx);

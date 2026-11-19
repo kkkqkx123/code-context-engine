@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::runtime::RelationRuntime;
 use cce_config::{AppConfig, Settings};
+use cce_types::error::ConfigError;
 
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{
@@ -344,7 +345,18 @@ fn seed_settings(config: &AppConfig) -> Result<(), EngineError> {
         );
         return Ok(());
     }
-    Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))
+    match Settings::init(config.clone()) {
+        Ok(()) => Ok(()),
+        // Another builder may win the race between the check above and init;
+        // the global is then already seeded, which is the same tolerated case.
+        Err(ConfigError::AlreadyInitialized) => {
+            tracing::warn!(
+                "Settings initialized concurrently; the supplied config applies to this engine only"
+            );
+            Ok(())
+        }
+        Err(e) => Err(EngineError::Config(e.to_string())),
+    }
 }
 
 impl Default for EngineBuilder {
