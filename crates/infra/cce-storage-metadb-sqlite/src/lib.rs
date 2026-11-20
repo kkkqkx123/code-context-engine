@@ -11,7 +11,6 @@ pub mod contract;
 pub mod helpers;
 pub mod metrics;
 pub mod migration;
-pub mod project_registry;
 pub mod repo;
 pub mod schema;
 pub mod snapshot_store;

@@ -177,10 +177,7 @@ impl RelationUpdateProcessor {
         // Reuse the process-internal materialized base + delta chain instead
         // of reloading the full graph from SQLite; a config reload typically
         // happens right after a hot update that already populated the cache.
-        let view = match self
-            .base_cache
-            .get_or_load(store.as_ref(), project_id, active_epoch)
-        {
+        let view = match self.base_cache.get_or_load(store, project_id, active_epoch) {
             Ok(view) => view,
             Err(error) => {
                 return Err(HotUpdateError::relation(error.to_string()));
@@ -264,7 +261,7 @@ impl RelationUpdateProcessor {
         }
         let view = self
             .base_cache
-            .get_or_load(store.as_ref(), project_id, active_epoch)
+            .get_or_load(store, project_id, active_epoch)
             .map_err(|e| HotUpdateError::relation(e.to_string()))?;
         let project_root = self.project_root(store).await?;
         // Build set of extension_files for quick lookup

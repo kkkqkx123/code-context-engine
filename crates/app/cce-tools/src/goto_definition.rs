@@ -16,14 +16,13 @@ use crate::symbol_lookup_types::{
     DefinitionCode, DefinitionLocation, GotoDefinitionRequest, GotoDefinitionResponse,
     SymbolLookupError,
 };
-use cce_storage_metadb_sqlite::SqliteClient;
 
 /// Goto definition tool
 pub struct GotoDefinitionTool {
     /// Published snapshot index (shared, read-only)
     index: Arc<LayeredSnapshotIndex>,
     /// Relation backend for chunk content lookup (local branch only)
-    metadata_store: Option<Arc<SqliteClient>>,
+    metadata_store: Option<crate::store::ToolMetadataStore>,
     /// Project ID for relation queries
     project_id: i64,
 }
@@ -42,7 +41,7 @@ impl GotoDefinitionTool {
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+    pub fn with_metadata_store(mut self, store: crate::store::ToolMetadataStore) -> Self {
         self.metadata_store = Some(store);
         self
     }

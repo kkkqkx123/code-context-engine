@@ -134,7 +134,7 @@ impl super::CodeContextEngine {
 
         runtime.set_updating().await;
         match cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            store.as_ref(),
+            &store,
             project_id,
             active_epoch,
         ) {
@@ -234,7 +234,7 @@ impl super::CodeContextEngine {
             return Err(EngineError::Config(message.to_string()));
         }
         let index = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            store.as_ref(),
+            &store,
             project_id,
             active_epoch,
         )

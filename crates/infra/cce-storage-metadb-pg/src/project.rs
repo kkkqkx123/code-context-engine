@@ -1,11 +1,11 @@
 use cce_types::StorageError;
 
 use cce_storage_common::metadb::{
-    GenerationOverride, OverrideDisposition, ProjectIndexManifest, ProjectIndexManifestState,
-    ProjectRecord,
+    GenerationOverride, NewProjectRecord, OverrideDisposition, ProjectIndexManifest,
+    ProjectIndexManifestState, ProjectRecord, ProjectUpdateRecord,
 };
 
-use crate::error::classify_pg;
+use crate::error::{classify_pg, classify_project_insert};
 use crate::rows::{MANIFEST_COLUMNS, PROJECT_COLUMNS, manifest_from_row, project_from_row};
 
 use super::PostgresClient;
@@ -60,6 +60,169 @@ impl PostgresClient {
         .await
     }
 
+    pub(crate) async fn projects_all(&self) -> Result<Vec<ProjectRecord>, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let rows = client
+                .query(
+                    &format!(
+                        "SELECT {PROJECT_COLUMNS} FROM projects ORDER BY created_at DESC, id DESC"
+                    ),
+                    &[],
+                )
+                .await
+                .map_err(classify_pg)?;
+            rows.iter().map(project_from_row).collect()
+        })
+        .await
+    }
+
+    pub(crate) async fn project_insert(
+        &self,
+        record: &NewProjectRecord,
+    ) -> Result<i64, StorageError> {
+        let record = record.clone();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let now = chrono::Utc::now().timestamp();
+            client
+                .query_one(
+                    "INSERT INTO projects (name, root_path, config_file_path, language, \
+                     profile_json, profile_version, created_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, $5, 0, $6, $6) RETURNING id",
+                    &[
+                        &record.name,
+                        &record.root_path,
+                        &record
+                            .config_file_path
+                            .clone()
+                            .unwrap_or_else(|| ".cce/config.json".to_string()),
+                        &record.language,
+                        &record
+                            .profile_json
+                            .clone()
+                            .unwrap_or_else(|| "{}".to_string()),
+                        &now,
+                    ],
+                )
+                .await
+                .map_err(classify_project_insert)?
+                .try_get(0)
+                .map_err(classify_pg)
+        })
+        .await
+    }
+
+    pub(crate) async fn project_path_exists(&self, root_path: &str) -> Result<bool, StorageError> {
+        let root_path = root_path.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let exists: bool = client
+                .query_one(
+                    "SELECT EXISTS(SELECT 1 FROM projects WHERE root_path = $1)",
+                    &[&root_path],
+                )
+                .await
+                .map_err(classify_pg)?
+                .get(0);
+            Ok(exists)
+        })
+        .await
+    }
+
+    pub(crate) async fn project_update(
+        &self,
+        project_id: i64,
+        updates: &ProjectUpdateRecord,
+    ) -> Result<(), StorageError> {
+        let updates = updates.clone();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let now = chrono::Utc::now().timestamp();
+            client
+                .execute(
+                    "UPDATE projects SET \
+                        name = COALESCE($1, name), \
+                        root_path = COALESCE($2, root_path), \
+                        config_file_path = COALESCE($3, config_file_path), \
+                        language = COALESCE($4, language), \
+                        profile_json = COALESCE($5, profile_json), \
+                        profile_version = CASE WHEN $5 IS NOT NULL \
+                            THEN profile_version + 1 ELSE profile_version END, \
+                        last_indexed = COALESCE($6, last_indexed), \
+                        updated_at = $7 \
+                     WHERE id = $8",
+                    &[
+                        &updates.name,
+                        &updates.root_path,
+                        &updates.config_file_path,
+                        &updates.language,
+                        &updates.profile_json,
+                        &updates.last_indexed,
+                        &now,
+                        &project_id,
+                    ],
+                )
+                .await
+                .map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn project_delete_with_cascade(
+        &self,
+        project_id: i64,
+    ) -> Result<(), StorageError> {
+        self.run(async move {
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            tx.execute(
+                "DELETE FROM checkpoint WHERE project_id = $1",
+                &[&project_id],
+            )
+            .await
+            .map_err(classify_pg)?;
+            tx.execute("DELETE FROM projects WHERE id = $1", &[&project_id])
+                .await
+                .map_err(classify_pg)?;
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn project_clear_index(&self, project_id: i64) -> Result<(), StorageError> {
+        self.run(async move {
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            for table in [
+                "entity_detail_mappings",
+                "chunks",
+                "entities",
+                "files",
+                "generation_overrides",
+                "project_index_manifests",
+                "project_meta",
+                "checkpoint",
+                "checkpoint_batch",
+                "checkpoint_file",
+                "work_unit_checkpoint",
+                "index_state_projection",
+            ] {
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE project_id = $1"),
+                    &[&project_id],
+                )
+                .await
+                .map_err(classify_pg)?;
+            }
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
     pub(crate) async fn project_meta_get_int(
         &self,
         project_id: i64,
@@ -104,6 +267,80 @@ impl PostgresClient {
                      ON CONFLICT (project_id, key) DO UPDATE SET \
                         value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
                     &[&project_id, &key, &value.to_string(), &now],
+                )
+                .await
+                .map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn project_meta_get_int_optional(
+        &self,
+        project_id: i64,
+        key: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        let key = key.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let value: Option<String> = client
+                .query_opt(
+                    "SELECT value FROM project_meta WHERE project_id = $1 AND key = $2",
+                    &[&project_id, &key],
+                )
+                .await
+                .map_err(classify_pg)?
+                .map(|row| row.get(0));
+            value
+                .map(|raw| {
+                    raw.parse::<i64>().map_err(|_| {
+                        StorageError::query(format!("project_meta {key} is not an integer"))
+                    })
+                })
+                .transpose()
+        })
+        .await
+    }
+
+    pub(crate) async fn project_meta_get_string_optional(
+        &self,
+        project_id: i64,
+        key: &str,
+    ) -> Result<Option<String>, StorageError> {
+        let key = key.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let value: Option<String> = client
+                .query_opt(
+                    "SELECT value FROM project_meta WHERE project_id = $1 AND key = $2",
+                    &[&project_id, &key],
+                )
+                .await
+                .map_err(classify_pg)?
+                .map(|row| row.get(0));
+            Ok(value)
+        })
+        .await
+    }
+
+    pub(crate) async fn project_meta_set_string(
+        &self,
+        project_id: i64,
+        key: &str,
+        value: &str,
+    ) -> Result<(), StorageError> {
+        let key = key.to_string();
+        let value = value.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let now = chrono::Utc::now().timestamp();
+            client
+                .execute(
+                    "INSERT INTO project_meta (project_id, key, value, created_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, $4) \
+                     ON CONFLICT (project_id, key) DO UPDATE SET \
+                        value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                    &[&project_id, &key, &value, &now],
                 )
                 .await
                 .map_err(classify_pg)?;
@@ -422,6 +659,164 @@ impl PostgresClient {
         .await
     }
 
+    pub(crate) async fn manifest_by_operation(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<Option<ProjectIndexManifest>, StorageError> {
+        let operation_id = operation_id.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let row = client
+                .query_opt(
+                    &format!(
+                        "SELECT {MANIFEST_COLUMNS} FROM project_index_manifests \
+                         WHERE project_id = $1 AND operation_id = $2"
+                    ),
+                    &[&project_id, &operation_id],
+                )
+                .await
+                .map_err(classify_pg)?;
+            row.map(|row| manifest_from_row(&row)).transpose()
+        })
+        .await
+    }
+
+    pub(crate) async fn manifest_building_max_epoch(
+        &self,
+        project_id: i64,
+    ) -> Result<Option<i64>, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let value: Option<i64> = client
+                .query_opt(
+                    "SELECT MAX(data_epoch) FROM project_index_manifests \
+                     WHERE project_id = $1 AND state = 'building'",
+                    &[&project_id],
+                )
+                .await
+                .map_err(classify_pg)?
+                .map(|row| row.get(0));
+            Ok(value)
+        })
+        .await
+    }
+
+    pub(crate) async fn manifest_set_parent(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        parent_data_epoch: Option<i64>,
+    ) -> Result<(), StorageError> {
+        let operation_id = operation_id.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            client
+                .execute(
+                    "UPDATE project_index_manifests SET parent_data_epoch = $1 \
+                     WHERE project_id = $2 AND operation_id = $3",
+                    &[&parent_data_epoch, &project_id, &operation_id],
+                )
+                .await
+                .map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn manifest_parent_epoch(
+        &self,
+        project_id: i64,
+        data_epoch: i64,
+    ) -> Result<Option<i64>, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let value: Option<i64> = client
+                .query_opt(
+                    "SELECT parent_data_epoch FROM project_index_manifests \
+                     WHERE project_id = $1 AND data_epoch = $2 \
+                     ORDER BY publication_epoch DESC LIMIT 1",
+                    &[&project_id, &data_epoch],
+                )
+                .await
+                .map_err(classify_pg)?
+                .map(|row| row.get(0));
+            Ok(value)
+        })
+        .await
+    }
+
+    pub(crate) async fn manifest_has_incomplete(
+        &self,
+        project_id: i64,
+        operation_type: &str,
+    ) -> Result<bool, StorageError> {
+        let operation_type = operation_type.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let exists: bool = client
+                .query_one(
+                    "SELECT EXISTS(SELECT 1 FROM checkpoint \
+                     WHERE project_id = $1 AND operation_type = $2 AND status = 'in_progress')",
+                    &[&project_id, &operation_type],
+                )
+                .await
+                .map_err(classify_pg)?
+                .get(0);
+            Ok(exists)
+        })
+        .await
+    }
+
+    pub(crate) async fn overrides_upsert_batch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entries: &[(String, OverrideDisposition)],
+    ) -> Result<(), StorageError> {
+        let entries = entries.to_vec();
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.run(async move {
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            for (path, disposition) in &entries {
+                tx.execute(
+                    "INSERT INTO generation_overrides (project_id, epoch, file_path, disposition) \
+                     VALUES ($1, $2, $3, $4) \
+                     ON CONFLICT (project_id, epoch, file_path) DO UPDATE SET \
+                        disposition = EXCLUDED.disposition",
+                    &[&project_id, &epoch, path, &disposition.as_str()],
+                )
+                .await
+                .map_err(classify_pg)?;
+            }
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn overrides_clear(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let removed = client
+                .execute(
+                    "DELETE FROM generation_overrides WHERE project_id = $1 AND epoch = $2",
+                    &[&project_id, &epoch],
+                )
+                .await
+                .map_err(classify_pg)?;
+            Ok(removed as usize)
+        })
+        .await
+    }
+
     pub(crate) async fn overrides_replace(
         &self,
         project_id: i64,
@@ -499,7 +894,7 @@ impl PostgresClient {
     }
 }
 
-async fn manifest_begin_building_in(
+pub(crate) async fn manifest_begin_building_in(
     tx: &tokio_postgres::Transaction<'_>,
     project_id: i64,
     data_epoch: i64,

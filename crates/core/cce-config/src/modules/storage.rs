@@ -77,8 +77,7 @@ pub enum MetadataBackend {
     /// Embedded SQLite repositories (current behavior).
     #[default]
     Local,
-    /// PostgreSQL branch (forward scaffolding: configurable but not wired
-    /// into indexing, search, or hot-update paths yet).
+    /// PostgreSQL branch (selected at startup; schema migration runs there).
     Remote,
 }
 
@@ -740,6 +739,10 @@ impl WalConfig {
 pub struct QdrantConfig {
     /// Qdrant server URL
     pub url: String,
+    /// Explicit collection override. Benchmarks use unique names so runs
+    /// never share vector data; production leaves this unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_name: Option<String>,
     /// API key for authentication
     pub api_key: Option<String>,
     /// Vector dimension
@@ -791,6 +794,7 @@ impl Default for QdrantConfig {
     fn default() -> Self {
         Self {
             url: "http://localhost:6333".to_string(),
+            collection_name: None,
             api_key: None,
             vector_size: 1024,
             distance_metric: DistanceMetric::Cosine,

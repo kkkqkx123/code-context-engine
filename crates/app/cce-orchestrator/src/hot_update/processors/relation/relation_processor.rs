@@ -370,16 +370,12 @@ impl RelationUpdateProcessor {
             // it. Dependency propagation, fingerprinting, and delta
             // computation all read through this view; the cached base is
             // never mutated.
-            let base_view =
-                match self
-                    .base_cache
-                    .get_or_load(store.as_ref(), project_id, active_epoch)
-                {
-                    Ok(view) => view,
-                    Err(error) => {
-                        return Err(HotUpdateError::relation(error.to_string()));
-                    }
-                };
+            let base_view = match self.base_cache.get_or_load(store, project_id, active_epoch) {
+                Ok(view) => view,
+                Err(error) => {
+                    return Err(HotUpdateError::relation(error.to_string()));
+                }
+            };
             let project_root = match self.project_root(store).await {
                 Ok(root) => root,
                 Err(error) => return Err(error),

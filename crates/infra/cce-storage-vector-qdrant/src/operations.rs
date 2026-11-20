@@ -348,7 +348,8 @@ impl PointOperations {
     /// Upsert points and confirm full application.
     ///
     /// `wait=true` forces Qdrant to apply the batch before responding; the
-    /// response `result.status` must be `ok`. An `ack` status means the batch
+    /// response `result.status` must be `ok` or `completed` (newer Qdrant
+    /// releases). An `ack` status means the batch
     /// was not fully applied and HTTP 200 alone would hide point-level
     /// failures. Transient failures (transport, 5xx/429/408, non-applied
     /// batch) are retried with backoff; other 4xx is a deterministic request
@@ -444,7 +445,7 @@ impl PointOperations {
         })?;
 
         match payload.pointer("/result/status").and_then(|v| v.as_str()) {
-            Some("ok") => Ok(()),
+            Some("ok" | "completed") => Ok(()),
             Some(other) => Err(AttemptError::Transient(QdrantError::api(format!(
                 "Upsert of {} points was not fully applied: status '{}'",
                 point_count, other
@@ -641,8 +642,10 @@ impl PointOperations {
             .collect::<Vec<_>>();
 
         self.delete_by_filter(json!({
-            "should": should,
-            "min_should": 1
+            "min_should": {
+                "conditions": should,
+                "min_count": 1
+            }
         }))
         .await
     }
@@ -669,8 +672,10 @@ impl PointOperations {
             .collect::<Vec<_>>();
 
         self.delete_by_filter(json!({
-            "should": should,
-            "min_should": 1
+            "min_should": {
+                "conditions": should,
+                "min_count": 1
+            }
         }))
         .await
     }
@@ -1052,6 +1057,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_returns_ok_when_status_is_completed() {
+        let base_url =
+            spawn_mock_url(r#"{"result":{"operation_id":1,"status":"completed"}}"#).await;
+        let ops = PointOperations::new(Client::new(), "test".to_string(), base_url);
+        ops.upsert(&sample_points())
+            .await
+            .expect("completed status must be treated as applied");
+    }
+
+    #[tokio::test]
     async fn upsert_returns_err_when_batch_not_applied() {
         let base_url = spawn_mock_url(r#"{"result":{"operation_id":1,"status":"ack"}}"#).await;
         let ops = PointOperations::new(Client::new(), "test".to_string(), base_url);
@@ -1206,7 +1221,7 @@ mod tests {
             .expect("delete request body captured");
         let parsed: serde_json::Value =
             serde_json::from_str(body.trim()).expect("delete body is json");
-        let value = &parsed["filter"]["should"][0]["must"][0]["match"]["value"];
+        let value = &parsed["filter"]["min_should"]["conditions"][0]["must"][0]["match"]["value"];
         assert_eq!(
             value, "src/a.rs",
             "qdrant batch delete filter must carry the normalized path, not the raw input"

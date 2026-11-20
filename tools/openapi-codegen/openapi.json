@@ -10602,6 +10602,91 @@
           }
         }
       },
+      "QueryStageTimingsDto": {
+        "type": "object",
+        "description": "Per-call query stage accounting shared by single and aggregated search.",
+        "required": [
+          "coordinator_ms",
+          "filter_ms",
+          "cache_key_ms",
+          "rewrite_ms",
+          "embedding_ms",
+          "embedding_provider_ms",
+          "embedding_overhead_ms",
+          "vector_search_ms",
+          "bm25_retrieval_ms",
+          "fusion_ms",
+          "post_process_ms"
+        ],
+        "properties": {
+          "bm25_retrieval_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent in BM25 recall.",
+            "minimum": 0
+          },
+          "cache_key_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent building the query cache key.",
+            "minimum": 0
+          },
+          "coordinator_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent resolving the project and building the query coordinator.",
+            "minimum": 0
+          },
+          "embedding_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent producing the query embedding.",
+            "minimum": 0
+          },
+          "embedding_overhead_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time spent in embedding batching and resilience orchestration.",
+            "minimum": 0
+          },
+          "embedding_provider_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time spent inside the embedding transport, including connection setup.",
+            "minimum": 0
+          },
+          "filter_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent loading the epoch view for the query.",
+            "minimum": 0
+          },
+          "fusion_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent fusing recall paths, including key completion.",
+            "minimum": 0
+          },
+          "post_process_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent enriching and post-processing results.",
+            "minimum": 0
+          },
+          "rewrite_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent rewriting the query before recall.",
+            "minimum": 0
+          },
+          "vector_search_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall-clock time spent in the vector engine search.",
+            "minimum": 0
+          }
+        }
+      },
       "RecallPathDto": {
         "type": "string",
         "description": "Recall path of a secondary evidence reference.",
@@ -11032,6 +11117,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "stages": {
+            "$ref": "#/components/schemas/QueryStageTimingsDto",
+            "description": "Per-call stage accounting (zero when the answer came from cache)."
           },
           "sub_query_cache_hits": {
             "type": "integer",

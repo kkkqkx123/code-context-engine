@@ -5,6 +5,8 @@
 //! SQLite directly. The concrete SQLite adapter lives in
 //! `cce_infrastructure::storage::sqlite::SnapshotStoreAdapter`.
 
+use std::sync::Arc;
+
 use crate::types::relation::{CanonicalRelationSnapshot, SymbolKeyConflictRecord};
 use crate::types::{SnapshotDelta, StorageError};
 
@@ -102,4 +104,38 @@ pub trait RelationSnapshotStore: Send + Sync {
         after_epoch: i64,
         up_to_epoch: i64,
     ) -> Result<Vec<SnapshotDelta>, StorageError>;
+}
+
+impl<T: RelationSnapshotStore + ?Sized> RelationSnapshotStore for Arc<T> {
+    fn get_manifest(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Option<RelationSnapshotManifest>, StorageError> {
+        T::get_manifest(self.as_ref(), project_id, epoch)
+    }
+
+    fn read_snapshot(
+        &self,
+        manifest: &RelationSnapshotManifest,
+    ) -> Result<CanonicalRelationSnapshot, StorageError> {
+        T::read_snapshot(self.as_ref(), manifest)
+    }
+
+    fn find_base_epoch(
+        &self,
+        project_id: i64,
+        delta_epoch: i64,
+    ) -> Result<Option<i64>, StorageError> {
+        T::find_base_epoch(self.as_ref(), project_id, delta_epoch)
+    }
+
+    fn get_delta_chain(
+        &self,
+        project_id: i64,
+        after_epoch: i64,
+        up_to_epoch: i64,
+    ) -> Result<Vec<SnapshotDelta>, StorageError> {
+        T::get_delta_chain(self.as_ref(), project_id, after_epoch, up_to_epoch)
+    }
 }

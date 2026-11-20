@@ -106,9 +106,13 @@ impl QdrantClient {
             QdrantError::connection(e.to_string())
         })?;
 
-        // The storage layer now uses a fixed collection name and logical
-        // isolation via payload fields.
-        let collection_name = Self::generate_collection_name(workspace_path);
+        // An explicit collection isolates independent runs; otherwise the
+        // fixed format-versioned name keeps logical isolation via payloads.
+        let collection_name = config
+            .collection_name
+            .clone()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| Self::generate_collection_name(workspace_path));
 
         // Normalize URL
         let base_url = config.normalized_url();

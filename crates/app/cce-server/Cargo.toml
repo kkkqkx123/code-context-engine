@@ -46,6 +46,8 @@ tempfile = { workspace = true }
 tower = { workspace = true }
 criterion = { workspace = true }
 cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
+cce-plugin-runtime = { version = "0.1.0", path = "../cce-plugin-runtime" }
 
 [[bench]]
 name = "service_layer_concurrency"
@@ -53,6 +55,19 @@ harness = false
 
 [[bench]]
 name = "service_retrieval_matrix"
+harness = false
+
+[[bench]]
+name = "service_remote_backend_matrix"
+harness = false
+
+[[bench]]
+name = "plugin_overhead"
+harness = false
+required-features = ["plugins"]
+
+[[bench]]
+name = "highlight_overhead"
 harness = false
 
 [features]

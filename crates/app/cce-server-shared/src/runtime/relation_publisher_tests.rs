@@ -208,7 +208,7 @@ async fn publish_is_restart_equivalent_and_idempotent() {
         .expect("runtime snapshot should be published")
         .index
         .clone();
-    let cold = RelationSnapshotLoader::load(store.as_ref(), 1, first.relation_epoch)
+    let cold = RelationSnapshotLoader::load(&store, 1, first.relation_epoch)
         .expect("active epoch should cold-load");
     assert_eq!(live.function_count(), cold.function_count());
     assert_eq!(
@@ -381,7 +381,7 @@ async fn delta_publish_is_immediately_visible_to_runtime_queries() {
     );
     assert!(live.contains_file("src/extra.rs"));
     // Delta chain replay from SQLite reconstructs the same merged graph.
-    let cold = RelationSnapshotLoader::load(store.as_ref(), 1, publication.relation_epoch)
+    let cold = RelationSnapshotLoader::load(&store, 1, publication.relation_epoch)
         .expect("delta chain should cold-load");
     assert_eq!(live.compute_fingerprint(), cold.compute_fingerprint());
 
@@ -576,7 +576,7 @@ async fn cold_path_delta_publish_is_scoped_without_full_merge() {
     );
     assert!(live.contains_file("src/extra.rs"));
     // Replaying from SQLite reconstructs the same merged graph.
-    let cold = RelationSnapshotLoader::load(store.as_ref(), 1, publication.relation_epoch)
+    let cold = RelationSnapshotLoader::load(&store, 1, publication.relation_epoch)
         .expect("delta chain should cold-load");
     assert_eq!(live.compute_fingerprint(), cold.compute_fingerprint());
 }
@@ -826,7 +826,7 @@ async fn chain_hot_publish_merges_accumulated_deltas_for_runtime() {
     assert!(live.contains_file("src/extra2.rs"));
 
     // Full chain replay reconstructs the same merged graph.
-    let cold = RelationSnapshotLoader::load(store.as_ref(), 1, publication.relation_epoch)
+    let cold = RelationSnapshotLoader::load(&store, 1, publication.relation_epoch)
         .expect("delta chain should cold-load");
     assert_eq!(live.compute_fingerprint(), cold.compute_fingerprint());
 }
@@ -1058,7 +1058,7 @@ async fn maybe_compact_merges_delta_chain_at_threshold() {
         .expect("no-op compaction should succeed");
 
     // Cold load reconstructs the merged graph including all added files.
-    let cold = RelationSnapshotLoader::load(store.as_ref(), 1, active_after)
+    let cold = RelationSnapshotLoader::load(&store, 1, active_after)
         .expect("compacted epoch should cold-load");
     let live = runtime
         .get_snapshot()

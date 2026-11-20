@@ -55,13 +55,13 @@ pub struct DatabaseConfig {
     pub sqlite: SqliteConfig,
     /// BM25 index configuration
     pub bm25: Bm25Config,
-    /// Metadata storage backend selection (phase 1: local only).
+    /// Metadata storage backend selection.
     pub metadata_backend: MetadataBackend,
-    /// Reserved remote parameters for the relation branch (phase 3).
+    /// Remote relation branch parameters.
     pub metadata_remote: MetadataRemoteConfig,
-    /// Fulltext storage backend selection (phase 1: local only).
+    /// Fulltext storage backend selection.
     pub fulltext_backend: FulltextBackend,
-    /// Reserved remote parameters for the fulltext branch (phase 3).
+    /// Remote fulltext branch parameters.
     pub fulltext_remote: FulltextRemoteConfig,
     /// Advanced switch allowing non-preset backend combinations.
     ///
@@ -113,12 +113,9 @@ impl DatabaseConfig {
 
     /// Official preset combinations.
     ///
-    /// Supported presets: local-first (`local/local/local`) and
-    /// remote-vector (`qdrant/local/local`). Remote relation/fulltext
-    /// branches are forward scaffolding, not supported presets: selecting
-    /// them requires `allow_nonstandard_backends`, and assembly rejects them
-    /// at startup until the remote paths are wired. Remote branches validate
-    /// their own parameters when selected.
+    /// Supported presets are local metadata with any vector/fulltext
+    /// combination, plus remote metadata with local fulltext and either
+    /// vector branch. Other combinations require the advanced switch.
     pub fn validate_backend_combination(&self) -> ValidationResult {
         use crate::modules::VectorBackend as VB;
         if !self.metadata_backend.is_local()
@@ -153,18 +150,6 @@ impl DatabaseConfig {
                 "database.fulltext_remote.index_name",
             ));
         }
-        // The remote relation branch is forward scaffolding and is not wired
-        // into the engine write path. Reject it here so the failure surfaces
-        // during configuration validation instead of halfway through startup.
-        // The remote fulltext branch is wired (Elasticsearch), so it is
-        // allowed and validated above.
-        if !self.metadata_backend.is_local() {
-            return Err(ConfigValidationError::invalid_field(
-                "database.metadata_backend",
-                "remote metadata backend is not wired yet: supported matrices are local/local/local and qdrant/local/local; set metadata_backend = \"local\"",
-            ));
-        }
-
         let official = matches!(
             (
                 &self.vector_backend,
@@ -175,6 +160,8 @@ impl DatabaseConfig {
                 | (VB::Qdrant, MetadataBackend::Local, FulltextBackend::Local)
                 | (VB::Local, MetadataBackend::Local, FulltextBackend::Remote)
                 | (VB::Qdrant, MetadataBackend::Local, FulltextBackend::Remote)
+                | (VB::Local, MetadataBackend::Remote, FulltextBackend::Local)
+                | (VB::Qdrant, MetadataBackend::Remote, FulltextBackend::Local)
         );
         if official || self.allow_nonstandard_backends {
             Ok(())

@@ -238,6 +238,267 @@ impl PostgresClient {
         .await
     }
 
+    pub(crate) async fn snapshot_manifest_by_operation(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<Option<RelationSnapshotManifest>, StorageError> {
+        let operation_id = operation_id.to_string();
+        self.run(async move {
+            let client = self.pooled().await?;
+            let row = client
+                .query_opt(
+                    &format!(
+                        "SELECT {SNAPSHOT_MANIFEST_COLUMNS} FROM relation_snapshot_manifest \
+                         WHERE project_id = $1 AND operation_id = $2 LIMIT 1"
+                    ),
+                    &[&project_id, &operation_id],
+                )
+                .await
+                .map_err(classify_pg)?;
+            row.map(|row| snapshot_manifest_from_row(&row)).transpose()
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_activate(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<(), StorageError> {
+        self.run(async move {
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            snapshot_activate_in(&tx, project_id, epoch, chrono::Utc::now().timestamp()).await?;
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_retry_failed(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<(), StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let changed = client
+                .execute(
+                    "UPDATE relation_snapshot_manifest SET \
+                        state = 'building', input_fingerprint = NULL, \
+                        snapshot_fingerprint = NULL, file_count = NULL, \
+                        entity_count = NULL, relation_count = NULL, dependency_count = NULL, \
+                        validated_at = NULL, activated_at = NULL, failure_reason = NULL, \
+                        symbol_key_conflict_count = 0, \
+                        symbol_key_conflict_samples_json = NULL \
+                     WHERE project_id = $1 AND relation_epoch = $2 AND state = 'failed'",
+                    &[&project_id, &epoch],
+                )
+                .await
+                .map_err(classify_pg)?;
+            if changed != 1 {
+                return Err(StorageError::transaction(format!(
+                    "epoch {epoch} is not retryable"
+                )));
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_collect_garbage(
+        &self,
+        project_id: i64,
+        stale_before: i64,
+    ) -> Result<usize, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let changed = client
+                .execute(
+                    "DELETE FROM relation_snapshot_manifest \
+                     WHERE project_id = $1 AND state <> 'active' \
+                       AND operation_id NOT IN (
+                          SELECT operation_id FROM checkpoint \
+                          WHERE project_id = $1 AND status <> 'completed'
+                       ) \
+                       AND (\
+                          (state IN ('failed', 'building') AND created_at < $2) \
+                          OR (state = 'ready' AND relation_epoch NOT IN (
+                             SELECT relation_epoch FROM relation_snapshot_manifest \
+                             WHERE project_id = $1 AND state = 'ready' \
+                             ORDER BY relation_epoch DESC LIMIT 1
+                          ))\
+                       )",
+                    &[&project_id, &stale_before],
+                )
+                .await
+                .map_err(classify_pg)?;
+            Ok(changed as usize)
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_entities_count(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<i64, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let count: i64 = client
+                .query_one(
+                    "SELECT COUNT(*) FROM relation_snapshot_entities \
+                     WHERE project_id = $1 AND relation_epoch = $2",
+                    &[&project_id, &relation_epoch],
+                )
+                .await
+                .map_err(classify_pg)?
+                .get(0);
+            Ok(count)
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_delete_manifests_except(
+        &self,
+        project_id: i64,
+        keep_epoch: i64,
+    ) -> Result<usize, StorageError> {
+        self.run(async move {
+            let client = self.pooled().await?;
+            let changed = client
+                .execute(
+                    "DELETE FROM relation_snapshot_manifest \
+                     WHERE project_id = $1 AND relation_epoch <> $2",
+                    &[&project_id, &keep_epoch],
+                )
+                .await
+                .map_err(classify_pg)?;
+            Ok(changed as usize)
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_write_delta(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        delta: &SnapshotDelta,
+    ) -> Result<(), StorageError> {
+        let delta = delta.clone();
+        self.run(async move {
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            let state: Option<String> = tx
+                .query_opt(
+                    "SELECT state FROM relation_snapshot_manifest \
+                     WHERE project_id = $1 AND relation_epoch = $2",
+                    &[&project_id, &epoch],
+                )
+                .await
+                .map_err(classify_pg)?
+                .map(|row| row.get(0));
+            if state.as_deref() != Some("building") {
+                return Err(StorageError::transaction(format!(
+                    "epoch {epoch} is {state:?}, expected building"
+                )));
+            }
+            let json = serde_json::to_vec(&delta).map_err(|error| {
+                StorageError::validation(format!("delta serialization: {error}"))
+            })?;
+            let compressed = zstd::encode_all(&*json, 3)
+                .map_err(|error| StorageError::validation(format!("delta compression: {error}")))?;
+            let size = compressed.len() as i64;
+            tx.execute(
+                "UPDATE relation_snapshot_manifest SET state = 'delta' \
+                 WHERE project_id = $1 AND relation_epoch = $2",
+                &[&project_id, &epoch],
+            )
+            .await
+            .map_err(classify_pg)?;
+            tx.execute(
+                "INSERT INTO relation_snapshot_deltas (project_id, base_epoch, delta_epoch, \
+                 delta_data, size_bytes) VALUES ($1, $2, $3, $4, $5)",
+                &[&project_id, &delta.base_epoch, &epoch, &compressed, &size],
+            )
+            .await
+            .map_err(classify_pg)?;
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn snapshot_delta_chain_info(
+        &self,
+        project_id: i64,
+        active_epoch: i64,
+    ) -> Result<(usize, i64, i64), StorageError> {
+        let base_epoch = self
+            .snapshot_find_base(project_id, active_epoch)
+            .await?
+            .unwrap_or(active_epoch);
+        if base_epoch >= active_epoch {
+            return Ok((0, 0, 0));
+        }
+        self.run(async move {
+            let client = self.pooled().await?;
+            let row = client
+                .query_one(
+                    "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) \
+                     FROM relation_snapshot_deltas \
+                     WHERE project_id = $1 AND delta_epoch > $2 AND delta_epoch <= $3",
+                    &[&project_id, &base_epoch, &active_epoch],
+                )
+                .await
+                .map_err(classify_pg)?;
+            let count: i64 = row.get(0);
+            let total_size: i64 = row.get(1);
+            let size_sql = [
+                "SELECT COALESCE(SUM(\
+                    COALESCE(length(path), 0) + COALESCE(length(language), 0) + \
+                    COALESCE(length(input_hash), 0) + COALESCE(length(imports_json), 0)\
+                 ), 0) FROM relation_snapshot_files \
+                 WHERE project_id = $1 AND relation_epoch = $2",
+                "SELECT COALESCE(SUM(\
+                    COALESCE(length(scoped_name), 0) + COALESCE(length(kind_json), 0) + \
+                    COALESCE(length(name), 0) + COALESCE(length(signature), 0) + \
+                    COALESCE(length(parameters_json), 0) + COALESCE(length(return_type), 0) + \
+                    COALESCE(length(span_json), 0) + COALESCE(length(doc_comment), 0) + \
+                    COALESCE(length(modifiers_json), 0) + COALESCE(length(attributes_json), 0) + \
+                    COALESCE(length(metadata_json), 0) + COALESCE(length(subtype), 0)\
+                 ), 0) FROM relation_snapshot_entities \
+                 WHERE project_id = $1 AND relation_epoch = $2",
+                "SELECT COALESCE(SUM(\
+                    COALESCE(length(raw_target), 0) + COALESCE(length(relation_type_json), 0) + \
+                    COALESCE(length(span_json), 0) + COALESCE(length(external_type_json), 0) + \
+                    COALESCE(length(unresolved_reason), 0) + \
+                    COALESCE(length(stdlib_category_json), 0)\
+                 ), 0) FROM relation_snapshot_relations \
+                 WHERE project_id = $1 AND relation_epoch = $2",
+                "SELECT COALESCE(SUM(COALESCE(length(export_type), 0)), 0) \
+                 FROM relation_snapshot_exports \
+                 WHERE project_id = $1 AND relation_epoch = $2",
+                "SELECT COALESCE(SUM(\
+                    COALESCE(length(target_path), 0) + COALESCE(length(source), 0)\
+                 ), 0) FROM relation_snapshot_dependencies \
+                 WHERE project_id = $1 AND relation_epoch = $2",
+            ];
+            let mut base_size = 0i64;
+            for sql in size_sql {
+                let value: i64 = client
+                    .query_one(sql, &[&project_id, &base_epoch])
+                    .await
+                    .map_err(classify_pg)?
+                    .get(0);
+                base_size = base_size.saturating_add(value);
+            }
+            Ok((count.max(0) as usize, total_size, base_size.max(1)))
+        })
+        .await
+    }
+
     pub(crate) async fn db_size(&self) -> Result<u64, StorageError> {
         self.run(async move {
             let client = self.pooled().await?;

@@ -30,12 +30,10 @@ mod types;
 use std::collections::HashMap;
 
 use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
-use cce_storage_metadb_sqlite::SqliteClient;
-use std::sync::Arc;
 
 use crate::common::read_snippets_batch;
 use crate::epoch_view::{EpochView, load_epoch_view};
-use crate::store::{get_chunk_records, resolve_project_root};
+use crate::store::{ToolMetadataStore, get_chunk_records, resolve_project_root};
 
 pub use self::types::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
@@ -51,7 +49,7 @@ pub struct KeywordSearchTool<F> {
     /// Fulltext backend for keyword recall (called through the contract)
     fulltext: F,
     /// Relation backend for the epoch view and chunk content lookup
-    metadata_store: Option<Arc<SqliteClient>>,
+    metadata_store: Option<ToolMetadataStore>,
 }
 
 impl<F> KeywordSearchTool<F>
@@ -74,7 +72,7 @@ where
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+    pub fn with_metadata_store(mut self, store: ToolMetadataStore) -> Self {
         self.metadata_store = Some(store);
         self
     }

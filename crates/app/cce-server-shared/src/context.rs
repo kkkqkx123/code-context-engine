@@ -221,9 +221,7 @@ impl SharedContext {
     }
 
     /// Get a clone of the project registry
-    pub fn project_registry_clone(
-        &self,
-    ) -> Arc<cce_storage_metadb_sqlite::project_registry::ProjectRegistry> {
+    pub fn project_registry_clone(&self) -> Arc<cce_orchestrator::ProjectRegistry> {
         self.engine.project_registry_clone()
     }
 }

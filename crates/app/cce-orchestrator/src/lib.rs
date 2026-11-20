@@ -16,6 +16,7 @@
 pub mod export;
 pub mod export_processor;
 pub mod operation;
+pub mod project_registry;
 
 pub mod hot_update;
 pub mod index;
@@ -41,6 +42,7 @@ pub use index::{
     DeadLetterRetryReport, IndexOptions, IndexOrchestrator, IndexResult, IndexStageTimings,
     RelationPublication, RelationSnapshotPublisher,
 };
+pub use project_registry::ProjectRegistry;
 
 pub use hot_update::{
     DebounceConfigBuilder, DebounceInfo, GlobalDebounce, HotUpdateCoordinator, HotUpdateError,

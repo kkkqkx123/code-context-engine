@@ -6,6 +6,8 @@
 
 本方案不改变召回与重排口径，不引入 trait object，不新增“v2”模块，也不保留旧路径兼容层。存储后端选择沿用 `VectorStore` / `FulltextStore` 的枚举分发方式。
 
+> 实施说明：远端 metadata 已按 `docs/plan/metadata-backend-dispatch-design.md` 完成接线：PostgreSQL 契约方法补齐，`MetadataStore` 改为确定类型后端分发，配置层放开远端 metadata。下文保留原始问题分析，具体实现以正式设计文档和当前代码为准。
+
 ## 问题清单
 
 ### 1. 测试环境无法切换后端
@@ -22,7 +24,7 @@
 
 ### 4. 项目注册表绑定 SQLite 私有接口
 
-`crates/infra/cce-storage-metadb-sqlite/src/project_registry.rs` 直接持有 `SqliteClient`，并通过 `read_connection()` 与 `ProjectRepository` 读取项目记录。该模块不能接受后端中立的 `MetadataStorage`，因此即使引入 `RelationStore` 枚举，项目注册表仍会把服务锁回 SQLite。
+`crates/infra/cce-storage-metadb-sqlite/src/project_registry.rs` 直接持有 `SqliteClient`，并通过 `read_connection()` 与 `ProjectRepository` 读取项目记录。该模块不能接受后端中立的 `MetadataStorage`，因此即使引入 `MetadataStore` 枚举，项目注册表仍会把服务锁回 SQLite。
 
 ### 5. 插件与高亮缺独立基准入口
 
@@ -53,11 +55,11 @@
 
 ## 阶段二：远端 metadata 枚举化
 
-在 `cce-orchestrator` 引入 `RelationStore` 枚举，分支为本地 SQLite 客户端和远端 PostgreSQL 客户端，并为其实现 `MetadataStorage` 契约。转发实现可用宏展开，但运行时仍是确定类型分发，不使用 `dyn`。
+在 `cce-orchestrator` 引入 `MetadataStore` 枚举，分支为本地 SQLite 客户端和远端 PostgreSQL 客户端，并为其实现 `MetadataStorage` 契约。转发实现可用宏展开，但运行时仍是确定类型分发，不使用 `dyn`。
 
-替换 `MetadataStore = Arc<SqliteClient>` 类型别名，所有索引、查询、热更新、检查点和导出路径统一使用 `RelationStore`。需要同步调整 `MetricsAggregator` 的类型参数和检查点相关泛型约束。
+替换 `MetadataStore = Arc<SqliteClient>` 类型别名，所有索引、查询、热更新、检查点和导出路径统一使用新的 `MetadataStore` 枚举。此处的 `MetadataStore` 表示元数据持久化后端选择，必须与 `cce-codegraph` 中表示关系图索引的 `RelationStore` 区分。需要同步调整 `MetricsAggregator` 的类型参数和检查点相关泛型约束。
 
-`RelationStore` 提供：
+`MetadataStore` 提供：
 
 - `backend_name()`
 - `is_local()` / `is_remote()`
@@ -68,17 +70,17 @@
 
 ## 阶段三：项目注册表去 SQLite 化
 
-把 `ProjectRegistry` 从 `cce-storage-metadb-sqlite` 移到不依赖具体后端的位置，并改为接受 `RelationStore`。读取项目记录时只调用 `MetadataStorage::project_record()`，不再使用 SQLite 私有连接池和 `ProjectRepository`。
+把 `ProjectRegistry` 从 `cce-storage-metadb-sqlite` 移到不依赖具体后端的位置，并改为接受 `MetadataStore`。读取项目记录时只调用 `MetadataStorage::project_record()`，不再使用 SQLite 私有连接池和 `ProjectRepository`。
 
 `ProjectUpdateRecord` 与 `ProjectRecord` 已在共享契约中定义，迁移只调整注册表依赖，不改变缓存语义、singleflight 行为或指标名称。
 
-完成后，engine 的 `project_registry`、`metrics_aggregator`、索引装配和查询装配都必须从同一个 `RelationStore` 实例构建，不得出现第二个元数据客户端。
+完成后，engine 的 `project_registry`、`metrics_aggregator`、索引装配和查询装配都必须从同一个 `MetadataStore` 实例构建，不得出现第二个元数据客户端。
 
 ## 阶段四：配置校验与引擎装配
 
 从 `global.rs` 移除对远端 metadata 的硬拒绝，并把已支持的后端矩阵收敛为显式列表。官方矩阵扩展到 `local/local/local`、`local/local/remote`、`qdrant/local/local`、`qdrant/local/remote`。
 
-`CodeContextEngine::build` 按 `DatabaseConfig` 一次性构造 `RelationStore`、`VectorStore` 和 `FulltextStore`。远端 metadata 与远端 fulltext 的关系在配置层校验，避免运行中出现混合世代数据。
+`CodeContextEngine::build` 按 `DatabaseConfig` 一次性构造 `MetadataStore`、`VectorStore` 和 `FulltextStore`。远端 metadata 与远端 fulltext 的关系在配置层校验，避免运行中出现混合世代数据。
 
 引擎启动阶段只做连接与 schema 迁移，不清理项目数据；每个基准运行使用独立项目和独立索引名，跨后端切换仍要求全量重建。
 

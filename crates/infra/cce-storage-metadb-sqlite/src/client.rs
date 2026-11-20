@@ -587,6 +587,12 @@ impl cce_metrics::SqliteStore for SqliteClient {
     }
 }
 
+impl cce_storage_common::metadb::MetadataProjectScope for SqliteClient {
+    fn scope_to_project(&self, project_id: i64) -> Result<Self, StorageError> {
+        Ok(Self::for_project(self, project_id)?.as_ref().clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

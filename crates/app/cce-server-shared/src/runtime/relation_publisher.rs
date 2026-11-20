@@ -260,14 +260,13 @@ impl ServerRelationSnapshotPublisher {
         self.runtime.set_updating().await;
 
         // Load current full state (base + deltas) through the relation contract
-        let full_index =
-            match RelationSnapshotLoader::load(self.store.as_ref(), project_id, active_epoch) {
-                Ok(index) => index,
-                Err(error) => {
-                    self.runtime.report_failure(error.to_string()).await;
-                    return Err(error);
-                }
-            };
+        let full_index = match RelationSnapshotLoader::load(&self.store, project_id, active_epoch) {
+            Ok(index) => index,
+            Err(error) => {
+                self.runtime.report_failure(error.to_string()).await;
+                return Err(error);
+            }
+        };
 
         // Export as full canonical snapshot
         let config_fingerprint = {
@@ -488,17 +487,14 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 // removal). No detached O(project) clone is performed here;
                 // `detached_clone` is reserved for scenarios that genuinely
                 // need an independent mutable copy (e.g. compaction)
-                let loaded = match RelationSnapshotLoader::load(
-                    self.store.as_ref(),
-                    project_id,
-                    delta.base_epoch,
-                ) {
-                    Ok(index) => index,
-                    Err(error) => {
-                        self.runtime.report_failure(error.to_string()).await;
-                        return Err(error);
-                    }
-                };
+                let loaded =
+                    match RelationSnapshotLoader::load(&self.store, project_id, delta.base_epoch) {
+                        Ok(index) => index,
+                        Err(error) => {
+                            self.runtime.report_failure(error.to_string()).await;
+                            return Err(error);
+                        }
+                    };
                 LayeredSnapshotIndex::new(Arc::new(RelationSnapshotIndex::from_index_shared(
                     &loaded,
                 )))

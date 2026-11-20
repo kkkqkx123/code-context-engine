@@ -2,9 +2,10 @@ use cce_types::StorageError;
 use tokio_postgres::Row;
 
 use cce_storage_common::metadb::{
-    AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, EntityRecord,
-    FileCheckpointRecord, FileRecord, ProjectIndexManifest, ProjectIndexManifestState,
-    ProjectRecord, WorkUnitCheckpointRecord, WorkUnitStatus,
+    AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
+    ChunkRecord, EntityDetailMapping, EntityRecord, FileCheckpointRecord, FileRecord,
+    IndexStateProjection, ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord,
+    WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 
 use crate::error::classify_pg;
@@ -221,6 +222,73 @@ pub fn file_checkpoint_from_row(
         module_progress: row.try_get("module_progress").map_err(classify_pg)?,
         created_at: row.try_get("created_at").map_err(classify_pg)?,
         updated_at: row.try_get("updated_at").map_err(classify_pg)?,
+    })
+}
+
+pub const BATCH_CHECKPOINT_COLUMNS: &str = "id, operation_id, batch_index, first_file, \
+     last_file, file_count, processed_files, failed_files, entities_extracted, relations_found, \
+     chunks_generated, vectors_stored, start_time, end_time, duration_ms, created_at, updated_at";
+
+pub fn batch_checkpoint_from_row(row: &Row) -> Result<BatchCheckpointRecord, StorageError> {
+    let batch_index: i64 = row.try_get("batch_index").map_err(classify_pg)?;
+    let number = |column: &str| -> Result<u32, StorageError> {
+        let value: i64 = row.try_get(column).map_err(classify_pg)?;
+        Ok(value.max(0) as u32)
+    };
+    Ok(BatchCheckpointRecord {
+        id: row.try_get("id").map_err(classify_pg)?,
+        operation_id: row.try_get("operation_id").map_err(classify_pg)?,
+        batch_index: batch_index.max(0) as u32,
+        first_file: row.try_get("first_file").map_err(classify_pg)?,
+        last_file: row.try_get("last_file").map_err(classify_pg)?,
+        file_count: number("file_count")?,
+        processed_files: number("processed_files")?,
+        failed_files: number("failed_files")?,
+        entities_extracted: number("entities_extracted")?,
+        relations_found: number("relations_found")?,
+        chunks_generated: number("chunks_generated")?,
+        vectors_stored: number("vectors_stored")?,
+        start_time: row.try_get("start_time").map_err(classify_pg)?,
+        end_time: row.try_get("end_time").map_err(classify_pg)?,
+        duration_ms: row.try_get("duration_ms").map_err(classify_pg)?,
+        created_at: row.try_get("created_at").map_err(classify_pg)?,
+        updated_at: row.try_get("updated_at").map_err(classify_pg)?,
+    })
+}
+
+pub fn detail_mapping_from_row(row: &Row) -> Result<EntityDetailMapping, StorageError> {
+    Ok(EntityDetailMapping {
+        id: row.try_get("id").map_err(classify_pg)?,
+        entity_id: row.try_get("entity_id").map_err(classify_pg)?,
+        project_id: row.try_get("project_id").map_err(classify_pg)?,
+        epoch: row.try_get("epoch").map_err(classify_pg)?,
+        qdrant_point_ids: row.try_get("qdrant_point_ids").map_err(classify_pg)?,
+        bm25_doc_ids: row.try_get("bm25_doc_ids").map_err(classify_pg)?,
+        chunk_count: row.try_get("chunk_count").map_err(classify_pg)?,
+        created_at: row.try_get("created_at").map_err(classify_pg)?,
+        updated_at: row.try_get("updated_at").map_err(classify_pg)?,
+    })
+}
+
+pub const DETAIL_MAPPING_COLUMNS: &str = "id, entity_id, project_id, epoch, qdrant_point_ids, bm25_doc_ids, chunk_count, \
+     created_at, updated_at";
+
+pub fn projection_from_row(row: &Row) -> Result<IndexStateProjection, StorageError> {
+    Ok(IndexStateProjection {
+        project_id: row.try_get("project_id").map_err(classify_pg)?,
+        operation_id: row.try_get("operation_id").map_err(classify_pg)?,
+        file_path: row.try_get("file_path").map_err(classify_pg)?,
+        version: row.try_get("version").map_err(classify_pg)?,
+        state_json: row.try_get("state_json").map_err(classify_pg)?,
+        updated_at: row.try_get("updated_at").map_err(classify_pg)?,
+    })
+}
+
+pub fn chunk_content_from_row(row: &Row) -> Result<ChunkContent, StorageError> {
+    Ok(ChunkContent {
+        chunk_id: row.try_get("chunk_id").map_err(classify_pg)?,
+        content: row.try_get("content").map_err(classify_pg)?,
+        bm25_keywords: row.try_get("bm25_keywords").map_err(classify_pg)?,
     })
 }
 

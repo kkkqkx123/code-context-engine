@@ -72,20 +72,6 @@ impl QdrantRetrieval {
                 }));
             }
 
-            if let Some(ref prefix) = f.directory_prefix {
-                let normalized = cce_types::normalize_project_path(prefix);
-                let trimmed = normalized.trim_end_matches('/');
-                let wildcard = if trimmed.is_empty() {
-                    "*".to_string()
-                } else {
-                    format!("{trimmed}/*")
-                };
-                must_conditions.push(serde_json::json!({
-                    "key": "file_path",
-                    "wildcard": wildcard
-                }));
-            }
-
             if let Some(ref categories) = f.include_categories {
                 if !categories.is_empty() {
                     let or_conditions: Vec<serde_json::Value> = categories
@@ -98,8 +84,10 @@ impl QdrantRetrieval {
                         })
                         .collect();
                     must_conditions.push(serde_json::json!({
-                        "should": or_conditions,
-                        "min_should": 1
+                        "min_should": {
+                            "conditions": or_conditions,
+                            "min_count": 1
+                        }
                     }));
                 }
             }
@@ -166,8 +154,10 @@ impl QdrantRetrieval {
             })
             .collect();
         serde_json::json!({
-            "should": should_conditions,
-            "min_should": 1
+            "min_should": {
+                "conditions": should_conditions,
+                "min_count": 1
+            }
         })
     }
 
@@ -188,8 +178,10 @@ impl QdrantRetrieval {
             "must": [
                 { "key": "epoch", "match": { "value": parent_epoch } }
             ],
-            "should": path_matches,
-            "min_should": 1
+            "min_should": {
+                "conditions": path_matches,
+                "min_count": 1
+            }
         })
     }
 
@@ -276,11 +268,29 @@ impl QdrantRetrieval {
             self.base_url, self.collection_name
         );
 
+        // Qdrant keyword payloads have no wildcard predicate. Directory
+        // scoping is applied to the returned payload instead, so widen the
+        // candidate set and trim it back to the requested limit afterwards.
+        let directory_prefix = query
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.directory_prefix.as_ref())
+            .map(|prefix| {
+                cce_types::normalize_project_path(prefix)
+                    .trim_end_matches('/')
+                    .to_string()
+            });
+        let candidate_limit = if directory_prefix.is_some() {
+            query.limit.saturating_mul(8).min(1000)
+        } else {
+            query.limit
+        };
+
         let filter = self.build_filter(query.filter.as_ref());
 
         let mut body = serde_json::json!({
             "vector": query.vector,
-            "limit": query.limit,
+            "limit": candidate_limit,
             "with_payload": true
         });
 
@@ -304,7 +314,15 @@ impl QdrantRetrieval {
             "Executing dense vector search"
         );
 
-        self.execute_search(&url, body).await
+        let mut hits = self.execute_search(&url, body).await?;
+        if let Some(prefix) = directory_prefix {
+            hits.retain(|hit| {
+                hit.payload.file_path == prefix
+                    || hit.payload.file_path.starts_with(&format!("{prefix}/"))
+            });
+            hits.truncate(query.limit);
+        }
+        Ok(hits)
     }
 }
 
@@ -348,12 +366,13 @@ mod tests {
 
         let json = client.build_filter(Some(&filter)).expect("filter built");
         let epoch_condition = &json["must"][0];
-        let values: Vec<i64> = epoch_condition["should"]
+        let values: Vec<i64> = epoch_condition["min_should"]["conditions"]
             .as_array()
-            .expect("should array")
+            .expect("min_should conditions")
             .iter()
             .map(|c| c["match"]["value"].as_i64().expect("epoch value"))
             .collect();
+        assert_eq!(epoch_condition["min_should"]["min_count"], 1);
         assert_eq!(values, vec![4, 5]);
         assert!(
             json.get("must_not").is_none(),
@@ -383,12 +402,13 @@ mod tests {
             "exclusion must be scoped to the parent epoch"
         );
         assert_eq!(exclusion["must"][0]["match"]["value"], 4);
-        let paths: Vec<&str> = exclusion["should"]
+        let paths: Vec<&str> = exclusion["min_should"]["conditions"]
             .as_array()
-            .expect("should array")
+            .expect("min_should conditions")
             .iter()
             .map(|c| c["match"]["value"].as_str().expect("path"))
             .collect();
+        assert_eq!(exclusion["min_should"]["min_count"], 1);
         assert_eq!(paths, vec!["src/a.rs"]);
     }
 
@@ -405,12 +425,9 @@ mod tests {
             ..Default::default()
         };
 
-        let result = client.build_filter(Some(&filter));
-        assert!(result.is_some());
-
-        let json = result.unwrap();
-        assert_eq!(json["must"][0]["key"], "file_path");
-        assert_eq!(json["must"][0]["wildcard"], "/src/main/*");
+        // Directory prefixes are applied to returned payloads by the search
+        // path: a keyword payload cannot serve a wildcard predicate on Qdrant.
+        assert!(client.build_filter(Some(&filter)).is_none());
     }
 
     #[test]

@@ -180,8 +180,7 @@ impl super::CodeContextEngine {
             .unwrap_or(meta.active_relation_epoch);
 
         if relation_epoch > 0 {
-            match RelationSnapshotLoader::load(metadata_store.as_ref(), project_id, relation_epoch)
-            {
+            match RelationSnapshotLoader::load(&metadata_store, project_id, relation_epoch) {
                 Ok(index) => {
                     result.entity_count = index.function_count();
                     result.relation_count = index.resolved_relation_count();

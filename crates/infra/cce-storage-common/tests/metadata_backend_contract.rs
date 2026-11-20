@@ -10,8 +10,8 @@
 
 use cce_storage_common::metadb::{
     CheckpointRecord, CheckpointStatus, ChunkRecord, EntityDetailMapping, EntityRecord,
-    FileCheckpointRecord, FileRecord, GenerationOverride, MetadataStorage, OverrideDisposition,
-    ProjectIndexManifestState, WorkUnitCheckpointRecord, WorkUnitStatus,
+    FileCheckpointRecord, FileRecord, GenerationOverride, MetadataBackendStore, MetadataStorage,
+    OverrideDisposition, ProjectIndexManifestState, WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 use cce_types::CanonicalRelationSnapshot;
 
@@ -398,6 +398,16 @@ async fn run_contract_suite(store: &impl MetadataStorage, tag: &str, project: i6
         0
     );
     store.db_size().await.expect("db size probe");
+}
+
+#[test]
+fn backend_dispatch_satisfies_generated_contract() {
+    cce_storage_common::metadb::assert_metadata_storage::<
+        MetadataBackendStore<
+            cce_storage_metadb_sqlite::SqliteClient,
+            cce_storage_metadb_pg::PostgresClient,
+        >,
+    >();
 }
 
 #[tokio::test]

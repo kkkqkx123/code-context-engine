@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use cce_config::AppConfig;
-use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
+use cce_config::modules::{
+    EmbeddingModelConfig, FulltextBackend, HnswConfig, MetadataBackend, ProviderConfig,
+    VectorBackend,
+};
 use cce_server_shared::context::SharedContext;
 use cce_server_shared::engine::CodeContextEngine;
 
@@ -164,8 +167,47 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+/// Backend combination used by a test environment.
+///
+/// Benchmarks construct this directly instead of relying on environment
+/// variables: `test_env()` does not go through `ConfigLoader`, so exported
+/// `CCE_DB_*` variables cannot switch its backends.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct TestBackends {
+    pub vector_backend: VectorBackend,
+    pub fulltext_backend: FulltextBackend,
+    pub qdrant_url: Option<String>,
+    pub qdrant_collection: Option<String>,
+    pub fulltext_url: Option<String>,
+    pub fulltext_index: Option<String>,
+    pub metadata_backend: MetadataBackend,
+    pub metadata_url: Option<String>,
+}
+
+#[allow(dead_code)]
+impl Default for TestBackends {
+    fn default() -> Self {
+        Self {
+            vector_backend: VectorBackend::Local,
+            fulltext_backend: FulltextBackend::Local,
+            qdrant_url: None,
+            qdrant_collection: None,
+            fulltext_url: None,
+            fulltext_index: None,
+            metadata_backend: MetadataBackend::Local,
+            metadata_url: None,
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub async fn test_env() -> TestEnv {
+    test_env_with_backends(TestBackends::default()).await
+}
+
+#[allow(dead_code)]
+pub async fn test_env_with_backends(backends: TestBackends) -> TestEnv {
     let _guard = ENV_SERIAL
         .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
@@ -202,16 +244,43 @@ pub async fn test_env() -> TestEnv {
     );
     config.llm.embedding_models = models;
     config.embedder.default_model = "test-model".to_string();
-    // Keep the local vector collection dimension in sync with the mock
-    // embedder's declared dimension, otherwise vector storage rejects
-    // every batch and a batch-level error skips relation publication.
+
+    // Both vector branches use the same width and HNSW parameters so the
+    // only remaining difference is the storage implementation.
     config.database.vector_local.vector_size = 384;
+    config.database.vector_local.hnsw_m = Some(16);
+    config.database.vector_local.hnsw_ef_construct = Some(100);
+    config.database.vector_local.hnsw_ef_search = Some(64);
+    config.database.vector_local.full_scan_threshold = Some(10_000);
+    config.database.vector_backend = backends.vector_backend;
+    config.database.qdrant.vector_size = 384;
+    config.database.qdrant.auto_start = false;
+    config.database.qdrant.collection_name = backends.qdrant_collection;
+    config.database.qdrant.hnsw = Some(HnswConfig {
+        m: 16,
+        ef_construct: 100,
+        on_disk: true,
+        payload_m: None,
+        inline_storage: None,
+    });
+    if let Some(url) = backends.qdrant_url {
+        config.database.qdrant.url = url;
+    }
+
     // BM25 defaults to disabled; the embedded Tantivy index is what the
     // keyword-search success paths assert against, so point it at the
-    // per-test temp dir and enable it.
+    // per-test temp dir and enable it. The remote branch keeps its own
+    // unique index name supplied by the caller.
     config.database.bm25.enabled = true;
     config.database.bm25.index_path =
         Some(data_dir.path().join("bm25").to_string_lossy().to_string());
+    config.database.fulltext_backend = backends.fulltext_backend;
+    config.database.fulltext_remote.url = backends.fulltext_url;
+    config.database.fulltext_remote.index_name = backends.fulltext_index;
+    config.database.metadata_backend = backends.metadata_backend;
+    if let Some(url) = backends.metadata_url {
+        config.database.metadata_remote.url = Some(url);
+    }
 
     let engine = CodeContextEngine::builder()
         .config(config)

@@ -8,17 +8,22 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use cce_storage_common::MetadataStorage;
-use cce_storage_common::metadb::ChunkRecord;
+use cce_storage_common::metadb::{ChunkRecord, MetadataBackendStore};
 pub use cce_storage_common::source::{SourceFileCache, read_source_lines_cached};
-use cce_storage_metadb_sqlite::SqliteClient;
-use std::sync::Arc;
 
 use crate::epoch_view::EpochView;
+use std::sync::Arc;
+
+/// Metadata handle shared by the standalone tools.
+pub type ToolMetadataStore = MetadataBackendStore<
+    Arc<cce_storage_metadb_sqlite::SqliteClient>,
+    Arc<cce_storage_metadb_pg::PostgresClient>,
+>;
 
 /// Fetch chunk records by chunk IDs through the backend-neutral relation
 /// contract, resolving the full epoch view.
 pub async fn get_chunk_records(
-    store: &Arc<SqliteClient>,
+    store: &impl MetadataStorage,
     chunk_ids: &[String],
     project_id: i64,
     view: &EpochView,
@@ -37,7 +42,7 @@ pub async fn get_chunk_records(
 }
 
 async fn resolve_chunk_records(
-    store: &Arc<SqliteClient>,
+    store: &impl MetadataStorage,
     chunk_ids: &[String],
     project_id: i64,
     view: &EpochView,
@@ -87,7 +92,10 @@ async fn resolve_chunk_records(
 /// to the project root, so the root is recovered from the project registry.
 /// Returns `None` when the relation handle is missing or the project row
 /// carries no root path.
-pub async fn resolve_project_root(store: &Arc<SqliteClient>, project_id: i64) -> Option<PathBuf> {
+pub async fn resolve_project_root(
+    store: &impl MetadataStorage,
+    project_id: i64,
+) -> Option<PathBuf> {
     store
         .project_record(project_id)
         .await

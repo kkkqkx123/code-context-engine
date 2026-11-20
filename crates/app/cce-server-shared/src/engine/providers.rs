@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 /// The coordinator only needs registry reads; the concrete registry type
 /// lives in the storage branch, so the engine injects it behind the
 /// orchestration-layer port rather than exposing the branch type.
-struct RegistrySource(std::sync::Arc<cce_storage_metadb_sqlite::project_registry::ProjectRegistry>);
+struct RegistrySource(std::sync::Arc<cce_orchestrator::ProjectRegistry>);
 
 #[async_trait::async_trait]
 impl ProjectConfigSource for RegistrySource {

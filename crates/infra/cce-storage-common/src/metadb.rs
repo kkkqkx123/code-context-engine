@@ -46,1156 +46,998 @@ pub use generation::{
 pub use project::{NewProjectRecord, ProjectRecord, ProjectUpdateRecord};
 pub use projection::IndexStateProjection;
 
-/// Metadata storage contract implemented by the local SQLite branch and the
-/// remote PostgreSQL branch.
-///
-/// Callers hold concrete handles and call through this contract; no caller
-/// touches a concrete connection or transaction.
-pub trait MetadataStorage: Clone + Send + Sync + 'static {
-    // -- Project directory --
+mod backend;
+#[macro_use]
+mod contract;
 
-    /// Ensure the project registry row exists (idempotent).
+pub use backend::{MetadataBackendStore, MetadataProjectScope};
+
+metadata_storage_contract! {
+    metadata_project: MetadataProjectStore {
+        /// Ensure the project registry row exists (idempotent).
     fn ensure_project(
-        &self,
-        project_id: i64,
-        root_path: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Fetch the project registry row, if present.
+    &self,
+    project_id: i64,
+    root_path: &str,
+    ) -> Result<(), StorageError>;
+        /// Fetch the project registry row, if present.
     fn project_record(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Option<ProjectRecord>, StorageError>> + Send;
-
-    /// List every registered project, newest first.
+    &self,
+    project_id: i64,
+    ) -> Result<Option<ProjectRecord>, StorageError>;
+        /// List every registered project, newest first.
     fn projects_all(&self)
-    -> impl Future<Output = Result<Vec<ProjectRecord>, StorageError>> + Send;
-
-    /// Apply a partial project-row update.
+    -> Result<Vec<ProjectRecord>, StorageError>;
+        /// Apply a partial project-row update.
     fn project_update(
-        &self,
-        project_id: i64,
-        updates: &ProjectUpdateRecord,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Register a project row; returns the new id.
-    ///
-    /// Uniqueness violations on name or root path surface as errors whose
-    /// message contains `UNIQUE constraint failed`.
+    &self,
+    project_id: i64,
+    updates: &ProjectUpdateRecord,
+    ) -> Result<(), StorageError>;
+        /// Register a project row; returns the new id.
+        ///
+        /// Uniqueness violations on name or root path surface as errors whose
+        /// message contains `UNIQUE constraint failed`.
     fn project_insert(
-        &self,
-        record: &NewProjectRecord,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Whether a project row already uses `root_path`.
+    &self,
+    record: &NewProjectRecord,
+    ) -> Result<i64, StorageError>;
+        /// Whether a project row already uses `root_path`.
     fn project_path_exists(
-        &self,
-        root_path: &str,
-    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
-
-    /// Delete one project's record together with its checkpoint rows.
+    &self,
+    root_path: &str,
+    ) -> Result<bool, StorageError>;
+        /// Delete one project's record together with its checkpoint rows.
     fn project_delete_with_cascade(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Remove one project's database files; returns the removed file count.
+    &self,
+    project_id: i64,
+    ) -> Result<(), StorageError>;
+        /// Remove one project's database files; returns the removed file count.
     fn project_delete_db(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Drop one project's index data while keeping the project row.
-    ///
-    /// Clears files, entities, chunks, entity mappings, relation snapshots,
-    /// project metadata and checkpoints in one storage-side transaction.
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Drop one project's index data while keeping the project row.
+        ///
+        /// Clears files, entities, chunks, entity mappings, relation snapshots,
+        /// project metadata and checkpoints in one storage-side transaction.
     fn project_clear_index(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Read an integer project metadata value.
+    &self,
+    project_id: i64,
+    ) -> Result<(), StorageError>;
+        /// Read an integer project metadata value.
     fn project_meta_get_int(
-        &self,
-        project_id: i64,
-        key: &str,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Write an integer project metadata value.
+    &self,
+    project_id: i64,
+    key: &str,
+    ) -> Result<i64, StorageError>;
+        /// Write an integer project metadata value.
     fn project_meta_set_int(
-        &self,
-        project_id: i64,
-        key: &str,
-        value: i64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Read an integer project metadata value, if the row exists.
-    ///
-    /// A missing row is the legitimate default (`None`); unparseable
-    /// values and backend failures are errors.
+    &self,
+    project_id: i64,
+    key: &str,
+    value: i64,
+    ) -> Result<(), StorageError>;
+        /// Read an integer project metadata value, if the row exists.
+        ///
+        /// A missing row is the legitimate default (`None`); unparseable
+        /// values and backend failures are errors.
     fn project_meta_get_int_optional(
-        &self,
-        project_id: i64,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
-
-    /// Read a string project metadata value, if the row exists.
+    &self,
+    project_id: i64,
+    key: &str,
+    ) -> Result<Option<i64>, StorageError>;
+        /// Read a string project metadata value, if the row exists.
     fn project_meta_get_string_optional(
-        &self,
-        project_id: i64,
-        key: &str,
-    ) -> impl Future<Output = Result<Option<String>, StorageError>> + Send;
-
-    /// Write a string project metadata value.
+    &self,
+    project_id: i64,
+    key: &str,
+    ) -> Result<Option<String>, StorageError>;
+        /// Write a string project metadata value.
     fn project_meta_set_string(
-        &self,
-        project_id: i64,
-        key: &str,
-        value: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    // -- Generation manifest --
-
-    /// Allocate (or reattach to) the building manifest for an operation.
-    fn manifest_begin_building(
-        &self,
-        project_id: i64,
-        data_epoch: i64,
-        operation_id: &str,
-        input_fingerprint: Option<&str>,
-    ) -> impl Future<Output = Result<ProjectIndexManifest, StorageError>> + Send;
-
-    /// Mark the inheritance registration of a candidate complete.
-    fn manifest_mark_candidate_ready(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Atomically activate a generation: the manifest row, the relation
-    /// snapshot state, and the project metadata advance in one transaction.
-    fn manifest_activate(
-        &self,
-        project_id: i64,
-        data_epoch: i64,
-        relation_epoch: i64,
-        operation_id: &str,
-        input_fingerprint: Option<&str>,
-    ) -> impl Future<Output = Result<ProjectIndexManifest, StorageError>> + Send;
-
-    /// Mark the building manifest of an operation failed.
-    fn manifest_mark_failed(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        reason: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Fetch the currently active manifest, if any.
-    fn manifest_active(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Option<ProjectIndexManifest>, StorageError>> + Send;
-
-    /// Fetch the building manifest registered for an operation, if any.
-    fn manifest_by_operation(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<Option<ProjectIndexManifest>, StorageError>> + Send;
-
-    /// Highest building data epoch of one project, if any.
-    fn manifest_building_max_epoch(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
-
-    /// Link (or unlink, with `None`) a building manifest to its parent.
-    fn manifest_set_parent(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        parent_data_epoch: Option<i64>,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Parent data epoch of one data epoch, if the generation inherits.
-    fn manifest_parent_epoch(
-        &self,
-        project_id: i64,
-        data_epoch: i64,
-    ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
-
-    /// Whether an in-progress checkpoint of the given operation type exists.
-    fn manifest_has_incomplete(
-        &self,
-        project_id: i64,
-        operation_type: &str,
-    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
-
-    /// Recycle one data epoch: content rows, overrides, manifest rows, and
-    /// snapshot rows of the epoch are removed in one transaction.
-    fn manifest_recycle_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    // -- Generation overrides --
-
-    /// Replace the override set of one generation atomically.
-    fn overrides_replace(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        overrides: &[GenerationOverride],
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// List the overrides of one generation ordered by file path.
-    fn overrides_for_generation(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<GenerationOverride>, StorageError>> + Send;
-
-    /// Upsert override dispositions of one generation atomically.
-    fn overrides_upsert_batch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        entries: &[(String, OverrideDisposition)],
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Clear the override registrations of one generation.
-    fn overrides_clear(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    // -- Content index --
-
-    /// Idempotent batch write of file rows for one project and epoch.
-    fn files_upsert(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        files: &[FileRecord],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete file rows of one project and epoch.
-    fn files_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete all file rows of one project.
-    fn files_delete_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Visible `(path, content_hash)` pairs of the active generation view.
-    ///
-    /// Own-generation rows win over inherited ones; overrides hide
-    /// inherited rows but never rows the published generation owns itself.
-    fn files_visible_hashes(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Vec<FileHashEntry>, StorageError>> + Send;
-
-    /// Record content hashes at an epoch (idempotent per path).
-    fn files_record_hashes(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        entries: &[(String, String)],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Drop hash rows of paths at an epoch.
-    fn files_remove_hashes(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        paths: &[String],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Ensure file rows of a batch without touching content hashes.
-    fn files_ensure(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        batch_id: i64,
-        entries: &[FileEnsureEntry],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete every file row of one path across all epochs.
-    ///
-    /// Entity and mapping rows follow through the foreign-key cascade.
-    fn files_delete_by_path(
-        &self,
-        project_id: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// File rows by row id scoped to one project.
-    fn files_by_ids(
-        &self,
-        project_id: i64,
-        ids: &[i64],
-    ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
-
-    /// Latest file row of one path across all epochs, if any.
-    fn file_by_path(
-        &self,
-        project_id: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<Option<FileRecord>, StorageError>> + Send;
-
-    /// Idempotent batch write of entity rows (records carry project/epoch).
-    fn entities_upsert(
-        &self,
-        entities: &[EntityRecord],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Batch insert of entity rows returning the assigned row ids.
-    fn entities_insert_returning_ids(
-        &self,
-        entities: &[EntityRecord],
-    ) -> impl Future<Output = Result<Vec<i64>, StorageError>> + Send;
-
-    /// Entity rows of one generation joined with their file paths.
-    fn entities_with_files(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<EntityWithFile>, StorageError>> + Send;
-
-    /// Entity rows by row id scoped to one project.
-    fn entities_by_ids(
-        &self,
-        project_id: i64,
-        ids: &[i64],
-    ) -> impl Future<Output = Result<Vec<EntityRecord>, StorageError>> + Send;
-
-    /// Entity rows of one file scoped to one project.
-    fn entities_by_file(
-        &self,
-        project_id: i64,
-        file_id: i64,
-    ) -> impl Future<Output = Result<Vec<EntityRecord>, StorageError>> + Send;
-
-    /// Delete one entity row by id; returns whether a row was removed.
-    fn entities_delete_by_id(
-        &self,
-        project_id: i64,
-        entity_id: i64,
-    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
-
-    /// Delete entity rows of one file at an epoch.
-    fn entities_delete_by_file(
-        &self,
-        file_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Repoint a child entity at its parent inside one generation.
-    fn entities_set_parent(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        child_id: i64,
-        parent_id: i64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Delete entity rows of one project and epoch.
-    fn entities_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete all entity rows of one project.
-    fn entities_delete_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Entity row ids of one file at one epoch, ascending.
-    ///
-    /// Backs cross-epoch stability assertions without hydrating full rows.
-    fn entity_ids_by_file_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<Vec<i64>, StorageError>> + Send;
-
-    /// Count entity rows of one project and epoch.
-    fn entities_count(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Full-text entity search scoped to one project and epoch.
-    ///
-    /// The local branch serves SQLite FTS5; the remote branch serves a
-    /// portable substring match over name, signature and scoped name.
-    /// Rows whose file path is in `excluded_files` are dropped inside the
-    /// branch. An empty query after sanitization returns no rows.
-    fn entities_search_fts(
-        &self,
-        project_id: i64,
-        query: &str,
-        limit: i64,
-        epoch: i64,
-        excluded_files: &[String],
-    ) -> impl Future<Output = Result<Vec<EntityRecord>, StorageError>> + Send;
-
-    /// List file rows of one project across the given epochs, ordered by path.
-    ///
-    /// Backs index-based file search on branches without live project files.
-    fn files_list(
-        &self,
-        project_id: i64,
-        epochs: &[i64],
-    ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
-
-    /// Page chunk rows of one project and epoch with their file category.
-    fn chunks_page_with_category(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        limit: i64,
-        offset: i64,
-    ) -> impl Future<Output = Result<Vec<(ChunkRecord, u8)>, StorageError>> + Send;
-
-    /// List `(path, batch_id, content_hash)` of one project and epoch ordered by path.
-    ///
-    /// Backs recovery classification without hydrating full file rows.
-    fn files_epoch_entries(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<FileEpochEntry>, StorageError>> + Send;
-
-    /// Point one path's file row at `epoch` (recovery re-parse marking).
-    ///
-    /// Returns whether a row was updated.
-    fn files_set_epoch(
-        &self,
-        project_id: i64,
-        path: &str,
-        epoch: i64,
-    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
-
-    /// Latest cached parsed bytes for `(path, content_hash)` from an
-    /// in-progress operation, if any.
-    fn checkpoint_cached_parsed_data(
-        &self,
-        project_id: i64,
-        file_path: &str,
-        content_hash: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>, StorageError>> + Send;
-
-    /// Chunk rows of one file at one epoch, ordered by chunk id.
-    fn chunks_by_file_epoch(
-        &self,
-        project_id: i64,
-        file_path: &str,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<ChunkRecord>, StorageError>> + Send;
-
-    /// Chunk ids of one file at one epoch, ordered by chunk id.
-    fn chunks_by_file(
-        &self,
-        project_id: i64,
-        file_path: &str,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<String>, StorageError>> + Send;
-
-    /// Count file rows of one project and epoch.
-    fn files_count(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Whether a file row exists at one project, epoch and path.
-    fn files_exists_at_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
-
-    /// Page file rows of one project and epoch ordered by row id.
-    fn files_page(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        limit: i64,
-        offset: i64,
-    ) -> impl Future<Output = Result<Vec<FileRecord>, StorageError>> + Send;
-
-    /// Idempotent batch write of chunk rows (records carry project/epoch).
-    fn chunks_upsert(
-        &self,
-        chunks: &[ChunkRecord],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Read back chunk rows by id for enrichment. An empty epoch list
-    /// disables epoch filtering.
-    fn chunks_by_ids(
-        &self,
-        project_id: i64,
-        chunk_ids: &[String],
-        epochs: &[i64],
-    ) -> impl Future<Output = Result<Vec<ChunkRecord>, StorageError>> + Send;
-
-    /// Delete chunk rows of one project and epoch.
-    fn chunks_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete all chunk rows of one project.
-    fn chunks_delete_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Count chunk rows of one file across all epochs.
-    fn chunks_count_by_path(
-        &self,
-        project_id: i64,
-        file_path: &str,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Count chunk rows of one project and epoch.
-    fn chunks_count(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Chunk texts of one generation for BM25 document reconstruction.
-    fn chunks_content_by_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Vec<ChunkContent>, StorageError>> + Send;
-
-    /// Chunk row and truncated-marker counts of one generation channel.
-    fn chunks_stats(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        channel: &str,
-    ) -> impl Future<Output = Result<(i64, i64), StorageError>> + Send;
-
-    /// Largest entity id referenced by chunk rows of one generation.
-    fn chunks_max_entity_id(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Option<u64>, StorageError>> + Send;
-
-    /// Delete every chunk row of one file across all epochs.
-    fn chunks_delete_by_file(
-        &self,
-        project_id: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Write chunk rows and entity detail mappings in one transaction.
-    fn chunks_and_mappings_upsert(
-        &self,
-        chunks: &[ChunkRecord],
-        mappings: &[EntityDetailMapping],
-    ) -> impl Future<Output = Result<(usize, usize), StorageError>> + Send;
-
-    /// Idempotent batch write of entity detail mappings.
-    fn mappings_upsert(
-        &self,
-        mappings: &[EntityDetailMapping],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete mapping rows of one project and epoch.
-    fn mappings_delete_by_project_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete all mapping rows of one project.
-    fn mappings_delete_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Detail mapping of one entity at an epoch, if present.
-    fn mappings_by_entity(
-        &self,
-        project_id: i64,
-        entity_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Option<EntityDetailMapping>, StorageError>> + Send;
-
-    // -- Progress checkpoints --
-
-    /// Create an operation-level checkpoint.
-    fn checkpoint_create(
-        &self,
-        project_id: i64,
-        checkpoint: &CheckpointRecord,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Fetch an operation-level checkpoint.
-    fn checkpoint_get(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<Option<CheckpointRecord>, StorageError>> + Send;
-
-    /// Update an operation-level checkpoint status.
-    fn checkpoint_set_status(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        status: CheckpointStatus,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Replace an operation-level checkpoint.
-    fn checkpoint_update(
-        &self,
-        project_id: i64,
-        checkpoint: &CheckpointRecord,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Idempotent write of one file checkpoint.
-    fn file_checkpoint_upsert(
-        &self,
-        project_id: i64,
-        file: &FileCheckpointRecord,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Fetch one file checkpoint.
-    fn file_checkpoint_get(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        file_path: &str,
-    ) -> impl Future<Output = Result<Option<FileCheckpointRecord>, StorageError>> + Send;
-
-    /// Fetch the active checkpoint of one project, if any.
-    fn checkpoint_active(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Option<CheckpointRecord>, StorageError>> + Send;
-
-    /// Mark an operation checkpoint active.
-    fn checkpoint_set_active(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        priority: i32,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Clear the active marker of an operation.
-    fn checkpoint_clear_active(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Refresh the heartbeat of an active operation.
-    fn checkpoint_heartbeat(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Clear active markers idle longer than `stale_threshold_secs`.
-    fn checkpoints_cleanup_stale(
-        &self,
-        project_id: i64,
-        stale_threshold_secs: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete terminal checkpoints older than `ttl_seconds`.
-    ///
-    /// Only `completed`/`failed` rows whose `updated_at` precedes the cutoff
-    /// and that carry no active flag are removed; returns the deleted count.
-    fn checkpoints_delete_expired(
-        &self,
-        project_id: i64,
-        ttl_seconds: u64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// List in-progress operations of one project.
-    fn checkpoints_unfinished(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Vec<CheckpointRecord>, StorageError>> + Send;
-
-    /// Latest incomplete checkpoint of an operation type and root.
-    fn checkpoint_latest_incomplete(
-        &self,
-        project_id: i64,
-        operation_type: &str,
-        root_dir: &str,
-    ) -> impl Future<Output = Result<Option<CheckpointRecord>, StorageError>> + Send;
-
-    /// Update the batch cursor of an operation checkpoint.
-    fn checkpoint_set_batch_index(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        batch_index: u32,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Create a batch-level checkpoint.
-    fn checkpoint_batch_create(
-        &self,
-        project_id: i64,
-        batch: &BatchCheckpointRecord,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Fetch a batch-level checkpoint.
-    fn checkpoint_batch_get(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        batch_index: u32,
-    ) -> impl Future<Output = Result<Option<BatchCheckpointRecord>, StorageError>> + Send;
-
-    /// List file checkpoints of one batch.
-    fn checkpoint_batch_files(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        batch_index: u32,
-    ) -> impl Future<Output = Result<Vec<FileCheckpointRecord>, StorageError>> + Send;
-
-    /// List failed files of one operation as `(path, error)` pairs.
-    fn checkpoint_failed_files(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<Vec<(String, String)>, StorageError>> + Send;
-
-    /// Delete batch checkpoints of one operation.
-    fn checkpoint_batches_delete_by_operation(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete file checkpoints of one operation.
-    fn checkpoint_files_delete_by_operation(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Overwrite one file checkpoint's parsed envelope bytes.
-    ///
-    /// Returns whether a row was updated.
-    fn checkpoint_file_set_parsed_data(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        file_path: &str,
-        data: &[u8],
-    ) -> impl Future<Output = Result<bool, StorageError>> + Send;
-
-    /// `(entity id, Qdrant point ids JSON)` mappings of one file at one
-    /// epoch, ordered by entity id.
-    fn mappings_point_ids_by_file_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<Vec<(i64, String)>, StorageError>> + Send;
-
-    /// Delete detail mappings of one file's entities.
-    fn mappings_delete_by_file_id(
-        &self,
-        project_id: i64,
-        file_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete detail mappings of one entity.
-    fn mappings_delete_by_entity_id(
-        &self,
-        project_id: i64,
-        entity_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Clear per-module progress markers of one operation.
-    fn file_checkpoints_clear_module_progress(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Insert a work-unit checkpoint.
-    fn work_unit_insert(
-        &self,
-        record: &WorkUnitCheckpointRecord,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Update a work-unit checkpoint status.
-    fn work_unit_set_status(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        stage: &str,
-        work_unit_hash: &str,
-        status: WorkUnitStatus,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// List work-unit checkpoints of one operation stage.
-    fn work_units_list(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        stage: &str,
-    ) -> impl Future<Output = Result<Vec<WorkUnitCheckpointRecord>, StorageError>> + Send;
-
-    /// Fetch one work-unit checkpoint by hash.
-    fn work_unit_by_hash(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        stage: &str,
-        work_unit_hash: &str,
-    ) -> impl Future<Output = Result<Option<WorkUnitCheckpointRecord>, StorageError>> + Send;
-
-    /// Batch insert of work-unit checkpoints returning row ids.
-    fn work_units_insert_batch(
-        &self,
-        records: &[WorkUnitCheckpointRecord],
-    ) -> impl Future<Output = Result<Vec<i64>, StorageError>> + Send;
-
-    /// Delete work-unit checkpoints of one operation.
-    fn work_units_delete_by_operation(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    // -- Relation snapshots --
-
-    /// Allocate a building relation epoch for an operation.
-    fn snapshot_allocate(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        config_fingerprint: &str,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    /// Persist a full snapshot and mark its epoch ready, atomically.
-    fn snapshot_write_ready(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        snapshot: &CanonicalRelationSnapshot,
-        input_fingerprint: &str,
-        snapshot_fingerprint: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Read back the canonical snapshot of an epoch.
-    fn snapshot_read(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<CanonicalRelationSnapshot, StorageError>> + Send;
-
-    /// Fetch the snapshot manifest of an epoch, if present.
-    fn snapshot_manifest(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<Option<RelationSnapshotManifest>, StorageError>> + Send;
-
-    /// Persist one delta onto a building epoch allocated by
-    /// [`MetadataStorage::snapshot_allocate`].
-    fn snapshot_write_delta(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        delta: &SnapshotDelta,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Read the incremental delta chain of an epoch range.
-    fn snapshot_delta_chain(
-        &self,
-        project_id: i64,
-        after_epoch: i64,
-        up_to_epoch: i64,
-    ) -> impl Future<Output = Result<Vec<SnapshotDelta>, StorageError>> + Send;
-
-    /// Resolve the base epoch a delta epoch was built from.
-    fn snapshot_find_base(
-        &self,
-        project_id: i64,
-        delta_epoch: i64,
-    ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
-
-    /// Mark a relation epoch failed.
-    fn snapshot_mark_failed(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        reason: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Delete snapshot manifests of every epoch but `keep_epoch`.
-    fn snapshot_delete_manifests_except(
-        &self,
-        project_id: i64,
-        keep_epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// `(chain length, cumulative delta bytes, base snapshot bytes)` of the
-    /// delta chain ending at `active_epoch`; zeros when there is no chain.
-    fn snapshot_delta_chain_info(
-        &self,
-        project_id: i64,
-        active_epoch: i64,
-    ) -> impl Future<Output = Result<(usize, i64, i64), StorageError>> + Send;
-
-    /// Delete every snapshot row of one epoch.
-    fn snapshot_delete_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete every snapshot row of one project.
-    fn snapshot_delete_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Fetch the snapshot manifest registered for an operation, if any.
-    fn snapshot_manifest_by_operation(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<Option<RelationSnapshotManifest>, StorageError>> + Send;
-
-    /// Activate a previously written relation epoch.
-    fn snapshot_activate(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Reopen a failed relation epoch for another write attempt.
-    fn snapshot_retry_failed(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Reclaim relation rows older than `stale_before`.
-    fn snapshot_collect_garbage(
-        &self,
-        project_id: i64,
-        stale_before: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Count canonical snapshot entities of one relation epoch.
-    fn snapshot_entities_count(
-        &self,
-        project_id: i64,
-        relation_epoch: i64,
-    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
-
-    // -- Generation materialization --
-
-    /// Copy one file's rows from a source generation into a target one.
-    ///
-    /// Parent references remap to the copied rows and target-owned rows
-    /// are never shadowed; returns the copied entity row count.
-    fn generation_copy_file(
-        &self,
-        project_id: i64,
-        source_epoch: i64,
-        target_epoch: i64,
-        path: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Materialize an inherited generation into a full one (compaction).
-    ///
-    /// Copies every non-overridden source row into the target in one
-    /// transaction, replacing crash residue of the same source paths.
-    fn generation_materialize(
-        &self,
-        project_id: i64,
-        source_epoch: i64,
-        target_epoch: i64,
-        excluded_paths: &[String],
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Compute the retention plan over stale generations.
-    fn generation_gc_plan(
-        &self,
-        project_id: i64,
-        keep_active_generations: usize,
-        stale_before: i64,
-    ) -> impl Future<Output = Result<GenerationGcPlan, StorageError>> + Send;
-
-    /// Apply a retention plan, removing only unprotected generations.
-    fn generation_gc_apply(
-        &self,
-        project_id: i64,
-        plan: &GenerationGcPlan,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    // -- Hot-update candidate --
-
-    /// Register a hot-update candidate inheriting from a parent generation.
-    ///
-    /// One transaction: begin the building manifest, link the parent, clear
-    /// residual rows and overrides of the epoch number, mark it ready.
-    fn candidate_begin(
-        &self,
-        project_id: i64,
-        candidate_epoch: i64,
-        operation_id: &str,
-        parent_data_epoch: Option<i64>,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Clear every candidate-generation row plus its override registrations.
-    fn candidate_clear_epoch(
-        &self,
-        project_id: i64,
-        epoch: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Clear one file set's candidate-generation rows (chunks, entities).
-    fn candidate_delete_file_rows(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        paths: &[String],
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Prepare one file set for rewriting on a channel (`nl` or `emb`).
-    ///
-    /// Drops the channel's chunk rows of the candidate epoch and registers
-    /// `replaced` overrides so the parent rows stay hidden.
-    fn candidate_prepare_channel(
-        &self,
-        project_id: i64,
-        epoch: i64,
-        paths: &[String],
-        channel: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    // -- File-level state projection --
-
-    /// Load the durable projection rows of one operation.
-    fn projection_load(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<Vec<IndexStateProjection>, StorageError>> + Send;
-
-    /// Upsert a projection row; an older version never overwrites a newer one.
-    fn projection_upsert(
-        &self,
-        row: &IndexStateProjection,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Upsert a batch of projection rows in one transaction.
-    fn projection_upsert_batch(
-        &self,
-        rows: &[IndexStateProjection],
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Delete one file's projection row inside an operation.
-    fn projection_delete(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-        file_path: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete every projection row of one operation.
-    fn projection_delete_by_operation(
-        &self,
-        project_id: i64,
-        operation_id: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Delete every projection row of one project.
-    fn projection_delete_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    // -- Admission audit --
-
-    /// Record one admitted ingest batch.
-    fn admission_record_admitted(
-        &self,
-        fingerprint: &str,
-        projects: &[i64],
-        quota_bytes: Option<u64>,
-        bytes: u64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Record one rejection with its cause.
-    fn admission_record_rejection(
-        &self,
-        fingerprint: &str,
-        projects: &[i64],
-        quota_bytes: Option<u64>,
-        reason: &str,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
-
-    /// Fetch one audit row by fingerprint.
-    fn admission_get(
-        &self,
-        fingerprint: &str,
-    ) -> impl Future<Output = Result<Option<AdmissionAuditRecord>, StorageError>> + Send;
-
-    /// List every audit row ordered by fingerprint.
-    fn admission_list(
-        &self,
-    ) -> impl Future<Output = Result<Vec<AdmissionAuditRecord>, StorageError>> + Send;
-
-    // -- Capacity --
-
-    /// Aggregate on-disk size (local: main plus per-project files; remote:
-    /// whole database size plus per-project estimate where available).
-    fn db_size(&self) -> impl Future<Output = Result<u64, StorageError>> + Send;
-
-    /// Remove a project: local deletes the per-project database files
-    /// (evict handle, then main plus WAL/SHM sidecars); remote deletes the
-    /// project rows across business tables in one transaction.
-    /// Returns the number of removed business records; snapshot-only
-    /// deletion stays on `snapshot_delete_project`.
-    fn delete_project_db(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
-    /// Backend name for logging (`local` for the embedded branch).
-    fn backend_name(&self) -> &'static str {
-        "local"
+    &self,
+    project_id: i64,
+    key: &str,
+    value: &str,
+    ) -> Result<(), StorageError>;
     }
-
-    /// Whether this branch keeps per-project database files.
-    fn is_per_project_db(&self) -> bool {
-        true
+    metadata_manifest: MetadataManifestStore {
+        /// Allocate (or reattach to) the building manifest for an operation.
+    fn manifest_begin_building(
+    &self,
+    project_id: i64,
+    data_epoch: i64,
+    operation_id: &str,
+    input_fingerprint: Option<&str>,
+    ) -> Result<ProjectIndexManifest, StorageError>;
+        /// Mark the inheritance registration of a candidate complete.
+    fn manifest_mark_candidate_ready(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<(), StorageError>;
+        /// Atomically activate a generation: the manifest row, the relation
+        /// snapshot state, and the project metadata advance in one transaction.
+    fn manifest_activate(
+    &self,
+    project_id: i64,
+    data_epoch: i64,
+    relation_epoch: i64,
+    operation_id: &str,
+    input_fingerprint: Option<&str>,
+    ) -> Result<ProjectIndexManifest, StorageError>;
+        /// Mark the building manifest of an operation failed.
+    fn manifest_mark_failed(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    reason: &str,
+    ) -> Result<(), StorageError>;
+        /// Fetch the currently active manifest, if any.
+    fn manifest_active(
+    &self,
+    project_id: i64,
+    ) -> Result<Option<ProjectIndexManifest>, StorageError>;
+        /// Fetch the building manifest registered for an operation, if any.
+    fn manifest_by_operation(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<Option<ProjectIndexManifest>, StorageError>;
+        /// Highest building data epoch of one project, if any.
+    fn manifest_building_max_epoch(
+    &self,
+    project_id: i64,
+    ) -> Result<Option<i64>, StorageError>;
+        /// Link (or unlink, with `None`) a building manifest to its parent.
+    fn manifest_set_parent(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    parent_data_epoch: Option<i64>,
+    ) -> Result<(), StorageError>;
+        /// Parent data epoch of one data epoch, if the generation inherits.
+    fn manifest_parent_epoch(
+    &self,
+    project_id: i64,
+    data_epoch: i64,
+    ) -> Result<Option<i64>, StorageError>;
+        /// Whether an in-progress checkpoint of the given operation type exists.
+    fn manifest_has_incomplete(
+    &self,
+    project_id: i64,
+    operation_type: &str,
+    ) -> Result<bool, StorageError>;
+        /// Recycle one data epoch: content rows, overrides, manifest rows, and
+        /// snapshot rows of the epoch are removed in one transaction.
+    fn manifest_recycle_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+    }
+    metadata_generation: MetadataGenerationStore {
+        /// Replace the override set of one generation atomically.
+    fn overrides_replace(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    overrides: &[GenerationOverride],
+    ) -> Result<(), StorageError>;
+        /// List the overrides of one generation ordered by file path.
+    fn overrides_for_generation(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<Vec<GenerationOverride>, StorageError>;
+        /// Upsert override dispositions of one generation atomically.
+    fn overrides_upsert_batch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    entries: &[(String, OverrideDisposition)],
+    ) -> Result<(), StorageError>;
+        /// Clear the override registrations of one generation.
+    fn overrides_clear(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Copy one file's rows from a source generation into a target one.
+        ///
+        /// Parent references remap to the copied rows and target-owned rows
+        /// are never shadowed; returns the copied entity row count.
+    fn generation_copy_file(
+    &self,
+    project_id: i64,
+    source_epoch: i64,
+    target_epoch: i64,
+    path: &str,
+    ) -> Result<usize, StorageError>;
+        /// Materialize an inherited generation into a full one (compaction).
+        ///
+        /// Copies every non-overridden source row into the target in one
+        /// transaction, replacing crash residue of the same source paths.
+    fn generation_materialize(
+    &self,
+    project_id: i64,
+    source_epoch: i64,
+    target_epoch: i64,
+    excluded_paths: &[String],
+    ) -> Result<(), StorageError>;
+        /// Compute the retention plan over stale generations.
+    fn generation_gc_plan(
+    &self,
+    project_id: i64,
+    keep_active_generations: usize,
+    stale_before: i64,
+    ) -> Result<GenerationGcPlan, StorageError>;
+        /// Apply a retention plan, removing only unprotected generations.
+    fn generation_gc_apply(
+    &self,
+    project_id: i64,
+    plan: &GenerationGcPlan,
+    ) -> Result<(), StorageError>;
+        /// Register a hot-update candidate inheriting from a parent generation.
+        ///
+        /// One transaction: begin the building manifest, link the parent, clear
+        /// residual rows and overrides of the epoch number, mark it ready.
+    fn candidate_begin(
+    &self,
+    project_id: i64,
+    candidate_epoch: i64,
+    operation_id: &str,
+    parent_data_epoch: Option<i64>,
+    ) -> Result<(), StorageError>;
+        /// Clear every candidate-generation row plus its override registrations.
+    fn candidate_clear_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Clear one file set's candidate-generation rows (chunks, entities).
+    fn candidate_delete_file_rows(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    paths: &[String],
+    ) -> Result<usize, StorageError>;
+        /// Prepare one file set for rewriting on a channel (`nl` or `emb`).
+        ///
+        /// Drops the channel's chunk rows of the candidate epoch and registers
+        /// `replaced` overrides so the parent rows stay hidden.
+    fn candidate_prepare_channel(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    paths: &[String],
+    channel: &str,
+    ) -> Result<(), StorageError>;
+    }
+    metadata_content: MetadataContentStore {
+        /// Idempotent batch write of file rows for one project and epoch.
+    fn files_upsert(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    files: &[FileRecord],
+    ) -> Result<usize, StorageError>;
+        /// Delete file rows of one project and epoch.
+    fn files_delete_by_project_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete all file rows of one project.
+    fn files_delete_by_project(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Visible `(path, content_hash)` pairs of the active generation view.
+        ///
+        /// Own-generation rows win over inherited ones; overrides hide
+        /// inherited rows but never rows the published generation owns itself.
+    fn files_visible_hashes(
+    &self,
+    project_id: i64,
+    ) -> Result<Vec<FileHashEntry>, StorageError>;
+        /// Record content hashes at an epoch (idempotent per path).
+    fn files_record_hashes(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    entries: &[(String, String)],
+    ) -> Result<usize, StorageError>;
+        /// Drop hash rows of paths at an epoch.
+    fn files_remove_hashes(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    paths: &[String],
+    ) -> Result<usize, StorageError>;
+        /// Ensure file rows of a batch without touching content hashes.
+    fn files_ensure(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    batch_id: i64,
+    entries: &[FileEnsureEntry],
+    ) -> Result<usize, StorageError>;
+        /// Delete every file row of one path across all epochs.
+        ///
+        /// Entity and mapping rows follow through the foreign-key cascade.
+    fn files_delete_by_path(
+    &self,
+    project_id: i64,
+    path: &str,
+    ) -> Result<usize, StorageError>;
+        /// File rows by row id scoped to one project.
+    fn files_by_ids(
+    &self,
+    project_id: i64,
+    ids: &[i64],
+    ) -> Result<Vec<FileRecord>, StorageError>;
+        /// Latest file row of one path across all epochs, if any.
+    fn file_by_path(
+    &self,
+    project_id: i64,
+    path: &str,
+    ) -> Result<Option<FileRecord>, StorageError>;
+        /// Idempotent batch write of entity rows (records carry project/epoch).
+    fn entities_upsert(
+    &self,
+    entities: &[EntityRecord],
+    ) -> Result<usize, StorageError>;
+        /// Batch insert of entity rows returning the assigned row ids.
+    fn entities_insert_returning_ids(
+    &self,
+    entities: &[EntityRecord],
+    ) -> Result<Vec<i64>, StorageError>;
+        /// Entity rows of one generation joined with their file paths.
+    fn entities_with_files(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<Vec<EntityWithFile>, StorageError>;
+        /// Entity rows by row id scoped to one project.
+    fn entities_by_ids(
+    &self,
+    project_id: i64,
+    ids: &[i64],
+    ) -> Result<Vec<EntityRecord>, StorageError>;
+        /// Entity rows of one file scoped to one project.
+    fn entities_by_file(
+    &self,
+    project_id: i64,
+    file_id: i64,
+    ) -> Result<Vec<EntityRecord>, StorageError>;
+        /// Delete one entity row by id; returns whether a row was removed.
+    fn entities_delete_by_id(
+    &self,
+    project_id: i64,
+    entity_id: i64,
+    ) -> Result<bool, StorageError>;
+        /// Delete entity rows of one file at an epoch.
+    fn entities_delete_by_file(
+    &self,
+    file_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Repoint a child entity at its parent inside one generation.
+    fn entities_set_parent(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    child_id: i64,
+    parent_id: i64,
+    ) -> Result<(), StorageError>;
+        /// Delete entity rows of one project and epoch.
+    fn entities_delete_by_project_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete all entity rows of one project.
+    fn entities_delete_by_project(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Entity row ids of one file at one epoch, ascending.
+        ///
+        /// Backs cross-epoch stability assertions without hydrating full rows.
+    fn entity_ids_by_file_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    path: &str,
+    ) -> Result<Vec<i64>, StorageError>;
+        /// Count entity rows of one project and epoch.
+    fn entities_count(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<i64, StorageError>;
+        /// Full-text entity search scoped to one project and epoch.
+        ///
+        /// The local branch serves SQLite FTS5; the remote branch serves a
+        /// portable substring match over name, signature and scoped name.
+        /// Rows whose file path is in `excluded_files` are dropped inside the
+        /// branch. An empty query after sanitization returns no rows.
+    fn entities_search_fts(
+    &self,
+    project_id: i64,
+    query: &str,
+    limit: i64,
+    epoch: i64,
+    excluded_files: &[String],
+    ) -> Result<Vec<EntityRecord>, StorageError>;
+        /// List file rows of one project across the given epochs, ordered by path.
+        ///
+        /// Backs index-based file search on branches without live project files.
+    fn files_list(
+    &self,
+    project_id: i64,
+    epochs: &[i64],
+    ) -> Result<Vec<FileRecord>, StorageError>;
+        /// Page chunk rows of one project and epoch with their file category.
+    fn chunks_page_with_category(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    limit: i64,
+    offset: i64,
+    ) -> Result<Vec<(ChunkRecord, u8)>, StorageError>;
+        /// List `(path, batch_id, content_hash)` of one project and epoch ordered by path.
+        ///
+        /// Backs recovery classification without hydrating full file rows.
+    fn files_epoch_entries(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<Vec<FileEpochEntry>, StorageError>;
+        /// Point one path's file row at `epoch` (recovery re-parse marking).
+        ///
+        /// Returns whether a row was updated.
+    fn files_set_epoch(
+    &self,
+    project_id: i64,
+    path: &str,
+    epoch: i64,
+    ) -> Result<bool, StorageError>;
+        /// Latest cached parsed bytes for `(path, content_hash)` from an
+        /// in-progress operation, if any.
+    fn checkpoint_cached_parsed_data(
+    &self,
+    project_id: i64,
+    file_path: &str,
+    content_hash: &str,
+    ) -> Result<Option<Vec<u8>>, StorageError>;
+        /// Chunk rows of one file at one epoch, ordered by chunk id.
+    fn chunks_by_file_epoch(
+    &self,
+    project_id: i64,
+    file_path: &str,
+    epoch: i64,
+    ) -> Result<Vec<ChunkRecord>, StorageError>;
+        /// Chunk ids of one file at one epoch, ordered by chunk id.
+    fn chunks_by_file(
+    &self,
+    project_id: i64,
+    file_path: &str,
+    epoch: i64,
+    ) -> Result<Vec<String>, StorageError>;
+        /// Count file rows of one project and epoch.
+    fn files_count(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<i64, StorageError>;
+        /// Whether a file row exists at one project, epoch and path.
+    fn files_exists_at_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    path: &str,
+    ) -> Result<bool, StorageError>;
+        /// Page file rows of one project and epoch ordered by row id.
+    fn files_page(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    limit: i64,
+    offset: i64,
+    ) -> Result<Vec<FileRecord>, StorageError>;
+        /// Idempotent batch write of chunk rows (records carry project/epoch).
+    fn chunks_upsert(
+    &self,
+    chunks: &[ChunkRecord],
+    ) -> Result<usize, StorageError>;
+        /// Read back chunk rows by id for enrichment. An empty epoch list
+        /// disables epoch filtering.
+    fn chunks_by_ids(
+    &self,
+    project_id: i64,
+    chunk_ids: &[String],
+    epochs: &[i64],
+    ) -> Result<Vec<ChunkRecord>, StorageError>;
+        /// Delete chunk rows of one project and epoch.
+    fn chunks_delete_by_project_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete all chunk rows of one project.
+    fn chunks_delete_by_project(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Count chunk rows of one file across all epochs.
+    fn chunks_count_by_path(
+    &self,
+    project_id: i64,
+    file_path: &str,
+    ) -> Result<i64, StorageError>;
+        /// Count chunk rows of one project and epoch.
+    fn chunks_count(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<i64, StorageError>;
+        /// Chunk texts of one generation for BM25 document reconstruction.
+    fn chunks_content_by_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<Vec<ChunkContent>, StorageError>;
+        /// Chunk row and truncated-marker counts of one generation channel.
+    fn chunks_stats(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    channel: &str,
+    ) -> Result<(i64, i64), StorageError>;
+        /// Largest entity id referenced by chunk rows of one generation.
+    fn chunks_max_entity_id(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<Option<u64>, StorageError>;
+        /// Delete every chunk row of one file across all epochs.
+    fn chunks_delete_by_file(
+    &self,
+    project_id: i64,
+    path: &str,
+    ) -> Result<usize, StorageError>;
+        /// Write chunk rows and entity detail mappings in one transaction.
+    fn chunks_and_mappings_upsert(
+    &self,
+    chunks: &[ChunkRecord],
+    mappings: &[EntityDetailMapping],
+    ) -> Result<(usize, usize), StorageError>;
+        /// Idempotent batch write of entity detail mappings.
+    fn mappings_upsert(
+    &self,
+    mappings: &[EntityDetailMapping],
+    ) -> Result<usize, StorageError>;
+        /// Delete mapping rows of one project and epoch.
+    fn mappings_delete_by_project_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete all mapping rows of one project.
+    fn mappings_delete_by_project(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Detail mapping of one entity at an epoch, if present.
+    fn mappings_by_entity(
+    &self,
+    project_id: i64,
+    entity_id: i64,
+    epoch: i64,
+    ) -> Result<Option<EntityDetailMapping>, StorageError>;
+    }
+    metadata_checkpoint: MetadataCheckpointStore {
+        /// Create an operation-level checkpoint.
+    fn checkpoint_create(
+    &self,
+    project_id: i64,
+    checkpoint: &CheckpointRecord,
+    ) -> Result<i64, StorageError>;
+        /// Fetch an operation-level checkpoint.
+    fn checkpoint_get(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<Option<CheckpointRecord>, StorageError>;
+        /// Update an operation-level checkpoint status.
+    fn checkpoint_set_status(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    status: CheckpointStatus,
+    ) -> Result<(), StorageError>;
+        /// Replace an operation-level checkpoint.
+    fn checkpoint_update(
+    &self,
+    project_id: i64,
+    checkpoint: &CheckpointRecord,
+    ) -> Result<(), StorageError>;
+        /// Idempotent write of one file checkpoint.
+    fn file_checkpoint_upsert(
+    &self,
+    project_id: i64,
+    file: &FileCheckpointRecord,
+    ) -> Result<(), StorageError>;
+        /// Fetch one file checkpoint.
+    fn file_checkpoint_get(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    file_path: &str,
+    ) -> Result<Option<FileCheckpointRecord>, StorageError>;
+        /// Fetch the active checkpoint of one project, if any.
+    fn checkpoint_active(
+    &self,
+    project_id: i64,
+    ) -> Result<Option<CheckpointRecord>, StorageError>;
+        /// Mark an operation checkpoint active.
+    fn checkpoint_set_active(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    priority: i32,
+    ) -> Result<(), StorageError>;
+        /// Clear the active marker of an operation.
+    fn checkpoint_clear_active(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<usize, StorageError>;
+        /// Refresh the heartbeat of an active operation.
+    fn checkpoint_heartbeat(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<(), StorageError>;
+        /// Clear active markers idle longer than `stale_threshold_secs`.
+    fn checkpoints_cleanup_stale(
+    &self,
+    project_id: i64,
+    stale_threshold_secs: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete terminal checkpoints older than `ttl_seconds`.
+        ///
+        /// Only `completed`/`failed` rows whose `updated_at` precedes the cutoff
+        /// and that carry no active flag are removed; returns the deleted count.
+    fn checkpoints_delete_expired(
+    &self,
+    project_id: i64,
+    ttl_seconds: u64,
+    ) -> Result<usize, StorageError>;
+        /// List in-progress operations of one project.
+    fn checkpoints_unfinished(
+    &self,
+    project_id: i64,
+    ) -> Result<Vec<CheckpointRecord>, StorageError>;
+        /// Latest incomplete checkpoint of an operation type and root.
+    fn checkpoint_latest_incomplete(
+    &self,
+    project_id: i64,
+    operation_type: &str,
+    root_dir: &str,
+    ) -> Result<Option<CheckpointRecord>, StorageError>;
+        /// Update the batch cursor of an operation checkpoint.
+    fn checkpoint_set_batch_index(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    batch_index: u32,
+    ) -> Result<(), StorageError>;
+        /// Create a batch-level checkpoint.
+    fn checkpoint_batch_create(
+    &self,
+    project_id: i64,
+    batch: &BatchCheckpointRecord,
+    ) -> Result<(), StorageError>;
+        /// Fetch a batch-level checkpoint.
+    fn checkpoint_batch_get(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    batch_index: u32,
+    ) -> Result<Option<BatchCheckpointRecord>, StorageError>;
+        /// List file checkpoints of one batch.
+    fn checkpoint_batch_files(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    batch_index: u32,
+    ) -> Result<Vec<FileCheckpointRecord>, StorageError>;
+        /// List failed files of one operation as `(path, error)` pairs.
+    fn checkpoint_failed_files(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<Vec<(String, String)>, StorageError>;
+        /// Delete batch checkpoints of one operation.
+    fn checkpoint_batches_delete_by_operation(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<usize, StorageError>;
+        /// Delete file checkpoints of one operation.
+    fn checkpoint_files_delete_by_operation(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<usize, StorageError>;
+        /// Overwrite one file checkpoint's parsed envelope bytes.
+        ///
+        /// Returns whether a row was updated.
+    fn checkpoint_file_set_parsed_data(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    file_path: &str,
+    data: &[u8],
+    ) -> Result<bool, StorageError>;
+        /// `(entity id, Qdrant point ids JSON)` mappings of one file at one
+        /// epoch, ordered by entity id.
+    fn mappings_point_ids_by_file_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    path: &str,
+    ) -> Result<Vec<(i64, String)>, StorageError>;
+        /// Delete detail mappings of one file's entities.
+    fn mappings_delete_by_file_id(
+    &self,
+    project_id: i64,
+    file_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete detail mappings of one entity.
+    fn mappings_delete_by_entity_id(
+    &self,
+    project_id: i64,
+    entity_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Clear per-module progress markers of one operation.
+    fn file_checkpoints_clear_module_progress(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<usize, StorageError>;
+        /// Insert a work-unit checkpoint.
+    fn work_unit_insert(
+    &self,
+    record: &WorkUnitCheckpointRecord,
+    ) -> Result<i64, StorageError>;
+        /// Update a work-unit checkpoint status.
+    fn work_unit_set_status(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    stage: &str,
+    work_unit_hash: &str,
+    status: WorkUnitStatus,
+    ) -> Result<(), StorageError>;
+        /// List work-unit checkpoints of one operation stage.
+    fn work_units_list(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    stage: &str,
+    ) -> Result<Vec<WorkUnitCheckpointRecord>, StorageError>;
+        /// Fetch one work-unit checkpoint by hash.
+    fn work_unit_by_hash(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    stage: &str,
+    work_unit_hash: &str,
+    ) -> Result<Option<WorkUnitCheckpointRecord>, StorageError>;
+        /// Batch insert of work-unit checkpoints returning row ids.
+    fn work_units_insert_batch(
+    &self,
+    records: &[WorkUnitCheckpointRecord],
+    ) -> Result<Vec<i64>, StorageError>;
+        /// Delete work-unit checkpoints of one operation.
+    fn work_units_delete_by_operation(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<usize, StorageError>;
+    }
+    metadata_snapshot: MetadataSnapshotStore {
+        /// Allocate a building relation epoch for an operation.
+    fn snapshot_allocate(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    config_fingerprint: &str,
+    ) -> Result<i64, StorageError>;
+        /// Persist a full snapshot and mark its epoch ready, atomically.
+    fn snapshot_write_ready(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    snapshot: &CanonicalRelationSnapshot,
+    input_fingerprint: &str,
+    snapshot_fingerprint: &str,
+    ) -> Result<(), StorageError>;
+        /// Read back the canonical snapshot of an epoch.
+    fn snapshot_read(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<CanonicalRelationSnapshot, StorageError>;
+        /// Fetch the snapshot manifest of an epoch, if present.
+    fn snapshot_manifest(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<Option<RelationSnapshotManifest>, StorageError>;
+        /// Persist one delta onto a building epoch allocated by
+        /// [`MetadataStorage::snapshot_allocate`].
+    fn snapshot_write_delta(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    delta: &SnapshotDelta,
+    ) -> Result<(), StorageError>;
+        /// Read the incremental delta chain of an epoch range.
+    fn snapshot_delta_chain(
+    &self,
+    project_id: i64,
+    after_epoch: i64,
+    up_to_epoch: i64,
+    ) -> Result<Vec<SnapshotDelta>, StorageError>;
+        /// Resolve the base epoch a delta epoch was built from.
+    fn snapshot_find_base(
+    &self,
+    project_id: i64,
+    delta_epoch: i64,
+    ) -> Result<Option<i64>, StorageError>;
+        /// Mark a relation epoch failed.
+    fn snapshot_mark_failed(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    reason: &str,
+    ) -> Result<(), StorageError>;
+        /// Delete snapshot manifests of every epoch but `keep_epoch`.
+    fn snapshot_delete_manifests_except(
+    &self,
+    project_id: i64,
+    keep_epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// `(chain length, cumulative delta bytes, base snapshot bytes)` of the
+        /// delta chain ending at `active_epoch`; zeros when there is no chain.
+    fn snapshot_delta_chain_info(
+    &self,
+    project_id: i64,
+    active_epoch: i64,
+    ) -> Result<(usize, i64, i64), StorageError>;
+        /// Delete every snapshot row of one epoch.
+    fn snapshot_delete_epoch(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<usize, StorageError>;
+        /// Delete every snapshot row of one project.
+    fn snapshot_delete_project(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+        /// Fetch the snapshot manifest registered for an operation, if any.
+    fn snapshot_manifest_by_operation(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<Option<RelationSnapshotManifest>, StorageError>;
+        /// Activate a previously written relation epoch.
+    fn snapshot_activate(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<(), StorageError>;
+        /// Reopen a failed relation epoch for another write attempt.
+    fn snapshot_retry_failed(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    ) -> Result<(), StorageError>;
+        /// Reclaim relation rows older than `stale_before`.
+    fn snapshot_collect_garbage(
+    &self,
+    project_id: i64,
+    stale_before: i64,
+    ) -> Result<usize, StorageError>;
+        /// Count canonical snapshot entities of one relation epoch.
+    fn snapshot_entities_count(
+    &self,
+    project_id: i64,
+    relation_epoch: i64,
+    ) -> Result<i64, StorageError>;
+    }
+    metadata_projection: MetadataProjectionStore {
+        /// Load the durable projection rows of one operation.
+    fn projection_load(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<Vec<IndexStateProjection>, StorageError>;
+        /// Upsert a projection row; an older version never overwrites a newer one.
+    fn projection_upsert(
+    &self,
+    row: &IndexStateProjection,
+    ) -> Result<(), StorageError>;
+        /// Upsert a batch of projection rows in one transaction.
+    fn projection_upsert_batch(
+    &self,
+    rows: &[IndexStateProjection],
+    ) -> Result<(), StorageError>;
+        /// Delete one file's projection row inside an operation.
+    fn projection_delete(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    file_path: &str,
+    ) -> Result<usize, StorageError>;
+        /// Delete every projection row of one operation.
+    fn projection_delete_by_operation(
+    &self,
+    project_id: i64,
+    operation_id: &str,
+    ) -> Result<usize, StorageError>;
+        /// Delete every projection row of one project.
+    fn projection_delete_by_project(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
+    }
+    metadata_admission: MetadataAdmissionStore {
+        /// Record one admitted ingest batch.
+    fn admission_record_admitted(
+    &self,
+    fingerprint: &str,
+    projects: &[i64],
+    quota_bytes: Option<u64>,
+    bytes: u64,
+    ) -> Result<(), StorageError>;
+        /// Record one rejection with its cause.
+    fn admission_record_rejection(
+    &self,
+    fingerprint: &str,
+    projects: &[i64],
+    quota_bytes: Option<u64>,
+    reason: &str,
+    ) -> Result<(), StorageError>;
+        /// Fetch one audit row by fingerprint.
+    fn admission_get(
+    &self,
+    fingerprint: &str,
+    ) -> Result<Option<AdmissionAuditRecord>, StorageError>;
+        /// List every audit row ordered by fingerprint.
+    fn admission_list(
+    &self,
+    ) -> Result<Vec<AdmissionAuditRecord>, StorageError>;
+    }
+    metadata_capacity: MetadataCapacityStore {
+        /// Aggregate on-disk size (local: main plus per-project files; remote:
+        /// whole database size plus per-project estimate where available).
+    fn db_size(&self) -> Result<u64, StorageError>;
+        /// Remove a project: local deletes the per-project database files
+        /// (evict handle, then main plus WAL/SHM sidecars); remote deletes the
+        /// project rows across business tables in one transaction.
+        /// Returns the number of removed business records; snapshot-only
+        /// deletion stays on `snapshot_delete_project`.
+    fn delete_project_db(
+    &self,
+    project_id: i64,
+    ) -> Result<usize, StorageError>;
     }
 }
 

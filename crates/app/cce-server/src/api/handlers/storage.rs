@@ -19,9 +19,32 @@ use cce_api::models::{
     IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
+use cce_orchestrator::index::{MetadataDiagnostics, MetadataStore};
 use cce_server_shared::maintenance::ProjectIndexMaintenanceService;
 use cce_storage_common::MetadataStorage;
+use cce_storage_common::metadb::MetadataBackendStore;
 use cce_storage_common::{FulltextStorage, VectorStorage};
+
+/// Backend-neutral metadata diagnostics snapshot.
+async fn metadata_diagnostics(store: &MetadataStore) -> MetadataDiagnostics {
+    match store {
+        MetadataBackendStore::Local(client) => client.diagnose_summary().await,
+        MetadataBackendStore::Remote(client) => {
+            let health = client.health().await;
+            let size = client.db_size().await;
+            MetadataDiagnostics {
+                reachable: *health.as_ref().unwrap_or(&false),
+                version: None,
+                size_bytes: *size.as_ref().unwrap_or(&0),
+                error: health
+                    .as_ref()
+                    .err()
+                    .map(|error| error.to_string())
+                    .or_else(|| size.as_ref().err().map(|error| error.to_string())),
+            }
+        }
+    }
+}
 
 // ============================================================================
 // Clear Index
@@ -637,7 +660,7 @@ pub async fn handle_storage_status(
     // Check relation through the backend-neutral diagnostics snapshot.
     let relation_storage = match state.engine.metadata_store() {
         Some(store) => {
-            let diag = store.diagnose_summary().await;
+            let diag = metadata_diagnostics(&store).await;
             StorageComponentStatus {
                 backend: store.backend_name().to_string(),
                 connected: diag.reachable,

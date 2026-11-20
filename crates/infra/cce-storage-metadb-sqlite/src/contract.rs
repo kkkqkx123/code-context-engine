@@ -2818,9 +2818,8 @@ mod tests {
             ..DatabaseConfig::default()
         };
         assert!(remote.validate_backend_combination().is_err());
-        // Remote branches are forward scaffolding, not an official preset:
-        // even with endpoints configured, the full-remote combination needs
-        // the advanced switch for its wired branches.
+        // Remote metadata with local fulltext is an official preset; the
+        // full-remote combination needs the advanced switch.
         let mut preset = DatabaseConfig {
             vector_backend: cce_config::modules::VectorBackend::Qdrant,
             metadata_backend: cce_config::modules::MetadataBackend::Remote,
@@ -2838,12 +2837,17 @@ mod tests {
         };
         assert!(preset.validate_backend_combination().is_err());
         preset.allow_nonstandard_backends = true;
-        // The remote relation write path is not wired, so a combination
-        // containing it stays rejected even with the advanced switch; only
-        // wired branches (remote fulltext below) are flag-allowed.
-        assert!(preset.validate_backend_combination().is_err());
-        // Remote fulltext is a wired official preset, so the partial mix
-        // validates without the advanced switch.
+        assert!(preset.validate_backend_combination().is_ok());
+        // Remote metadata with local fulltext validates without the switch.
+        let remote_metadata = DatabaseConfig {
+            metadata_backend: cce_config::modules::MetadataBackend::Remote,
+            metadata_remote: cce_config::modules::MetadataRemoteConfig {
+                url: Some("postgres://localhost:5432/cce".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(remote_metadata.validate_backend_combination().is_ok());
         let partial = DatabaseConfig {
             fulltext_backend: cce_config::modules::FulltextBackend::Remote,
             fulltext_remote: cce_config::modules::FulltextRemoteConfig {

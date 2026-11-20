@@ -16,9 +16,11 @@ use cce_config::project_registry::{ProjectEntry, ProjectMetadata, RegistryError}
 use cce_config::validation::Validate;
 use cce_config::{AppConfig, ProjectAppConfig, Settings};
 use cce_metrics::{LabeledCounter, LabeledGauge, LabeledHistogram, MetricsRegistry};
+use cce_storage_common::MetadataStorage;
+use cce_storage_common::metadb::{ProjectRecord, ProjectUpdateRecord};
 use chrono::Utc;
 
-use crate::{ProjectRepository, ProjectUpdateRecord, SqliteClient};
+use crate::index::MetadataStore;
 
 #[derive(Debug)]
 struct ProjectRegistryMetrics {
@@ -75,17 +77,17 @@ pub struct ProjectRegistry {
     /// winner's entry from the cache.
     key_locks: Arc<Mutex<HashMap<i64, Arc<Mutex<()>>>>>,
     metrics: Arc<ProjectRegistryMetrics>,
-    sqlite: SqliteClient,
+    store: MetadataStore,
 }
 
 impl ProjectRegistry {
-    /// Create a new empty project registry
-    pub fn new(metrics_registry: Arc<MetricsRegistry>, sqlite: SqliteClient) -> Self {
+    /// Create a new empty project registry over the shared metadata store.
+    pub fn new(metrics_registry: Arc<MetricsRegistry>, store: MetadataStore) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
             key_locks: Arc::new(Mutex::new(HashMap::new())),
             metrics: Arc::new(ProjectRegistryMetrics::new(&metrics_registry)),
-            sqlite,
+            store,
         }
     }
 
@@ -134,16 +136,12 @@ impl ProjectRegistry {
         })?;
         let global_version = Settings::global_version();
 
-        // Load project record (scoped to drop MutexGuard before subsequent async work)
-        let record = {
-            let conn = self
-                .sqlite
-                .read_connection()
-                .map_err(|error| RegistryError::Database(error.to_string()))?;
-            ProjectRepository::get_by_id(&conn, project_id)
-                .map_err(|error| RegistryError::Database(error.to_string()))?
-                .ok_or(RegistryError::ProjectNotFound(project_id))?
-        };
+        let record = self
+            .store
+            .project_record(project_id)
+            .await
+            .map_err(|error| RegistryError::Database(error.to_string()))?
+            .ok_or(RegistryError::ProjectNotFound(project_id))?;
 
         let config = effective_config(&global_config, &record)?;
         let profile = parse_profile(&record)?;
@@ -247,17 +245,15 @@ impl ProjectRegistry {
             }
         }
 
-        // Cache miss — query SQLite (scoped to drop MutexGuard before await)
-        let project_id: i64 = {
-            let conn = self
-                .sqlite
-                .read_connection()
-                .map_err(|error| RegistryError::Database(error.to_string()))?;
-            let record = ProjectRepository::find_by_root_path(&conn, &normalized)
-                .map_err(|error| RegistryError::Database(error.to_string()))?
-                .ok_or_else(|| RegistryError::PathNotFound(path.display().to_string()))?;
-            record.id
-        };
+        let project_id: i64 = self
+            .store
+            .projects_all()
+            .await
+            .map_err(|error| RegistryError::Database(error.to_string()))?
+            .into_iter()
+            .find(|record| record.root_path == normalized)
+            .ok_or_else(|| RegistryError::PathNotFound(path.display().to_string()))?
+            .id;
 
         // Load into cache via get_or_load (uses project ID from record)
         self.get_or_load(project_id).await
@@ -271,15 +267,12 @@ impl ProjectRegistry {
         &self,
         project_id: i64,
     ) -> Result<(ProjectAppConfig, u64), RegistryError> {
-        let record = {
-            let conn = self
-                .sqlite
-                .read_connection()
-                .map_err(|error| RegistryError::Database(error.to_string()))?;
-            ProjectRepository::get_by_id(&conn, project_id)
-                .map_err(|error| RegistryError::Database(error.to_string()))?
-                .ok_or(RegistryError::ProjectNotFound(project_id))?
-        };
+        let record = self
+            .store
+            .project_record(project_id)
+            .await
+            .map_err(|error| RegistryError::Database(error.to_string()))?
+            .ok_or(RegistryError::ProjectNotFound(project_id))?;
         let profile = parse_profile(&record)?;
         let version =
             Settings::combine_versions(record.profile_version_u64(), Settings::global_version());
@@ -301,22 +294,11 @@ impl ProjectRegistry {
             .map_err(|error| RegistryError::Validation(error.to_string()))?;
         let canonical = profile.to_canonical_json();
         let updates = ProjectUpdateRecord::default().with_profile_json(canonical);
-        self.sqlite
-            .with_transaction(|tx| {
-                let existing = ProjectRepository::get_by_id(tx, project_id)
-                    .map_err(|error| {
-                        cce_types::StorageError::query(format!(
-                            "Failed to load project {project_id}: {error}"
-                        ))
-                    })?
-                    .ok_or_else(|| {
-                        cce_types::StorageError::not_found(format!(
-                            "Project {project_id} not found"
-                        ))
-                    })?;
-                let _ = existing;
-                ProjectRepository::update(tx, project_id, &updates)
-            })
+        // The contract bumps the profile version in the same storage
+        // transaction as the profile document.
+        self.store
+            .project_update(project_id, &updates)
+            .await
             .map_err(|error| RegistryError::Database(error.to_string()))?;
         self.invalidate_cache(Some(project_id)).await?;
         // Repopulate immediately so callers observe the fresh effective
@@ -351,13 +333,13 @@ impl ProjectRegistry {
     }
 }
 
-pub fn parse_profile(record: &crate::ProjectRecord) -> Result<ProjectAppConfig, RegistryError> {
+pub fn parse_profile(record: &ProjectRecord) -> Result<ProjectAppConfig, RegistryError> {
     ProjectAppConfig::from_json_str(&record.profile_json).map_err(RegistryError::Configuration)
 }
 
 pub fn effective_config(
     global: &AppConfig,
-    record: &crate::ProjectRecord,
+    record: &ProjectRecord,
 ) -> Result<AppConfig, RegistryError> {
     let profile = parse_profile(record)?;
     let mut merged = global.merge_with_project(&profile);
@@ -390,35 +372,30 @@ fn timestamp_to_rfc3339(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NewProjectRecord, ProjectRepository};
+    use cce_storage_common::metadb::NewProjectRecord;
 
     #[tokio::test]
-    async fn loads_distinct_projects_from_sqlite() {
+    async fn loads_distinct_projects_from_metadata_store() {
         let _ = Settings::init(AppConfig::default());
-        let sqlite = SqliteClient::in_memory().expect("Failed to create SQLite database");
+        let store = crate::index::in_memory_metadata_store().expect("in-memory metadata store");
         let first_root = tempfile::tempdir().expect("Failed to create first project");
         let second_root = tempfile::tempdir().expect("Failed to create second project");
-        let (first_id, second_id) = sqlite
-            .with_transaction(|tx| {
-                let first = ProjectRepository::insert(
-                    tx,
-                    &NewProjectRecord::new(
-                        "registry-project-one".to_string(),
-                        first_root.path().to_string_lossy().to_string(),
-                    ),
-                )?;
-                let second = ProjectRepository::insert(
-                    tx,
-                    &NewProjectRecord::new(
-                        "registry-project-two".to_string(),
-                        second_root.path().to_string_lossy().to_string(),
-                    ),
-                )?;
-                Ok((first, second))
-            })
-            .expect("Failed to insert projects");
+        let first_id = store
+            .project_insert(&NewProjectRecord::new(
+                "registry-project-one".to_string(),
+                first_root.path().to_string_lossy().to_string(),
+            ))
+            .await
+            .expect("Failed to insert first project");
+        let second_id = store
+            .project_insert(&NewProjectRecord::new(
+                "registry-project-two".to_string(),
+                second_root.path().to_string_lossy().to_string(),
+            ))
+            .await
+            .expect("Failed to insert second project");
 
-        let registry = ProjectRegistry::new(Arc::new(MetricsRegistry::new()), sqlite);
+        let registry = ProjectRegistry::new(Arc::new(MetricsRegistry::new()), store);
         let first = registry
             .get_or_load(first_id)
             .await

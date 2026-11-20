@@ -34,22 +34,24 @@
 - `qdrant / local / local`
 - `local / local / remote`
 - `qdrant / local / remote`
+- `local / remote / local`
+- `qdrant / remote / local`
 
-其中三个位置分别表示：向量后端 / 关系后端 / 全文后端。
+其中三个位置分别表示：向量后端 / 元数据后端 / 全文后端。远端元数据与远端全文同时启用属于非官方组合，必须显式设置 `allow_nonstandard_backends`。
 
 ### 4.2 硬性约束
 
-- 关系后端当前必须为 `local`（SQLite）。`remote`（PostgreSQL）在配置校验阶段直接拒绝，因为相关写入与控制面尚未接线。
-- 引擎元数据存储固定为 SQLite 客户端。项目注册、操作协调、checkpoint 清理、metrics 聚合、generation GC 等控制面依赖 SQLite。
+- 元数据后端可为 `local`（SQLite）或 `remote`（PostgreSQL）；远端必须配置 `metadata_remote.url`，启动阶段完成 schema 迁移。
+- 项目注册、索引、查询、热更新、checkpoint 与导出共享同一个元数据句柄；metrics 聚合仍使用独立的本地 SQLite 文件。
 - 向量后端可为 `local` 或 `qdrant`，切换需要重建索引。
 - 全文后端可为 `local`（Tantivy）或 `remote`（Elasticsearch），切换需要重建索引。
-- `allow_nonstandard_backends` 仅用于放行非预设组合，不能绕过关系 remote 的未接线限制。
+- `allow_nonstandard_backends` 仅用于放行非预设组合；远端 metadata 与远端 fulltext 同时启用需要该开关。
 
 ### 4.3 切换成本
 
 - 切换向量后端需要全量重建索引，不迁移旧数据。
 - 切换全文后端需要全量重建索引，不迁移旧数据。
-- 关系后端当前不可切换。
+- 元数据后端可切换，但切换后需要全量重建索引，旧数据不迁移。
 
 ## 5. 本地模式与服务端模式
 
@@ -73,9 +75,9 @@ CLI 为纯 HTTP 客户端；`server` 与 `mcp` 是本地生命周期命令，业
 
 - 向量：可使用内嵌 `local`，也可连接外部 Qdrant
 - 全文：可使用内嵌 Tantivy，也可连接外部 Elasticsearch
-- 关系：当前仍必须使用 SQLite，且该 SQLite 位于服务端进程所在环境
-- PostgreSQL 关系后端尚未接线，不能在服务端模式下使用
-- 远程 Qdrant/Elasticsearch 适合服务端模式下的外部化部署，但关系数据仍留在服务端本地 SQLite
+- 元数据：可使用服务端本地 SQLite，也可连接外部 PostgreSQL
+- 远程 Qdrant/Elasticsearch/PostgreSQL 适合服务端模式下的外部化部署
+- 远端元数据仅验证服务链路可用性，不参与召回质量对比
 
 ## 6. 后端处理方式
 
@@ -95,12 +97,13 @@ CLI 为纯 HTTP 客户端；`server` 与 `mcp` 是本地生命周期命令，业
 - 运行时所有路径通过 `FulltextStore` 枚举分发
 - 状态接口通过后端中立诊断快照暴露健康与文档数
 
-### 6.3 关系模块
+### 6.3 元数据模块
 
-- 当前仅 SQLite 分支可用
-- PostgreSQL 分支为预留，配置与客户端实现可能部分存在，但装配层拒绝启用
-- 元数据与控制面深度依赖 SQLite 特有能力
-- 状态接口通过后端中立诊断快照暴露数据库大小
+- 本地分支为内嵌 SQLite，远端分支为 PostgreSQL
+- 契约方法清单在 `cce-storage-common` 中声明一次，同时生成组合契约与后端转发
+- 后端分发类型在装配层构造一次，分支为确定类型，不使用 trait object
+- 项目作用域句柄由同一分发类型返回；远端分支复用同一连接池
+- 状态接口通过后端中立诊断快照暴露健康、版本与数据库大小
 
 ## 7. 术语约束
 
@@ -108,13 +111,13 @@ CLI 为纯 HTTP 客户端；`server` 与 `mcp` 是本地生命周期命令，业
 - `remote` 表示外部服务后端，不应与客户端远程访问语义混淆
 - 向量后端使用具体品牌名 `Qdrant`
 - 全文后端使用 `local / remote`，其中 remote 当前对应 Elasticsearch
-- 关系后端使用 `local / remote`，其中 remote 预留对应 PostgreSQL
+- 元数据后端使用 `local / remote`，其中 remote 对应 PostgreSQL
 
 ## 8. 运行时分发约束
 
 - 三个存储句柄均为枚举，运行时通过模式匹配分发
 - 新增方法必须同步维护所有分支
-- 未接线分支应在装配阶段失败，不应在运行时静默降级
+- 后端能力差异在配置或启动阶段暴露，不应在业务调用中途失败
 - 诊断与状态路径应使用后端中立快照，避免 downcast
 
 ## 9. 相关文档

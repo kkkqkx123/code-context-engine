@@ -17,14 +17,14 @@ use cce_metrics::{
     AggregationConfig, MetricsAggregator, MetricsRegistry, ProgressTracker, RenderCache,
 };
 use cce_orchestrator::OperationCoordinator;
+use cce_orchestrator::ProjectRegistry;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::index::IndexOrchestrator;
-use cce_orchestrator::index::{FulltextStore, MetadataStore, VectorStore};
+use cce_orchestrator::index::{FulltextStore, MetadataStore, VectorStore, open_metadata_store};
 use cce_orchestrator::query::cache::{CacheConfig, QueryCache};
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_plugin::PluginRegistry;
 use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
 use cce_storage_vector_qdrant::QdrantProcessHandle;
 
 /// Error type for engine operations
@@ -182,20 +182,23 @@ impl CodeContextEngine {
         // registry. Late calls are ignored by the installer.
         cce_llm_client::suite::init_gateway(&metrics_registry);
 
-        // Create the embedded metadata store directly. Remote selection is
-        // rejected by configuration validation, so assembly only opens the
-        // local database path here.
+        // Construct the metadata backend once. Remote schema migration is
+        // part of startup so capability failures surface before any request.
+        let metadata_store: MetadataStore = open_metadata_store(&config.database)
+            .await
+            .map_err(|e| EngineError::Config(e.to_string()))?;
+        let metadata_store_for_engine = metadata_store.clone();
+
+        // Metrics aggregation remains a local SQLite facility; it is not a
+        // metadata backend branch and never serves project metadata.
         let sqlite_client = Arc::new(
             SqliteClient::new(config.database.sqlite.clone())
                 .map_err(|e| EngineError::Config(e.to_string()))?,
         );
-        let metadata_store: MetadataStore = sqlite_client.clone();
-        let metadata_store_for_engine = metadata_store.clone();
 
-        // Create project registry
         let project_registry = Arc::new(ProjectRegistry::new(
             metrics_registry.clone(),
-            (*sqlite_client).clone(),
+            metadata_store.clone(),
         ));
 
         let vector = VectorStore::from_database_config(&config.database)

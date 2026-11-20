@@ -387,10 +387,9 @@ pub struct DependencyParams {
 
 /// Validate backend preset combination (three-tier logic).
 ///
-/// Official presets pass silently: local-first and remote-vector. Remote
-/// relation/fulltext branches are forward scaffolding, so any selection of
-/// them warns that the runtime is local-only; non-preset combinations warn
-/// and point at the advanced switch.
+/// Official presets pass silently: local metadata with any vector/fulltext
+/// branch, and remote metadata with local fulltext. Non-preset combinations
+/// warn and point at the advanced switch.
 pub fn validate_backend_preset_dependencies(
     vector_backend: crate::modules::VectorBackend,
     metadata_backend: crate::modules::MetadataBackend,
@@ -399,14 +398,21 @@ pub fn validate_backend_preset_dependencies(
 ) -> Vec<ConfigWarning> {
     use crate::modules::VectorBackend as VB;
     let mut warnings = Vec::new();
-    let remote_relation = !metadata_backend.is_local();
     let remote_fulltext = !fulltext_backend.is_local();
-    if remote_relation || remote_fulltext {
+    if !metadata_backend.is_local() && remote_fulltext {
         warnings.push(ConfigWarning::new(
             WarningSeverity::Info,
-            "database.metadata_backend/database.fulltext_backend",
-            "database.qdrant",
-            "Remote relation/fulltext branches are forward scaffolding and not wired into indexing, search, or hot-update paths; the supported runtime is local-only, and a full reindex is required when switching backends.",
+            "database.metadata_backend",
+            "database.allow_nonstandard_backends",
+            "Remote metadata with remote fulltext is not an official preset; both branches require reindexing and independent service health checks.",
+        ));
+    }
+    if remote_fulltext {
+        warnings.push(ConfigWarning::new(
+            WarningSeverity::Info,
+            "database.fulltext_backend",
+            "database.fulltext_remote.url",
+            "Remote fulltext storage uses its own index and requires a full reindex after switching backends.",
         ));
     }
     let official = matches!(
@@ -418,6 +424,22 @@ pub fn validate_backend_preset_dependencies(
         ) | (
             VB::Qdrant,
             crate::modules::MetadataBackend::Local,
+            crate::modules::FulltextBackend::Local,
+        ) | (
+            VB::Local,
+            crate::modules::MetadataBackend::Local,
+            crate::modules::FulltextBackend::Remote,
+        ) | (
+            VB::Qdrant,
+            crate::modules::MetadataBackend::Local,
+            crate::modules::FulltextBackend::Remote,
+        ) | (
+            VB::Local,
+            crate::modules::MetadataBackend::Remote,
+            crate::modules::FulltextBackend::Local,
+        ) | (
+            VB::Qdrant,
+            crate::modules::MetadataBackend::Remote,
             crate::modules::FulltextBackend::Local,
         )
     );

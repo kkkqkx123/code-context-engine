@@ -282,7 +282,7 @@ impl NlDocumentUpdateProcessor {
         if *cache == Some(epoch) {
             return Ok(());
         }
-        match RelationSnapshotLoader::load(store.as_ref(), self.project_id, epoch) {
+        match RelationSnapshotLoader::load(&store, self.project_id, epoch) {
             Ok(index) => {
                 let exporter = self.exporter().await;
                 let enhancer_config = cce_export::RelationEnhancerConfig::default();

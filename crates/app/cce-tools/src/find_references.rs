@@ -19,7 +19,6 @@ use crate::symbol_lookup_types::{
     CallerEntityInfo, FindReferencesRequest, FindReferencesResponse, GroupedReferences,
     ReferenceLocation, SymbolKind, SymbolLookupError,
 };
-use cce_storage_metadb_sqlite::SqliteClient;
 
 /// Configuration for find references tool
 #[derive(Debug, Clone)]
@@ -46,7 +45,7 @@ pub struct FindReferencesTool {
     /// Configuration
     config: FindReferencesConfig,
     /// Relation backend for snippet lookup (local branch only)
-    metadata_store: Option<Arc<SqliteClient>>,
+    metadata_store: Option<crate::store::ToolMetadataStore>,
     /// Project ID for relation queries
     project_id: i64,
     /// Query result cache (LRU) for repeated lookups
@@ -75,7 +74,7 @@ impl FindReferencesTool {
     ///
     /// Reads go through the relation contract, so both branches share one
     /// read path and branch selection stays inside the enum.
-    pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
+    pub fn with_metadata_store(mut self, store: crate::store::ToolMetadataStore) -> Self {
         self.metadata_store = Some(store);
         self
     }
@@ -131,7 +130,7 @@ impl FindReferencesTool {
         &self,
         symbol_name: &str,
         project_id: i64,
-        store: &Arc<SqliteClient>,
+        store: &crate::store::ToolMetadataStore,
     ) -> Result<EntityId, SymbolLookupError> {
         // Unified path: try snapshot name index first (O(1) without DB).
         let ids = self.index.get_function_ids_by_name(symbol_name);

@@ -19,3 +19,14 @@ pub fn classify_pg(error: tokio_postgres::Error) -> StorageError {
     }
     StorageError::connection(format!("pg transport failed: {error}"))
 }
+
+/// Project registration translates unique violations into the same message
+/// the local branch reports so callers can classify conflicts uniformly.
+pub fn classify_project_insert(error: tokio_postgres::Error) -> StorageError {
+    if let Some(db) = error.as_db_error()
+        && db.code().code() == "23505"
+    {
+        return StorageError::validation(format!("UNIQUE constraint failed: {error}"));
+    }
+    classify_pg(error)
+}

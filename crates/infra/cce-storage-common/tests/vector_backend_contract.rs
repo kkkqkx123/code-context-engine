@@ -452,7 +452,7 @@ async fn qdrant_backend_contract() {
         url,
         vector_size: DIM,
         distance_metric: DistanceMetric::Cosine,
-        timeout_ms: 5000,
+        timeout_ms: 15_000,
         max_retries: 0,
         retry_delay_ms: 10,
         enabled: true,

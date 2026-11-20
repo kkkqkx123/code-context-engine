@@ -5,11 +5,11 @@ use super::EngineError;
 use super::project_cache::ProjectCache;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
+use cce_orchestrator::ProjectRegistry;
 use cce_orchestrator::index::VectorStore;
 use cce_orchestrator::index::{FulltextStore, MetadataStore};
 use cce_storage_common::MetadataStorage;
 use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
 use tokio::sync::Mutex;
 
 impl super::CodeContextEngine {
