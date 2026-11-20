@@ -13,7 +13,7 @@
 - GitHub Releases、Elastic artifacts、Ubuntu archive 可访问。Elasticsearch 压缩包较大，下载耗时明显，需要断点续传并只下载一次。
 - `podman` 在当前内核上因 cgroups v1 不可用。
 - 端口 6333、9200、5432 当前未被占用；为避免与未来任务冲突，基准使用 16333、19200、15432。
-- PostgreSQL 服务本身可启动，但当前代码只把远端 metadata 作为前向脚手架，配置校验和引擎装配都不接受 `metadata_backend = "remote"`，因此不能通过服务级矩阵覆盖它。
+- PostgreSQL 服务本身可启动。远端 metadata 已按 `docs/plan/metadata-backend-dispatch-design.md` 完成确定类型分发、配置放开与服务级 smoke；当前状态与启停方式见 `docs/dev/devs-service-environment.md`。
 
 ## 服务优先级与可行性
 

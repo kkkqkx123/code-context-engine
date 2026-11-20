@@ -21,6 +21,7 @@ pub use loader::lua_mapping::{
     lua_table_to_chunked_result, lua_table_to_plugin_document, lua_table_to_plugin_entity,
     lua_table_to_rerank_result,
 };
+pub use loader::lua_plugin::LuaHookTiming;
 pub use native::NativePlugin;
 pub use pattern::{CompiledPattern, PatternDeclaration, compile_patterns, extract_entities};
 pub use registry::FilePluginSource;

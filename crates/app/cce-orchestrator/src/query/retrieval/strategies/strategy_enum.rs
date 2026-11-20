@@ -15,7 +15,9 @@ pub struct RetrievalOutcome {
     pub results: Result<Vec<SearchResult>>,
     pub embedding_ms: u64,
     pub embedding_provider_ms: u64,
+    pub embedding_first_ms: u64,
     pub embedding_overhead_ms: u64,
+    pub embedding_cache_hits: u64,
     pub vector_search_ms: u64,
 }
 
@@ -74,7 +76,9 @@ impl RetrievalStrategy {
                     results: outcome.results,
                     embedding_ms: outcome.embedding_ms,
                     embedding_provider_ms: outcome.embedding_provider_ms,
+                    embedding_first_ms: outcome.embedding_first_ms,
                     embedding_overhead_ms: outcome.embedding_overhead_ms,
+                    embedding_cache_hits: outcome.embedding_cache_hits,
                     vector_search_ms: outcome.vector_search_ms,
                 }
             }
@@ -82,7 +86,9 @@ impl RetrievalStrategy {
                 results: s.retrieve(options, query_filter).await,
                 embedding_ms: 0,
                 embedding_provider_ms: 0,
+                embedding_first_ms: 0,
                 embedding_overhead_ms: 0,
+                embedding_cache_hits: 0,
                 vector_search_ms: 0,
             },
         }

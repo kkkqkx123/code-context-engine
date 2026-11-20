@@ -49,6 +49,7 @@ fn main() {
     let mut read_ns = 0u128;
     let mut slice_ns = 0u128;
     let mut marker_ns = 0u128;
+    let mut markers_total = 0usize;
     for _ in 0..rounds {
         for file in &files {
             let path = root.path().join(&file.path);
@@ -63,6 +64,7 @@ fn main() {
             let started = Instant::now();
             let markers = build_markers(&excerpt, "fn_");
             marker_ns += started.elapsed().as_nanos();
+            markers_total += markers.len();
             std::hint::black_box(markers);
         }
     }
@@ -76,12 +78,12 @@ fn main() {
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "highlight_overhead.tsv",
-        "# run_id\trequests\tread_us_per_request\tslice_us_per_request\tmarker_us_per_request\ttotal_us_per_request",
+        "# run_id\trequests\tmarkers\tread_us_per_request\tslice_us_per_request\tmarker_us_per_request\ttotal_us_per_request",
     );
     let per = |total: u128| total as f64 / requests as f64 / 1000.0;
     let _ = writeln!(
         out,
-        "{run_id}\t{requests}\t{:.3}\t{:.3}\t{:.3}\t{:.3}",
+        "{run_id}\t{requests}\t{markers_total}\t{:.3}\t{:.3}\t{:.3}\t{:.3}",
         per(read_ns),
         per(slice_ns),
         per(marker_ns),

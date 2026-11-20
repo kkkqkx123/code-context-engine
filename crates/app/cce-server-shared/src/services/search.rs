@@ -195,11 +195,14 @@ fn convert_query_stages(stages: cce_orchestrator::QueryStageTimings) -> QuerySta
         rewrite_ms: stages.rewrite_ms,
         embedding_ms: stages.embedding_ms,
         embedding_provider_ms: stages.embedding_provider_ms,
+        embedding_first_ms: stages.embedding_first_ms,
         embedding_overhead_ms: stages.embedding_overhead_ms,
+        embedding_cache_hits: stages.embedding_cache_hits,
         vector_search_ms: stages.vector_search_ms,
         bm25_retrieval_ms: stages.bm25_retrieval_ms,
         fusion_ms: stages.fusion_ms,
         post_process_ms: stages.post_process_ms,
+        response_render_ms: 0,
     }
 }
 

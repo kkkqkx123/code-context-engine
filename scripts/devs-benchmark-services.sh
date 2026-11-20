@@ -1,27 +1,49 @@
 #!/usr/bin/env bash
 # On-demand external services for CCE benchmarks on devs.
 #
-# Usage: bash scripts/devs-benchmark-services.sh {up|down|status|clean} [qdrant|elasticsearch|all]
+# Usage: bash scripts/devs-benchmark-services.sh {up|down|status|metrics|env|clean} [qdrant|elasticsearch|postgres|all]
 #
 # Services are started only for a benchmark run and stopped by PID file. The
 # downloaded archives stay cached; each run gets its own data directory.
 set -u
 
-ROOT=/data/kkkqkx/cce/services
-CACHE="$ROOT/cache"
-LOG_ROOT=/data/kkkqkx/cce/service-logs
+INSTALL_ROOT=${CCE_SERVICE_ROOT:-/opt/cce-services}
+DATA_ROOT=${CCE_SERVICE_DATA:-/var/lib/cce-services}
+CACHE="$INSTALL_ROOT/cache"
+LOG_ROOT=${CCE_SERVICE_LOG:-/var/log/cce-services}
 mkdir -p "$CACHE" "$LOG_ROOT"
 
 QDRANT_VERSION=${QDRANT_VERSION:-1.15.5}
 ES_VERSION=${ES_VERSION:-7.17.28}
+PG_VERSION=${PG_VERSION:-10.23}
 QDRANT_URL=${QDRANT_URL:-http://127.0.0.1:16333}
 ES_URL=${ES_URL:-http://127.0.0.1:19200}
+PG_URL=${PG_URL:-postgres://postgres@127.0.0.1:15432/postgres}
 RUN_ID=${RUN_ID:-$(date +%s)}
 
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
-qdrant_dir() { echo "$ROOT/qdrant"; }
-es_dir() { echo "$ROOT/elasticsearch"; }
+qdrant_dir() { echo "$INSTALL_ROOT/qdrant"; }
+es_dir() { echo "$INSTALL_ROOT/elasticsearch"; }
+pg_dir() { echo "$INSTALL_ROOT/postgres"; }
+qdrant_data() { echo "$DATA_ROOT/qdrant"; }
+es_data() { echo "$DATA_ROOT/elasticsearch"; }
+pg_data() { echo "$DATA_ROOT/postgres"; }
+pg_bin() { echo "$(pg_dir)/usr/lib/postgresql/10/bin"; }
+target_dir() {
+    case "$1" in
+        qdrant) qdrant_dir ;;
+        elasticsearch) es_dir ;;
+        postgres) pg_dir ;;
+    esac
+}
+target_run_dir() {
+    case "$1" in
+        qdrant) echo "$(qdrant_data)/run" ;;
+        elasticsearch) echo "$(es_data)/run" ;;
+        postgres) echo "$(pg_data)/run" ;;
+    esac
+}
 
 download() {
     local url=$1 path=$2
@@ -30,6 +52,7 @@ download() {
         return 0
     fi
     log "downloading $url"
+    mkdir -p "$(dirname "$path")"
     curl -fL --retry 3 --continue-at - -o "$path" "$url"
 }
 
@@ -49,116 +72,298 @@ wait_http() {
     return 1
 }
 
+wait_pg() {
+    local timeout=$1 deadline=$((SECONDS + 60))
+    local pg_isready
+    pg_isready="$(pg_bin)/pg_isready"
+    while (( SECONDS < deadline )); do
+        if "$pg_isready" -h 127.0.0.1 -p 15432 -q; then
+            log "postgres healthy: 127.0.0.1:15432"
+            return 0
+        fi
+        sleep 1
+    done
+    log "postgres failed health check: 127.0.0.1:15432"
+    return 1
+}
+
 start_qdrant() {
-    local dir base archive
-    dir=$(qdrant_dir); base="qdrant-$QDRANT_VERSION"
+    local dir archive
+    dir=$(qdrant_dir)
     archive="$CACHE/qdrant-x86_64-unknown-linux-musl-$QDRANT_VERSION.tar.gz"
     download "https://github.com/qdrant/qdrant/releases/download/v$QDRANT_VERSION/qdrant-x86_64-unknown-linux-musl.tar.gz" "$archive"
-    mkdir -p "$dir/bin" "$dir/data/$RUN_ID" "$dir/logs" "$dir/run"
+    local data run
+    data="$(qdrant_data)/$RUN_ID"
+    run="$(target_run_dir qdrant)"
+    mkdir -p "$dir/bin" "$data" "$run" "$LOG_ROOT/qdrant"
     if [[ ! -x "$dir/bin/qdrant" ]]; then
         tar -xzf "$archive" -C "$dir/bin"
         chmod +x "$dir/bin/qdrant"
     fi
-    if [[ -f "$dir/run/qdrant.pid" ]] && kill -0 "$(cat "$dir/run/qdrant.pid")" 2>/dev/null; then
-        log "qdrant already running: pid $(cat "$dir/run/qdrant.pid")"
+    if curl -fsS --max-time 3 "$QDRANT_URL/healthz" >/dev/null 2>&1; then
+        log "qdrant already healthy: $QDRANT_URL"
         return 0
     fi
     QDRANT__SERVICE__HTTP_PORT=16333 \
-    QDRANT__STORAGE__STORAGE_PATH="$dir/data/$RUN_ID" \
-    QDRANT__STORAGE__SNAPSHOTS_PATH="$dir/data/$RUN_ID/snapshots" \
-        nohup "$dir/bin/qdrant" >> "$LOG_ROOT/qdrant-$RUN_ID.log" 2>&1 &
-    echo $! > "$dir/run/qdrant.pid"
-    log "qdrant started: pid $(cat "$dir/run/qdrant.pid"), data=$dir/data/$RUN_ID"
+    QDRANT__STORAGE__STORAGE_PATH="$data" \
+    QDRANT__STORAGE__SNAPSHOTS_PATH="$data/snapshots" \
+        nohup "$dir/bin/qdrant" >> "$LOG_ROOT/qdrant/qdrant-$RUN_ID.log" 2>&1 &
+    echo $! > "$run/qdrant.pid"
+    log "qdrant started: pid $(cat "$run/qdrant.pid"), data=$data"
     wait_http qdrant "$QDRANT_URL/healthz" 60
 }
 
 start_es() {
-    local dir base archive
-    dir=$(es_dir); base="elasticsearch-$ES_VERSION"
-    archive="$CACHE/$base-linux-x86_64.tar.gz"
-    download "https://artifacts.elastic.co/downloads/elasticsearch/$base-linux-x86_64.tar.gz" "$archive"
-    mkdir -p "$dir/bin" "$dir/data/$RUN_ID" "$dir/logs" "$dir/run"
-    if [[ ! -x "$dir/bin/elasticsearch/bin/elasticsearch" ]]; then
-        mkdir -p "$dir/bin/elasticsearch"
-        tar -xzf "$archive" -C "$dir/bin/elasticsearch" --strip-components=1
+    local dir archive
+    dir=$(es_dir)
+    archive="$CACHE/elasticsearch-$ES_VERSION-linux-x86_64.tar.gz"
+    download "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-$ES_VERSION-linux-x86_64.tar.gz" "$archive"
+    local data run
+    data="$(es_data)/$RUN_ID"
+    run="$(target_run_dir elasticsearch)"
+    mkdir -p "$data" "$run" "$LOG_ROOT/elasticsearch"
+    if [[ ! -x "$dir/bin/elasticsearch" ]]; then
+        tar -xzf "$archive" -C "$dir" --strip-components=1
     fi
-    if [[ -f "$dir/run/elasticsearch.pid" ]] && kill -0 "$(cat "$dir/run/elasticsearch.pid")" 2>/dev/null; then
-        log "elasticsearch already running: pid $(cat "$dir/run/elasticsearch.pid")"
+    if curl -fsS --max-time 3 "$ES_URL/" >/dev/null 2>&1; then
+        log "elasticsearch already healthy: $ES_URL"
         return 0
     fi
     ES_JAVA_OPTS="-Xms1g -Xmx1g" \
-    ES_PATH_CONF="$dir/bin/elasticsearch/config" \
-        nohup "$dir/bin/elasticsearch/bin/elasticsearch" \
+    ES_JAVA_HOME="$dir/jdk" \
+    ES_PATH_CONF="$dir/config" \
+        nohup "$dir/bin/elasticsearch" \
             -Ediscovery.type=single-node \
             -Enetwork.host=127.0.0.1 \
             -Ehttp.port=19200 \
             -Etransport.port=19300 \
-            -Epath.data="$dir/data/$RUN_ID" \
-            -Epath.logs="$LOG_ROOT" \
+            -Epath.data="$data" \
+            -Epath.logs="$LOG_ROOT/elasticsearch" \
             -Expack.security.enabled=false \
             -Eingest.geoip.downloader.enabled=false \
-            >> "$LOG_ROOT/elasticsearch-$RUN_ID.log" 2>&1 &
-    echo $! > "$dir/run/elasticsearch.pid"
-    log "elasticsearch started: pid $(cat "$dir/run/elasticsearch.pid"), data=$dir/data/$RUN_ID"
+            >> "$LOG_ROOT/elasticsearch/elasticsearch-$RUN_ID.log" 2>&1 &
+    echo $! > "$run/elasticsearch.pid"
+    log "elasticsearch started: pid $(cat "$run/elasticsearch.pid"), data=$data"
     # Cluster boot includes JVM and shard recovery; keep this above the
     # per-request timeout so benchmarks never start against a half-ready node.
     wait_http elasticsearch "$ES_URL/" 240
 }
 
-stop_service() {
-    local name=$1 dir pid
-    if [[ "$name" == qdrant ]]; then dir=$(qdrant_dir); else dir=$(es_dir); fi
-    if [[ ! -f "$dir/run/$name.pid" ]]; then
+prepare_pg() {
+    local dir bin deb
+    dir=$(pg_dir)
+    bin="$(pg_bin)"
+    if [[ -x "$bin/postgres" ]]; then
+        return 0
+    fi
+    mkdir -p "$CACHE/pg-debs" "$dir/usr"
+    for package in libpq5 postgresql-client-10 postgresql-10; do
+        deb=$(find "$CACHE/pg-debs" -name "${package}_*_amd64.deb" -print -quit 2>/dev/null || true)
+        if [[ -z "$deb" ]]; then
+            deb="$CACHE/pg-debs/${package}_${PG_VERSION}-0ubuntu0.18.04.2_amd64.deb"
+            pool=main
+            [[ "$package" == postgresql-* ]] && pool=universe
+            download "http://archive.ubuntu.com/ubuntu/pool/$pool/p/postgresql-10/$(basename "$deb")" "$deb"
+        fi
+        dpkg-deb -x "$deb" "$dir/usr"
+    done
+}
+
+start_pg() {
+    local dir bin data run pid
+    prepare_pg
+    dir=$(pg_dir)
+    bin="$(pg_bin)"
+    data="$(pg_data)/data"
+    run="$(target_run_dir postgres)"
+    mkdir -p "$data" "$run" "$LOG_ROOT/postgres"
+    if "$bin/pg_isready" -h 127.0.0.1 -p 15432 -q; then
+        log "postgres already healthy: 127.0.0.1:15432"
+        return 0
+    fi
+    if [[ ! -f "$data/PG_VERSION" ]]; then
+        mkdir -p "$data"
+        "$bin/initdb" -D "$data" -A trust -U postgres \
+            > "$LOG_ROOT/postgres/pg-initdb-$RUN_ID.log" 2>&1
+    fi
+    "$bin/pg_ctl" -D "$data" \
+        -o "-h 127.0.0.1 -p 15432 -k $run" \
+        -l "$LOG_ROOT/postgres/postgres-$RUN_ID.log" -w start
+    pid=$(head -n 1 "$data/postmaster.pid")
+    echo "$pid" > "$run/postgres.pid"
+    echo "$data" > "$run/postgres.data"
+    log "postgres started: pid $pid, data=$data"
+    wait_pg 60
+}
+
+stop_pid() {
+    local name=$1 run pid
+    run=$(target_run_dir "$name")
+    if [[ ! -f "$run/$name.pid" ]]; then
         log "$name: no pid file"
         return 0
     fi
-    pid=$(cat "$dir/run/$name.pid")
+    pid=$(cat "$run/$name.pid")
     if kill -0 "$pid" 2>/dev/null; then
         kill "$pid" && log "$name: stopped pid $pid"
     else
         log "$name: pid $pid already exited"
     fi
-    rm -f "$dir/run/$name.pid"
+    rm -f "$run/$name.pid"
 }
 
-status_service() {
-    local name=$1 dir pid
-    if [[ "$name" == qdrant ]]; then dir=$(qdrant_dir); else dir=$(es_dir); fi
-    pid=$(cat "$dir/run/$name.pid" 2>/dev/null || true)
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-        log "$name: running pid $pid"
+stop_pg() {
+    local run data pid
+    run="$(target_run_dir postgres)"
+    if [[ -f "$run/postgres.pid" ]]; then
+        pid=$(cat "$run/postgres.pid")
+        data=$(cat "$run/postgres.data" 2>/dev/null || true)
+        if [[ -n "$data" && -x "$(pg_bin)/pg_ctl" ]]; then
+            "$(pg_bin)/pg_ctl" -D "$data" -m fast -w stop \
+                || stop_pid postgres
+        elif kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" && log "postgres: stopped pid $pid"
+        fi
+        rm -f "$run/postgres.pid" "$run/postgres.data"
     else
-        log "$name: not running"
+        log "postgres: no pid file"
     fi
 }
 
+status_service() {
+    local name=$1 run pid health
+    run=$(target_run_dir "$name")
+    pid=$(cat "$run/$name.pid" 2>/dev/null || true)
+    health=stopped
+    case "$name" in
+        qdrant)
+            curl -fsS --max-time 3 "$QDRANT_URL/healthz" >/dev/null 2>&1 && health=healthy
+            ;;
+        elasticsearch)
+            curl -fsS --max-time 3 "$ES_URL/" >/dev/null 2>&1 && health=healthy
+            ;;
+        postgres)
+            [[ -x "$(pg_bin)/pg_isready" ]] \
+                && "$(pg_bin)/pg_isready" -h 127.0.0.1 -p 15432 -q \
+                && health=healthy
+            ;;
+    esac
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        log "$name: running pid $pid, health=$health"
+    else
+        log "$name: no live pid, health=$health"
+    fi
+}
+
+process_stats() {
+    local pid=$1 utime stime rss hwm
+    [[ -r "/proc/$pid/stat" ]] || { printf '%s\t%s\t%s\n' 0 0 0; return 0; }
+    read -r utime stime < <(awk '{print $14, $15}' "/proc/$pid/stat")
+    rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
+    hwm=$(awk '/^VmHWM:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
+    awk -v u="${utime:-0}" -v s="${stime:-0}" -v r="${rss:-0}" -v h="${hwm:-0}" \
+        'BEGIN {printf "%.2f\t%d\t%d\n", (u+s)/100, r, h}'
+}
+
+service_health() {
+    local name=$1
+    case "$name" in
+        qdrant) curl -fsS --max-time 3 "$QDRANT_URL/healthz" >/dev/null 2>&1 && echo healthy || echo stopped ;;
+        elasticsearch) curl -fsS --max-time 3 "$ES_URL/" >/dev/null 2>&1 && echo healthy || echo stopped ;;
+        postgres) [[ -x "$(pg_bin)/pg_isready" ]] \
+            && "$(pg_bin)/pg_isready" -h 127.0.0.1 -p 15432 -q && echo healthy || echo stopped ;;
+    esac
+}
+
+metrics_service() {
+    local name=$1 run pid stats
+    run=$(target_run_dir "$name")
+    pid=$(cat "$run/$name.pid" 2>/dev/null || true)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        stats=$(process_stats "$pid")
+        awk -v n="$name" -v p="$pid" -v s="$stats" \
+            'BEGIN {split(s, a, "\t"); printf "%s pid=%s cpu_s=%s rss_kb=%s peak_rss_kb=%s\n", n, p, a[1], a[2], a[3]}'
+    else
+        log "$name not running"
+    fi
+}
+
+sample_services() {
+    local name run pid stats health stamp
+    stamp=$(date -u +%FT%TZ)
+    for name in $services; do
+        run=$(target_run_dir "$name")
+        pid=$(cat "$run/$name.pid" 2>/dev/null || true)
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            stats=$(process_stats "$pid")
+            health=$(service_health "$name")
+            awk -v t="$stamp" -v n="$name" -v p="$pid" -v s="$stats" -v h="$health" \
+                'BEGIN {split(s, a, "\t"); printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", t, n, p, a[1], a[2], a[3], h}'
+        else
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$stamp" "$name" 0 0 0 0 stopped
+        fi
+    done
+}
+
 clean_service() {
-    local name=$1 dir
-    if [[ "$name" == qdrant ]]; then dir=$(qdrant_dir); else dir=$(es_dir); fi
-    rm -rf "$dir/data" "$dir/run"
-    log "$name: removed run data and pid files (cache kept)"
+    local name=$1
+    case "$name" in
+        qdrant) rm -rf "$(qdrant_data)" ;;
+        elasticsearch) rm -rf "$(es_data)" ;;
+        postgres) rm -rf "$(pg_data)" ;;
+    esac
+    log "$name: removed run data and pid files (installation and cache kept)"
+}
+
+print_env() {
+    cat <<EOF
+export CCE_TEST_QDRANT_URL=$QDRANT_URL
+export CCE_TEST_ES_URL=$ES_URL
+export CCE_TEST_PG_URL=$PG_URL
+export PATH="$HOME/.cargo/bin:\$PATH"
+EOF
 }
 
 target=${2:-all}
-case "${1:-}" in
+services="qdrant elasticsearch postgres"
+[[ "$target" == all ]] || services="$target"
+case "$1" in
     up)
-        [[ "$target" == all || "$target" == qdrant ]] && start_qdrant
-        [[ "$target" == all || "$target" == elasticsearch ]] && start_es
+        for service in $services; do
+            case "$service" in
+                qdrant) start_qdrant ;;
+                elasticsearch) start_es ;;
+                postgres) start_pg ;;
+                *) echo "unknown service: $service" >&2; exit 2 ;;
+            esac
+        done
         ;;
     down)
-        [[ "$target" == all || "$target" == qdrant ]] && stop_service qdrant
-        [[ "$target" == all || "$target" == elasticsearch ]] && stop_service elasticsearch
+        for service in $services; do
+            case "$service" in
+                qdrant|elasticsearch) stop_pid "$service" ;;
+                postgres) stop_pg ;;
+                *) echo "unknown service: $service" >&2; exit 2 ;;
+            esac
+        done
         ;;
     status)
-        [[ "$target" == all || "$target" == qdrant ]] && status_service qdrant
-        [[ "$target" == all || "$target" == elasticsearch ]] && status_service elasticsearch
+        for service in $services; do status_service "$service"; done
+        ;;
+    metrics)
+        for service in $services; do metrics_service "$service"; done
+        ;;
+    sample)
+        sample_services
+        ;;
+    env)
+        print_env
         ;;
     clean)
-        [[ "$target" == all || "$target" == qdrant ]] && clean_service qdrant
-        [[ "$target" == all || "$target" == elasticsearch ]] && clean_service elasticsearch
+        for service in $services; do clean_service "$service"; done
         ;;
     *)
-        echo "usage: $0 {up|down|status|clean} [qdrant|elasticsearch|all]" >&2
+        echo "usage: $0 {up|down|status|metrics|sample|env|clean} [qdrant|elasticsearch|postgres|all]" >&2
         exit 2
         ;;
 esac

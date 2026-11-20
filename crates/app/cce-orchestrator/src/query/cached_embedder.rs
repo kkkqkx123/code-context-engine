@@ -12,7 +12,10 @@
 //! a sufficient cache key. Batch methods are delegated uncached: the query
 //! path only uses `embed_one`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 use cce_llm::{EmbeddingProvider, EmbeddingResult, EmbeddingTiming, LlmError};
@@ -67,22 +70,29 @@ impl<E: EmbeddingProvider> CachedEmbedder<E> {
 
     pub async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
         let key = text.to_owned();
-        let was_cached = self.cache.get(&key).await.is_some();
-        self.inner.reset_embedding_timing();
+        let invoked = Arc::new(AtomicBool::new(false));
         let inner = Arc::clone(&self.inner);
         let pending = {
             let key = key.clone();
-            async move { <E as EmbeddingProvider>::embed_one(&inner, &key).await }
+            let invoked = Arc::clone(&invoked);
+            async move {
+                inner.reset_embedding_timing();
+                invoked.store(true, Ordering::Release);
+                <E as EmbeddingProvider>::embed_one(&inner, &key).await
+            }
         };
         let result = self
             .cache
             .try_get_with(key, pending)
             .await
             .map_err(|err| Arc::try_unwrap(err).unwrap_or_else(|shared| (*shared).clone()));
-        let timing = if was_cached {
-            EmbeddingTiming::default()
-        } else {
+        let timing = if invoked.load(Ordering::Acquire) {
             self.inner.last_embedding_timing()
+        } else {
+            EmbeddingTiming {
+                cache_hit: true,
+                ..EmbeddingTiming::default()
+            }
         };
         *self
             .last_timing

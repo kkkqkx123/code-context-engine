@@ -50,6 +50,10 @@ pub struct EmbedderConfig {
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
 
+    /// Establish the embedding connection during engine startup.
+    #[serde(default = "default_warmup_on_start")]
+    pub warmup_on_start: bool,
+
     /// Initial retry delay in milliseconds
     #[serde(default = "default_retry_delay")]
     pub retry_delay_ms: u64,
@@ -91,6 +95,10 @@ fn default_max_item_tokens() -> usize {
     8192
 }
 
+fn default_warmup_on_start() -> bool {
+    true
+}
+
 impl Default for EmbedderConfig {
     fn default() -> Self {
         Self {
@@ -99,6 +107,7 @@ impl Default for EmbedderConfig {
             max_item_tokens: default_max_item_tokens(),
             timeout_secs: default_timeout(),
             max_retries: default_max_retries(),
+            warmup_on_start: default_warmup_on_start(),
             retry_delay_ms: default_retry_delay(),
             extra_headers: HashMap::new(),
             extra_params: HashMap::new(),

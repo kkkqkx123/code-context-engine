@@ -5,10 +5,41 @@
 use axum::{Json, extract::State};
 use std::path::PathBuf;
 
-use cce_api::models::{ErrorResponse, IndexRequest, IndexResponse, error_codes};
+use cce_api::models::{
+    ErrorResponse, IndexRequest, IndexResponse, IndexStageTimingsDto, error_codes,
+};
 use cce_orchestrator::IndexResult;
 
 use crate::api::response::ApiResult;
+
+fn index_stages_dto(result: &IndexResult) -> IndexStageTimingsDto {
+    let stages = &result.stages;
+    IndexStageTimingsDto {
+        scan_ms: stages.scan_ms,
+        batch_process_ms: stages.batch_process_ms,
+        batch_setup_ms: stages.batch_setup_ms,
+        entity_store_ms: stages.entity_store_ms,
+        vector_store_ms: stages.vector_store_ms,
+        bm25_store_ms: stages.bm25_store_ms,
+        summary_ms: stages.summary_ms,
+        relation_ms: stages.relation_ms,
+        export_ms: stages.export_ms,
+        relation_spool_ms: stages.relation_spool_ms,
+        relation_spool_write_ms: stages.relation_spool_write_ms,
+        relation_symbols_ms: stages.relation_symbols_ms,
+        symbol_modules_ms: stages.symbol_modules_ms,
+        symbol_type_index_ms: stages.symbol_type_index_ms,
+        symbol_overload_ms: stages.symbol_overload_ms,
+        symbol_flat_ms: stages.symbol_flat_ms,
+        symbol_cross_file_ms: stages.symbol_cross_file_ms,
+        export_spool_ms: stages.export_spool_ms,
+        manifest_ms: stages.manifest_ms,
+        batch_overhead_ms: stages.batch_overhead_ms,
+        batches: stages.batches,
+        vector_store_calls: stages.vector_store_calls,
+        bm25_store_calls: stages.bm25_store_calls,
+    }
+}
 
 fn index_response_from_result(result: IndexResult) -> IndexResponse {
     let has_errors = !result.errors().is_empty();
@@ -24,6 +55,7 @@ fn index_response_from_result(result: IndexResult) -> IndexResponse {
         total_relations: result.total_relations,
         total_vectors: result.total_vectors,
         elapsed_ms: result.elapsed_ms,
+        stages: index_stages_dto(&result),
         message: if !has_errors {
             format!(
                 "Indexing completed, a total of {} files were processed, {} entities were extracted, and {} relationships were identified.",

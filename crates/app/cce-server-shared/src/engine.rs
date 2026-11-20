@@ -239,6 +239,15 @@ impl CodeContextEngine {
             cce_metrics::EmbeddingMetrics::new(&metrics_registry, embedder.model_name());
         embedder = embedder.with_metrics(embedding_metrics);
 
+        if config.embedder.warmup_on_start
+            && let Err(error) = embedder.embed_one("cce-embedding-warmup").await
+        {
+            tracing::warn!(
+                error = %error,
+                "Embedding warmup failed; the first query may pay connection setup"
+            );
+        }
+
         let embedder = Arc::new(embedder);
 
         // Create LLM health-probe metrics labeled by the provider

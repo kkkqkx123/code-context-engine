@@ -19,7 +19,7 @@ mod schema;
 mod snapshot;
 mod sync_snapshot;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use cce_circuit_breaker::CircuitBreaker;
@@ -49,8 +49,30 @@ pub struct PostgresClient {
 const BREAKER_THRESHOLD: u32 = 3;
 const BREAKER_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Runtime that owns the connection pool's background tasks.
+///
+/// Snapshot reads are synchronous at the codegraph port. Keeping pool
+/// maintenance on a dedicated multi-thread runtime lets those reads block a
+/// caller on any runtime flavor without starving connection cleanup.
+fn background_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("cce-metadata-pg")
+            .enable_all()
+            .build()
+            .expect("postgres metadata runtime builds")
+    })
+}
+
+pub(crate) fn runtime_handle() -> tokio::runtime::Handle {
+    background_runtime().handle().clone()
+}
+
 impl PostgresClient {
     pub fn new(config: PostgresConfig) -> Result<Self, StorageError> {
+        let _guard = background_runtime().enter();
         let pg_config = config.pg_config()?;
         let manager = Manager::from_config(
             pg_config,
@@ -178,10 +200,17 @@ impl PostgresClient {
     }
 
     async fn pooled(&self) -> Result<deadpool_postgres::Client, StorageError> {
-        self.pool
-            .get()
+        // Connection drivers must live on the metadata runtime so synchronous
+        // snapshot reads can wait without parking the caller's runtime.
+        let pool = self.pool.clone();
+        runtime_handle()
+            .spawn(async move {
+                pool.get().await.map_err(|error| {
+                    StorageError::connection(format!("pg pool acquire failed: {error}"))
+                })
+            })
             .await
-            .map_err(|error| StorageError::connection(format!("pg pool acquire failed: {error}")))
+            .map_err(|error| StorageError::connection(format!("pg pool task failed: {error}")))?
     }
 
     async fn check_breaker(&self) -> Result<(), StorageError> {

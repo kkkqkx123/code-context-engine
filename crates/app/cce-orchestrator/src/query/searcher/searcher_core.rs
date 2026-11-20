@@ -375,7 +375,9 @@ impl Searcher {
         record_query_stages(stages, |timings| {
             timings.embedding_ms = vector_outcome.embedding_ms;
             timings.embedding_provider_ms = vector_outcome.embedding_provider_ms;
+            timings.embedding_first_ms = vector_outcome.embedding_first_ms;
             timings.embedding_overhead_ms = vector_outcome.embedding_overhead_ms;
+            timings.embedding_cache_hits = vector_outcome.embedding_cache_hits;
             timings.vector_search_ms = vector_outcome.vector_search_ms;
             timings.bm25_retrieval_ms = bm25_elapsed;
         });
@@ -571,7 +573,9 @@ impl Searcher {
         record_query_stages(stages, |timings| {
             timings.embedding_ms = outcome.embedding_ms;
             timings.embedding_provider_ms = outcome.embedding_provider_ms;
+            timings.embedding_first_ms = outcome.embedding_first_ms;
             timings.embedding_overhead_ms = outcome.embedding_overhead_ms;
+            timings.embedding_cache_hits = outcome.embedding_cache_hits;
             timings.vector_search_ms = outcome.vector_search_ms;
         });
         let mut results = outcome.results.map_err(|e| {

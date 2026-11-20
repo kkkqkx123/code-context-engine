@@ -163,8 +163,14 @@ pub struct QueryStageTimingsDto {
     pub embedding_ms: u64,
     /// Time spent inside the embedding transport, including connection setup.
     pub embedding_provider_ms: u64,
+    /// Provider time of the first transport call made by this client.
+    pub embedding_first_ms: u64,
     /// Time spent in embedding batching and resilience orchestration.
     pub embedding_overhead_ms: u64,
+    /// Number of query embeddings served without a remote call.
+    pub embedding_cache_hits: u64,
+    /// Time spent converting query results into the response DTO.
+    pub response_render_ms: u64,
     /// Wall-clock time spent in the vector engine search.
     pub vector_search_ms: u64,
     /// Wall-clock time spent in BM25 recall.

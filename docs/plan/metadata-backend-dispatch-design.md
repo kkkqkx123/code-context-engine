@@ -111,4 +111,4 @@ PostgreSQL 客户端的契约测试继续保留，作为组件级语义验证。
 
 本设计已落地：`cce-storage-common` 用一份声明宏生成组合契约、分域子契约和 `Arc` / 后端分发的转发实现；`cce-storage-metadb-pg` 的契约存根已清零；`MetadataStore` 成为确定类型的元数据后端句柄；配置层允许 `metadata_backend = "remote"`（与远端全文同开时仍需高级开关）；服务级 smoke 覆盖项目创建、索引、检索、热更新读路径、检查点往返与图导出。
 
-devs 上 `cargo check --workspace --all-targets`、`cargo clippy --workspace --all-targets --all-features`、`cargo build -p cce-cli -p cce-server` 与 `cargo test --workspace --lib` 均通过。PostgreSQL 服务未在验证环境中启动，远端契约与 smoke 用例会在提供 `CCE_TEST_PG_URL` 时执行。
+devs 上 `cargo check --workspace --all-targets`、`cargo clippy --workspace --all-targets --all-features`、`cargo build -p cce-cli -p cce-server` 与 `cargo test --workspace --lib` 均通过。PostgreSQL 已按 `docs/dev/devs-service-environment.md` 安装并开始验证；远端契约 3/3 与服务级 smoke 1/1 通过。smoke 过程中发现同步快照桥接会在单线程运行时上饿死连接池维护任务，已改为把连接驱动固定在专用运行时，并由普通线程进入该运行时完成同步读取。

@@ -14,8 +14,13 @@ use crate::error::LlmError;
 pub struct EmbeddingTiming {
     /// Time spent inside the transport provider, including connection setup.
     pub provider_ms: u64,
+    /// Provider time of the first transport call made by this client.
+    /// Zero for later calls; isolates connection setup from steady state.
+    pub first_call_ms: u64,
     /// Time spent in batching, resilience and local orchestration.
     pub overhead_ms: u64,
+    /// True when no remote call was made because the query embedding was cached.
+    pub cache_hit: bool,
 }
 
 /// Result of an embedding operation

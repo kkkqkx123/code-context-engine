@@ -784,6 +784,12 @@ impl QueryCoordinator {
                     Ok(Ok(mut result)) => {
                         aggregate_stages.embedding_ms =
                             aggregate_stages.embedding_ms.saturating_add(result.stages.embedding_ms);
+                        aggregate_stages.embedding_first_ms = aggregate_stages
+                            .embedding_first_ms
+                            .max(result.stages.embedding_first_ms);
+                        aggregate_stages.embedding_cache_hits = aggregate_stages
+                            .embedding_cache_hits
+                            .saturating_add(result.stages.embedding_cache_hits);
                         aggregate_stages.vector_search_ms = aggregate_stages
                             .vector_search_ms
                             .saturating_add(result.stages.vector_search_ms);

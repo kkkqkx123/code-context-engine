@@ -1,6 +1,6 @@
 //! Embedding Request Handler
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -20,6 +20,8 @@ use llm_suite_embedding::EmbeddingProvider;
 pub struct SuiteEmbeddingTransport<P = llm_suite_embedding::OpenAICompatibleProvider> {
     provider: P,
     resilience: Resilience,
+    first_call_pending: AtomicBool,
+    first_call_ms: AtomicU64,
 }
 
 /// Translates the CCE preprocessor configuration into the suite's
@@ -107,6 +109,8 @@ impl SuiteEmbeddingTransport<llm_suite_embedding::OpenAICompatibleProvider> {
         Ok(Self {
             provider,
             resilience,
+            first_call_pending: AtomicBool::new(true),
+            first_call_ms: AtomicU64::new(0),
         })
     }
 }
@@ -131,6 +135,10 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
     ) -> Result<(EmbeddingResult, EmbeddingTiming), LlmError> {
         let provider_ms = Arc::new(AtomicU64::new(0));
         let observed_ms = Arc::clone(&provider_ms);
+        let first_call_ms = Arc::new(AtomicU64::new(0));
+        let observed_first = Arc::clone(&first_call_ms);
+        let first_pending = &self.first_call_pending;
+        let recorded_first = &self.first_call_ms;
         let started = Instant::now();
         let result = self
             .resilience
@@ -139,16 +147,19 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
                 || async {
                     let provider_started = Instant::now();
                     let result = self.provider.embed(&batch).await;
-                    observed_ms.store(
-                        provider_started.elapsed().as_millis() as u64,
-                        Ordering::Relaxed,
-                    );
+                    let elapsed_ms = provider_started.elapsed().as_millis() as u64;
+                    observed_ms.store(elapsed_ms, Ordering::Relaxed);
+                    if first_pending.swap(false, Ordering::AcqRel) {
+                        observed_first.store(elapsed_ms, Ordering::Relaxed);
+                        recorded_first.store(elapsed_ms, Ordering::Relaxed);
+                    }
                     result
                 },
             )
             .await;
         let total_ms = started.elapsed().as_millis() as u64;
         let provider_ms = provider_ms.load(Ordering::Relaxed);
+        let first_call_ms = first_call_ms.load(Ordering::Relaxed);
         let result = result
             .map(|result| EmbeddingResult {
                 embeddings: result.embeddings,
@@ -160,7 +171,9 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
             result,
             EmbeddingTiming {
                 provider_ms,
+                first_call_ms,
                 overhead_ms: total_ms.saturating_sub(provider_ms),
+                cache_hit: false,
             },
         ))
     }
@@ -170,6 +183,8 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
         Self {
             provider,
             resilience: Resilience::new(),
+            first_call_pending: AtomicBool::new(true),
+            first_call_ms: AtomicU64::new(0),
         }
     }
 
@@ -255,6 +270,7 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
                 let owned: Vec<String> = batch.iter().map(|text| (*text).to_string()).collect();
                 let (result, batch_timing) = self.inner.embed_batch_timed(owned).await?;
                 timing.provider_ms += batch_timing.provider_ms;
+                timing.first_call_ms += batch_timing.first_call_ms;
                 timing.overhead_ms += batch_timing.overhead_ms;
                 all_embeddings.extend(result.embeddings);
                 total_prompt_tokens += result.prompt_tokens;
@@ -293,6 +309,7 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
         for (_, result) in ordered {
             let (result, batch_timing) = result?;
             timing.provider_ms += batch_timing.provider_ms;
+            timing.first_call_ms += batch_timing.first_call_ms;
             timing.overhead_ms += batch_timing.overhead_ms;
             all_embeddings.extend(result.embeddings);
             total_prompt_tokens += result.prompt_tokens;

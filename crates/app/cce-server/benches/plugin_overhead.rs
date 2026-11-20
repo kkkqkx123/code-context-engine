@@ -142,26 +142,45 @@ fn main() {
     let mut symbols_ns = 0u128;
     let mut bm25_ns = 0u128;
     let mut embedding_ns = 0u128;
+    let mut script_ns = 0u64;
+    let mut dispatch_ns = 0u64;
     for file in &project.files {
         let mark = Instant::now();
         let _ = lua.filter_file(&file.path.to_string_lossy(), false, 100);
         filter_ns += mark.elapsed().as_nanos();
+        let timing = lua.last_hook_timing();
+        script_ns += timing.script_us;
+        dispatch_ns += timing.dispatch_us;
         let mark = Instant::now();
         let _ = lua.extract_symbols(&file.content, &file.path.to_string_lossy(), file.language);
         symbols_ns += mark.elapsed().as_nanos();
+        let timing = lua.last_hook_timing();
+        script_ns += timing.script_us;
+        dispatch_ns += timing.dispatch_us;
         let mark = Instant::now();
         let _ = lua.generate_bm25(&group);
         bm25_ns += mark.elapsed().as_nanos();
+        let timing = lua.last_hook_timing();
+        script_ns += timing.script_us;
+        dispatch_ns += timing.dispatch_us;
         let mark = Instant::now();
         let _ = lua.generate_embedding(&group);
         embedding_ns += mark.elapsed().as_nanos();
+        let timing = lua.last_hook_timing();
+        script_ns += timing.script_us;
+        dispatch_ns += timing.dispatch_us;
     }
     let hook_wall_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     let queries = 200;
+    let mut query_script_ns = 0u64;
+    let mut query_dispatch_ns = 0u64;
     let started = Instant::now();
     for _ in 0..queries {
         let _ = lua.rewrite_query("tf nlp search").expect("rewrite hook");
+        let timing = lua.last_hook_timing();
+        query_script_ns += timing.script_us;
+        query_dispatch_ns += timing.dispatch_us;
     }
     let query_ms = started.elapsed().as_secs_f64() * 1000.0;
 
@@ -173,18 +192,24 @@ fn main() {
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "plugin_overhead.tsv",
-        "# run_id\tplugin_count\tfiles\tregistry_load_ms\tlua_init_ms\tnative_init_ms\tfilter_us_per_file\tsymbol_us_per_file\tbm25_us_per_file\tembedding_us_per_file\thook_wall_ms\tquery_rewrite_us_per_call\tquery_wall_ms",
+        "# run_id\tplugin_count\tfiles\tregistry_load_ms\tlua_init_ms\tnative_init_ms\tfilter_us_per_file\tsymbol_us_per_file\tbm25_us_per_file\tembedding_us_per_file\thook_wall_ms\tscript_us_per_hook\tdispatch_us_per_hook\tquery_rewrite_us_per_call\tquery_script_us_per_call\tquery_dispatch_us_per_call\tquery_wall_ms",
     );
     let per_file = |total: u128| total as f64 / files as f64 / 1000.0;
+    let hooks = (files * 4) as u64;
+    let per_hook = |total: u64, count: u64| total as f64 / count as f64;
     let _ = writeln!(
         out,
-        "{run_id}\t{}\t{files}\t{registry_ms:.3}\t{lua_init_ms:.3}\t{native_init_ms:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{hook_wall_ms:.3}\t{:.3}\t{query_ms:.3}",
+        "{run_id}\t{}\t{files}\t{registry_ms:.3}\t{lua_init_ms:.3}\t{native_init_ms:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{hook_wall_ms:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{query_ms:.3}",
         bundles.len(),
         per_file(filter_ns),
         per_file(symbols_ns),
         per_file(bm25_ns),
         per_file(embedding_ns),
+        per_hook(script_ns, hooks),
+        per_hook(dispatch_ns, hooks),
         query_ms * 1000.0 / queries as f64,
+        query_script_ns as f64 / queries as f64,
+        query_dispatch_ns as f64 / queries as f64,
     );
     println!(
         "plugins={} files={files} registry={registry_ms:.2}ms filter={:.3}us/file",

@@ -183,6 +183,9 @@ pub struct TestBackends {
     pub fulltext_index: Option<String>,
     pub metadata_backend: MetadataBackend,
     pub metadata_url: Option<String>,
+    /// Requests per minute allowed by the offline stub provider. Zero keeps
+    /// the deterministic benchmark path free of token-bucket waits.
+    pub embedding_rate_limit: u32,
 }
 
 #[allow(dead_code)]
@@ -197,6 +200,7 @@ impl Default for TestBackends {
             fulltext_index: None,
             metadata_backend: MetadataBackend::Local,
             metadata_url: None,
+            embedding_rate_limit: 0,
         }
     }
 }
@@ -228,6 +232,7 @@ pub async fn test_env_with_backends(backends: TestBackends) -> TestEnv {
             name: "Test Provider".to_string(),
             base_url: spawn_llm_stub(384),
             api_keys: vec!["test-key".to_string()],
+            rate_limit: backends.embedding_rate_limit,
             ..ProviderConfig::default()
         },
     );

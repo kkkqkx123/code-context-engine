@@ -10,6 +10,7 @@
 //! (`cce_server_shared::services::search`) together with the MCP surface.
 
 use axum::{Json, extract::State};
+use std::time::Instant;
 
 use crate::api::validation;
 use cce_server_shared::services::project;
@@ -160,23 +161,28 @@ pub async fn handle_search(
         },
     };
     match service.run_single(project_id, spec).await {
-        Ok(outcome) => SearchApiResponse::Success(SearchResponse {
-            success: true,
-            total: outcome.total,
-            items: outcome.items,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-            sources_used: outcome.sources,
-            failed_sub_queries: outcome.failed_sub_queries,
-            planned_sub_queries: outcome.planned_sub_queries,
-            executed_sub_queries: outcome.executed_sub_queries,
-            succeeded_sub_queries: outcome.succeeded_sub_queries,
-            sub_query_cache_hits: outcome.sub_query_cache_hits,
-            from_cache: outcome.from_cache,
-            relation_epoch: outcome.relation_epoch,
-            relation_stale: outcome.relation_stale,
-            sub_query_stats: outcome.sub_query_stats,
-            stages: outcome.stages,
-        }),
+        Ok(outcome) => {
+            let render_started = Instant::now();
+            let mut response = SearchResponse {
+                success: true,
+                total: outcome.total,
+                items: outcome.items,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                sources_used: outcome.sources,
+                failed_sub_queries: outcome.failed_sub_queries,
+                planned_sub_queries: outcome.planned_sub_queries,
+                executed_sub_queries: outcome.executed_sub_queries,
+                succeeded_sub_queries: outcome.succeeded_sub_queries,
+                sub_query_cache_hits: outcome.sub_query_cache_hits,
+                from_cache: outcome.from_cache,
+                relation_epoch: outcome.relation_epoch,
+                relation_stale: outcome.relation_stale,
+                sub_query_stats: outcome.sub_query_stats,
+                stages: outcome.stages,
+            };
+            response.stages.response_render_ms = render_started.elapsed().as_millis() as u64;
+            SearchApiResponse::Success(response)
+        }
         Err(error) => {
             tracing::error!("Search failed: {}", error);
             SearchApiResponse::Error(service_error(error))
@@ -331,23 +337,28 @@ pub async fn handle_aggregated_search(
         },
     };
     match service.run_aggregated(project_id, spec).await {
-        Ok(outcome) => SearchApiResponse::Success(SearchResponse {
-            success: true,
-            total: outcome.total,
-            items: outcome.items,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-            sources_used: outcome.sources,
-            failed_sub_queries: outcome.failed_sub_queries,
-            planned_sub_queries: outcome.planned_sub_queries,
-            executed_sub_queries: outcome.executed_sub_queries,
-            succeeded_sub_queries: outcome.succeeded_sub_queries,
-            sub_query_cache_hits: outcome.sub_query_cache_hits,
-            from_cache: outcome.from_cache,
-            relation_epoch: outcome.relation_epoch,
-            relation_stale: outcome.relation_stale,
-            sub_query_stats: outcome.sub_query_stats,
-            stages: outcome.stages,
-        }),
+        Ok(outcome) => {
+            let render_started = Instant::now();
+            let mut response = SearchResponse {
+                success: true,
+                total: outcome.total,
+                items: outcome.items,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                sources_used: outcome.sources,
+                failed_sub_queries: outcome.failed_sub_queries,
+                planned_sub_queries: outcome.planned_sub_queries,
+                executed_sub_queries: outcome.executed_sub_queries,
+                succeeded_sub_queries: outcome.succeeded_sub_queries,
+                sub_query_cache_hits: outcome.sub_query_cache_hits,
+                from_cache: outcome.from_cache,
+                relation_epoch: outcome.relation_epoch,
+                relation_stale: outcome.relation_stale,
+                sub_query_stats: outcome.sub_query_stats,
+                stages: outcome.stages,
+            };
+            response.stages.response_render_ms = render_started.elapsed().as_millis() as u64;
+            SearchApiResponse::Success(response)
+        }
         Err(error) => {
             tracing::error!("Aggregated search failed: {}", error);
             SearchApiResponse::Error(service_error(error))

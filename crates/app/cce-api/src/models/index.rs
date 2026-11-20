@@ -22,6 +22,34 @@ pub struct IndexRequest {
     pub custom_gitignore: Option<String>,
 }
 
+/// Wall-clock accounting for one full-index run.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct IndexStageTimingsDto {
+    pub scan_ms: u64,
+    pub batch_process_ms: u64,
+    pub batch_setup_ms: u64,
+    pub entity_store_ms: u64,
+    pub vector_store_ms: u64,
+    pub bm25_store_ms: u64,
+    pub summary_ms: u64,
+    pub relation_ms: u64,
+    pub export_ms: u64,
+    pub relation_spool_ms: u64,
+    pub relation_spool_write_ms: u64,
+    pub relation_symbols_ms: u64,
+    pub symbol_modules_ms: u64,
+    pub symbol_type_index_ms: u64,
+    pub symbol_overload_ms: u64,
+    pub symbol_flat_ms: u64,
+    pub symbol_cross_file_ms: u64,
+    pub export_spool_ms: u64,
+    pub manifest_ms: u64,
+    pub batch_overhead_ms: u64,
+    pub batches: usize,
+    pub vector_store_calls: usize,
+    pub bm25_store_calls: usize,
+}
+
 /// Index response
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexResponse {
@@ -44,6 +72,9 @@ pub struct IndexResponse {
     pub total_relations: usize,
     pub total_vectors: usize,
     pub elapsed_ms: u64,
+    /// Per-stage accounting for the run.
+    #[serde(default)]
+    pub stages: IndexStageTimingsDto,
     pub message: String,
     #[serde(default)]
     pub errors: Vec<String>,

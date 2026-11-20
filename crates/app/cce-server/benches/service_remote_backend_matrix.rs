@@ -6,8 +6,9 @@
 //! instead of being recorded as request errors.
 //!
 //! Run: `cargo bench -p cce-server --bench service_remote_backend_matrix`
-//! Reports: `benches/results/service_remote_backend_matrix.tsv` and
-//! `benches/results/service_remote_backend_index.tsv`.
+//! Reports: `service_remote_backend_matrix.tsv`,
+//! `service_remote_backend_index.tsv`, `service_remote_backend_index_stages.tsv`
+//! and `service_remote_backend_stages.tsv` under `benches/results/`.
 
 use std::fs;
 use std::io::{Read, Write as _};
@@ -16,7 +17,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::Json;
 use axum::extract::State;
-use cce_api::models::SearchRequest;
+use cce_api::models::{QueryStageTimingsDto, SearchRequest};
 use cce_bench_kit::{
     DEFAULT_LANG_DIST, ProjectSize, SyntheticProject, cpu_ms, resource_delta, resource_snapshot,
 };
@@ -45,6 +46,8 @@ struct RequestSample {
     latency_ms: u64,
     ok: bool,
     error: Option<String>,
+    stages: QueryStageTimingsDto,
+    from_cache: bool,
 }
 
 fn fulltext_label(backend: FulltextBackend) -> &'static str {
@@ -149,17 +152,21 @@ async fn run_wave(
             let started = Instant::now();
             let response = search::handle_search(State(state), Json(request)).await;
             let latency_ms = started.elapsed().as_millis() as u64;
-            let (ok, error) = match response {
-                ApiResult::Success(_) => (true, None),
+            let (ok, error, stages, from_cache) = match response {
+                ApiResult::Success(success) => (true, None, success.stages, success.from_cache),
                 ApiResult::Error(failure) => (
                     false,
                     Some(format!("{}: {}", failure.error.code, failure.error.message)),
+                    QueryStageTimingsDto::default(),
+                    false,
                 ),
             };
             RequestSample {
                 latency_ms,
                 ok,
                 error,
+                stages,
+                from_cache,
             }
         });
     }
@@ -216,10 +223,20 @@ fn main() {
         "service_remote_backend_index.tsv",
         "# run_id\tservice_version\tvector_backend\tfulltext_backend\tbackend_combination\tfile_tier\tfiles\tfiles_indexed\terrors\tindex_wall_ms\tcpu_ms\tpeak_rss_kb\trss_delta_kb\tread_bytes_delta\twrite_bytes_delta\tqdrant_version\tes_version\thnsw_preset",
     );
+    let mut index_stages_out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "service_remote_backend_index_stages.tsv",
+        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tbatches\tvector_store_calls\tbm25_store_calls",
+    );
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "service_remote_backend_matrix.tsv",
         "# run_id\tservice_version\tvector_backend\tfulltext_backend\tbackend_combination\tfile_tier\tmode\tconcurrency\tphase\trequests\terrors\tfirst_error\tp50_ms\tp95_ms\tp99_ms\treq_per_sec\tcpu_ms\tpeak_rss_kb\trss_delta_kb\tread_bytes_delta\twrite_bytes_delta",
+    );
+    let mut stage_out = cce_bench_kit::open_report_with_header(
+        env!("CARGO_MANIFEST_DIR"),
+        "service_remote_backend_stages.tsv",
+        "# run_id\tservice_version\tbackend_combination\tfile_tier\tmode\tconcurrency\tphase\trequests\tresult_cache_hits\tembedding_cache_hits\tavg_coordinator_ms\tavg_filter_ms\tavg_cache_key_ms\tavg_rewrite_ms\tavg_embedding_ms\tavg_embedding_first_ms\tavg_embedding_provider_ms\tavg_embedding_overhead_ms\tavg_vector_ms\tavg_bm25_ms\tavg_fusion_ms\tavg_post_ms\tavg_response_render_ms",
     );
 
     rt.block_on(async {
@@ -238,6 +255,7 @@ fn main() {
                 fulltext_index: Some(format!("cce-bench-{run_id}-{slug}")),
                 metadata_backend: cce_config::modules::MetadataBackend::Local,
                 metadata_url: None,
+                embedding_rate_limit: 0,
             };
             let env = common::test_env_with_backends(backends).await;
             let project_id =
@@ -268,6 +286,35 @@ fn main() {
                 index_resources.read_bytes.unwrap_or(0),
                 index_resources.write_bytes.unwrap_or(0),
             );
+            let stages = &indexed.stages;
+            let _ = writeln!(
+                index_stages_out,
+                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                size.label(),
+                stages.scan_ms,
+                stages.batch_process_ms,
+                stages.batch_setup_ms,
+                stages.entity_store_ms,
+                stages.vector_store_ms,
+                stages.bm25_store_ms,
+                stages.summary_ms,
+                stages.relation_ms,
+                stages.export_ms,
+                stages.relation_spool_ms,
+                stages.relation_spool_write_ms,
+                stages.relation_symbols_ms,
+                stages.symbol_modules_ms,
+                stages.symbol_type_index_ms,
+                stages.symbol_overload_ms,
+                stages.symbol_flat_ms,
+                stages.symbol_cross_file_ms,
+                stages.export_spool_ms,
+                stages.manifest_ms,
+                stages.batch_overhead_ms,
+                stages.batches,
+                stages.vector_store_calls,
+                stages.bm25_store_calls,
+            );
             println!(
                 "{combination}: indexed {} files in {index_wall_ms} ms",
                 indexed.files_indexed
@@ -279,6 +326,8 @@ fn main() {
                         let mut latencies = Vec::with_capacity(WAVES * concurrency);
                         let mut errors = 0usize;
                         let mut first_error = String::new();
+                        let mut stage_sums = QueryStageTimingsDto::default();
+                        let mut result_cache_hits = 0usize;
                         let before = resource_snapshot();
                         let wave_started = Instant::now();
                         for wave in 0..WAVES {
@@ -297,6 +346,26 @@ fn main() {
                             .await
                             {
                                 latencies.push(sample.latency_ms);
+                                if sample.from_cache {
+                                    result_cache_hits += 1;
+                                }
+                                stage_sums.coordinator_ms += sample.stages.coordinator_ms;
+                                stage_sums.filter_ms += sample.stages.filter_ms;
+                                stage_sums.cache_key_ms += sample.stages.cache_key_ms;
+                                stage_sums.rewrite_ms += sample.stages.rewrite_ms;
+                                stage_sums.embedding_ms += sample.stages.embedding_ms;
+                                stage_sums.embedding_first_ms += sample.stages.embedding_first_ms;
+                                stage_sums.embedding_provider_ms +=
+                                    sample.stages.embedding_provider_ms;
+                                stage_sums.embedding_overhead_ms +=
+                                    sample.stages.embedding_overhead_ms;
+                                stage_sums.embedding_cache_hits +=
+                                    sample.stages.embedding_cache_hits;
+                                stage_sums.vector_search_ms += sample.stages.vector_search_ms;
+                                stage_sums.bm25_retrieval_ms += sample.stages.bm25_retrieval_ms;
+                                stage_sums.fusion_ms += sample.stages.fusion_ms;
+                                stage_sums.post_process_ms += sample.stages.post_process_ms;
+                                stage_sums.response_render_ms += sample.stages.response_render_ms;
                                 if !sample.ok {
                                     errors += 1;
                                     if first_error.is_empty() {
@@ -313,6 +382,32 @@ fn main() {
                         latencies.sort_unstable();
                         let requests = latencies.len();
                         let rate = requests as f64 / (total_ms / 1000.0);
+                        let avg = |value: u64| -> f64 {
+                            if requests == 0 {
+                                0.0
+                            } else {
+                                value as f64 / requests as f64
+                            }
+                        };
+                        let _ = writeln!(
+                            stage_out,
+                            "{run_id}\t{service_version}\t{combination}\t{}\t{mode}\t{concurrency}\t{phase}\t{requests}\t{result_cache_hits}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                            size.label(),
+                            stage_sums.embedding_cache_hits,
+                            avg(stage_sums.coordinator_ms),
+                            avg(stage_sums.filter_ms),
+                            avg(stage_sums.cache_key_ms),
+                            avg(stage_sums.rewrite_ms),
+                            avg(stage_sums.embedding_ms),
+                            avg(stage_sums.embedding_first_ms),
+                            avg(stage_sums.embedding_provider_ms),
+                            avg(stage_sums.embedding_overhead_ms),
+                            avg(stage_sums.vector_search_ms),
+                            avg(stage_sums.bm25_retrieval_ms),
+                            avg(stage_sums.fusion_ms),
+                            avg(stage_sums.post_process_ms),
+                            avg(stage_sums.response_render_ms),
+                        );
                         let _ = writeln!(
                             out,
                             "{run_id}\t{service_version}\t{}\t{}\t{combination}\t{}\t{mode}\t{concurrency}\t{phase}\t{requests}\t{errors}\t{first_error}\t{}\t{}\t{}\t{rate:.1}\t{}\t{}\t{}\t{}\t{}",

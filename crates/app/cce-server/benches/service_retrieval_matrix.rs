@@ -111,7 +111,7 @@ fn main() {
     let mut stage_out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "service_retrieval_stages.tsv",
-        "# mode\tconcurrency\tphase\trequests\terrors\tfirst_error\tcache_hits\tavg_coordinator_ms\tavg_filter_ms\tavg_cache_key_ms\tavg_rewrite_ms\tavg_embedding_ms\tavg_embedding_provider_ms\tavg_embedding_overhead_ms\tavg_vector_ms\tavg_bm25_ms\tavg_fusion_ms\tavg_post_ms",
+        "# mode\tconcurrency\tphase\trequests\terrors\tfirst_error\tcache_hits\tembedding_cache_hits\tavg_coordinator_ms\tavg_filter_ms\tavg_cache_key_ms\tavg_rewrite_ms\tavg_embedding_ms\tavg_embedding_first_ms\tavg_embedding_provider_ms\tavg_embedding_overhead_ms\tavg_vector_ms\tavg_bm25_ms\tavg_fusion_ms\tavg_post_ms\tavg_response_render_ms",
     );
 
     rt.block_on(async {
@@ -167,7 +167,10 @@ fn main() {
                             stage_sums.rewrite_ms += sample.stages.rewrite_ms;
                             stage_sums.embedding_ms += sample.stages.embedding_ms;
                             stage_sums.embedding_provider_ms += sample.stages.embedding_provider_ms;
+                            stage_sums.embedding_first_ms += sample.stages.embedding_first_ms;
                             stage_sums.embedding_overhead_ms += sample.stages.embedding_overhead_ms;
+                            stage_sums.embedding_cache_hits += sample.stages.embedding_cache_hits;
+                            stage_sums.response_render_ms += sample.stages.response_render_ms;
                             stage_sums.vector_search_ms += sample.stages.vector_search_ms;
                             stage_sums.bm25_retrieval_ms += sample.stages.bm25_retrieval_ms;
                             stage_sums.fusion_ms += sample.stages.fusion_ms;
@@ -215,18 +218,21 @@ fn main() {
                     );
                     let _ = writeln!(
                         stage_out,
-                        "{mode}\t{concurrency}\t{phase}\t{requests}\t{errors}\t{first_error}\t{cache_hits}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                        "{mode}\t{concurrency}\t{phase}\t{requests}\t{errors}\t{first_error}\t{cache_hits}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                        stage_sums.embedding_cache_hits,
                         avg(stage_sums.coordinator_ms),
                         avg(stage_sums.filter_ms),
                         avg(stage_sums.cache_key_ms),
                         avg(stage_sums.rewrite_ms),
                         avg(stage_sums.embedding_ms),
+                        avg(stage_sums.embedding_first_ms),
                         avg(stage_sums.embedding_provider_ms),
                         avg(stage_sums.embedding_overhead_ms),
                         avg(stage_sums.vector_search_ms),
                         avg(stage_sums.bm25_retrieval_ms),
                         avg(stage_sums.fusion_ms),
                         avg(stage_sums.post_process_ms),
+                        avg(stage_sums.response_render_ms),
                     );
                 }
             }

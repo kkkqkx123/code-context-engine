@@ -24,7 +24,9 @@ pub(super) struct DenseRetrievalOutcome {
     pub results: Result<Vec<SearchResult>>,
     pub embedding_ms: u64,
     pub embedding_provider_ms: u64,
+    pub embedding_first_ms: u64,
     pub embedding_overhead_ms: u64,
+    pub embedding_cache_hits: u64,
     pub vector_search_ms: u64,
 }
 
@@ -68,7 +70,9 @@ impl DenseStrategy {
                     results: Err(crate::query::error::QueryError::Vector(error)),
                     embedding_ms: embedding_started.elapsed().as_millis() as u64,
                     embedding_provider_ms: 0,
+                    embedding_first_ms: 0,
                     embedding_overhead_ms: 0,
+                    embedding_cache_hits: 0,
                     vector_search_ms: 0,
                 };
             }
@@ -109,7 +113,9 @@ impl DenseStrategy {
                     results: Err(error),
                     embedding_ms,
                     embedding_provider_ms: embedding_timing.provider_ms,
+                    embedding_first_ms: embedding_timing.first_call_ms,
                     embedding_overhead_ms: embedding_timing.overhead_ms,
+                    embedding_cache_hits: u64::from(embedding_timing.cache_hit),
                     vector_search_ms: search_started.elapsed().as_millis() as u64,
                 };
             }
@@ -119,7 +125,9 @@ impl DenseStrategy {
             results: Ok(apply_strategy_filters(raw, options, config.top_k)),
             embedding_ms,
             embedding_provider_ms: embedding_timing.provider_ms,
+            embedding_first_ms: embedding_timing.first_call_ms,
             embedding_overhead_ms: embedding_timing.overhead_ms,
+            embedding_cache_hits: u64::from(embedding_timing.cache_hit),
             vector_search_ms,
         }
     }

@@ -120,6 +120,19 @@ Lua 脚本本身初始化仅 0.135 ms，native 动态库加载仅 0.021 ms；但
 - 插件/native 构建：`/data/kkkqkx/cce/bench-ab17d436-plugin*.log`、`/data/kkkqkx/cce/build-ab17d436-native-plugin2.log`；
 - 远端 metadata 服务级失败：`/data/kkkqkx/cce/bench-ab17d436-pg-smoke.log`。
 
+## 后续修复状态
+
+细化方案见 `docs/plan/service-backend-followup-remediation.md`，devs 服务现状与
+环境配置见 `docs/dev/devs-service-environment.md`。
+
+- 第 1 项已在发现阶段修复，回归单测保留；第 5 项的确定类型后端分发与配置放开
+  已在当前 `main` 落地，并补充服务级 smoke。
+- 第 2、3、4、6、7、8 项以阶段归因和运行时开销修复为主：嵌入首次连接与缓存命中
+  透出到检索阶段 TSV，启动阶段预热连接；服务索引阶段进入响应 DTO；Lua hook
+  去掉逐调用线程创建；响应渲染与高亮 harness 分离；外部服务进程指标由管理脚本采集。
+- Elasticsearch 与本地 Tantivy 的冷查询差距属于后端固有成本，不作为代码缺陷消除，
+  由 SLA 与堆配置单独约束。
+
 ## 明确未做
 
 - 未执行 50,000 文件档；5,000 文件档先完成并确认资源占用，ES 不直接跑 Large。

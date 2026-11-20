@@ -1,7 +1,6 @@
 use mlua::{HookTriggers, Lua, Table, VmState};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::mpsc::{RecvTimeoutError, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
 
@@ -10,7 +9,6 @@ use crate::loader::lua_mapping::entity_group_to_lua_table;
 use crate::pattern::{CompiledPattern, PatternDeclaration, compile_patterns};
 use crate::types::PluginMetadata;
 use cce_metrics::PluginMetrics;
-use cce_plugin::CancellationToken;
 use cce_types::QueryType;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -20,6 +18,18 @@ use cce_plugin::default_timeout_for;
 
 const DEFAULT_MEMORY_LIMIT_KB: usize = 64 * 1024;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 10_000;
+
+/// Sentinel produced by the protection hook when the call deadline expires.
+const HOOK_TIMEOUT_MESSAGE: &str = "Plugin execution timed out";
+
+/// Split accounting for one Lua hook invocation.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LuaHookTiming {
+    /// Time spent inside the Lua script.
+    pub script_us: u64,
+    /// Time spent acquiring a VM and installing the protection hook.
+    pub dispatch_us: u64,
+}
 
 /// Number of consecutive timeouts after which a plugin is disabled.
 const CIRCUIT_BREAKER_THRESHOLD: u64 = 3;
@@ -78,6 +88,8 @@ pub struct LuaPlugin {
     pub(crate) disabled: AtomicBool,
     /// Number of consecutive timeouts observed so far.
     pub(crate) consecutive_timeouts: AtomicU64,
+    /// Timing of the most recent hook invocation.
+    last_hook_timing: Mutex<LuaHookTiming>,
 }
 
 impl LuaPlugin {
@@ -387,6 +399,7 @@ impl LuaPlugin {
             metrics: None,
             disabled: AtomicBool::new(false),
             consecutive_timeouts: AtomicU64::new(0),
+            last_hook_timing: Mutex::new(LuaHookTiming::default()),
         })
     }
 
@@ -396,23 +409,28 @@ impl LuaPlugin {
         self
     }
 
+    /// Timing split of the most recent hook invocation.
+    pub fn last_hook_timing(&self) -> LuaHookTiming {
+        *self
+            .last_hook_timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Set a debug hook that fires every [`HOOK_INSTRUCTION_INTERVAL`]
-    /// instructions.  The hook checks the cancellation token and the
-    /// current memory usage; if either exceeds its limit the Lua
-    /// execution is interrupted with a Lua error which terminates the
-    /// worker thread promptly.
+    /// instructions. The hook checks the deadline and current memory usage;
+    /// if either exceeds its limit, Lua execution is interrupted with a
+    /// script error.
     pub(crate) fn set_protection_hook(
         lua: &Lua,
-        token: CancellationToken,
+        deadline: Instant,
         max_kb: usize,
     ) -> Result<(), PluginError> {
         lua.set_hook(
             HookTriggers::new().every_nth_instruction(HOOK_INSTRUCTION_INTERVAL),
             move |l, _| {
-                if token.is_cancelled() {
-                    return Err(mlua::Error::RuntimeError(
-                        "Plugin execution timed out".to_string(),
-                    ));
+                if Instant::now() >= deadline {
+                    return Err(mlua::Error::RuntimeError(HOOK_TIMEOUT_MESSAGE.to_string()));
                 }
                 let used_kb = l.used_memory() / 1024;
                 if used_kb > max_kb {
@@ -440,11 +458,9 @@ impl LuaPlugin {
     /// Run `f` on a Lua VM from the pool, with a hard timeout.
     ///
     /// Lua states are pooled and reused across calls — each state has
-    /// the plugin script pre-loaded.  The debug hook fires periodically
-    /// to check the cancellation token and memory limit, so the worker
-    /// thread terminates shortly after the caller gives up waiting
-    /// (rather than running to completion).  After the call finishes
-    /// the VM is returned to the pool for reuse.
+    /// the plugin script pre-loaded. The debug hook checks the deadline
+    /// and memory limit while the script runs. After the call finishes
+    /// the hook is removed and the VM is returned to the pool.
     ///
     /// After [`CIRCUIT_BREAKER_THRESHOLD`] consecutive timeouts the plugin
     /// is disabled and further calls fail with a circuit-broken error.
@@ -495,56 +511,51 @@ impl LuaPlugin {
         result
     }
 
-    /// Inner execution on a dedicated thread with a hard timeout.
+    /// Inner execution with a deadline enforced by the Lua protection hook.
+    ///
+    /// Lua scripts only use the safe standard library, so an instruction hook
+    /// can interrupt loops and allocation without moving each call to a new
+    /// OS thread. The timeout is checked at the same points as the existing
+    /// memory limit.
     pub(crate) fn run_with_timeout<R>(
         &self,
         operation: &str,
-        f: impl FnOnce(&Lua) -> Result<R, PluginError> + Send + 'static,
-    ) -> Result<R, PluginError>
-    where
-        R: Send + 'static,
-    {
-        let (tx, rx) = channel::<Result<R, PluginError>>();
-        let plugin_id = self.metadata.id.clone();
-        let timeout = self.timeout_for(operation);
-        let vm_pool = self.vm_pool.clone();
-        let max_kb = self.memory_limit_kb;
-        let token = CancellationToken::new();
-        let token_for_thread = token.clone();
+        f: impl FnOnce(&Lua) -> Result<R, PluginError>,
+    ) -> Result<R, PluginError> {
+        let deadline = Instant::now() + self.timeout_for(operation);
+        let dispatch_started = Instant::now();
+        let lua = self.vm_pool.acquire()?;
+        let setup = Self::set_protection_hook(&lua, deadline, self.memory_limit_kb);
+        let dispatch_us = dispatch_started.elapsed().as_micros() as u64;
 
-        std::thread::spawn(move || {
-            let lua = match vm_pool.acquire() {
-                Ok(lua) => lua,
-                Err(e) => {
-                    let _ = tx.send(Err(e));
-                    return;
-                }
-            };
-
-            if let Err(e) = Self::set_protection_hook(&lua, token_for_thread, max_kb) {
-                vm_pool.release(lua);
-                let _ = tx.send(Err(e));
-                return;
+        let (result, script_us) = match setup {
+            Err(error) => (Err(error), 0),
+            Ok(()) => {
+                let script_started = Instant::now();
+                let result = f(&lua);
+                (result, script_started.elapsed().as_micros() as u64)
             }
+        };
+        lua.remove_hook();
+        self.vm_pool.release(lua);
+        *self
+            .last_hook_timing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = LuaHookTiming {
+            script_us,
+            dispatch_us,
+        };
 
-            let result = f(&lua);
-            vm_pool.release(lua);
-            let _ = tx.send(result);
-        });
-
-        match rx.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(RecvTimeoutError::Timeout) => {
-                token.cancel();
+        match result {
+            Err(PluginError::ScriptError(message)) if message.contains(HOOK_TIMEOUT_MESSAGE) => {
                 warn!(
-                    "Plugin {plugin_id} timed out during {operation} ({}ms)",
-                    timeout.as_millis()
+                    plugin = %self.metadata.id,
+                    operation = %operation,
+                    "Lua plugin hit its execution deadline"
                 );
                 Err(PluginError::Timeout)
             }
-            Err(RecvTimeoutError::Disconnected) => Err(PluginError::ExecutionFailed(format!(
-                "Plugin {plugin_id} thread terminated unexpectedly during {operation}"
-            ))),
+            other => other,
         }
     }
 }

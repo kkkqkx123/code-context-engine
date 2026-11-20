@@ -44,6 +44,7 @@ impl LuaVmPool {
     /// The pool is bounded by [`LUA_POOL_MAX_STATES`]; extra VMs are
     /// dropped so burst concurrency does not grow memory without bound.
     pub(crate) fn release(&self, lua: Lua) {
+        lua.remove_hook();
         if let Ok(mut states) = self.states.lock() {
             if states.len() < LUA_POOL_MAX_STATES {
                 states.push(lua);
