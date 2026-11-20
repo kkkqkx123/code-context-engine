@@ -37,7 +37,8 @@ pub use checkpoint::{
 };
 pub use chunk::{ChunkContent, ChunkRecord, EntityDetailMapping};
 pub use entity::{
-    DbId, EntityRecord, EntityWithFile, FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord,
+    DbId, EntityFileWrite, EntityRecord, EntityWithFile, FileEnsureEntry, FileEpochEntry,
+    FileHashEntry, FileRecord,
 };
 pub use generation::{
     AdmissionAuditRecord, GenerationGcPlan, GenerationOverride, OverrideDisposition,
@@ -393,6 +394,18 @@ metadata_storage_contract! {
     &self,
     entities: &[EntityRecord],
     ) -> Result<Vec<i64>, StorageError>;
+        /// Replace the entity rows of several files in one transaction.
+        ///
+        /// Each entry ensures its file row, deletes that file's rows at the
+        /// epoch, inserts all entities and links parents by local index. The
+        /// operation commits once and rolls back as a whole on failure.
+    fn entities_replace_files(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    batch_id: i64,
+    files: &[EntityFileWrite],
+    ) -> Result<(), StorageError>;
         /// Entity rows of one generation joined with their file paths.
     fn entities_with_files(
     &self,

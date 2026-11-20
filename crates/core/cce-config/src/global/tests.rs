@@ -184,6 +184,24 @@ fn test_resolve_dependencies_auto_enable() {
 }
 
 #[test]
+fn test_resolve_dependencies_unlimits_local_default_rate_limit() {
+    let mut config = AppConfig::default();
+    let mut provider = crate::modules::ProviderConfig::default();
+    provider.provider_type = cce_types::llm::ProviderType::Local;
+    provider.rate_limit = 600;
+    config.llm.providers.insert("local".to_string(), provider);
+
+    config.resolve_dependencies();
+
+    let resolved = config
+        .llm
+        .providers
+        .get("local")
+        .expect("local provider remains registered");
+    assert_eq!(resolved.rate_limit, 0);
+}
+
+#[test]
 fn test_validate_and_resolve_dependencies() {
     let mut config = AppConfig::default();
     config.database.bm25.enabled = true;

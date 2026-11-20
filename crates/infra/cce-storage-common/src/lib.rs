@@ -456,6 +456,23 @@ pub fn vector_collection_name() -> String {
     format!("cce_vectors-i{}", cce_types::INDEX_FORMAT_VERSION)
 }
 
+/// Backend-neutral counters for one vector write stream.
+///
+/// The embedded engine reports WAL, commit and index-build counters here.
+/// A remote backend has no equivalent local counters and reports `None`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VectorWriteMetrics {
+    pub txns_applied: u64,
+    pub points_upserted: u64,
+    pub wal_flushes: u64,
+    pub wal_txns_flushed: u64,
+    pub apply_wait_nanos: u64,
+    pub checkpoints: u64,
+    pub checkpoint_total_nanos: u64,
+    pub hnsw_builds: u64,
+    pub hnsw_build_total_nanos: u64,
+}
+
 /// Backend-agnostic vector storage contract.
 ///
 /// Covers writes, vector search, id/file deletes, counting and collection
@@ -474,6 +491,14 @@ pub fn vector_collection_name() -> String {
 pub trait VectorStorage: Clone + Send + Sync + 'static {
     /// Backend name for logging and diagnostics (`local` or `qdrant`).
     fn backend_name(&self) -> &'static str;
+
+    /// Cumulative write-path counters, when the backend exposes them.
+    ///
+    /// Snapshots are cumulative over the store lifetime so callers take a
+    /// before/after delta around one indexing run.
+    fn write_metrics(&self) -> Option<VectorWriteMetrics> {
+        None
+    }
 
     /// Ensure the collection exists (create when missing).
     /// Returns true when the collection was created.

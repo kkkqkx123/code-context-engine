@@ -31,6 +31,18 @@ pub struct FileEnsureEntry {
     pub last_modified: i64,
 }
 
+/// One file's entity replacement payload for a batch transaction.
+///
+/// Parent references use indexes into `entities` of the same file; storage
+/// resolves them to the database ids returned by the insert. Records carry
+/// no file id because the storage backend resolves it inside the transaction.
+#[derive(Debug, Clone)]
+pub struct EntityFileWrite {
+    pub file: FileEnsureEntry,
+    pub entities: Vec<EntityRecord>,
+    pub parent_indices: Vec<Option<usize>>,
+}
+
 /// Entity row together with its owning file path.
 ///
 /// Backs vector-side detail mapping and symbol-tool resolution without

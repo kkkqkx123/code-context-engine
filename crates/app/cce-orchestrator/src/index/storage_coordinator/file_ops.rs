@@ -135,10 +135,11 @@ impl StorageCoordinator {
             .map(|parsed| parsed.path.clone())
             .collect();
         self.prepare_hot_update_bm25(&paths).await?;
-        for parsed in parsed_files {
-            self.store_parsed_files(std::slice::from_ref(*parsed))
-                .await?;
-        }
+        let owned: Vec<cce_types::ParsedFile> = parsed_files
+            .iter()
+            .map(|parsed| (*parsed).clone())
+            .collect();
+        self.store_parsed_files(&owned).await?;
 
         self.store_bm25(chunks).await
     }

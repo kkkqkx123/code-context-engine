@@ -6,7 +6,7 @@ use std::sync::Arc;
 use cce_config::modules::{DistanceMetric as CceDistance, LocalVectorConfig};
 use cce_storage_common::{
     DenseSearchQuery, Payload, ScoredPoint, SearchFilter, VectorPoint, VectorStorage,
-    payload_matches_filter, vector_collection_name,
+    VectorWriteMetrics, payload_matches_filter, vector_collection_name,
 };
 use cce_types::{PointKind, StorageError};
 use simvec::{
@@ -360,6 +360,21 @@ fn normalized_path_values(file_paths: &[&str]) -> Vec<serde_json::Value> {
 impl VectorStorage for LocalVectorStore {
     fn backend_name(&self) -> &'static str {
         "local"
+    }
+
+    fn write_metrics(&self) -> Option<VectorWriteMetrics> {
+        let snapshot = self.engine.collection_metrics(&self.collection).ok()?;
+        Some(VectorWriteMetrics {
+            txns_applied: snapshot.txns_applied,
+            points_upserted: snapshot.points_upserted,
+            wal_flushes: snapshot.wal_flushes,
+            wal_txns_flushed: snapshot.wal_txns_flushed,
+            apply_wait_nanos: snapshot.apply_wait_nanos,
+            checkpoints: snapshot.checkpoints,
+            checkpoint_total_nanos: snapshot.checkpoint.total_nanos,
+            hnsw_builds: snapshot.hnsw_builds,
+            hnsw_build_total_nanos: snapshot.hnsw_build.total_nanos,
+        })
     }
 
     async fn ensure_collection(&self) -> Result<bool, StorageError> {

@@ -226,7 +226,7 @@ fn main() {
     let mut index_stages_out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "service_remote_backend_index_stages.tsv",
-        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tbatches\tvector_store_calls\tbm25_store_calls",
+        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tbatches\tvector_store_calls\tentity_store_calls\tbm25_store_calls\tvector_txns_applied\tvector_points_written\tvector_wal_flushes\tvector_wal_txns\tvector_commit_wait_ms\tvector_hnsw_builds\tvector_hnsw_build_ms\tvector_checkpoints\tvector_checkpoint_ms",
     );
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
@@ -257,6 +257,10 @@ fn main() {
                 metadata_url: None,
                 embedding_rate_limit: 0,
             };
+            assert_eq!(
+                backends.embedding_rate_limit, 0,
+                "offline benchmark provider must not inherit a token bucket"
+            );
             let env = common::test_env_with_backends(backends).await;
             let project_id =
                 common::create_project(&env.state, &root.path().to_string_lossy()).await;
@@ -289,7 +293,7 @@ fn main() {
             let stages = &indexed.stages;
             let _ = writeln!(
                 index_stages_out,
-                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 size.label(),
                 stages.scan_ms,
                 stages.batch_process_ms,
@@ -313,7 +317,17 @@ fn main() {
                 stages.batch_overhead_ms,
                 stages.batches,
                 stages.vector_store_calls,
+                stages.entity_store_calls,
                 stages.bm25_store_calls,
+                stages.vector_txns_applied,
+                stages.vector_points_written,
+                stages.vector_wal_flushes,
+                stages.vector_wal_txns,
+                stages.vector_commit_wait_ms,
+                stages.vector_hnsw_builds,
+                stages.vector_hnsw_build_ms,
+                stages.vector_checkpoints,
+                stages.vector_checkpoint_ms,
             );
             println!(
                 "{combination}: indexed {} files in {index_wall_ms} ms",

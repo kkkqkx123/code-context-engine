@@ -25,9 +25,9 @@ use std::time::Duration;
 use cce_circuit_breaker::CircuitBreaker;
 use cce_storage_common::metadb::{
     AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
-    ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileCheckpointRecord,
-    FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord, GenerationGcPlan,
-    GenerationOverride, IndexStateProjection, MetadataStorage, NewProjectRecord,
+    ChunkRecord, EntityDetailMapping, EntityFileWrite, EntityRecord, EntityWithFile,
+    FileCheckpointRecord, FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord,
+    GenerationGcPlan, GenerationOverride, IndexStateProjection, MetadataStorage, NewProjectRecord,
     OverrideDisposition, ProjectIndexManifest, ProjectRecord, ProjectUpdateRecord,
     WorkUnitCheckpointRecord, WorkUnitStatus,
 };
@@ -817,6 +817,17 @@ impl MetadataStorage for PostgresClient {
         entities: &[EntityRecord],
     ) -> Result<Vec<i64>, StorageError> {
         self.entities_insert_returning_ids(entities).await
+    }
+
+    async fn entities_replace_files(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        batch_id: i64,
+        files: &[EntityFileWrite],
+    ) -> Result<(), StorageError> {
+        self.entities_replace_files(project_id, epoch, batch_id, files)
+            .await
     }
 
     async fn entities_with_files(

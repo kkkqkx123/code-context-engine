@@ -10,9 +10,9 @@ use crate::SqliteClient;
 
 pub use cce_storage_common::metadb::{
     AdmissionAuditRecord, BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, ChunkContent,
-    ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileCheckpointRecord,
-    FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord, GenerationGcPlan,
-    GenerationOverride, IndexStateProjection, MetadataStorage, NewProjectRecord,
+    ChunkRecord, EntityDetailMapping, EntityFileWrite, EntityRecord, EntityWithFile,
+    FileCheckpointRecord, FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord,
+    GenerationGcPlan, GenerationOverride, IndexStateProjection, MetadataStorage, NewProjectRecord,
     OverrideDisposition, ProjectIndexManifest, ProjectIndexManifestState, ProjectRecord,
     WorkUnitCheckpointRecord, WorkUnitStatus, assert_metadata_storage, validate_checkpoint,
 };
@@ -1381,6 +1381,89 @@ impl MetadataStorage for SqliteClient {
             return Ok(Vec::new());
         }
         self.with_transaction(|tx| EntityRepository::insert_batch(tx, entities))
+    }
+
+    async fn entities_replace_files(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        batch_id: i64,
+        files: &[EntityFileWrite],
+    ) -> Result<(), StorageError> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        self.with_transaction(|tx| {
+            let mut ensure_file = tx.prepare(
+                "INSERT INTO files
+                    (path, language, category, last_modified, created_at, project_id, content_hash, epoch, batch_id)
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, NULL, ?6, ?7)
+                 ON CONFLICT(project_id, epoch, path) DO UPDATE SET
+                    language = excluded.language,
+                    category = excluded.category,
+                    last_modified = excluded.last_modified,
+                    batch_id = excluded.batch_id",
+            ).map_err(|error| StorageError::insert("files", format!("prepare ensure: {error}")))?;
+            let mut file_id = tx.prepare(
+                "SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2 AND path = ?3",
+            ).map_err(|error| StorageError::query(format!("prepare file id lookup: {error}")))?;
+            let mut link_parent = tx.prepare(
+                "UPDATE entities SET parent_id = ?1 WHERE id = ?2 AND project_id = ?3 AND epoch = ?4",
+            ).map_err(|error| StorageError::update("entities", format!("prepare parent link: {error}")))?;
+
+            for entry in files {
+                if entry.parent_indices.len() != entry.entities.len() {
+                    return Err(StorageError::validation(format!(
+                        "parent index count {} does not match entity count {} for {}",
+                        entry.parent_indices.len(),
+                        entry.entities.len(),
+                        entry.file.path
+                    )));
+                }
+                ensure_file.execute(rusqlite::params![
+                    entry.file.path,
+                    entry.file.language,
+                    entry.file.category,
+                    entry.file.last_modified,
+                    project_id,
+                    epoch,
+                    batch_id,
+                ]).map_err(|error| {
+                    StorageError::insert("files", format!("failed to ensure file record: {error}"))
+                })?;
+                let id: i64 = file_id.query_row(
+                    rusqlite::params![project_id, epoch, entry.file.path],
+                    |row| row.get(0),
+                ).map_err(|error| {
+                    StorageError::query(format!("failed to resolve file id for {}: {error}", entry.file.path))
+                })?;
+                tx.execute(
+                    "DELETE FROM entities WHERE file_id = ?1 AND epoch = ?2",
+                    rusqlite::params![id, epoch],
+                ).map_err(|error| StorageError::delete("entities", error.to_string()))?;
+
+                let mut records = Vec::with_capacity(entry.entities.len());
+                for record in &entry.entities {
+                    let mut record = record.clone();
+                    record.file_id = id;
+                    records.push(record);
+                }
+                let ids = EntityRepository::insert_batch(tx, &records)?;
+                for (child_index, parent) in entry.parent_indices.iter().enumerate() {
+                    let Some(parent_index) = parent else { continue };
+                    let parent_id = *ids.get(*parent_index).ok_or_else(|| {
+                        StorageError::insert(
+                            "entities",
+                            format!("parent index {parent_index} is outside the file batch"),
+                        )
+                    })?;
+                    let child_id = ids[child_index];
+                    link_parent.execute(rusqlite::params![parent_id, child_id, project_id, epoch])
+                        .map_err(|error| StorageError::update("entities", error.to_string()))?;
+                }
+            }
+            Ok(())
+        })
     }
 
     async fn entities_with_files(
@@ -3204,5 +3287,91 @@ mod tests {
             .expect("readback");
         assert_eq!(readback.len(), 1);
         assert_eq!(readback[0].content, "fn a(x: u32) {}");
+    }
+    fn entity_batch_record(name: &str, epoch: i64) -> EntityRecord {
+        EntityRecord {
+            id: 0,
+            name: name.to_string(),
+            kind: "function".to_string(),
+            file_id: 0,
+            signature: None,
+            span_start_row: None,
+            span_end_row: None,
+            span_start_column: None,
+            span_end_column: None,
+            span_start_byte: None,
+            span_end_byte: None,
+            scoped_name: Some(name.to_string()),
+            overload_discriminator: String::new(),
+            depth: None,
+            parent_id: None,
+            metadata: None,
+            parameters_json: None,
+            return_type: None,
+            doc_comment: None,
+            modifiers_json: None,
+            project_id: 1,
+            epoch,
+            batch_id: 7,
+            rank: 0.0,
+        }
+    }
+
+    fn entity_batch_file(path: &str, name: &str, epoch: i64) -> EntityFileWrite {
+        EntityFileWrite {
+            file: FileEnsureEntry {
+                path: path.to_string(),
+                language: "rust".to_string(),
+                category: 1,
+                last_modified: 1,
+            },
+            entities: vec![entity_batch_record(name, epoch)],
+            parent_indices: vec![None],
+        }
+    }
+
+    #[tokio::test]
+    async fn entity_file_batch_commits_once_and_rolls_back_on_failure() {
+        let client = SqliteClient::in_memory().expect("in-memory client");
+        MetadataStorage::ensure_project(&client, 1, "/tmp/batch")
+            .await
+            .expect("project");
+        let epoch = 11;
+        let mut parent = entity_batch_file("a.rs", "parent", epoch);
+        parent.entities.push(entity_batch_record("child", epoch));
+        parent.parent_indices = vec![None, Some(0)];
+
+        MetadataStorage::entities_replace_files(&client, 1, epoch, 7, &[parent])
+            .await
+            .expect("batch write");
+
+        let stored = MetadataStorage::entities_with_files(&client, 1, epoch)
+            .await
+            .expect("stored entities");
+        assert_eq!(stored.len(), 2);
+        let child = stored
+            .iter()
+            .find(|entry| entry.entity.name == "child")
+            .expect("child entity");
+        let parent = stored
+            .iter()
+            .find(|entry| entry.entity.name == "parent")
+            .expect("parent entity");
+        assert_eq!(child.entity.parent_id, Some(parent.entity.id));
+
+        let mut invalid = entity_batch_file("b.rs", "replacement", epoch);
+        invalid.parent_indices.push(None);
+        assert!(
+            MetadataStorage::entities_replace_files(&client, 1, epoch, 7, &[invalid])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            MetadataStorage::entities_count(&client, 1, epoch)
+                .await
+                .expect("count after rollback"),
+            2,
+            "a failed batch must not commit an earlier file"
+        );
     }
 }

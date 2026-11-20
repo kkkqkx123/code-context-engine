@@ -311,6 +311,11 @@ retry_delay_ms = 2000
 rate_limit = 0                            # 本地服务通常不限速
 ```
 
+`rate_limit` 使用按 `base_url::provider_id` 共享的令牌桶：`600/min` 等于 10 rps、burst 10，
+令牌耗尽时单次请求最多等待约 100 ms。索引与交互查询共用同一桶，chat、embedding 与 rerank
+也会互相占用预算；交互查询的延迟 SLA 必须把该等待计入。本地 provider 保留默认值时会在配置
+解析阶段自动转为 0；离线测试与基准环境应显式配置 `rate_limit = 0`。
+
 ### 熔断器（circuit_breaker）
 
 熔断器与限速器共享同一上游粒度（按 `base_url`）：同一上游的所有模型客户端（embedding / chat / rerank）共用同一个熔断器。计入熔断的失败包括 HTTP 5xx/网络错误、超时和无效响应；429 限流、鉴权、模型不存在等错误不计入。

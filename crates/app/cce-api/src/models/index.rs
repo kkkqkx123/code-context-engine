@@ -47,7 +47,17 @@ pub struct IndexStageTimingsDto {
     pub batch_overhead_ms: u64,
     pub batches: usize,
     pub vector_store_calls: usize,
+    pub entity_store_calls: usize,
     pub bm25_store_calls: usize,
+    pub vector_txns_applied: u64,
+    pub vector_points_written: u64,
+    pub vector_wal_flushes: u64,
+    pub vector_wal_txns: u64,
+    pub vector_commit_wait_ms: u64,
+    pub vector_hnsw_builds: u64,
+    pub vector_hnsw_build_ms: u64,
+    pub vector_checkpoints: u64,
+    pub vector_checkpoint_ms: u64,
 }
 
 /// Index response

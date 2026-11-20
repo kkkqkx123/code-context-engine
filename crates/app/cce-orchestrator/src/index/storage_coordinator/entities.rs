@@ -2,7 +2,7 @@
 
 use cce_scanner::FileEntry;
 use cce_storage_common::MetadataStorage;
-use cce_storage_common::metadb::{EntityRecord, FileEnsureEntry};
+use cce_storage_common::metadb::{EntityFileWrite, EntityRecord, FileEnsureEntry};
 
 use crate::error::OrchestratorError;
 
@@ -92,42 +92,12 @@ impl StorageCoordinator {
 
         let epoch = self.epoch();
         let batch_id = self.batch_id();
+        let mut writes = Vec::with_capacity(parsed_files.len());
         for parsed in parsed_files {
             // Single-source category via the unified detection chain.
             let category = cce_types::LanguageInfo::detect_from_path(&parsed.path)
                 .file_category()
                 .as_u8();
-            store
-                .files_ensure(
-                    self.project_id,
-                    epoch,
-                    batch_id,
-                    &[FileEnsureEntry {
-                        path: parsed.path.clone(),
-                        language: parsed.language.to_string(),
-                        category,
-                        last_modified: chrono::Utc::now().timestamp(),
-                    }],
-                )
-                .await
-                .map_err(OrchestratorError::Storage)?;
-
-            let file = store
-                .file_by_path(self.project_id, &parsed.path)
-                .await
-                .map_err(OrchestratorError::Storage)?
-                .ok_or_else(|| {
-                    OrchestratorError::Storage(cce_types::StorageError::query(format!(
-                        "failed to resolve file record for {}",
-                        parsed.path
-                    )))
-                })?;
-            let file_id = file.id;
-            store
-                .entities_delete_by_file(file_id, epoch)
-                .await
-                .map_err(OrchestratorError::Storage)?;
-
             let scoped_names = parsed.resolve_all_scoped_names();
             // The symbol key aligns with the relation side:
             // (project, epoch, file, scoped_name, kind,
@@ -136,8 +106,10 @@ impl StorageCoordinator {
             // discriminators, so no suffix mangling is needed. The
             // source entity link stays exact via `__source_entity_id`.
             let mut records = Vec::with_capacity(parsed.entities.len());
-            let mut sources = Vec::with_capacity(parsed.entities.len());
-            for entity in &parsed.entities {
+            let mut source_positions =
+                std::collections::HashMap::with_capacity(parsed.entities.len());
+            for (index, entity) in parsed.entities.iter().enumerate() {
+                source_positions.insert(entity.id, index);
                 // resolve against the once-built map instead of
                 // rebuilding the id -> entity map per entity.
                 let scoped_name = scoped_names.get(&entity.id).cloned();
@@ -152,7 +124,7 @@ impl StorageCoordinator {
                     id: 0,
                     name: entity.name.clone(),
                     kind: entity.kind.to_string(),
-                    file_id,
+                    file_id: 0,
                     signature: Some(entity.signature.clone()),
                     span_start_row: Some(entity.span.start_position.row as i64),
                     span_end_row: Some(entity.span.end_position.row as i64),
@@ -199,33 +171,32 @@ impl StorageCoordinator {
                     batch_id,
                     rank: 0.0,
                 };
-                sources.push((entity.id, entity.parent));
                 records.push(record);
             }
-            let db_ids = store
-                .entities_insert_returning_ids(&records)
-                .await
-                .map_err(OrchestratorError::Storage)?;
-            let source_to_db: std::collections::HashMap<_, _> = sources
+            let parent_indices = parsed
+                .entities
                 .iter()
-                .copied()
-                .zip(db_ids.iter().copied())
-                .map(|((source_id, _), db_id)| (source_id, db_id))
+                .map(|entity| {
+                    entity
+                        .parent
+                        .and_then(|parent| source_positions.get(&parent).copied())
+                })
                 .collect();
-            for ((_source_id, parent_source_id), db_id) in sources.into_iter().zip(db_ids) {
-                let Some(parent_source_id) = parent_source_id else {
-                    continue;
-                };
-                let Some(parent_db_id) = source_to_db.get(&parent_source_id) else {
-                    continue;
-                };
-                store
-                    .entities_set_parent(self.project_id, epoch, db_id, *parent_db_id)
-                    .await
-                    .map_err(OrchestratorError::Storage)?;
-            }
+            writes.push(EntityFileWrite {
+                file: FileEnsureEntry {
+                    path: parsed.path.clone(),
+                    language: parsed.language.to_string(),
+                    category,
+                    last_modified: chrono::Utc::now().timestamp(),
+                },
+                entities: records,
+                parent_indices,
+            });
         }
-        Ok(())
+        store
+            .entities_replace_files(self.project_id, epoch, batch_id, &writes)
+            .await
+            .map_err(OrchestratorError::Storage)
     }
 }
 

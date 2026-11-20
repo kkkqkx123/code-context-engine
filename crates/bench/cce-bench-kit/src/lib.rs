@@ -10,6 +10,7 @@
 //! to compile and a single source of truth for tier sizes.
 
 use std::fs;
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -238,14 +239,43 @@ pub fn open_report(manifest_dir: &str, file_name: &str) -> fs::File {
     }
 }
 
-/// Opens a report file and records the header line before any rows.
-pub fn open_report_with_header(manifest_dir: &str, file_name: &str, header: &str) -> fs::File {
-    let mut file = open_report(manifest_dir, file_name);
-    use std::io::Write as _;
-    match writeln!(file, "{header}") {
-        Ok(()) => file,
-        Err(e) => panic!("write report header {header:?}: {e}"),
+/// Opens a report file and guarantees its first line matches `header`.
+///
+/// A schema change resets the trend file instead of appending rows under a
+/// stale header; mixed-shape tables are not comparable and must not survive.
+pub fn open_report_at_with_header(path: &Path, header: &str) -> fs::File {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create report directory");
     }
+    let mut file = match fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(e) => panic!("open {}: {e}", path.display()),
+    };
+    let mut existing = String::new();
+    file.seek(SeekFrom::Start(0)).expect("rewind report");
+    if BufReader::new(&file)
+        .read_line(&mut existing)
+        .expect("read report header")
+        > 0
+        && existing.trim_end() == header
+    {
+        file.seek(SeekFrom::End(0)).expect("seek report end");
+        return file;
+    }
+    file.set_len(0).expect("reset report with stale header");
+    file.seek(SeekFrom::Start(0)).expect("rewind reset report");
+    writeln!(file, "{header}").expect("write report header");
+    file
+}
+
+/// Opens a benchmark report under `benches/results` with a checked header.
+pub fn open_report_with_header(manifest_dir: &str, file_name: &str, header: &str) -> fs::File {
+    open_report_at_with_header(&results_path(manifest_dir, file_name), header)
 }
 
 /// Single-function Rust stub shared by the small scanner fixtures.

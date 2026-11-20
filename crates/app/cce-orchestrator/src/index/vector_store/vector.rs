@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use cce_storage_common::{DenseSearchQuery, ScoredPoint, VectorPoint, VectorStorage};
+use cce_storage_common::{
+    DenseSearchQuery, ScoredPoint, VectorPoint, VectorStorage, VectorWriteMetrics,
+};
 use cce_storage_vector_local::LocalVectorStore;
 use cce_storage_vector_qdrant::QdrantClient;
 use cce_types::{PointKind, StorageError};
@@ -49,6 +51,14 @@ impl VectorStore {
         match self {
             Self::Local(_) => "local",
             Self::Qdrant(_) => "qdrant",
+        }
+    }
+
+    /// Cumulative local write counters; the remote branch has none.
+    pub fn write_metrics(&self) -> Option<VectorWriteMetrics> {
+        match self {
+            Self::Local(store) => VectorStorage::write_metrics(store.as_ref()),
+            Self::Qdrant(_) => None,
         }
     }
 

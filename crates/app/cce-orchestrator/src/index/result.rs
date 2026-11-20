@@ -2,6 +2,8 @@
 //!
 //! This module provides a summary of indexing operations for reporting purposes.
 
+use cce_storage_common::VectorWriteMetrics;
+
 /// Execution outcome for a full index operation.
 ///
 /// Replaces the implicit "errors list means partial failure" convention
@@ -44,7 +46,44 @@ pub struct IndexStageTimings {
     pub batch_overhead_ms: u64,
     pub batches: usize,
     pub vector_store_calls: usize,
+    pub entity_store_calls: usize,
     pub bm25_store_calls: usize,
+    pub vector_txns_applied: u64,
+    pub vector_points_written: u64,
+    pub vector_wal_flushes: u64,
+    pub vector_wal_txns: u64,
+    pub vector_commit_wait_ms: u64,
+    pub vector_hnsw_builds: u64,
+    pub vector_hnsw_build_ms: u64,
+    pub vector_checkpoints: u64,
+    pub vector_checkpoint_ms: u64,
+}
+
+impl IndexStageTimings {
+    /// Fold a before/after snapshot of the embedded vector engine into the
+    /// stage record. Remote backends have no counters and stay at zero.
+    pub fn record_vector_write_delta(
+        &mut self,
+        before: Option<VectorWriteMetrics>,
+        after: Option<VectorWriteMetrics>,
+    ) {
+        let (Some(before), Some(after)) = (before, after) else {
+            return;
+        };
+        let delta = |current: u64, previous: u64| current.saturating_sub(previous);
+        self.vector_txns_applied = delta(after.txns_applied, before.txns_applied);
+        self.vector_points_written = delta(after.points_upserted, before.points_upserted);
+        self.vector_wal_flushes = delta(after.wal_flushes, before.wal_flushes);
+        self.vector_wal_txns = delta(after.wal_txns_flushed, before.wal_txns_flushed);
+        self.vector_commit_wait_ms =
+            delta(after.apply_wait_nanos, before.apply_wait_nanos) / 1_000_000;
+        self.vector_hnsw_builds = delta(after.hnsw_builds, before.hnsw_builds);
+        self.vector_hnsw_build_ms =
+            delta(after.hnsw_build_total_nanos, before.hnsw_build_total_nanos) / 1_000_000;
+        self.vector_checkpoints = delta(after.checkpoints, before.checkpoints);
+        self.vector_checkpoint_ms =
+            delta(after.checkpoint_total_nanos, before.checkpoint_total_nanos) / 1_000_000;
+    }
 }
 
 /// Indexing result summary

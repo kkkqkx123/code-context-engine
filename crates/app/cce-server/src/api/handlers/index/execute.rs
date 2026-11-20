@@ -37,7 +37,17 @@ fn index_stages_dto(result: &IndexResult) -> IndexStageTimingsDto {
         batch_overhead_ms: stages.batch_overhead_ms,
         batches: stages.batches,
         vector_store_calls: stages.vector_store_calls,
+        entity_store_calls: stages.entity_store_calls,
         bm25_store_calls: stages.bm25_store_calls,
+        vector_txns_applied: stages.vector_txns_applied,
+        vector_points_written: stages.vector_points_written,
+        vector_wal_flushes: stages.vector_wal_flushes,
+        vector_wal_txns: stages.vector_wal_txns,
+        vector_commit_wait_ms: stages.vector_commit_wait_ms,
+        vector_hnsw_builds: stages.vector_hnsw_builds,
+        vector_hnsw_build_ms: stages.vector_hnsw_build_ms,
+        vector_checkpoints: stages.vector_checkpoints,
+        vector_checkpoint_ms: stages.vector_checkpoint_ms,
     }
 }
 

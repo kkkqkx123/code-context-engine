@@ -521,6 +521,7 @@ impl IndexOrchestrator {
             tracing::warn!(error = %e, "Failed to initialize vector collections, vector storage may be unavailable");
             errors.push(format!("Vector initialization failed: {}", e));
         }
+        let vector_write_before = self.storage.vector_write_metrics();
         let target_epoch = self.storage.begin_full_index().await?;
         tracing::info!(
             project_id = self.project_id,
@@ -714,6 +715,8 @@ impl IndexOrchestrator {
 
         // Process files in batches using FileIndexer for deterministic batch boundaries
         self.run_batch_loop(&mut ctx, &options, output_mode).await?;
+        ctx.stages
+            .record_vector_write_delta(vector_write_before, self.storage.vector_write_metrics());
 
         // Rebuild against one complete symbol snapshot. Parsed relation inputs
         // are replayed from the operation-local spool so peak memory remains

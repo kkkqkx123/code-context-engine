@@ -1,8 +1,8 @@
 use cce_types::StorageError;
 
 use cce_storage_common::metadb::{
-    ChunkContent, ChunkRecord, EntityDetailMapping, EntityRecord, EntityWithFile, FileEnsureEntry,
-    FileEpochEntry, FileHashEntry, FileRecord,
+    ChunkContent, ChunkRecord, EntityDetailMapping, EntityFileWrite, EntityRecord, EntityWithFile,
+    FileEnsureEntry, FileEpochEntry, FileHashEntry, FileRecord,
 };
 
 use crate::error::classify_pg;
@@ -1011,6 +1011,132 @@ impl PostgresClient {
             }
             tx.commit().await.map_err(classify_pg)?;
             Ok(ids)
+        })
+        .await
+    }
+
+    pub(crate) async fn entities_replace_files(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        batch_id: i64,
+        files: &[EntityFileWrite],
+    ) -> Result<(), StorageError> {
+        let files = files.to_vec();
+        if files.is_empty() {
+            return Ok(());
+        }
+        self.run(async move {
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            for entry in &files {
+                if entry.parent_indices.len() != entry.entities.len() {
+                    return Err(StorageError::validation(format!(
+                        "parent index count {} does not match entity count {} for {}",
+                        entry.parent_indices.len(),
+                        entry.entities.len(),
+                        entry.file.path
+                    )));
+                }
+                tx.execute(
+                    "INSERT INTO files (path, language, category, last_modified, created_at, \
+                     project_id, content_hash, epoch, batch_id) \
+                     VALUES ($1, $2, $3, $4, $4, $5, NULL, $6, $7) \
+                     ON CONFLICT (project_id, epoch, path) DO UPDATE SET \
+                        language = EXCLUDED.language, category = EXCLUDED.category, \
+                        last_modified = EXCLUDED.last_modified, batch_id = EXCLUDED.batch_id",
+                    &[
+                        &entry.file.path,
+                        &entry.file.language,
+                        &(entry.file.category as i64),
+                        &entry.file.last_modified,
+                        &project_id,
+                        &epoch,
+                        &batch_id,
+                    ],
+                )
+                .await
+                .map_err(classify_pg)?;
+
+                let file_id: i64 = tx
+                    .query_one(
+                        "SELECT id FROM files WHERE project_id = $1 AND epoch = $2 AND path = $3",
+                        &[&project_id, &epoch, &entry.file.path],
+                    )
+                    .await
+                    .map_err(classify_pg)?
+                    .get(0);
+                tx.execute(
+                    "DELETE FROM entities WHERE file_id = $1 AND epoch = $2",
+                    &[&file_id, &epoch],
+                )
+                .await
+                .map_err(classify_pg)?;
+
+                let mut ids = Vec::with_capacity(entry.entities.len());
+                for record in &entry.entities {
+                    let id: i64 = tx
+                        .query_one(
+                            "INSERT INTO entities (name, kind, file_id, signature, span_start_row, \
+                             span_end_row, span_start_column, span_end_column, span_start_byte, \
+                             span_end_byte, scoped_name, overload_discriminator, depth, parent_id, \
+                             metadata, parameters_json, return_type, doc_comment, modifiers_json, \
+                             project_id, epoch, batch_id, rank) \
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
+                             $15, $16, $17, $18, $19, $20, $21, $22, $23) \
+                             ON CONFLICT (project_id, epoch, file_id, scoped_name, kind, \
+                             overload_discriminator) DO UPDATE SET name = EXCLUDED.name \
+                             RETURNING id",
+                            &[
+                                &record.name,
+                                &record.kind,
+                                &file_id,
+                                &record.signature,
+                                &record.span_start_row,
+                                &record.span_end_row,
+                                &record.span_start_column,
+                                &record.span_end_column,
+                                &record.span_start_byte,
+                                &record.span_end_byte,
+                                &record.scoped_name,
+                                &record.overload_discriminator,
+                                &record.depth,
+                                &record.parent_id,
+                                &record.metadata,
+                                &record.parameters_json,
+                                &record.return_type,
+                                &record.doc_comment,
+                                &record.modifiers_json,
+                                &project_id,
+                                &epoch,
+                                &batch_id,
+                                &(record.rank as f64),
+                            ],
+                        )
+                        .await
+                        .map_err(classify_pg)?
+                        .get(0);
+                    ids.push(id);
+                }
+                for (child_index, parent) in entry.parent_indices.iter().enumerate() {
+                    let Some(parent_index) = parent else { continue };
+                    let parent_id = *ids.get(*parent_index).ok_or_else(|| {
+                        StorageError::insert(
+                            "entities",
+                            format!("parent index {parent_index} is outside the file batch"),
+                        )
+                    })?;
+                    tx.execute(
+                        "UPDATE entities SET parent_id = $1 \
+                         WHERE id = $2 AND project_id = $3 AND epoch = $4",
+                        &[&parent_id, &ids[child_index], &project_id, &epoch],
+                    )
+                    .await
+                    .map_err(classify_pg)?;
+                }
+            }
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(())
         })
         .await
     }

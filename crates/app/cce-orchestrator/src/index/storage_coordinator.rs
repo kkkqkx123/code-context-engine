@@ -34,6 +34,7 @@ use cce_storage_vector_qdrant::QdrantClient;
 
 use super::super::error::OrchestratorError;
 use super::vector_store::{FulltextStore, MetadataStore, VectorStore};
+use cce_storage_common::VectorWriteMetrics;
 
 pub(crate) mod bm25;
 pub(crate) mod candidate;
@@ -284,6 +285,11 @@ impl StorageCoordinator {
     /// Get the configured vector backend, if any.
     pub fn vector(&self) -> Option<&VectorStore> {
         self.vector.as_ref()
+    }
+
+    /// Cumulative write-path counters for the configured vector backend.
+    pub fn vector_write_metrics(&self) -> Option<VectorWriteMetrics> {
+        self.vector.as_ref().and_then(VectorStore::write_metrics)
     }
 
     /// Get the configured Qdrant client, if the remote branch is active.

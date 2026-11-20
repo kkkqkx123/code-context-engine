@@ -218,6 +218,7 @@ impl IndexOrchestrator {
             let mut entity_store_ok = true;
             let stage_started = Instant::now();
             if !batch_result.parsed_files.is_empty() {
+                ctx.stages.entity_store_calls += 1;
                 if let Err(error) = self
                     .storage
                     .store_parsed_files(&batch_result.parsed_files)

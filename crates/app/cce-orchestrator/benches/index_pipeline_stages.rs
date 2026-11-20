@@ -9,6 +9,8 @@
 //! share of the end-to-end wall time is reconstructed from those results.
 //!
 //! Run: `cargo run -p cce-orchestrator --bench index_pipeline_stages`
+//! Set `CCE_BENCH_METADATA=file` to use file-backed SQLite with the service's
+//! WAL and synchronous settings; the default stays in memory as a control.
 //! Baseline numbers are appended to `benches/results/index_pipeline_stages.tsv`.
 
 use std::io::Write;
@@ -24,9 +26,15 @@ use cce_storage_common::MetadataStorage;
 /// Scale tier for the synthetic project.
 const SIZE: ProjectSize = ProjectSize::Small;
 
-/// Build an in-memory metadata store with one seeded project (id 1).
-fn make_metadata() -> MetadataStore {
-    let store = in_memory_metadata_store().expect("in-memory store");
+/// Build a metadata store with one seeded project (id 1).
+fn make_metadata(path: Option<&std::path::Path>) -> MetadataStore {
+    let store = match path {
+        Some(path) => MetadataStore::Local(std::sync::Arc::new(
+            cce_storage_metadb_sqlite::SqliteClient::with_path(path.to_string_lossy())
+                .expect("file metadata client"),
+        )),
+        None => in_memory_metadata_store().expect("in-memory store"),
+    };
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -34,6 +42,13 @@ fn make_metadata() -> MetadataStore {
         .block_on(store.ensure_project(1, "/tmp/bench"))
         .expect("seed project");
     store
+}
+
+fn fresh_metadata(file_backed: bool) -> (MetadataStore, Option<tempfile::TempDir>) {
+    let guard = file_backed.then(|| tempfile::TempDir::new().expect("metadata dir"));
+    let path = guard.as_ref().map(|dir| dir.path().join("metadata.db"));
+    let store = make_metadata(path.as_deref());
+    (store, guard)
 }
 
 /// Materialize the synthetic project to a fresh temp dir and return its root.
@@ -79,7 +94,9 @@ async fn run_once(root: &std::path::Path, metadata: MetadataStore) -> u64 {
 
 fn main() {
     let root = materialize();
-    let metadata = make_metadata();
+    let file_backed = std::env::var("CCE_BENCH_METADATA").as_deref() == Ok("file");
+    let metadata_label = if file_backed { "file" } else { "memory" };
+    let (metadata, _metadata_guard) = fresh_metadata(file_backed);
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -89,7 +106,7 @@ fn main() {
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "index_pipeline_stages.tsv",
-        "# tier\tfiles\tms\tfiles_per_sec\tbytes_written",
+        "# tier\tfiles\tms\tfiles_per_sec\tbytes_written\tmetadata",
     );
 
     // Warm-up so tree-sitter grammars and sqlite pages are steady-state.
@@ -104,20 +121,24 @@ fn main() {
         "end_to_end ({:?}): {indexed} files in {ms:8.1} ms -> {rate:8.1} files/s",
         SIZE
     );
-    let _ = writeln!(out, "{}\t{indexed}\t{ms:.1}\t{rate:.1}\t0", SIZE.label());
+    let _ = writeln!(
+        out,
+        "{}\t{indexed}\t{ms:.1}\t{rate:.1}\t0\t{metadata_label}",
+        SIZE.label()
+    );
 
     // Criterion timing for the end-to-end pass (modest sampling to bound cost).
-    // Each iteration gets a fresh in-memory metadata store: reusing the
-    // warmed-up store would re-index the same 500 files into ever-growing
-    // tables, so the timing would measure accumulation rather than
-    // steady-state indexing cost.
+    // Each iteration gets a fresh metadata store in the selected durability
+    // mode: reusing the warmed-up store would re-index the same files into
+    // ever-growing tables, so the timing would measure accumulation rather
+    // than steady-state indexing cost.
     let mut criterion = criterion::Criterion::default()
         .sample_size(10)
         .measurement_time(Duration::from_secs(8))
         .warm_up_time(Duration::from_secs(2));
     criterion.bench_function("end_to_end_small", |b| {
         b.iter(|| {
-            let fresh = make_metadata();
+            let (fresh, _guard) = fresh_metadata(file_backed);
             let _ = rt.block_on(run_once(&root, fresh));
         })
     });
