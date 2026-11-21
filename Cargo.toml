@@ -61,7 +61,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.97"
 license = "Apache-2.0"
 repository = "https://github.com/kkkqkx123/code-context-engine"
 
@@ -191,7 +191,7 @@ notify = "8.2"
 sysinfo = "0.33"
 
 # Plugin system
-mlua = { version = "0.11", features = ["vendored", "lua55", "send"] }
+mlua = { version = "0.12", features = ["vendored", "lua55", "send"] }
 libloading = "0.9"
 globset = "0.4"
 
