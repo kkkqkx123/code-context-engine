@@ -8,7 +8,6 @@ use axum::{
 };
 
 use crate::api::response::ApiResult;
-use cce_api::models::error_codes;
 use cce_api::models::{
     CreateProjectRequest, ErrorResponse, ProjectConfig, ProjectDeleteResponse,
     ProjectDetailResponse, UpdateProjectRequest,
@@ -18,6 +17,7 @@ use cce_server_shared::services::project::{
 };
 use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::ProjectUpdateRecord;
+use cce_types::error_codes;
 
 /// Handle create project request
 #[utoipa::path(

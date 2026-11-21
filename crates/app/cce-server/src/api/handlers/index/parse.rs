@@ -4,10 +4,9 @@
 
 use axum::Json;
 
-use cce_api::models::{
-    EntityInfo, ErrorResponse, ParseRequest, ParseResponse, RelationInfo, error_codes,
-};
+use cce_api::models::{EntityInfo, ErrorResponse, ParseRequest, ParseResponse, RelationInfo};
 use cce_server_shared::services::tools;
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

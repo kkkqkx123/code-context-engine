@@ -14,9 +14,9 @@ use axum::extract::State;
 use crate::api::response::ApiResult;
 use cce_api::models::{
     ErrorResponse, QdrantActionResponse, QdrantProcessStatus, QdrantProcessStatusResponse,
-    error_codes,
 };
 use cce_server_shared::context::SharedContext;
+use cce_types::error_codes;
 
 // ---------------------------------------------------------------------------
 // Handlers

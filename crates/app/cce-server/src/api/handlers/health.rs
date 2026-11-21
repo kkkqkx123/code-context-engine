@@ -12,10 +12,11 @@ use cce_api::models::{
     Bm25HealthResponse, EmbeddingHealthResponse, ErrorResponse, HealthStatus, QdrantDiagnostic,
     QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
     RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueQuery,
-    RetryQueueStatusResponse, ServiceStatus, error_codes,
+    RetryQueueStatusResponse, ServiceStatus,
 };
 use cce_server_shared::context::SharedContext;
 use cce_storage_common::MetadataStorage;
+use cce_types::error_codes;
 
 // --- Handlers ---
 

@@ -4,9 +4,10 @@ use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use axum::{Json, http::StatusCode};
 
-use cce_api::models::{UpdateProjectRequest, error_codes};
+use cce_api::models::UpdateProjectRequest;
 use cce_server::api::handlers::{config, health, project, watch};
 use cce_server::api::response::ApiResult;
+use cce_types::error_codes;
 
 use common::{create_request, test_env};
 

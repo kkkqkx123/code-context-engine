@@ -12,9 +12,10 @@ use cce_config::{AppConfig, ConfigWarning, DependencyParams, Settings, validate_
 
 use cce_api::models::{
     ConfigInfoResponse, ConfigReloadQuery, ConfigReloadResponse, ConfigValidateResponse,
-    ConfigWarningInfo, ErrorResponse, error_codes,
+    ConfigWarningInfo, ErrorResponse,
 };
 use cce_server_shared::services::config;
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

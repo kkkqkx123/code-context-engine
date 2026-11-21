@@ -11,14 +11,18 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use super::support::{tool_error, tool_failure};
+use cce_types::error_codes;
+
+use super::support::{relation_tool_error, tool_failure};
 
 /// Arguments identifying an entity by ID.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct EntityArgs {
     /// Project ID the entity belongs to (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
     /// Stable symbol ID (for example `sym_…`).
+    #[schemars(length(min = 1))]
     pub entity_id: String,
     /// Pagination offset for callees/callers listing (default 0).
     #[serde(default)]
@@ -32,15 +36,19 @@ pub struct EntityArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CallChainArgs {
     /// Project ID the entity belongs to (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
     /// Stable symbol ID (for example `sym_…`).
+    #[schemars(length(min = 1))]
     pub entity_id: String,
-    /// Traversal direction: "forward"/"down" (callees, default) or
+    /// Traversal direction: "forward"/"down"/"callees" (callees, default) or
     /// "backward"/"up"/"callers" (callers).
     #[serde(default)]
+    #[schemars(extend("enum" = ["forward", "down", "callees", "backward", "up", "callers"]))]
     pub direction: Option<String>,
-    /// Maximum traversal depth (default 3).
+    /// Maximum traversal depth (default 3). Zero means unlimited.
     #[serde(default)]
+    #[schemars(range(min = 0))]
     pub max_depth: Option<usize>,
     /// Pagination offset into the chain nodes (default 0).
     #[serde(default)]
@@ -62,7 +70,7 @@ pub async fn entity_callees(
     );
     let edges = match relation::callees(state, args.project_id, &args.entity_id, &options).await {
         Ok(edges) => edges,
-        Err(error) => return tool_error("callees", error),
+        Err(error) => return relation_tool_error("callees", &error),
     };
     let items: Vec<Value> = edges
         .items
@@ -100,7 +108,7 @@ pub async fn entity_callers(
     );
     let edges = match relation::callers(state, args.project_id, &args.entity_id, &options).await {
         Ok(edges) => edges,
-        Err(error) => return tool_error("callers", error),
+        Err(error) => return relation_tool_error("callers", &error),
     };
     let items: Vec<Value> = edges
         .items
@@ -134,9 +142,12 @@ pub async fn call_chain(
         Some(raw) => match CallDirection::parse(raw) {
             Some(direction) => direction,
             None => {
-                return Ok(tool_failure(format!(
-                    "call_chain failed: direction must be one of down, forward, up, or backward, got '{raw}'"
-                )));
+                return Ok(tool_failure(
+                    error_codes::INVALID_INPUT,
+                    format!(
+                        "call_chain failed: direction must be one of down, forward, callees, up, backward, or callers, got '{raw}'"
+                    ),
+                ));
             }
         },
     };
@@ -152,7 +163,7 @@ pub async fn call_chain(
             .await
         {
             Ok(page) => page,
-            Err(error) => return tool_error("call_chain", error),
+            Err(error) => return relation_tool_error("call_chain", &error),
         };
     let items: Vec<Value> = page
         .items

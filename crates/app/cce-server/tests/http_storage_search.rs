@@ -7,13 +7,14 @@ use axum::{Json, http::StatusCode};
 use cce_api::models::{
     AggregatedSearchRequest, BatchDeleteRequest, ClearIndexRequest, EntitySearchRequest,
     ProjectConfigUpdateRequest, SearchRequest, StorageQuery, SubQueryRequest, SubQueryStatusDto,
-    SummaryRequest, error_codes,
+    SummaryRequest,
 };
 use cce_server::api::handlers::project::indexing as project_indexing;
 use cce_server::api::handlers::{
     entity_search, health, index, metrics, project, search, storage, summary, tools,
 };
 use cce_server::api::response::ApiResult;
+use cce_types::error_codes;
 
 use common::{
     create_project, create_project_named, index_fixture_project, seeded_project, test_env,

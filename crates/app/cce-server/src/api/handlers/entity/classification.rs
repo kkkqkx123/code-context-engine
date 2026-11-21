@@ -7,8 +7,8 @@ use axum::extract::{Path, Query, State};
 
 use cce_api::models::{
     ClassificationQueryParams, ClassificationRelation, ClassificationStatsResponse, ErrorResponse,
-    error_codes,
 };
+use cce_types::error_codes;
 
 use crate::api::response::{ApiResult, relation_error};
 use cce_server_shared::services::relation::{self, ClassificationCategory};

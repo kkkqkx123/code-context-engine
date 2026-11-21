@@ -73,6 +73,48 @@ pub struct SymbolCandidate {
     pub kind: String,
 }
 
+/// Render a relation service failure into transport-neutral error parts.
+///
+/// Returns `(code, message, details)`. Both the HTTP and MCP surfaces use this
+/// mapping so a given variant carries the same code on every transport. The
+/// values come from the core error code table; `details` is an opaque,
+/// machine-readable payload the caller may act on (for example candidate
+/// stable IDs for an ambiguous seed).
+pub fn relation_error_parts(
+    error: &RelationServiceError,
+) -> (&'static str, String, Option<String>) {
+    use cce_types::error_codes;
+
+    match error {
+        RelationServiceError::InvalidInput(message) => {
+            (error_codes::INVALID_REQUEST, message.clone(), None)
+        }
+        RelationServiceError::Project(message) | RelationServiceError::Execution(message) => {
+            (error_codes::INTERNAL_ERROR, message.clone(), None)
+        }
+        RelationServiceError::UnknownSeed(seed) => (
+            error_codes::ENTITY_NOT_FOUND,
+            format!("Unknown symbol seed: {seed}"),
+            Some(
+                "Seed must be a stable symbol ID (sym_…), 'path/to/file#name', '#name', or a bare symbol name.".to_string(),
+            ),
+        ),
+        RelationServiceError::AmbiguousSeed { seed, candidates } => (
+            error_codes::AMBIGUOUS_SYMBOL,
+            format!(
+                "Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs",
+                candidates.len()
+            ),
+            Some(serde_json::to_string(candidates).unwrap_or_else(|_| "[]".to_string())),
+        ),
+        RelationServiceError::Unavailable { state, epoch } => (
+            error_codes::SERVICE_UNAVAILABLE,
+            format!("Relation index not available: {state:?}, epoch: {epoch}"),
+            None,
+        ),
+    }
+}
+
 /// A runtime entity described by its transport-neutral identity.
 ///
 /// `stable_id` falls back to `entity:<runtime id>` for entities the symbol

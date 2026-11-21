@@ -6,8 +6,9 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use cce_api::models::{ErrorResponse, error_codes};
+use cce_api::models::ErrorResponse;
 use cce_storage_common::MetadataStorage;
+use cce_types::error_codes;
 
 use cce_server_shared::context::SharedContext;
 

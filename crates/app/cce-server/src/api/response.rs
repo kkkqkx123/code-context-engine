@@ -6,8 +6,9 @@
 //! status codes in one place instead of being duplicated in every handler.
 
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use cce_api::models::{ErrorResponse, error_codes};
-use cce_server_shared::services::relation::RelationServiceError;
+use cce_api::models::ErrorResponse;
+use cce_server_shared::services::relation::{RelationServiceError, relation_error_parts};
+use cce_types::error_codes;
 use serde::Serialize;
 
 /// Unified API result: either an error payload or a success payload.
@@ -40,30 +41,10 @@ impl<T: Serialize> IntoResponse for ApiResult<T> {
 /// Availability stays a transport concern: the service reports the runtime
 /// state, the HTTP surface renders it as `503`.
 pub fn relation_error(error: RelationServiceError) -> ErrorResponse {
-    match error {
-        RelationServiceError::InvalidInput(message) => {
-            ErrorResponse::new(error_codes::INVALID_REQUEST, message)
-        }
-        RelationServiceError::Project(message) | RelationServiceError::Execution(message) => {
-            ErrorResponse::new(error_codes::INTERNAL_ERROR, message)
-        }
-        RelationServiceError::UnknownSeed(seed) => ErrorResponse::with_details(
-            error_codes::ENTITY_NOT_FOUND,
-            format!("Unknown symbol seed: {seed}"),
-            "Seed must be a stable symbol ID (sym_…), 'path/to/file#name', '#name', or a bare symbol name.",
-        ),
-        RelationServiceError::AmbiguousSeed { seed, candidates } => ErrorResponse::with_details(
-            error_codes::AMBIGUOUS_SYMBOL,
-            format!(
-                "Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs",
-                candidates.len()
-            ),
-            serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string()),
-        ),
-        RelationServiceError::Unavailable { state, epoch } => ErrorResponse::new(
-            error_codes::SERVICE_UNAVAILABLE,
-            format!("Relation index not available: {state:?}, epoch: {epoch}"),
-        ),
+    let (code, message, details) = relation_error_parts(&error);
+    match details {
+        Some(details) => ErrorResponse::with_details(code, message, details),
+        None => ErrorResponse::new(code, message),
     }
 }
 

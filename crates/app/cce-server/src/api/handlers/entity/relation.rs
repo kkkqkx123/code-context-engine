@@ -9,9 +9,10 @@ use axum::extract::{Path, Query as QueryParams, State};
 use cce_api::models::{
     CallChainDirectionParams, CallChainNode, CallChainResponse, CallPathQuery, CallPathResponse,
     ClassImplementationsResponse, ClassInheritanceResponse, ClassRelation, ErrorResponse,
-    InterfaceRelation, RelationFilterParams, error_codes,
+    InterfaceRelation, RelationFilterParams,
 };
 use cce_server_shared::services::relation::{self, CallDirection, ChainNode};
+use cce_types::error_codes;
 
 use crate::api::response::{ApiResult, relation_error};
 

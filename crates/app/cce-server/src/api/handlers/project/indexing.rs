@@ -5,7 +5,6 @@
 use axum::extract::{Path, State};
 
 use crate::api::response::ApiResult;
-use cce_api::models::error_codes;
 use cce_api::models::{
     DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterFileEntry,
     DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest, ErrorResponse,
@@ -13,6 +12,7 @@ use cce_api::models::{
 };
 use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::ProjectUpdateRecord;
+use cce_types::error_codes;
 
 /// Handle project indexing request
 #[utoipa::path(

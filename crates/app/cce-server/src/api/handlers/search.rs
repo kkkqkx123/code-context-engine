@@ -20,9 +20,8 @@ use cce_server_shared::services::search::{
 };
 use cce_utils::text::is_blank;
 
-use cce_api::models::{
-    AggregatedSearchRequest, ErrorResponse, SearchRequest, SearchResponse, error_codes,
-};
+use cce_api::models::{AggregatedSearchRequest, ErrorResponse, SearchRequest, SearchResponse};
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

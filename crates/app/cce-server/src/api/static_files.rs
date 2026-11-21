@@ -17,8 +17,9 @@ use axum::{
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
-use cce_api::models::{ErrorResponse, error_codes};
+use cce_api::models::ErrorResponse;
 use cce_server_shared::context::SharedContext;
+use cce_types::error_codes;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower::{ServiceExt, service_fn};

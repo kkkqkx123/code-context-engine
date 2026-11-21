@@ -11,8 +11,8 @@ use axum::{
 
 use cce_api::models::{
     ErrorResponse, StartWatchRequest, StartWatchResponse, StopWatchResponse, WatchStatusResponse,
-    error_codes,
 };
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

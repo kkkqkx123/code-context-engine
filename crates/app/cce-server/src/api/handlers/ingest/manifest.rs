@@ -3,9 +3,9 @@
 use axum::extract::{Path as AxumPath, State};
 use cce_api::models::{
     ErrorResponse, INGEST_CHUNK_BYTES, IngestManifestRequest, IngestManifestResponse, MissingChunk,
-    error_codes,
 };
 use cce_storage_common::MetadataStorage;
+use cce_types::error_codes;
 
 use super::paths::storage_path;
 use super::staging::received_chunk_indices;

@@ -20,9 +20,10 @@ use base64::Engine as _;
 use cce_admission::{
     AdmissionConfig, AdmissionContext, AdmissionGate, AdmissionMetrics, TokenEntry,
 };
-use cce_api::models::{MAX_INGEST_BATCH_FILES, error_codes};
+use cce_api::models::MAX_INGEST_BATCH_FILES;
 use cce_server::api::handlers::ingest;
 use cce_server::api::response::ApiResult;
+use cce_types::error_codes;
 
 use common::{create_project, seeded_project, test_env};
 

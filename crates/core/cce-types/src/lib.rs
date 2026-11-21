@@ -1,6 +1,7 @@
 //! Core domain types for the code context engine
 
 pub mod build_system;
+pub mod error_codes;
 pub mod path;
 pub mod serialization;
 pub mod supply;

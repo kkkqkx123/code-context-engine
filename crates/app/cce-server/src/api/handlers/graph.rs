@@ -21,8 +21,9 @@ pub use traversal::{
     handle_graph_ego, handle_graph_export, handle_graph_path, handle_graph_subgraph,
 };
 
-use cce_api::models::{ErrorResponse, GraphEdge, GraphNode, error_codes};
+use cce_api::models::{ErrorResponse, GraphEdge, GraphNode};
 use cce_server_shared::services::graph::{GraphFilterSpec, GraphPageSpec};
+use cce_types::error_codes;
 
 /// Translate the comma-separated wire filters into a filter spec.
 fn parse_comma_list(raw: &str) -> Vec<String> {

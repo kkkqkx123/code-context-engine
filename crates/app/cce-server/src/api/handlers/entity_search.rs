@@ -5,8 +5,9 @@
 use axum::{Json, extract::State};
 
 use cce_api::models::{
-    EntitySearchRequest, EntitySearchResponse, EntitySearchResult, ErrorResponse, error_codes,
+    EntitySearchRequest, EntitySearchResponse, EntitySearchResult, ErrorResponse,
 };
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 use cce_server_shared::services::project;

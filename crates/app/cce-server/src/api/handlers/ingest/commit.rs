@@ -1,11 +1,12 @@
 //! Commit entry applying staged files through the incremental pipeline.
 
 use axum::extract::{Path as AxumPath, State};
-use cce_api::models::{ErrorResponse, IngestCommitResponse, error_codes};
+use cce_api::models::{ErrorResponse, IngestCommitResponse};
 use cce_orchestrator::index::MetadataStore;
 use cce_storage_common::MetadataStorage;
 use cce_storage_common::VectorStorage;
 use cce_storage_common::metadb::{ProjectRecord, ProjectUpdateRecord};
+use cce_types::error_codes;
 
 use super::staging::{INGEST_STAGING_RETENTION, clear_project_staging, sweep_project_staging};
 use crate::api::response::ApiResult;

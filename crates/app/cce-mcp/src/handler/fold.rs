@@ -4,6 +4,7 @@
 //! coordinator, degrading to truncated text with `structure_known=false` for
 //! unknown languages or parse failures.
 
+use cce_types::error_codes;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -24,6 +25,7 @@ pub struct FoldArgs {
     pub max_tokens: Option<usize>,
     /// Optional fold mode ("detailed" or "minimal").
     #[serde(default)]
+    #[schemars(extend("enum" = ["detailed", "minimal"]))]
     pub mode: Option<String>,
 }
 
@@ -45,6 +47,7 @@ pub struct FoldBatchItemArgs {
     pub max_tokens: Option<usize>,
     /// Optional fold mode (detailed or minimal).
     #[serde(default)]
+    #[schemars(extend("enum" = ["detailed", "minimal"]))]
     pub mode: Option<String>,
 }
 
@@ -52,6 +55,7 @@ pub struct FoldBatchItemArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct FoldBatchArgs {
     /// Entries to fold.
+    #[schemars(length(min = 1))]
     pub items: Vec<FoldBatchItemArgs>,
     /// Global language default for items without an explicit hint.
     #[serde(default)]
@@ -61,6 +65,7 @@ pub struct FoldBatchArgs {
     pub max_tokens: Option<usize>,
     /// Global fold mode default.
     #[serde(default)]
+    #[schemars(extend("enum" = ["detailed", "minimal"]))]
     pub mode: Option<String>,
 }
 
@@ -149,9 +154,10 @@ pub async fn fold_batch(args: FoldBatchArgs) -> Result<CallToolResult, rmcp::Err
             })
             .to_string(),
         )])),
-        Err(error) => Ok(super::support::tool_failure(format!(
-            "fold_batch failed: {error}"
-        ))),
+        Err(error) => Ok(super::support::tool_failure(
+            error_codes::INTERNAL_ERROR,
+            format!("fold_batch failed: {error}"),
+        )),
     }
 }
 

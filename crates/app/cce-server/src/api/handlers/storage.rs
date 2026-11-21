@@ -17,13 +17,14 @@ use cce_api::models::{
     BackendResultInfo, BatchDeleteRequest, BatchDeleteResponse, ClearIndexRequest,
     ClearIndexResponse, DeleteEntityResponse, DeleteFileResponse, ErrorResponse, IndexStatistics,
     IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
-    StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
+    StorageQuery, StorageStatus, StorageStatusResponse,
 };
 use cce_orchestrator::index::{MetadataDiagnostics, MetadataStore};
 use cce_server_shared::maintenance::ProjectIndexMaintenanceService;
 use cce_storage_common::MetadataStorage;
 use cce_storage_common::metadb::MetadataBackendStore;
 use cce_storage_common::{FulltextStorage, VectorStorage};
+use cce_types::error_codes;
 
 /// Backend-neutral metadata diagnostics snapshot.
 async fn metadata_diagnostics(store: &MetadataStore) -> MetadataDiagnostics {

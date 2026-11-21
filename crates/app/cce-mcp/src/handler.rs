@@ -71,14 +71,18 @@ impl McpServerHandler {
     }
 
     /// Reject calls to tools that are not in the configured allow-list.
-    fn ensure_enabled(&self, name: &str) -> Result<(), McpError> {
+    ///
+    /// Returns a structured tool error when disabled, `None` when allowed, so
+    /// every tool failure — including configuration rejections — travels
+    /// through the same `isError` channel with a machine-readable code.
+    fn ensure_enabled(&self, name: &str) -> Option<CallToolResult> {
         if !support::is_tool_allowed(self.enabled_tools.as_ref().map(|v| v.as_slice()), name) {
-            return Err(McpError::invalid_params(
+            return Some(support::tool_failure(
+                cce_types::error_codes::INVALID_REQUEST,
                 format!("tool '{name}' is disabled by configuration"),
-                None,
             ));
         }
-        Ok(())
+        None
     }
 
     #[tool(
@@ -88,7 +92,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("search")?;
+        if let Some(err) = self.ensure_enabled("search") {
+            return Ok(err);
+        }
         search::search(&self.state, args).await
     }
 
@@ -99,7 +105,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<AggregatedSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("aggregated_search")?;
+        if let Some(err) = self.ensure_enabled("aggregated_search") {
+            return Ok(err);
+        }
         search::aggregated_search(&self.state, args).await
     }
 
@@ -110,7 +118,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FileSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("file_search")?;
+        if let Some(err) = self.ensure_enabled("file_search") {
+            return Ok(err);
+        }
         search::file_search(&self.state, args).await
     }
 
@@ -121,7 +131,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<KeywordSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("keyword_search")?;
+        if let Some(err) = self.ensure_enabled("keyword_search") {
+            return Ok(err);
+        }
         search::keyword_search(&self.state, args).await
     }
 
@@ -132,7 +144,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<EntityArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("entity_callees")?;
+        if let Some(err) = self.ensure_enabled("entity_callees") {
+            return Ok(err);
+        }
         relations::entity_callees(&self.state, args).await
     }
 
@@ -141,7 +155,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<EntityArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("entity_callers")?;
+        if let Some(err) = self.ensure_enabled("entity_callers") {
+            return Ok(err);
+        }
         relations::entity_callers(&self.state, args).await
     }
 
@@ -152,13 +168,17 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<CallChainArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("call_chain")?;
+        if let Some(err) = self.ensure_enabled("call_chain") {
+            return Ok(err);
+        }
         relations::call_chain(&self.state, args).await
     }
 
     #[tool(description = "List all registered projects with their IDs, names and root paths.")]
     async fn list_projects(&self) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("list_projects")?;
+        if let Some(err) = self.ensure_enabled("list_projects") {
+            return Ok(err);
+        }
         project::list_projects(&self.state).await
     }
 
@@ -167,7 +187,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("get_project")?;
+        if let Some(err) = self.ensure_enabled("get_project") {
+            return Ok(err);
+        }
         project::get_project(&self.state, args).await
     }
 
@@ -178,7 +200,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<IndexProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("index_project")?;
+        if let Some(err) = self.ensure_enabled("index_project") {
+            return Ok(err);
+        }
         project::index_project(&self.state, args).await
     }
 
@@ -189,7 +213,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<IncrementalIndexArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("incremental_index")?;
+        if let Some(err) = self.ensure_enabled("incremental_index") {
+            return Ok(err);
+        }
         project::incremental_index(&self.state, args).await
     }
 
@@ -200,7 +226,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FoldArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("fold")?;
+        if let Some(err) = self.ensure_enabled("fold") {
+            return Ok(err);
+        }
         fold::fold(args).await
     }
 
@@ -211,7 +239,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FoldBatchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("fold_batch")?;
+        if let Some(err) = self.ensure_enabled("fold_batch") {
+            return Ok(err);
+        }
         fold::fold_batch(args).await
     }
 
@@ -222,7 +252,9 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        self.ensure_enabled("health")?;
+        if let Some(err) = self.ensure_enabled("health") {
+            return Ok(err);
+        }
         project::health(&self.state, args).await
     }
 }

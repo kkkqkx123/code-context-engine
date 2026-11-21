@@ -5,9 +5,9 @@
 use axum::extract::{Path, State};
 
 use crate::api::response::ApiResult;
-use cce_api::models::error_codes;
 use cce_api::models::{ErrorResponse, ProjectDetailResponse, ProjectListResponse};
 use cce_server_shared::services::project::{ProjectServiceError, get_project, list_projects};
+use cce_types::error_codes;
 
 /// Map a project service failure onto the HTTP error shape.
 fn project_error(error: ProjectServiceError) -> ErrorResponse {

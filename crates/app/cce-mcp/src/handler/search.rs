@@ -9,7 +9,10 @@ use cce_server_shared::services::search::{
     FileSearchSpec, SearchService, SharedQueryFields, SingleQuerySpec,
 };
 use cce_server_shared::services::tools::{self, KeywordOperator, KeywordSpec};
+use cce_types::error_codes;
 use rmcp::model::{CallToolResult, ContentBlock};
+
+use super::support::tool_failure;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -17,14 +20,17 @@ use std::sync::Arc;
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SearchArgs {
     /// Project ID to search within (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
     /// Natural-language or code query string.
     pub query: String,
     /// Maximum number of results to return (default 10).
     #[serde(default)]
+    #[schemars(range(min = 1, max = 100))]
     pub limit: Option<usize>,
     /// Retrieval source: vector, bm25, or hybrid (default).
     #[serde(default)]
+    #[schemars(extend("enum" = ["vector", "bm25", "hybrid"]))]
     pub query_type: Option<String>,
     /// Minimum unified score; results below are dropped.
     #[serde(default)]
@@ -40,12 +46,15 @@ pub struct SearchArgs {
     pub include_patterns: Option<Vec<String>>,
     /// Content types to exclude (test, generated, dependency).
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["test", "tests", "generated", "generate", "dependency", "dependencies", "vendor"] }))]
     pub exclude_content_types: Option<Vec<String>>,
     /// File categories to include (code, config, documentation, schema, other).
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["code", "config", "documentation", "schema", "other"] }))]
     pub include_categories: Option<Vec<String>>,
     /// File categories to exclude.
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["code", "config", "documentation", "schema", "other"] }))]
     pub exclude_categories: Option<Vec<String>>,
     /// Rerank master switch override.
     #[serde(default)]
@@ -55,6 +64,7 @@ pub struct SearchArgs {
     pub rerank_max_candidates: Option<usize>,
     /// Query intent override: semantic, keyword, hybrid, entity.
     #[serde(default)]
+    #[schemars(extend("enum" = ["semantic", "keyword", "hybrid", "entity"]))]
     pub query_intent: Option<String>,
     /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
     #[serde(default)]
@@ -65,13 +75,17 @@ pub struct SearchArgs {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AggregatedSubQueryArg {
     /// Query text (must not be blank).
+    #[schemars(length(min = 1))]
     pub text: String,
     /// Retrieval source for this sub-query: vector, bm25, or hybrid (default).
     #[serde(default)]
+    #[schemars(extend("enum" = ["vector", "bm25", "hybrid"]))]
     pub query_type: Option<String>,
     /// Share of the merged score this sub-query can contribute, in (0, 1].
-    /// Defaults to 1.0.
+    /// Defaults to 1.0. The schema uses a closed interval because JSON Schema
+    /// cannot express an exclusive lower bound; runtime validation keeps (0, 1].
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub weight: Option<f32>,
 }
 
@@ -79,16 +93,19 @@ pub struct AggregatedSubQueryArg {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AggregatedSearchArgs {
     /// Project ID to search within (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
     /// Original question the sub-queries were derived from. Used as the rerank
     /// context; when absent the sub-query texts are joined, which a semantic
     /// reranker reads as a synthetic query.
     #[serde(default)]
     pub query: Option<String>,
-    /// Sub-queries to run concurrently and merge (1 to 10).
+    /// Sub-queries to run concurrently and merge (1 to 16).
+    #[schemars(length(min = 1, max = 16))]
     pub sub_queries: Vec<AggregatedSubQueryArg>,
     /// Maximum number of merged results (default 10).
     #[serde(default)]
+    #[schemars(range(min = 1, max = 100))]
     pub limit: Option<usize>,
     /// Minimum merged score; results below are dropped.
     #[serde(default)]
@@ -104,12 +121,15 @@ pub struct AggregatedSearchArgs {
     pub include_patterns: Option<Vec<String>>,
     /// Content types to exclude (test, generated, dependency).
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["test", "tests", "generated", "generate", "dependency", "dependencies", "vendor"] }))]
     pub exclude_content_types: Option<Vec<String>>,
     /// File categories to include (code, config, documentation, schema, other).
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["code", "config", "documentation", "schema", "other"] }))]
     pub include_categories: Option<Vec<String>>,
     /// File categories to exclude.
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["code", "config", "documentation", "schema", "other"] }))]
     pub exclude_categories: Option<Vec<String>>,
     /// Rerank master switch override.
     #[serde(default)]
@@ -119,6 +139,7 @@ pub struct AggregatedSearchArgs {
     pub rerank_max_candidates: Option<usize>,
     /// Query intent override: semantic, keyword, hybrid, entity.
     #[serde(default)]
+    #[schemars(extend("enum" = ["semantic", "keyword", "hybrid", "entity"]))]
     pub query_intent: Option<String>,
     /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
     #[serde(default)]
@@ -129,11 +150,14 @@ pub struct AggregatedSearchArgs {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FileSearchArgs {
     /// Project ID to search within (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
     /// Fuzzy filename query.
+    #[schemars(length(min = 1))]
     pub query: String,
     /// Maximum number of hits (default 10).
     #[serde(default)]
+    #[schemars(range(min = 1, max = 100))]
     pub limit: Option<usize>,
     /// When true attach size and line counts, otherwise paths only.
     #[serde(default)]
@@ -149,6 +173,7 @@ pub struct FileSearchArgs {
     pub include_patterns: Option<Vec<String>>,
     /// Content types to exclude (test, generated, dependency).
     #[serde(default)]
+    #[schemars(extend("items" = { "type": "string", "enum": ["test", "tests", "generated", "generate", "dependency", "dependencies", "vendor"] }))]
     pub exclude_content_types: Option<Vec<String>>,
 }
 
@@ -156,17 +181,20 @@ pub struct FileSearchArgs {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct KeywordSearchArgs {
     /// Project ID to search within (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
     /// Keyword query string.
     pub query: String,
     /// Maximum number of results (default 10).
     #[serde(default)]
+    #[schemars(range(min = 1, max = 100))]
     pub top_n: Option<usize>,
     /// Number of results to skip for pagination (default 0).
     #[serde(default)]
     pub offset: Option<usize>,
     /// Term operator combining query terms: "or" (default) or "and".
     #[serde(default)]
+    #[schemars(extend("enum" = ["or", "and"]))]
     pub term_operator: Option<String>,
 }
 
@@ -186,9 +214,10 @@ pub async fn search(
     ) {
         Ok(sources) => sources,
         Err(error) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "search failed: {error}"
-            ))]));
+            return Ok(tool_failure(
+                error_codes::INVALID_INPUT,
+                format!("search failed: {error}"),
+            ));
         }
     };
     let mut exclude_content_types = Vec::new();
@@ -196,9 +225,10 @@ pub async fn search(
         match SearchService::parse_exclude_content_type(&raw) {
             Ok(content_type) => exclude_content_types.push(content_type),
             Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "search failed: {error}"
-                ))]));
+                return Ok(tool_failure(
+                    error_codes::INVALID_INPUT,
+                    format!("search failed: {error}"),
+                ));
             }
         }
     }
@@ -207,9 +237,10 @@ pub async fn search(
         match SearchService::parse_file_category(&raw, "include") {
             Ok(category) => include_categories.push(category),
             Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "search failed: {error}"
-                ))]));
+                return Ok(tool_failure(
+                    error_codes::INVALID_INPUT,
+                    format!("search failed: {error}"),
+                ));
             }
         }
     }
@@ -218,18 +249,20 @@ pub async fn search(
         match SearchService::parse_file_category(&raw, "exclude") {
             Ok(category) => exclude_categories.push(category),
             Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "search failed: {error}"
-                ))]));
+                return Ok(tool_failure(
+                    error_codes::INVALID_INPUT,
+                    format!("search failed: {error}"),
+                ));
             }
         }
     }
     let query_intent = match SearchService::parse_query_intent(args.query_intent.as_deref()) {
         Ok(intent) => intent,
         Err(error) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "search failed: {error}"
-            ))]));
+            return Ok(tool_failure(
+                error_codes::INVALID_INPUT,
+                format!("search failed: {error}"),
+            ));
         }
     };
     let spec = SingleQuerySpec {
@@ -269,9 +302,10 @@ pub async fn search(
             })
             .to_string(),
         )])),
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "search failed: {error}"
-        ))])),
+        Err(error) => Ok(tool_failure(
+            error_codes::QUERY_ERROR,
+            format!("search failed: {error}"),
+        )),
     }
 }
 
@@ -288,9 +322,10 @@ pub async fn aggregated_search(
     use cce_server_shared::services::search::{AggregatedQuerySpec, SubQuerySpec};
 
     let fail = |message: String| -> Result<CallToolResult, rmcp::ErrorData> {
-        Ok(super::support::tool_failure(format!(
-            "aggregated_search failed: {message}"
-        )))
+        Ok(tool_failure(
+            error_codes::INVALID_INPUT,
+            format!("aggregated_search failed: {message}"),
+        ))
     };
 
     let mut sub_queries = Vec::with_capacity(args.sub_queries.len());
@@ -378,7 +413,10 @@ pub async fn aggregated_search(
             })
             .to_string(),
         )])),
-        Err(error) => fail(error.to_string()),
+        Err(error) => Ok(tool_failure(
+            error_codes::QUERY_ERROR,
+            format!("aggregated_search failed: {error}"),
+        )),
     }
 }
 
@@ -393,21 +431,23 @@ pub async fn file_search(
     args: FileSearchArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     if args.project_id <= 0 {
-        return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "file search failed: invalid project_id {}",
-            args.project_id
-        ))]));
+        return Ok(tool_failure(
+            error_codes::INVALID_INPUT,
+            format!("file search failed: invalid project_id {}", args.project_id),
+        ));
     }
     if args.query.trim().is_empty() {
-        return Ok(CallToolResult::error(vec![ContentBlock::text(
+        return Ok(tool_failure(
+            error_codes::INVALID_INPUT,
             "file search failed: invalid query: query must not be empty".to_string(),
-        )]));
+        ));
     }
     let limit = args.limit.unwrap_or(10);
     if limit == 0 || limit > 100 {
-        return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "file search failed: invalid limit {limit}: must be 1..=100"
-        ))]));
+        return Ok(tool_failure(
+            error_codes::INVALID_INPUT,
+            format!("file search failed: invalid limit {limit}: must be 1..=100"),
+        ));
     }
     let service = SearchService::new(state);
     let mut exclude_content_types = Vec::new();
@@ -415,9 +455,10 @@ pub async fn file_search(
         match SearchService::parse_exclude_content_type(&raw) {
             Ok(content_type) => exclude_content_types.push(content_type),
             Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "search failed: {error}"
-                ))]));
+                return Ok(tool_failure(
+                    error_codes::INVALID_INPUT,
+                    format!("search failed: {error}"),
+                ));
             }
         }
     }
@@ -442,9 +483,10 @@ pub async fn file_search(
             })
             .to_string(),
         )])),
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "file search failed: {error}"
-        ))])),
+        Err(error) => Ok(tool_failure(
+            error_codes::QUERY_ERROR,
+            format!("file search failed: {error}"),
+        )),
     }
 }
 
@@ -487,9 +529,10 @@ pub async fn keyword_search(
                 .to_string(),
             )]))
         }
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "keyword_search failed: {error}"
-        ))])),
+        Err(error) => Ok(tool_failure(
+            error_codes::QUERY_ERROR,
+            format!("keyword_search failed: {error}"),
+        )),
     }
 }
 
@@ -546,5 +589,57 @@ mod tests {
         assert!(args.include_patterns.is_none());
         assert!(args.exclude_patterns.is_none());
         assert!(args.exclude_content_types.is_none());
+    }
+
+    #[test]
+    fn search_schema_carries_value_constraints() {
+        use schemars::schema_for;
+
+        let schema = serde_json::to_value(schema_for!(SearchArgs)).expect("schema serializes");
+        let props = &schema["properties"];
+        assert_eq!(props["project_id"]["minimum"], 1);
+        assert_eq!(props["limit"]["minimum"], 1);
+        assert_eq!(props["limit"]["maximum"], 100);
+        let query_type = props["query_type"]["enum"]
+            .as_array()
+            .expect("query_type enum is present");
+        assert_eq!(query_type.len(), 3);
+    }
+
+    #[test]
+    fn aggregated_schema_carries_sub_query_bounds() {
+        use schemars::schema_for;
+
+        let schema =
+            serde_json::to_value(schema_for!(AggregatedSearchArgs)).expect("schema serializes");
+        let props = &schema["properties"];
+        assert_eq!(props["sub_queries"]["minItems"], 1);
+        assert_eq!(props["sub_queries"]["maxItems"], 16);
+    }
+
+    #[test]
+    fn search_schema_carries_array_element_enums() {
+        use schemars::schema_for;
+
+        let schema = serde_json::to_value(schema_for!(SearchArgs)).expect("schema serializes");
+        let props = &schema["properties"];
+
+        let content_types = props["exclude_content_types"]["items"]["enum"]
+            .as_array()
+            .expect("exclude_content_types items enum is present");
+        assert!(content_types.iter().any(|v| v == "test"));
+        assert!(content_types.iter().any(|v| v == "dependency"));
+
+        let include_categories = props["include_categories"]["items"]["enum"]
+            .as_array()
+            .expect("include_categories items enum is present");
+        assert_eq!(include_categories.len(), 5);
+        assert!(include_categories.iter().any(|v| v == "code"));
+        assert!(include_categories.iter().any(|v| v == "documentation"));
+
+        let exclude_categories = props["exclude_categories"]["items"]["enum"]
+            .as_array()
+            .expect("exclude_categories items enum is present");
+        assert_eq!(exclude_categories.len(), 5);
     }
 }

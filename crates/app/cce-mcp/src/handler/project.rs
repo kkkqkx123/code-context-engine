@@ -6,6 +6,7 @@
 
 use cce_orchestrator::IndexOptions;
 use cce_server_shared::context::SharedContext;
+use cce_types::error_codes;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Deserialize;
 use serde_json::json;
@@ -37,6 +38,7 @@ pub struct IncrementalIndexArgs {
     /// Project ID to update (required).
     pub project_id: i64,
     /// Changed files, each path relative to the project root.
+    #[schemars(length(min = 1))]
     pub files: Vec<String>,
     /// Whether each file was deleted. Empty (all false), a single boolean
     /// applied to all files, or one boolean per file.
@@ -48,6 +50,7 @@ pub struct IncrementalIndexArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ProjectArgs {
     /// Project ID (required).
+    #[schemars(range(min = 1))]
     pub project_id: i64,
 }
 
@@ -57,9 +60,10 @@ pub async fn list_projects(state: &Arc<SharedContext>) -> Result<CallToolResult,
         Ok(projects) => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({ "projects": projects }).to_string(),
         )])),
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "list_projects failed: {error}"
-        ))])),
+        Err(error) => Ok(super::support::tool_failure(
+            error_codes::INTERNAL_ERROR,
+            format!("list_projects failed: {error}"),
+        )),
     }
 }
 
@@ -83,9 +87,10 @@ pub async fn get_project(
             })
             .to_string(),
         )])),
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "get_project failed: {error}"
-        ))])),
+        Err(error) => Ok(super::support::tool_failure(
+            error_codes::ENTITY_NOT_FOUND,
+            format!("get_project failed: {error}"),
+        )),
     }
 }
 
@@ -130,19 +135,18 @@ pub async fn index_project(
                 "total_relations": result.total_relations,
                 "errors": result.errors(),
             });
-            if result.is_success() {
-                Ok(CallToolResult::success(vec![ContentBlock::text(
-                    payload.to_string(),
-                )]))
-            } else {
-                Ok(CallToolResult::error(vec![ContentBlock::text(
-                    payload.to_string(),
-                )]))
-            }
+            // A partial index still produces a usable result. Keep it on the
+            // success channel with `status: "partial"` and the `errors` detail,
+            // mirroring the HTTP handler's success + success:false response.
+            // Only a real execution failure goes through the error envelope.
+            Ok(CallToolResult::success(vec![ContentBlock::text(
+                payload.to_string(),
+            )]))
         }
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "index_project failed: {error}"
-        ))])),
+        Err(error) => Ok(super::support::tool_failure(
+            error_codes::INTERNAL_ERROR,
+            format!("index_project failed: {error}"),
+        )),
     }
 }
 
@@ -153,9 +157,10 @@ pub async fn incremental_index(
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let deleted = args.deleted.clone().unwrap_or_default();
     if !is_valid_deleted_shape(deleted.len(), args.files.len()) {
-        return Ok(CallToolResult::error(vec![ContentBlock::text(
-            "`deleted` must be empty, length 1, or match the number of files",
-        )]));
+        return Ok(super::support::tool_failure(
+            error_codes::INVALID_INPUT,
+            "`deleted` must be empty, length 1, or match the number of files".to_string(),
+        ));
     }
     let mut changes: Vec<(PathBuf, bool)> = Vec::with_capacity(args.files.len());
     for (index, file) in args.files.iter().enumerate() {
@@ -173,9 +178,10 @@ pub async fn incremental_index(
     {
         Ok(coordinator) => coordinator,
         Err(error) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "hot update coordinator unavailable: {error}"
-            ))]));
+            return Ok(super::support::tool_failure(
+                error_codes::SERVICE_UNAVAILABLE,
+                format!("hot update coordinator unavailable: {error}"),
+            ));
         }
     };
     let coordinator = coordinator.lock().await;
@@ -188,9 +194,10 @@ pub async fn incremental_index(
             })
             .to_string(),
         )])),
-        Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-            "incremental_index failed: {error}"
-        ))])),
+        Err(error) => Ok(super::support::tool_failure(
+            error_codes::INTERNAL_ERROR,
+            format!("incremental_index failed: {error}"),
+        )),
     }
 }
 

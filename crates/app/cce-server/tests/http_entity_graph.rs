@@ -3,9 +3,10 @@ mod common;
 use axum::extract::{Path, Query, State};
 use serde_json::json;
 
-use cce_api::models::{ClassificationQueryParams, error_codes};
+use cce_api::models::ClassificationQueryParams;
 use cce_server::api::handlers::{entity, graph};
 use cce_server::api::response::ApiResult;
+use cce_types::error_codes;
 
 use cce_server::api::handlers::{qdrant_admin, watch};
 use common::{create_project, seeded_project, test_env};

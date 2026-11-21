@@ -6,10 +6,9 @@
 
 use axum::Json;
 
-use cce_api::models::{
-    ErrorResponse, FileSummaryItem, SummaryRequest, SummaryResponse, error_codes,
-};
+use cce_api::models::{ErrorResponse, FileSummaryItem, SummaryRequest, SummaryResponse};
 use cce_server_shared::services::tools::{self, SummarySpec};
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

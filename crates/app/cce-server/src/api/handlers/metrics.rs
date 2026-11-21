@@ -6,8 +6,9 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use cce_api::models::{
     AggregatedMetric as ApiAggregatedMetric, ErrorResponse, MetricsCleanupQuery,
-    MetricsCleanupResponse, MetricsHistoryQuery, error_codes,
+    MetricsCleanupResponse, MetricsHistoryQuery,
 };
+use cce_types::error_codes;
 use chrono::DateTime;
 
 use crate::api::response::ApiResult;

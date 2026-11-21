@@ -5,10 +5,9 @@
 use axum::{Json, extract::State};
 use std::path::PathBuf;
 
-use cce_api::models::{
-    ErrorResponse, IndexRequest, IndexResponse, IndexStageTimingsDto, error_codes,
-};
+use cce_api::models::{ErrorResponse, IndexRequest, IndexResponse, IndexStageTimingsDto};
 use cce_orchestrator::IndexResult;
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

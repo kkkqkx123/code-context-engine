@@ -7,9 +7,10 @@ use axum::Json;
 
 use cce_api::models::{
     BatchFoldRequest, BatchFoldResponse, BatchFoldResultItem, BatchFoldStats, ErrorResponse,
-    FoldRequest, FoldResponse, error_codes,
+    FoldRequest, FoldResponse,
 };
 use cce_server_shared::services::tools::{self, FoldBatchItemSpec, FoldBatchSpec, FoldSpec};
+use cce_types::error_codes;
 
 use crate::api::response::ApiResult;
 

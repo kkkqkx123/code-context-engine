@@ -10,7 +10,6 @@ use axum::{
 };
 
 use crate::api::response::ApiResult;
-use cce_api::models::error_codes;
 use cce_api::models::{
     ChatModelView, EmbeddingModelView, ErrorResponse, LlmDimensionStatus, LlmProviderSummary,
     LlmTestRequest, LlmTestResponse, ProjectConfigGetResponse, ProjectConfigReloadResponse,
@@ -22,6 +21,7 @@ use cce_server_shared::services::project::{
     LlmProbeService, ProjectLlmUpdateSpec, ProjectServiceError, probe_project_llm,
     read_project_profile, registry_error, update_project_llm, update_project_profile,
 };
+use cce_types::error_codes;
 
 /// Map a project service failure onto the HTTP error contract.
 fn project_error(error: ProjectServiceError) -> ErrorResponse {

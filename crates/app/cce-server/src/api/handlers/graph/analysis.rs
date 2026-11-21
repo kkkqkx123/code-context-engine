@@ -8,9 +8,10 @@ use axum::extract::{Path, Query as QueryParams, State};
 use cce_api::models::{
     CyclesQuery, EntityImpactQuery, ErrorResponse, GraphCycle, GraphCyclesResponse,
     GraphEntityImpactResponse, GraphImpactResponse, GraphModuleResponse, GraphStructuralResponse,
-    ImpactQuery, ModuleQuery, ModuleRelation, StructuralQuery, StructuralRelation, error_codes,
+    ImpactQuery, ModuleQuery, ModuleRelation, StructuralQuery, StructuralRelation,
 };
 use cce_server_shared::services::graph::{self, ImpactScope};
+use cce_types::error_codes;
 
 use crate::api::response::{ApiResult, relation_error};
 

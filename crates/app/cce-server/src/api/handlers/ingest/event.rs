@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use axum::extract::{Path as AxumPath, State};
 use base64::Engine as _;
 use cce_api::models::{
-    ErrorResponse, IngestEventKind, IngestEventRequest, IngestEventResponse,
-    MAX_INGEST_BATCH_FILES, error_codes,
+    ErrorResponse, IngestEventKind, IngestEventRequest, IngestEventResponse, MAX_INGEST_BATCH_FILES,
 };
+use cce_types::error_codes;
 
 use super::paths::{project_root, safe_join};
 use super::staging::stage_bytes;

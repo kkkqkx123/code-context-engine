@@ -4,9 +4,10 @@ use axum::extract::{Path, Query as QueryParams, State};
 
 use cce_api::models::{
     ComponentsQuery, EgoQuery, ErrorResponse, ExportQuery, GraphComponentsResponse, GraphPathQuery,
-    GraphPathResponse, GraphSubgraphResponse, SubgraphQuery, error_codes,
+    GraphPathResponse, GraphSubgraphResponse, SubgraphQuery,
 };
 use cce_server_shared::services::graph::{self, GraphDirectionSpec, GraphView};
+use cce_types::error_codes;
 
 use crate::api::response::{ApiResult, relation_error};
 

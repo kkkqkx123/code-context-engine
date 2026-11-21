@@ -6,8 +6,8 @@ use std::path::Path;
 use axum::extract::{Extension, Path as AxumPath, State};
 use cce_api::models::{
     ErrorResponse, IngestBatchRequest, IngestBatchResponse, IngestedFile, MAX_INGEST_BATCH_FILES,
-    error_codes,
 };
+use cce_types::error_codes;
 
 use super::paths::{project_root, storage_path};
 use super::staging::{
