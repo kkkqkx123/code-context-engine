@@ -282,26 +282,102 @@ fn test_document_chunks_carry_segment_key() {
     }
 }
 
-/// Multi-entity chunks: the struct group (QueueConfig + its impl methods)
-/// must surface every entity through entity_ids.
+/// A token-split group must attribute every fragment to the entity it covers
+/// and never drop one of the group's entities from the result set.
+///
+/// The grouper keeps a type and its impl block as two groups — impl children
+/// are skipped as standalone groups and rebuilt as methods of the impl group
+/// (`crates/parser/cce-parser/src/grouper/processors/class_method/processor.rs:262`).
+/// The fixture's `impl QueueConfig` group therefore holds three entities (the
+/// impl block plus `new` and `is_empty`), and the BM25 term budget splits it
+/// into one fragment per entity. The contract pinned here is per-fragment
+/// attribution: each result claims exactly the entity its fragment came from,
+/// the union covers the whole group, and each result still materializes the
+/// complete group body so callers never see a truncated method.
 #[test]
-fn test_multi_entity_chunks_surface_all_entities() {
+fn test_multi_entity_group_surfaces_every_entity() {
     let harness = AlignmentHarness::new();
 
     let results = harness.search_bm25("queue configuration", 10);
-    let queue_results: Vec<&SearchResult> = results
+    let impl_group: Vec<&SearchResult> = results
         .iter()
-        .filter(|r| r.file_path.ends_with("lib.rs"))
+        .filter(|r| r.file_path.ends_with("lib.rs") && r.content.contains("impl QueueConfig"))
         .collect();
-
-    let group = queue_results
-        .iter()
-        .find(|r| r.name.contains("QueueConfig") || r.content.contains("QueueConfig"))
-        .expect("queue group should be found");
     assert!(
-        group.entity_ids.len() >= 2,
-        "struct+impl group should contain multiple entities, got {:?}",
-        group.entity_ids
+        !impl_group.is_empty(),
+        "expected the impl QueueConfig group, got: {:?}",
+        results
+            .iter()
+            .map(|r| (r.file_path.as_str(), r.name.as_str()))
+            .collect::<Vec<_>>()
+    );
+
+    let segment = impl_group[0]
+        .segment_id
+        .as_deref()
+        .expect("impl group fragments must carry a segment key");
+    assert!(
+        impl_group
+            .iter()
+            .all(|r| r.segment_id.as_deref() == Some(segment)),
+        "sibling fragments of one logical group must share a segment key"
+    );
+
+    // Each fragment is attributed to exactly the entity it covers, so a result
+    // never claims an entity whose body it does not hold.
+    for r in &impl_group {
+        assert_eq!(
+            r.entity_ids.len(),
+            1,
+            "fragment '{}' must carry exactly the entity it covers, got {:?}",
+            r.id,
+            r.entity_ids
+        );
+        assert_eq!(
+            r.id.split("_bm25_").next(),
+            Some(segment),
+            "fragment '{}' must belong to segment '{}'",
+            r.id,
+            segment
+        );
+    }
+
+    // Together the fragments cover the impl block and both of its methods.
+    let mut covered: Vec<u64> = impl_group
+        .iter()
+        .flat_map(|r| r.entity_ids.iter().map(|id| id.0))
+        .collect();
+    covered.sort_unstable();
+    covered.dedup();
+    assert_eq!(
+        covered.len(),
+        impl_group.len(),
+        "fragments must not share an entity: {covered:?}"
+    );
+    assert!(
+        covered.len() >= 3,
+        "the impl group holds the impl block plus two methods, got {covered:?}"
+    );
+
+    let mut names: Vec<&str> = impl_group.iter().map(|r| r.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["QueueConfig", "is_empty", "new"],
+        "every entity of the group must surface under its own display name"
+    );
+
+    // Read-side materialization: a fragment is only part of its group, so the
+    // body handed back covers the whole group and the sibling results are
+    // therefore identical bodies under distinct entity keys.
+    let body = &impl_group[0].content;
+    assert!(
+        body.contains("pub fn new") && body.contains("pub fn is_empty"),
+        "the materialized body must cover the whole group, got: {body}"
+    );
+    assert!(
+        impl_group.iter().all(|r| &r.content == body),
+        "sibling fragments must materialize the same group body"
     );
 }
 

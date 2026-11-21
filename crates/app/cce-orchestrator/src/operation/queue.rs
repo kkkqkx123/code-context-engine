@@ -501,6 +501,7 @@ impl OperationQueue {
 mod tests {
     use super::*;
     use crate::index::vector_store::in_memory_metadata_store;
+    use crate::operation::checkpoint::CreateCheckpointParams;
 
     #[tokio::test]
     async fn test_priority_ordering() {
@@ -563,6 +564,99 @@ mod tests {
             .expect("Failed to dequeue")
             .expect("Queue is empty");
         assert_eq!(third.operation_id, "hot1");
+    }
+
+    /// A crashed run is reclaimed only once its heartbeat is stale: until then
+    /// a live operation keeps the active slot, after it the slot is free for
+    /// the next run.
+    #[tokio::test]
+    async fn test_cleanup_stale_operations_requires_a_stale_heartbeat() {
+        let db = in_memory_metadata_store().expect("Failed to create memory store");
+        let queue = OperationQueue::new_for_project(1, db.clone());
+
+        // Production registers the operation checkpoint before it reaches the
+        // queue; the active flag is an UPDATE on that row, so the row must
+        // exist for the heartbeat path to be meaningful.
+        crate::operation::CheckpointManager::new_for_project(1, db.clone())
+            .create_checkpoint(CreateCheckpointParams {
+                operation_id: "crashed",
+                operation_type: OperationKind::HotUpdate,
+                root_dir: "/path",
+                total_files: 1,
+                batch_size: 1,
+                file_list_hash: "hash",
+            })
+            .await
+            .expect("create operation checkpoint");
+
+        queue
+            .enqueue(
+                "crashed".to_string(),
+                OperationKind::HotUpdate,
+                "/path".to_string(),
+                OperationPriority::HotUpdate,
+            )
+            .await
+            .expect("enqueue hot update");
+        let active = queue
+            .dequeue()
+            .await
+            .expect("dequeue")
+            .expect("dequeued operation");
+        assert_eq!(active.operation_id, "crashed");
+
+        // A generous threshold must leave a freshly dequeued (heartbeating)
+        // operation alone, and refreshing the heartbeat must keep doing so.
+        assert_eq!(
+            queue.cleanup_stale_operations(3600).await.expect("cleanup"),
+            0,
+            "a live operation must not be reclaimed"
+        );
+        queue.heartbeat("crashed").await.expect("heartbeat");
+        assert_eq!(
+            queue.cleanup_stale_operations(3600).await.expect("cleanup"),
+            0,
+            "a refreshed heartbeat still counts as live"
+        );
+        assert!(
+            db.checkpoint_active(1)
+                .await
+                .expect("read active flag")
+                .is_some(),
+            "the active flag must survive a cleanup that found nothing stale"
+        );
+
+        // With nothing recent enough to survive, the slot is reclaimed so the
+        // next run can start instead of waiting forever.
+        assert_eq!(
+            queue.cleanup_stale_operations(0).await.expect("cleanup"),
+            1,
+            "a stale active operation must be reclaimed"
+        );
+        assert!(
+            db.checkpoint_active(1)
+                .await
+                .expect("read active flag")
+                .is_none(),
+            "the reclaimed operation must release the active flag"
+        );
+
+        // The queue is usable again: a new operation can be dequeued.
+        queue
+            .enqueue(
+                "fresh".to_string(),
+                OperationKind::HotUpdate,
+                "/path".to_string(),
+                OperationPriority::HotUpdate,
+            )
+            .await
+            .expect("enqueue replacement");
+        let replacement = queue
+            .dequeue()
+            .await
+            .expect("dequeue")
+            .expect("a reclaimed queue must hand out the next operation");
+        assert_eq!(replacement.operation_id, "fresh");
     }
 
     #[tokio::test]

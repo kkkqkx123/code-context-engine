@@ -20,13 +20,25 @@ use super::defaults::default_true;
 // Score normalization strategy (serde-compatible)
 // ============================================================================
 
-/// Score normalization strategy
+/// 单路检索的分数归一化策略。
+///
+/// 该策略只作用于「单路召回」（纯 BM25 / 纯向量）：把原始分数换算到一个
+/// 统一的刻度上，好让 `result.min_score` 这个绝对阈值在两路之间可比。
+/// 混合召回不使用它 —— 融合内部有独立的按对齐键 min-max。
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizationStrategy {
     /// Min-Max normalization to [0, 1]
-    #[default]
     MinMax,
+    /// 按集合内最大正值等比缩放（默认）。
+    ///
+    /// 保留原始分数的相对次序与相对差距，最高分映射为 1.0，其余按同一比例
+    /// 缩放，因此不会把「集合内最差的那一条」压成 0 —— min-max 正是那样
+    /// 做的，而 0 会被任何正的 `min_score` 丢弃，导致每次查询都必然少一条
+    /// 结果。负分按同一比例保留为负值（同样会被阈值过滤），没有正分时保持
+    /// 原样。
+    #[default]
+    MaxRelative,
     /// Z-score normalization (standardization)
     ZScore,
     /// No normalization (use raw scores)
@@ -496,7 +508,8 @@ pub struct ScoreNormalizationConfig {
     /// uniform score scale across all recall strategies (bm25 raw scores are
     /// unbounded without it).
     pub enable: bool,
-    /// Normalization strategy
+    /// Normalization strategy（默认 `max_relative`：等比缩放到最大值，
+    /// 不会把集合末位压成 0）
     pub strategy: NormalizationStrategy,
 }
 
@@ -504,7 +517,7 @@ impl Default for ScoreNormalizationConfig {
     fn default() -> Self {
         Self {
             enable: true,
-            strategy: NormalizationStrategy::MinMax,
+            strategy: NormalizationStrategy::default(),
         }
     }
 }
@@ -1198,6 +1211,18 @@ mod tests {
         assert_eq!(json, "\"z_score\"");
         let deser: NormalizationStrategy = serde_json::from_str(&json).unwrap();
         assert_eq!(deser, NormalizationStrategy::ZScore);
+
+        let json = serde_json::to_string(&NormalizationStrategy::MaxRelative).unwrap();
+        assert_eq!(json, "\"max_relative\"");
+        let deser: NormalizationStrategy = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, NormalizationStrategy::MaxRelative);
+
+        // A config that omits `strategy` has to inherit the default, which is
+        // the one that keeps the worst candidate above a positive threshold.
+        let config = ScoreNormalizationConfig::default();
+        assert_eq!(config.strategy, NormalizationStrategy::MaxRelative);
+        let omitted: ScoreNormalizationConfig = serde_json::from_str("{\"enable\":true}").unwrap();
+        assert_eq!(omitted.strategy, NormalizationStrategy::default());
     }
 
     #[test]

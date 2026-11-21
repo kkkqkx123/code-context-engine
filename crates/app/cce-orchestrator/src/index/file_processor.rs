@@ -49,6 +49,40 @@ pub(crate) fn output_mode_label(mode: OutputMode) -> &'static str {
 /// File processing result containing parsed file and chunked results
 pub type FileProcessResult = (ParsedFile, Vec<ChunkedResult>);
 
+/// Why a chunking-drift sweep left a file alone, or the chunks it rebuilt.
+///
+/// Both non-rebuild arms look identical to the regular change flow, yet they
+/// mean opposite things to a sweep: [`Self::Drifted`] is the expected outcome
+/// for a file edited outside change tracking, while [`Self::Unreadable`] means
+/// the sweep could not reach the file at all (wrong project root, unmounted
+/// path, permissions) and therefore did no work.
+#[derive(Debug)]
+pub enum RechunkOutcome {
+    /// On-disk bytes still matched the recorded hash; these chunks reflect the
+    /// current configuration.
+    Rebuilt(Vec<ChunkedResult>),
+    /// On-disk bytes no longer match the recorded hash; the regular change
+    /// flow owns the file.
+    Drifted,
+    /// The file could not be read, so the sweep never inspected its content.
+    Unreadable,
+}
+
+impl RechunkOutcome {
+    /// Chunks of a rebuilt file, `None` for either skip reason.
+    pub fn into_chunks(self) -> Option<Vec<ChunkedResult>> {
+        match self {
+            Self::Rebuilt(chunks) => Some(chunks),
+            Self::Drifted | Self::Unreadable => None,
+        }
+    }
+
+    /// Whether the sweep actually inspected the file's content.
+    pub fn is_unreadable(&self) -> bool {
+        matches!(self, Self::Unreadable)
+    }
+}
+
 /// Complete file processing result including pre-processor output
 ///
 /// This struct contains all processing artifacts for a single file,
@@ -271,6 +305,9 @@ impl FileProcessor {
     /// output always reflects the latest pipeline behavior: code files go
     /// through parse → group → convert → chunk, while document/config/text
     /// files are re-chunked through the document pipeline under `output_mode`.
+    ///
+    /// Callers that must tell drift apart from an unreadable path use
+    /// [`Self::rechunk_file_from_disk_with_outcome`] instead.
     pub async fn rechunk_file_from_disk(
         &mut self,
         read_path: &std::path::Path,
@@ -278,10 +315,35 @@ impl FileProcessor {
         expected_hash: &str,
         output_mode: OutputMode,
     ) -> Result<Option<Vec<ChunkedResult>>, OrchestratorError> {
-        // Verified read through the scanner: a missing/unreadable file or
-        // drifted bytes means the file moved outside change tracking, so the
-        // sweep leaves it to the regular change flow. Decoding failures still
-        // surface as errors.
+        Ok(self
+            .rechunk_file_from_disk_with_outcome(
+                read_path,
+                relative_path,
+                expected_hash,
+                output_mode,
+            )
+            .await?
+            .into_chunks())
+    }
+
+    /// Same as [`Self::rechunk_file_from_disk`], but reports why a file was
+    /// left alone.
+    ///
+    /// Drift and an unreadable path look identical to the regular change flow
+    /// yet mean opposite things to a sweep: drift is expected and correct to
+    /// leave alone, while an unreadable path means the sweep itself is broken
+    /// (wrong project root, missing mount, permissions) and must not be
+    /// recorded as finished.
+    pub async fn rechunk_file_from_disk_with_outcome(
+        &mut self,
+        read_path: &std::path::Path,
+        relative_path: &str,
+        expected_hash: &str,
+        output_mode: OutputMode,
+    ) -> Result<RechunkOutcome, OrchestratorError> {
+        // Verified read through the scanner: drifted bytes mean the file moved
+        // outside change tracking, so the sweep leaves it to the regular change
+        // flow. Decoding failures still surface as errors.
         let content = match read_verified_utf8(read_path, Some(expected_hash)).await {
             Ok(content) => content,
             Err(ParseError::ContentChanged(reason)) => {
@@ -290,7 +352,7 @@ impl FileProcessor {
                     %reason,
                     "Chunking-drift sweep found drifted on-disk content; skipping"
                 );
-                return Ok(None);
+                return Ok(RechunkOutcome::Drifted);
             }
             Err(ParseError::Io(error)) => {
                 tracing::warn!(
@@ -298,7 +360,7 @@ impl FileProcessor {
                     %error,
                     "Chunking-drift sweep cannot read file; skipping"
                 );
-                return Ok(None);
+                return Ok(RechunkOutcome::Unreadable);
             }
             Err(error) => return Err(OrchestratorError::Parse(error)),
         };
@@ -315,7 +377,7 @@ impl FileProcessor {
                 .unwrap_or(&self.chunking_config);
             let (chunks, _, _, _) =
                 self.process_doc(&content, relative_path, output_mode, chunking_config)?;
-            Ok(Some(chunks))
+            Ok(RechunkOutcome::Rebuilt(chunks))
         } else {
             let parsed = {
                 let mut coordinator = self.coordinator.lock().map_err(|_| {
@@ -324,7 +386,7 @@ impl FileProcessor {
                 coordinator.parse_with_language_info(relative_path, &content, &language_info)
             }?;
             let (chunks, _) = self.process_parsed_file(&parsed).await?;
-            Ok(Some(chunks))
+            Ok(RechunkOutcome::Rebuilt(chunks))
         }
     }
 
@@ -594,6 +656,60 @@ mod tests {
             .expect("rechunk probe")
             .expect("matching content must produce chunks");
         assert!(!chunks.is_empty());
+    }
+
+    /// A drifted file and an unreachable path must be distinguishable: drift is
+    /// a normal skip, an unreadable path means the sweep did no work.
+    #[tokio::test]
+    async fn rechunk_outcome_separates_drift_from_unreadable_paths() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("sample.rs");
+        let source = "pub fn alpha() -> i32 { 1 }\n";
+        std::fs::write(&path, source).expect("write file");
+        let stale_hash = cce_utils::hash::calculate_hash(b"outdated bytes");
+
+        let mut processor = FileProcessor::new();
+        let drifted = processor
+            .rechunk_file_from_disk_with_outcome(
+                &path,
+                "src/sample.rs",
+                &stale_hash,
+                OutputMode::Both,
+            )
+            .await
+            .expect("rechunk probe");
+        assert!(
+            matches!(drifted, RechunkOutcome::Drifted),
+            "changed bytes are drift, not a broken sweep"
+        );
+        assert!(!drifted.is_unreadable());
+        assert!(drifted.into_chunks().is_none());
+
+        // A path that does not exist is what a wrongly resolved project root
+        // produces: the sweep must report it as unreadable, not as drift.
+        let missing = dir.path().join("does-not-exist.rs");
+        let unreadable = processor
+            .rechunk_file_from_disk_with_outcome(
+                &missing,
+                "src/does-not-exist.rs",
+                &stale_hash,
+                OutputMode::Both,
+            )
+            .await
+            .expect("rechunk probe");
+        assert!(
+            unreadable.is_unreadable(),
+            "a missing file must not be reported as drift"
+        );
+        assert!(unreadable.into_chunks().is_none());
+
+        // The plain entry point keeps its historical shape for callers that
+        // only care about chunks.
+        let plain = processor
+            .rechunk_file_from_disk(&path, "src/sample.rs", &stale_hash, OutputMode::Both)
+            .await
+            .expect("rechunk probe");
+        assert!(plain.is_none());
     }
 
     /// Non-code files are swept through the document pipeline.

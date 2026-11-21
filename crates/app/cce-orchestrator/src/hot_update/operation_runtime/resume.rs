@@ -9,14 +9,9 @@
 //! operation runs, so the coordinator stays available for event
 //! accumulation, storm detection and configuration handling.
 
-use std::path::Path;
-
-use crate::hot_update::change::{
-    BatchChangeResult, FileChange, FileChangeType, ParseResultWithChanges,
-};
+use crate::hot_update::change::FileChangeType;
 use crate::hot_update::error::{HotUpdateError, Result};
 use crate::hot_update::processors::UpdateProcessor;
-use crate::operation::checkpoint::ParsedCheckpointPayload;
 use crate::operation::{ModuleFailure, OperationContext, OperationResult};
 
 /// Mutable state shared by every hot-update operation.
@@ -48,160 +43,45 @@ impl HotUpdateOperationRuntime {
         // the building candidate (adoptable → markers stay valid), while an
         // abort voids it (manifest failed → markers must be cleared so every
         // module re-executes against the fresh clone).
-        if let Some(ref storage) = self.storage_coordinator {
-            let adoptable = storage
+        //
+        // Adoptability can only be verified with the storage coordinator. When
+        // it is absent the markers are treated as void: a marker whose
+        // candidate was never confirmed alive would make every module skip a
+        // file it never durably wrote, which loses data, whereas clearing them
+        // only costs a redundant module pass.
+        let adoptable = match self.storage_coordinator {
+            Some(ref storage) => storage
                 .is_candidate_adoptable(&ctx.operation_id)
                 .await
-                .map_err(|e| HotUpdateError::hot_update(e.to_string()))?;
-            if !adoptable {
-                let cleared = if let Some(ref cm) = self.checkpoint_manager {
-                    cm.clear_module_progress(&ctx.operation_id)
-                        .await
-                        .map_err(|error| HotUpdateError::hot_update(error.to_string()))?
-                } else {
-                    0
-                };
-                tracing::warn!(
-                    operation_id = %ctx.operation_id,
-                    cleared_file_checkpoints = cleared,
-                    "Candidate generation is not adoptable on resume; cleared module progress markers"
-                );
+                .map_err(|e| HotUpdateError::hot_update(e.to_string()))?,
+            None => false,
+        };
+        if !adoptable {
+            let cleared = if let Some(ref cm) = self.checkpoint_manager {
+                cm.clear_module_progress(&ctx.operation_id)
+                    .await
+                    .map_err(|error| HotUpdateError::hot_update(error.to_string()))?
             } else {
-                tracing::debug!(
-                    operation_id = %ctx.operation_id,
-                    "Candidate generation is adoptable on resume; keeping module progress markers"
-                );
-            }
+                0
+            };
+            tracing::warn!(
+                operation_id = %ctx.operation_id,
+                cleared_file_checkpoints = cleared,
+                "Candidate generation is not adoptable on resume; cleared module progress markers"
+            );
+        } else {
+            tracing::debug!(
+                operation_id = %ctx.operation_id,
+                "Candidate generation is adoptable on resume; keeping module progress markers"
+            );
         }
 
-        // Reconstruct the exact hot-update input from the necessary ParsedFile
-        // checkpoint. Version or content mismatches fall back to a fresh parse.
-        let mut batch_result = if let Some(ref cm) = self.checkpoint_manager {
-            let file_checkpoints = cm
-                .get_batch_files(&ctx.operation_id, 0)
-                .await
-                .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
-            let mut result = BatchChangeResult::new();
-            let mut file_processor = self.new_file_processor().await;
-            for checkpoint in file_checkpoints {
-                // Restore the project-relative path identity used by the
-                // change-detection cache, `files` rows and storage removal,
-                // exactly like `process_watch_paths` does for live events.
-                let identity = self.relativize_scan_path(Path::new(&checkpoint.file_path));
-                let payload = checkpoint
-                    .parsed_data
-                    .as_deref()
-                    .and_then(crate::operation::checkpoint::decode_parsed_checkpoint)
-                    .filter(ParsedCheckpointPayload::is_compatible);
-
-                match payload {
-                    Some(ParsedCheckpointPayload::Deleted) => {
-                        result.add_file_change(FileChange::new(
-                            identity,
-                            FileChangeType::Deleted,
-                            checkpoint.content_hash.unwrap_or_default(),
-                            checkpoint.file_size.unwrap_or_default().max(0) as u64,
-                            chrono::Utc::now(),
-                        ));
-                        continue;
-                    }
-                    Some(ParsedCheckpointPayload::Parsed(envelope)) => {
-                        let read_path = self.resolve_scan_path(&identity);
-                        let disk_matches = match checkpoint.content_hash.as_deref() {
-                            Some(expected) => {
-                                cce_scanner::file_matches_scan_hash(&read_path, expected).await
-                            }
-                            None => false,
-                        };
-                        if disk_matches {
-                            // A file whose NL document was already exported in a
-                            // previous (interrupted) run is a resume candidate.
-                            //
-                            // The skip is validated against the persisted render
-                            // fingerprint in the export processor: the document is
-                            // only skipped when the current rendering inputs still
-                            // match the ones captured at export time. Configuration
-                            // changes between the crash and the resume therefore
-                            // force a re-export instead of leaving a stale document.
-                            let already_exported =
-                                checkpoint
-                                    .export_path
-                                    .as_deref()
-                                    .is_some_and(|export_path| {
-                                        self.watch_root
-                                            .as_deref()
-                                            .map(|root| root.join(export_path).exists())
-                                            .unwrap_or(false)
-                                    });
-                            let mut parse_result = ParseResultWithChanges::new(
-                                identity,
-                                envelope.parsed_file,
-                                envelope.change_type,
-                                envelope.change_type == FileChangeType::Added,
-                            );
-                            // Restore the pre-generated summary from its record
-                            // column so the summary/export processors reuse it.
-                            // Entity groups are not persisted: the export
-                            // processor derives them from the parsed file at
-                            // render time.
-                            if let Some(bytes) = checkpoint.summary_data.as_deref() {
-                                if let Some(summary_payload) =
-                                    crate::operation::checkpoint::decode_summary_checkpoint(bytes)
-                                {
-                                    parse_result.file_summary = Some(summary_payload.file_summary);
-                                    parse_result.stored_summary_fingerprint =
-                                        summary_payload.summary_config_fingerprint;
-                                }
-                            }
-                            parse_result.stored_render_fingerprint = checkpoint.render_fingerprint;
-                            parse_result.stored_content_hash = checkpoint.content_hash.clone();
-                            parse_result.module_progress =
-                                crate::hot_update::progress::read_module_progress(
-                                    checkpoint.module_progress.as_deref(),
-                                );
-                            let parse_result = if already_exported {
-                                parse_result.with_already_exported()
-                            } else {
-                                parse_result
-                            };
-                            result.add_parse_result(parse_result);
-                            continue;
-                        }
-                    }
-                    // Missing/incompatible payload: fall through to a fresh parse.
-                    None => {}
-                }
-
-                let read_path = self.resolve_scan_path(&identity);
-                if read_path.exists() {
-                    let parse_path = identity.to_string_lossy().into_owned();
-                    result.add_parse_result(
-                        file_processor
-                            .process_file_change_at(
-                                &read_path,
-                                &parse_path,
-                                FileChangeType::Modified,
-                                &self.metadata_store,
-                                self.project_id,
-                            )
-                            .await?,
-                    );
-                } else {
-                    result.add_file_change(FileChange::new(
-                        identity,
-                        FileChangeType::Deleted,
-                        String::new(),
-                        0,
-                        chrono::Utc::now(),
-                    ));
-                }
-            }
-            result
-        } else {
-            return Err(HotUpdateError::hot_update(
-                "cannot resume a hot operation without its checkpoint manager",
-            ));
-        };
+        // Reconstruct the exact hot-update input from the persisted
+        // checkpoints. Version or content mismatches fall back to a fresh
+        // parse; deleted files keep their tombstone.
+        let mut batch_result = self
+            .reconstruct_batch_from_checkpoints(&ctx.operation_id)
+            .await?;
 
         // A crash can happen after manifest activation but before the
         // checkpoint/hash projection is committed. The manifest is the durable

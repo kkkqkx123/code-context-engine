@@ -119,7 +119,7 @@ impl EntityRepository {
     pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<EntityRecord>, StorageError> {
         execute_query_optional(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE id = ?1",
             params![id],
             Self::from_row,
@@ -137,7 +137,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE file_id = ?1",
             params![file_id],
             Self::from_row,
@@ -152,7 +152,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE file_id = ?1 AND epoch = ?2",
             params![file_id, epoch],
             Self::from_row,
@@ -171,7 +171,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE file_id = ?1 AND project_id = ?2",
             params![file_id, project_id],
             Self::from_row,
@@ -190,7 +190,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE name = ?1 AND project_id = ?2",
             params![name, project_id],
             Self::from_row,
@@ -251,7 +251,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE kind = ?1 AND project_id = ?2",
             params![kind, project_id],
             Self::from_row,
@@ -268,7 +268,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE project_id = ?1",
             params![project_id],
             Self::from_row,
@@ -287,7 +287,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator
              FROM entities WHERE project_id = ?1 ORDER BY id LIMIT ?2 OFFSET ?3",
             params![project_id, limit, offset],
             Self::from_row,
@@ -510,40 +510,30 @@ impl EntityRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Build the schema through the production initializer.
+    ///
+    /// A hand-written copy used to live here and silently disagreed with
+    /// `schema::create_all` — it declared an `entities.rank` column that
+    /// production never creates, so every production query selecting `rank`
+    /// failed at runtime while these tests stayed green. Using the real
+    /// initializer keeps the two shapes from drifting apart again.
     fn setup_test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("Failed to open database");
-
+        crate::schema::create_all(&conn).expect("failed to create the production schema");
+        // The production schema enforces the entity → file → project foreign
+        // keys these tests exercise, so the parent rows must exist.
         conn.execute(
-            "CREATE TABLE entities (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                file_id INTEGER NOT NULL,
-                signature TEXT,
-                span_start_row INTEGER,
-                span_end_row INTEGER,
-                span_start_column INTEGER,
-                span_end_column INTEGER,
-                span_start_byte INTEGER,
-                span_end_byte INTEGER,
-                scoped_name TEXT,
-                overload_discriminator TEXT NOT NULL DEFAULT '',
-                depth INTEGER,
-                parent_id INTEGER,
-                metadata TEXT,
-                parameters_json TEXT,
-                return_type TEXT,
-                doc_comment TEXT,
-                modifiers_json TEXT,
-                project_id INTEGER NOT NULL,
-                epoch INTEGER NOT NULL DEFAULT 0,
-                batch_id INTEGER NOT NULL DEFAULT 0,
-                rank REAL NOT NULL DEFAULT 0.0
-            )",
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES (1, 'test-project', '/test-project', 0, 0)",
             [],
         )
-        .expect("Failed to create table");
-
+        .expect("seed project row");
+        conn.execute(
+            "INSERT INTO files (id, path, language, last_modified, created_at, project_id)
+             VALUES (1, 'test.rs', 'rust', 0, 0, 1)",
+            [],
+        )
+        .expect("seed file row");
         conn
     }
 

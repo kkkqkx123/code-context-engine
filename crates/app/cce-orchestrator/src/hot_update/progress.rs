@@ -98,3 +98,49 @@ pub async fn persist_module_progress(
         .map_err(|e| HotUpdateError::hot_update(e.to_string()))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_progress_reads_as_empty() {
+        assert!(read_module_progress(None).is_empty());
+        assert!(read_module_progress_strict(None).is_ok_and(|map| map.is_empty()));
+    }
+
+    #[test]
+    fn progress_roundtrips_through_json() {
+        let mut progress = HashMap::new();
+        progress.insert(MODULE_EMBEDDING.to_string(), "fp-emb".to_string());
+        progress.insert(MODULE_BM25.to_string(), "fp-bm25".to_string());
+
+        let encoded = write_module_progress(&progress);
+        assert_eq!(read_module_progress(Some(&encoded)), progress);
+    }
+
+    /// Corruption resets the marker map for the lenient reader, so the module
+    /// redoes the file instead of skipping work that may never have landed;
+    /// the strict reader surfaces it for callers that must not guess.
+    #[test]
+    fn corrupt_progress_resets_or_reports() {
+        assert!(read_module_progress(Some("{not json")).is_empty());
+        assert!(read_module_progress_strict(Some("{not json")).is_err());
+    }
+
+    /// The fingerprint must react to every input that changes the stored data:
+    /// a configuration change or a content change each produce a new value,
+    /// and the separator prevents concatenation collisions.
+    #[test]
+    fn fingerprint_covers_configuration_and_content() {
+        let base = module_input_fingerprint("cfg-a", "content-a");
+        assert_eq!(base, module_input_fingerprint("cfg-a", "content-a"));
+        assert_ne!(base, module_input_fingerprint("cfg-b", "content-a"));
+        assert_ne!(base, module_input_fingerprint("cfg-a", "content-b"));
+        assert_ne!(
+            module_input_fingerprint("ab", "c"),
+            module_input_fingerprint("a", "bc"),
+            "the separator must keep the two inputs distinguishable"
+        );
+    }
+}

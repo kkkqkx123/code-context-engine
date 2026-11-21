@@ -365,6 +365,10 @@ pub(crate) fn merge_small_chunks_cross_group(
     merge_strategy::sort_chunks_by_span(&mut chunks, group_spans);
 
     let mut stack: Vec<ChunkedResult> = Vec::with_capacity(chunks.len());
+    // Chunks this pass actually folded into a neighbour. Only they lose their
+    // intra-group fragment bookkeeping: a chunk that merely passed through the
+    // stack is still one piece of its own group's split.
+    let mut merged_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for chunk in chunks {
         stack.push(chunk);
@@ -377,6 +381,7 @@ pub(crate) fn merge_small_chunks_cross_group(
             if merge_strategy::should_merge(prev, top, path, config) {
                 let combined = merge_strategy::combined_cost(prev, top, path);
                 let merged = merge_two_chunks(prev, top, combined);
+                merged_ids.insert(merged.chunk_id.clone());
                 stack.pop();
                 stack.pop();
                 stack.push(merged);
@@ -390,10 +395,12 @@ pub(crate) fn merge_small_chunks_cross_group(
     for (idx, chunk) in stack.iter_mut().enumerate() {
         chunk.chunk_index = idx;
         chunk.total_chunks = total;
-        if let Some(code) = chunk.metadata.as_code_mut() {
-            code.is_fragment = false;
-            code.fragment_index = None;
-            code.total_fragments = None;
+        if merged_ids.contains(&chunk.chunk_id) {
+            if let Some(code) = chunk.metadata.as_code_mut() {
+                code.is_fragment = false;
+                code.fragment_index = None;
+                code.total_fragments = None;
+            }
         }
     }
 

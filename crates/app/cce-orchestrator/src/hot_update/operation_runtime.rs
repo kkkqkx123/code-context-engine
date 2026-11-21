@@ -284,9 +284,18 @@ impl HotUpdateOperationRuntime {
     /// Express a path relative to the scan root; absolute paths outside the
     /// root are returned unchanged (with a warning, as they break the
     /// project-relative path identity).
+    ///
+    /// Checkpoints already record the project-relative identity, so a
+    /// relative input is only normalized. Relativizing it against the root
+    /// would report it as "outside the scan root" on every resumed batch.
     fn relativize_scan_path(&self, path: &Path) -> PathBuf {
-        let root = Path::new(&self.change_detector.scan_options().root_path);
-        PathBuf::from(cce_types::path::relativize(root, path))
+        if path.is_absolute() {
+            let root = Path::new(&self.change_detector.scan_options().root_path);
+            return PathBuf::from(cce_types::path::relativize(root, path));
+        }
+        PathBuf::from(cce_types::path::normalize_project_path(
+            &path.to_string_lossy(),
+        ))
     }
 
     // ==================== Change detection ====================
@@ -981,4 +990,10 @@ impl HotUpdateOperationRuntime {
 
 mod config_change;
 mod persistence;
+mod reconstruct;
 mod resume;
+
+#[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
+mod reconstruct_tests;

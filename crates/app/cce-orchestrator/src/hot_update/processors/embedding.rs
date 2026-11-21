@@ -285,6 +285,9 @@ impl EmbeddingUpdateProcessor {
         let mut offset: i64 = 0;
         let mut rebuilt = 0usize;
         let mut skipped = 0usize;
+        // Files the sweep could not read at all. Tracked apart from `skipped`
+        // because it means the sweep is broken, not that the content drifted.
+        let mut unreadable = 0usize;
         loop {
             let page = store
                 .files_page(
@@ -311,12 +314,12 @@ impl EmbeddingUpdateProcessor {
                     continue;
                 };
                 let read_path = root_path.join(&file.path);
-                let chunks = self
+                let outcome = self
                     .context
                     .file_processor
                     .lock()
                     .await
-                    .rechunk_file_from_disk(
+                    .rechunk_file_from_disk_with_outcome(
                         &read_path,
                         &file.path,
                         hash,
@@ -324,7 +327,12 @@ impl EmbeddingUpdateProcessor {
                     )
                     .await
                     .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
-                let Some(chunks) = chunks else {
+                if outcome.is_unreadable() {
+                    unreadable += 1;
+                    skipped += 1;
+                    continue;
+                }
+                let Some(chunks) = outcome.into_chunks() else {
                     skipped += 1;
                     continue;
                 };
@@ -356,6 +364,20 @@ impl EmbeddingUpdateProcessor {
                     .map_err(|e| HotUpdateError::embedding(e.to_string()))?;
                 rebuilt += 1;
             }
+        }
+
+        // A sweep that could not read a single file did no work at all and must
+        // not be recorded as complete: `persist_fingerprint` marks this
+        // configuration as already swept, so a broken project root (an
+        // unregistered row falls back to the `/projects/{id}` placeholder)
+        // would silently suppress the re-chunk forever. Failing keeps the
+        // fingerprint stale so the next configuration change retries.
+        if rebuilt == 0 && unreadable > 0 {
+            return Err(HotUpdateError::embedding(format!(
+                "chunking-drift sweep could not read any of the {unreadable} candidate files \
+                 under {}; the project root is probably unregistered or unmounted",
+                root_path.display()
+            )));
         }
 
         persist_fingerprint(
