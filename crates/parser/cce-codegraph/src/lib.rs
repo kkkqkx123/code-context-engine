@@ -9,6 +9,7 @@
 
 pub mod config_parser;
 pub mod dependency_graph;
+pub mod entity_id;
 pub mod error;
 pub mod external;
 pub mod graph_metrics;

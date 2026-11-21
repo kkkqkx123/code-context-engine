@@ -303,16 +303,16 @@ impl RelationIndex {
     /// bit. Synthetic IDs produced by `ProjectSymbolTable::symbol_ref_for` set
     /// it, so the two spaces are disjoint and can be distinguished via
     /// `is_synthetic_id`.
-    pub const SYNTHETIC_MARK: u64 = 1u64 << 63;
+    pub const SYNTHETIC_MARK: u64 = crate::entity_id::SYNTHETIC_MARK;
 
     /// Whether the given EntityId is a synthetic symbol-table ID.
     pub fn is_synthetic_id(id: EntityId) -> bool {
-        id.0 & Self::SYNTHETIC_MARK != 0
+        crate::entity_id::is_synthetic_id(id.0)
     }
 
     /// Extract the low counter from a synthetic EntityId.
     pub fn synthetic_counter(id: EntityId) -> u64 {
-        id.0 & !Self::SYNTHETIC_MARK
+        crate::entity_id::synthetic_counter(id.0)
     }
 
     /// Allocate a globally unique entity ID.
