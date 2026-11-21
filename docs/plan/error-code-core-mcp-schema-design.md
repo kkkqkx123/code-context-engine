@@ -2,13 +2,13 @@
 
 ## 0. 文档状态与范围
 
-- 状态：**第 3、4、5 节已实现并通过编译与单测**；第 6 节（CLI 非零退出码）仅出方案，本阶段**不实现**。落地状态见 0.1。
+- 状态：**第 3、4、5、6 节全部已实现并通过编译与单测**。落地状态见 0.1。
 - 前置分析：`docs/analysis/cli-mcp-parameter-error-response-design-review.md`。
 - 本轮用户决议：
   1. 错误码迁入 core 层；
   2. MCP 工具错误设计由本方案判断后决定；
   3. schema 按本方案修改，接受 schema 表达力局限；
-  4. CLI 失败统一非零退出码——先出设计方案文档与错误码表格，作为下一阶段任务，本阶段不实现。
+  4. CLI 失败统一非零退出码——先出方案与错误码表格（首轮），下一阶段实现（本轮已完成，见第 6 节与 0.3）。
 - 规范遵循：见 `AGENTS.md`。文档用简体中文，代码标识保留英文；设计正文以自然语言描述为主，仅给出接口签名级 diff，不贴完整实现。
 
 ### 0.1 落地状态（实现后同步）
@@ -19,7 +19,7 @@
 | 第 4.4 节 映射下沉 | 已完成 | `relation_error_parts` 落于 `cce-server-shared/services/relation.rs`；HTTP `relation_error` 改为调用它 |
 | 第 4 节 MCP 结构化错误 | 已完成 | `tool_failure` / `tool_failure_with_details` / `relation_tool_error` 落地；26 处错误构造全部改为结构化 JSON；工具禁用（`ensure_enabled`）改为返回 `Option<CallToolResult>`，统一走 `isError` 通道（O3 落地为「单一通道」）；O4 落地：partial 改用成功通道、保留诊断 payload |
 | 第 5 节 schema 约束 | 已完成 | 4 个 Args 文件共 30 处注解 + O5 的 7 处数组元素枚举注解；新增 3 个 schema 断言单测；修正 `sub_queries` 文档 1..10 → 1..16 与 direction 文案补 callees/callers |
-| 第 6 节 CLI | 未实现（按决议） | 仅方案与错误码表格 |
+| 第 6 节 CLI | 已完成 | 新增 `cce-cli/src/error.rs`（`CliError` + 分层退出码）；`main` 改显式 `process::exit`，统一 stderr 渲染（JSON 模式结构化信封）；126 处 `print_error` 中约 90 处失败路径改为返回 `Err`，保留信息性输出；新增 5 个单测（详见 0.3） |
 
 落地时的事实修正（相对设计时的假设）：
 
@@ -40,6 +40,18 @@
 
 **O5 — 数组元素枚举用 `extend("items" = {...})` 补齐（采纳）。**
 关键事实：`inner` 只接受 validation 类属性（`length`/`range`/`pattern` 等，`schemars_derive-1.2.3/src/attr/validation.rs:209`），`extend` 是顶层属性（`attr/mod.rs:124`），故 `inner(extend(...))` 编译报错；`inner(pattern(...))` 语法亦不通。隔离探针验证 `extend("items" = { "type":"string", "enum":[...] })` 在 `Option<Vec<String>>` 上正确生成 `"type":["array","null"],"items":{"type":"string","enum":[...]}`，保留 description 且覆盖 items，是表达数组元素枚举的正确方式。合法字面量取自运行时：`FileCategory::from_name`（`file_category.rs:118-126`：code/config/documentation/schema/other）与 `parse_exclude_content_type`（`services/search.rs:267-277`：test/tests、generated/generate、dependency/dependencies/vendor）。覆盖字段：`exclude_content_types`、`include_categories`、`exclude_categories`（在 `SearchArgs` / `AggregatedSearchArgs` / `FileSearchArgs` 三处重复定义）。局限照旧：注解只影响 schema、不改变 serde，运行时校验保留兜底（5.4）。
+
+### 0.3 第 6 节 CLI 改造的落地说明（本轮新增）
+
+基于用户推送后的新基线（`8c64c78b`，含前序全部改动）完成 CLI 阶段。相对第 6 节设计的具体落地差异：
+
+- **入口机制**：`main` 从 `-> anyhow::Result<()>` 改为无返回，显式 `process::exit(status)`。设计中的 `print_error_and_fail` 实际落地为 `error.rs` 的 `CliError` + 三个辅助构造（`fail` / `fail_input` / `fail_client`），返回 `anyhow::Error` 供 `?` / `return Err` 冒泡；`main` 统一渲染，避免在每个命令里重复打印。
+- **退出码来源**：取 `ClientError::is_retryable()` / `code()`（`cce-client/src/error.rs:149,165`）映射——retryable/`SERVICE_UNAVAILABLE` → 4，服务端 `code` 为 `ENTITY_NOT_FOUND` → 3、`INVALID_*`/`AMBIGUOUS_SYMBOL` → 2，其余 → 1；本地输入校验用 `INVALID_INPUT` → 2。退出码分层按 6.2 建议值落地（O6 以此为准，可再调整）。
+- **错误码获取路径修正**：6.2 原写「CLI 经 `cce_api::models::error_codes` 获取」。因 O2 已删除 cce-api re-export，CLI 直连 `cce_types::error_codes`（`cce-cli/Cargo.toml` 新增 cce-types 依赖）。
+- **失败路径改造范围**：126 处 `print_error` 中，约 90 处为真实失败分支，改为返回 `Err(CliError)`；约 20 处为信息性输出予以保留——诊断明细（`errors` 数组遍历、config 校验的 Error 级告警、索引的 circuit breaker 警告）、合法状态显示（status/health 的「不健康」是正常结果）、逐项部分失败（summary/batch compress 的单条错误）。这类输出不构成命令失败，不影响退出码。
+- **JSON 模式错误**：stderr 输出 `{"error":{"code","message"}}`，stdout 仍只承载成功 payload。原 health check / status 在 JSON 模式把失败写成 stdout 的 `success:false` 对象，本轮统一收敛到 stderr 错误信封（避免一处失败两种解析规则）。
+- **工具链**：新基线 `Cargo.toml` 将 `rust-version` 提升到 1.97，本地以 `cargo +1.97.0` 完成 fmt/clippy/test（环境默认 1.93 不满足）。
+- **验证**：`cargo +1.97.0 test -p cce-cli` 39/39 通过（含 5 个新增退出码/错误渲染断言）；`clippy -p cce-cli --all-targets` cce-cli 自身零告警零错误；`fmt` 已执行。
 
 ## 1. 事实依据（带 file:line）
 
@@ -249,7 +261,7 @@
 - 数组元素枚举：`schemars` 1.2.3 的 `inner` 只接受 validation 类属性，`extend` 为顶层属性，`inner(extend(...))` 编译报错；改用 `extend("items" = {...})` 覆盖元素 schema 后已补齐（0.2 / 5.2）。局限仍在：注解只作用于生成的 schema，不改变 serde 反序列化，运行时 `parse_*` 校验保留兜底。
 - 这些局限由第 4 节的结构化错误对象覆盖：schema 用于"调用前预防"，错误对象用于"调用后纠偏"。
 
-## 6. CLI 失败非零退出码（下一阶段方案，本阶段不实现）
+## 6. CLI 失败非零退出码（已实现，落地差异见 0.3）
 
 ### 6.1 问题事实
 
@@ -261,7 +273,7 @@
 1. 引入 CLI 层统一错误出口：`print_error_and_fail(code, message) -> anyhow::Error`，替代 `print_error(...) ; Ok(())` 模式，使失败冒泡到 `main` 返回非零退出码。
 2. 保持 stdout/stderr 契约：成功输出走 stdout；错误文案走 stderr。JSON 模式下，错误额外在 stderr 输出结构化 `{"error":{...}}`（不污染 stdout，避免破坏只解析 stdout 的调用方）。
 3. 退出码分层（建议值，待 O6 拍板）：参数错误 2、未找到 3、服务不可用 4、其他 1。
-4. 错误码复用 core 表，CLI 经 `cce_api::models::error_codes` 获取（已可达）。
+4. 错误码复用 core 表，CLI 直连 `cce_types::error_codes`（O2 删除 re-export 后；落地时修正，见 0.3）。
 
 ### 6.3 错误码表格（三端统一，供 CLI 阶段使用）
 

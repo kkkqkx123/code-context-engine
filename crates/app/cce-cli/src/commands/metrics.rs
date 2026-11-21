@@ -5,7 +5,8 @@ use clap::Subcommand;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 
-use crate::output::{print_error, print_success};
+use crate::error::{fail, fail_client};
+use crate::output::print_success;
 use cce_api::models::{MetricsCleanupQuery, MetricsHistoryQuery};
 use cce_client::Client;
 
@@ -32,17 +33,11 @@ pub async fn execute_with_client(
     let content = match format {
         MetricsFormat::Prometheus => match client.metrics_prometheus().await {
             Ok(content) => content,
-            Err(error) => {
-                print_error(&format!("Failed to fetch metrics: {error}"));
-                return Ok(());
-            }
+            Err(error) => return Err(fail_client("Failed to fetch metrics", &error)),
         },
         MetricsFormat::Json => match client.metrics_json().await {
             Ok(snapshot) => serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
-            Err(error) => {
-                print_error(&format!("Failed to fetch metrics: {error}"));
-                return Ok(());
-            }
+            Err(error) => return Err(fail_client("Failed to fetch metrics", &error)),
         },
     };
     println!("{}", content);
@@ -164,7 +159,7 @@ pub async fn execute_cleanup_with_client(
             response.deleted_count
         ));
     } else {
-        print_error("Failed to clean up metrics");
+        return Err(fail("Failed to clean up metrics"));
     }
 
     Ok(())

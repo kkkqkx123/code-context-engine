@@ -2,6 +2,7 @@
 
 use clap::Subcommand;
 
+use crate::error::{fail, fail_client};
 use crate::output::truncate;
 use cce_api::models::SearchResultItem;
 
@@ -123,14 +124,11 @@ pub async fn execute_with_client(
                             }
                         }
                     } else {
-                        crate::output::print_error("Search failed");
+                        return Err(fail("Search failed"));
                     }
                     Ok(())
                 }
-                Err(e) => {
-                    crate::output::print_error(&format!("Search failed: {e}"));
-                    Ok(())
-                }
+                Err(e) => Err(fail_client("Search failed", &e)),
             }
         }
     }

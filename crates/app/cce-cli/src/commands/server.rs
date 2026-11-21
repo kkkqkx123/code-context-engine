@@ -14,7 +14,8 @@ use serde::Serialize;
 use tokio::process::Command;
 
 use crate::cli::OutputFormat;
-use crate::output::{print_error, print_output, print_success, print_warning};
+use crate::error::fail;
+use crate::output::{print_output, print_success, print_warning};
 
 use super::process as proc;
 
@@ -274,11 +275,12 @@ async fn start_background(
             Ok(())
         }
         Err(e) => {
-            print_error(&format!("server did not become ready: {e:#}"));
-            print_error(&format!("see log tail: {}", log_path.display()));
             let _ = proc::terminate_process(pid, 5);
             let _ = std::fs::remove_file(&pid_path);
-            Err(anyhow::anyhow!("server failed to become ready"))
+            Err(fail(format!(
+                "server failed to become ready: {e:#}; see log tail: {}",
+                log_path.display()
+            )))
         }
     }
 }

@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::output::{print_error, print_success};
+use crate::error::{fail, fail_client};
+use crate::output::print_success;
 use cce_api::models::StartWatchRequest;
 
 /// Execute watch commands through the client abstraction.
@@ -37,10 +38,10 @@ pub async fn execute_with_client(
                     if response.success {
                         print_success(&format!("Watch started on: {}", response.path));
                     } else {
-                        print_error("Failed to start watch");
+                        return Err(fail("Failed to start watch"));
                     }
                 }
-                Err(e) => print_error(&format!("Failed to start watch: {e}")),
+                Err(e) => return Err(fail_client("Failed to start watch", &e)),
             }
             Ok(())
         }
@@ -49,14 +50,11 @@ pub async fn execute_with_client(
                 if response.success {
                     print_success("Watch stopped");
                 } else {
-                    print_error("Failed to stop watch");
+                    return Err(fail("Failed to stop watch"));
                 }
                 Ok(())
             }
-            Err(e) => {
-                print_error(&format!("Failed to stop watch: {e}"));
-                Ok(())
-            }
+            Err(e) => Err(fail_client("Failed to stop watch", &e)),
         },
         WatchCommands::Status { project_id } => match client.watch_status(*project_id).await {
             Ok(response) => {
@@ -75,14 +73,11 @@ pub async fn execute_with_client(
                         }
                     }
                 } else {
-                    print_error("Failed to get watch status");
+                    return Err(fail("Failed to get watch status"));
                 }
                 Ok(())
             }
-            Err(e) => {
-                print_error(&format!("Failed to get watch status: {e}"));
-                Ok(())
-            }
+            Err(e) => Err(fail_client("Failed to get watch status", &e)),
         },
     }
 }

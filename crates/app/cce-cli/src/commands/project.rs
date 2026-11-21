@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::output::{print_error, print_success, print_table, truncate};
+use crate::error::{fail, fail_client};
+use crate::output::{print_success, print_table, truncate};
 use cce_api::models::{
     CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest, UpdateProjectRequest,
 };
@@ -54,10 +55,10 @@ pub async fn execute_with_client(
                         println!();
                         print_project_details(&response.project);
                     } else {
-                        print_error("Failed to create project");
+                        return Err(fail("Failed to create project"));
                     }
                 }
-                Err(e) => print_error(&format!("Failed to create project: {e}")),
+                Err(e) => return Err(fail_client("Failed to create project", &e)),
             }
             Ok(())
         }
@@ -86,14 +87,11 @@ pub async fn execute_with_client(
                         print_table(&headers, &rows);
                     }
                 } else {
-                    print_error("Failed to list projects");
+                    return Err(fail("Failed to list projects"));
                 }
                 Ok(())
             }
-            Err(e) => {
-                print_error(&format!("Failed to list projects: {e}"));
-                Ok(())
-            }
+            Err(e) => Err(fail_client("Failed to list projects", &e)),
         },
         ProjectCommands::Get { id } => {
             match client.get_project(project_id(id)?).await {
@@ -103,10 +101,10 @@ pub async fn execute_with_client(
                         println!();
                         print_project_details(&response.project);
                     } else {
-                        print_error("Failed to get project");
+                        return Err(fail("Failed to get project"));
                     }
                 }
-                Err(e) => print_error(&format!("Failed to get project: {e}")),
+                Err(e) => return Err(fail_client("Failed to get project", &e)),
             }
             Ok(())
         }
@@ -116,10 +114,10 @@ pub async fn execute_with_client(
                     if response.success {
                         print_success(&format!("Project {} deleted", response.project_id));
                     } else {
-                        print_error("Failed to delete project");
+                        return Err(fail("Failed to delete project"));
                     }
                 }
-                Err(e) => print_error(&format!("Failed to delete project: {e}")),
+                Err(e) => return Err(fail_client("Failed to delete project", &e)),
             }
             Ok(())
         }
@@ -134,10 +132,10 @@ pub async fn execute_with_client(
                         ));
                         println!("  {}", response.message);
                     } else {
-                        print_error("Failed to reload project configuration");
+                        return Err(fail("Failed to reload project configuration"));
                     }
                 }
-                Err(e) => print_error(&format!("Failed to reload project configuration: {e}")),
+                Err(e) => return Err(fail_client("Failed to reload project configuration", &e)),
             }
             Ok(())
         }
@@ -168,7 +166,7 @@ async fn update_project(
         println!();
         print_project_details(&response.project);
     } else {
-        print_error("Failed to update project");
+        return Err(fail("Failed to update project"));
     }
 
     Ok(())
@@ -187,7 +185,7 @@ async fn index_project(client: &Client, id: &str, verbose: bool) -> Result<()> {
             response.indexed_files, response.total_entities
         ));
     } else {
-        print_error("Failed to index project");
+        return Err(fail("Failed to index project"));
     }
 
     Ok(())
@@ -223,7 +221,7 @@ async fn update_project_config(client: &Client, id: &str, verbose: bool) -> Resu
         print_success(&format!("Project {} configuration updated", id));
         println!("  {}", response.message);
     } else {
-        print_error("Failed to update project configuration");
+        return Err(fail("Failed to update project configuration"));
     }
 
     Ok(())

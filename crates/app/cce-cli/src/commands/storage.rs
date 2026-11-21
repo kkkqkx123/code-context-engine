@@ -4,6 +4,7 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
+use crate::error::fail;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{BatchDeleteRequest, ClearIndexRequest};
 use cce_client::Client;
@@ -85,7 +86,7 @@ async fn storage_status(client: &Client, verbose: bool) -> Result<()> {
             println!("  Running:      {}", process.running);
         }
     } else {
-        print_error("Failed to get storage status");
+        return Err(fail("Failed to get storage status"));
     }
 
     Ok(())
@@ -127,7 +128,7 @@ async fn index_stats(project_id: i64, client: &Client, verbose: bool) -> Result<
             format_duration(response.elapsed_ms)
         );
     } else {
-        print_error("Failed to get index statistics");
+        return Err(fail("Failed to get index statistics"));
     }
 
     Ok(())
@@ -169,7 +170,7 @@ async fn clear_index(
             format_duration(response.elapsed_ms)
         );
     } else {
-        print_error("Failed to clear index");
+        return Err(fail("Failed to clear index"));
     }
 
     Ok(())
@@ -193,7 +194,7 @@ async fn delete_file(project_id: i64, client: &Client, path: &str, verbose: bool
             format_duration(response.elapsed_ms)
         );
     } else {
-        print_error("Failed to delete file");
+        return Err(fail("Failed to delete file"));
     }
 
     Ok(())
@@ -221,7 +222,7 @@ async fn delete_entity(project_id: i64, client: &Client, id: &str, verbose: bool
             format_duration(response.elapsed_ms)
         );
     } else {
-        print_error("Failed to delete entity");
+        return Err(fail("Failed to delete entity"));
     }
 
     Ok(())
@@ -277,7 +278,7 @@ async fn batch_delete(
             }
         }
     } else {
-        print_error("Batch delete failed");
+        return Err(fail("Batch delete failed"));
     }
 
     Ok(())

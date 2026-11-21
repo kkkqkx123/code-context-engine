@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::output::{print_error, print_output, print_success};
+use crate::error::{fail, fail_client};
+use crate::output::{print_output, print_success};
 use cce_api::models::GraphSubgraphResponse;
 
 /// Execute graph commands through the client abstraction.
@@ -58,10 +59,10 @@ pub async fn execute_with_client(
                     } else if response.success {
                         print_subgraph(&response);
                     } else {
-                        print_error("Graph ego query failed");
+                        return Err(fail("Graph ego query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph ego query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph ego query failed", &e)),
             }
         }
         GraphCommands::Path {
@@ -108,10 +109,10 @@ pub async fn execute_with_client(
                             print_success("No path found");
                         }
                     } else {
-                        print_error("Graph path query failed");
+                        return Err(fail("Graph path query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph path query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph path query failed", &e)),
             }
         }
         GraphCommands::Subgraph {
@@ -152,10 +153,10 @@ pub async fn execute_with_client(
                     } else if response.success {
                         print_subgraph(&response);
                     } else {
-                        print_error("Graph subgraph query failed");
+                        return Err(fail("Graph subgraph query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph subgraph query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph subgraph query failed", &e)),
             }
         }
         GraphCommands::Components {
@@ -196,10 +197,10 @@ pub async fn execute_with_client(
                             println!("  component {index}: {} entities", group.len());
                         }
                     } else {
-                        print_error("Graph components query failed");
+                        return Err(fail("Graph components query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph components query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph components query failed", &e)),
             }
         }
         GraphCommands::Export {
@@ -232,10 +233,10 @@ pub async fn execute_with_client(
                     } else if response.success {
                         print_subgraph(&response);
                     } else {
-                        print_error("Graph export failed");
+                        return Err(fail("Graph export failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph export failed: {e}")),
+                Err(e) => return Err(fail_client("Graph export failed", &e)),
             }
         }
         GraphCommands::Impact { file, project_id } => {
@@ -261,10 +262,10 @@ pub async fn execute_with_client(
                             println!("  indirect: {dependent}");
                         }
                     } else {
-                        print_error("Graph impact query failed");
+                        return Err(fail("Graph impact query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph impact query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph impact query failed", &e)),
             }
         }
         GraphCommands::EntityImpact {
@@ -302,10 +303,10 @@ pub async fn execute_with_client(
                             println!("  indirect: {dependent}");
                         }
                     } else {
-                        print_error("Graph entity impact query failed");
+                        return Err(fail("Graph entity impact query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph entity impact query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph entity impact query failed", &e)),
             }
         }
         GraphCommands::Cycles {
@@ -346,10 +347,10 @@ pub async fn execute_with_client(
                             println!("  cycle {index}: {}", cycle.members.join(" -> "));
                         }
                     } else {
-                        print_error("Graph cycle query failed");
+                        return Err(fail("Graph cycle query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph cycle query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph cycle query failed", &e)),
             }
         }
         GraphCommands::Structural {
@@ -400,10 +401,10 @@ pub async fn execute_with_client(
                             );
                         }
                     } else {
-                        print_error("Graph structural query failed");
+                        return Err(fail("Graph structural query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph structural query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph structural query failed", &e)),
             }
         }
         GraphCommands::Module { file, project_id } => {
@@ -432,10 +433,10 @@ pub async fn execute_with_client(
                             println!("  <- {caller}");
                         }
                     } else {
-                        print_error("Graph module query failed");
+                        return Err(fail("Graph module query failed"));
                     }
                 }
-                Err(e) => print_error(&format!("Graph module query failed: {e}")),
+                Err(e) => return Err(fail_client("Graph module query failed", &e)),
             }
         }
     }

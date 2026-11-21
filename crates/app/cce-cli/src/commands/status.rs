@@ -4,6 +4,7 @@ use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
 
+use crate::error::fail_client;
 use crate::icons;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::{StorageComponentStatus, StorageStatus};
@@ -79,19 +80,7 @@ pub async fn execute_with_client(
                 }
             }
         }
-        Err(e) => {
-            if matches!(format, crate::cli::OutputFormat::Json) {
-                let status = CombinedStatus {
-                    server_url: client.base_url().to_string(),
-                    healthy: false,
-                    storage: None,
-                };
-                print_output(format, &status);
-            } else {
-                print_error(&format!("Failed to get health status: {}", e));
-            }
-            return Ok(());
-        }
+        Err(e) => return Err(fail_client("Failed to get health status", &e)),
     }
 
     if matches!(format, crate::cli::OutputFormat::Json) {

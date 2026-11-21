@@ -5,7 +5,8 @@ use clap::Subcommand;
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::output::{print_error, print_success};
+use crate::error::fail;
+use crate::output::print_success;
 use cce_api::models::{
     BatchFoldRequest, CompressRequest, DiagnoseRequest, FindReferencesRequest, FoldRequest,
     GetSymbolsRequest, GotoDefinitionRequest, KeywordSearchRequest, KeywordTermOperator,
@@ -255,7 +256,7 @@ pub async fn execute_compress_with_client(
                 .error
                 .as_deref()
                 .unwrap_or("Failed to compress code");
-            print_error(err);
+            return Err(fail(err));
         }
     }
 
@@ -306,7 +307,7 @@ pub async fn execute_diagnose_with_client(
             .error
             .as_deref()
             .unwrap_or("Failed to diagnose code");
-        print_error(err);
+        return Err(fail(err));
     }
 
     Ok(())
@@ -331,8 +332,7 @@ pub async fn execute_get_symbols_with_client(
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
-            print_error("No data returned");
-            return Ok(());
+            return Err(fail("No data returned"));
         };
 
         print_success(&format!(
@@ -369,7 +369,7 @@ pub async fn execute_get_symbols_with_client(
         }
     } else {
         let err = response.error.as_deref().unwrap_or("Failed to get symbols");
-        print_error(err);
+        return Err(fail(err));
     }
 
     Ok(())
@@ -401,8 +401,7 @@ pub async fn execute_find_references_with_client(
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
-            print_error("No data returned");
-            return Ok(());
+            return Err(fail("No data returned"));
         };
 
         print_success(&format!(
@@ -435,7 +434,7 @@ pub async fn execute_find_references_with_client(
             .error
             .as_deref()
             .unwrap_or("Failed to find references");
-        print_error(err);
+        return Err(fail(err));
     }
 
     Ok(())
@@ -463,8 +462,7 @@ pub async fn execute_goto_definition_with_client(
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
-            print_error("No data returned");
-            return Ok(());
+            return Err(fail("No data returned"));
         };
 
         if result.definitions.is_empty() {
@@ -487,7 +485,7 @@ pub async fn execute_goto_definition_with_client(
             .error
             .as_deref()
             .unwrap_or("Failed to find definition");
-        print_error(err);
+        return Err(fail(err));
     }
 
     Ok(())
@@ -538,7 +536,7 @@ pub async fn execute_keyword_search_with_client(
         }
     } else {
         let err = response.error.as_deref().unwrap_or("Unknown error");
-        print_error(&format!("Keyword search failed: {}", err));
+        return Err(fail(format!("Keyword search failed: {}", err)));
     }
 
     Ok(())
@@ -569,7 +567,7 @@ pub async fn execute_fold_with_client(
         println!();
         println!("{}", response.folded_text);
     } else {
-        print_error("Fold failed");
+        return Err(fail("Fold failed"));
     }
     Ok(())
 }

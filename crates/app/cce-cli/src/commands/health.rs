@@ -5,6 +5,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use colored::Colorize;
 
+use crate::error::fail_client;
 use crate::icons;
 use crate::output::{print_error, print_output, print_success, print_warning};
 use cce_api::models::RetryQueueQuery;
@@ -89,17 +90,7 @@ async fn health_check(
                 }
             }
         }
-        Err(e) => {
-            if matches!(format, crate::cli::OutputFormat::Json) {
-                let error = serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to get health status: {}", e)
-                });
-                print_output(format, &error);
-            } else {
-                print_error(&format!("Failed to get health status: {}", e));
-            }
-        }
+        Err(e) => return Err(fail_client("Failed to get health status", &e)),
     }
 
     Ok(())
@@ -149,9 +140,7 @@ async fn health_qdrant(client: &Client, verbose: bool) -> Result<()> {
                 println!("  Error: {}", error.red());
             }
         }
-        Err(e) => {
-            print_error(&format!("Failed to get Qdrant health: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to get Qdrant health", &e)),
     }
 
     Ok(())
@@ -174,9 +163,7 @@ async fn health_embedding(client: &Client, verbose: bool) -> Result<()> {
             }
             print_value("Message", &response.message);
         }
-        Err(e) => {
-            print_error(&format!("Failed to get Embedding health: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to get Embedding health", &e)),
     }
 
     Ok(())
@@ -199,9 +186,7 @@ async fn health_bm25(client: &Client, verbose: bool) -> Result<()> {
                 print_value("Index Path", path);
             }
         }
-        Err(e) => {
-            print_error(&format!("Failed to get BM25 health: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to get BM25 health", &e)),
     }
 
     Ok(())
@@ -228,9 +213,7 @@ async fn retry_queue_status(client: &Client, verbose: bool) -> Result<()> {
                 ));
             }
         }
-        Err(e) => {
-            print_error(&format!("Failed to get retry queue status: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to get retry queue status", &e)),
     }
 
     Ok(())
@@ -249,9 +232,7 @@ async fn retry_queue_process(client: &Client, verbose: bool) -> Result<()> {
                 response.processed, response.message
             ));
         }
-        Err(e) => {
-            print_error(&format!("Failed to process retry queue: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to process retry queue", &e)),
     }
 
     Ok(())
@@ -270,9 +251,7 @@ async fn retry_queue_clear(client: &Client, verbose: bool) -> Result<()> {
                 response.cleared, response.message
             ));
         }
-        Err(e) => {
-            print_error(&format!("Failed to clear retry queue: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to clear retry queue", &e)),
     }
 
     Ok(())
@@ -287,9 +266,7 @@ async fn retry_queue_dead_list(client: &Client, verbose: bool) -> Result<()> {
         Ok(response) => {
             println!("dead_count={}", response.dead_count);
         }
-        Err(e) => {
-            print_error(&format!("Failed to list dead entries: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to list dead entries", &e)),
     }
     Ok(())
 }
@@ -303,9 +280,7 @@ async fn retry_queue_dead_clear(client: &Client, verbose: bool) -> Result<()> {
         Ok(response) => {
             print_success(&format!("Cleared: {}", response.message));
         }
-        Err(e) => {
-            print_error(&format!("Failed to clear dead entries: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to clear dead entries", &e)),
     }
     Ok(())
 }
@@ -320,9 +295,7 @@ async fn admission_stats(client: &Client, verbose: bool) -> Result<()> {
             println!("admitted={}", response.global.admitted);
             println!("tokens={}", response.tokens.len());
         }
-        Err(e) => {
-            print_error(&format!("Failed to get admission stats: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to get admission stats", &e)),
     }
     Ok(())
 }

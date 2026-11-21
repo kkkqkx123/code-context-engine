@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::output::{print_error, print_success};
+use crate::error::fail;
+use crate::output::print_success;
 use cce_api::models::QdrantProcessStatus;
 use cce_client::Client;
 
@@ -41,7 +42,7 @@ pub async fn execute_with_client(
             if response.success {
                 print_success(&response.message);
             } else {
-                print_error(&response.message);
+                return Err(fail(response.message.clone()));
             }
             println!("  Status:  {}", format_status(&response.status));
 

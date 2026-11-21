@@ -3,7 +3,8 @@
 use anyhow::Result;
 use clap::Parser;
 
-use crate::output::{format_duration, print_error, print_success, truncate};
+use crate::error::{fail, fail_client};
+use crate::output::{format_duration, print_success, truncate};
 use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
 
 /// Execute multi-query aggregated search
@@ -119,14 +120,8 @@ impl AggSearchCommand {
             println!("Sub-queries: {}", request.sub_queries.len());
         }
         match client.search_aggregated(&request).await {
-            Ok(response) => {
-                Self::render(&response);
-                Ok(())
-            }
-            Err(e) => {
-                print_error(&format!("Aggregated search failed: {e}"));
-                Ok(())
-            }
+            Ok(response) => Self::render(&response),
+            Err(e) => Err(fail_client("Aggregated search failed", &e)),
         }
     }
 
@@ -214,7 +209,7 @@ impl AggSearchCommand {
         })
     }
 
-    fn render(response: &SearchResponse) {
+    fn render(response: &SearchResponse) -> anyhow::Result<()> {
         if response.success {
             print_success(&format!(
                 "Found {} results in {}",
@@ -229,8 +224,9 @@ impl AggSearchCommand {
                     print_result_item(i + 1, item);
                 }
             }
+            Ok(())
         } else {
-            print_error("Aggregated search failed");
+            Err(fail("Aggregated search failed"))
         }
     }
 }

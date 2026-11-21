@@ -4,7 +4,8 @@
 
 use anyhow::Result;
 
-use crate::output::{print_error, print_success};
+use crate::error::{fail_client, fail_input};
+use crate::output::print_success;
 use cce_api::models::BatchCompressRequest;
 use cce_client::Client;
 
@@ -22,8 +23,9 @@ pub async fn execute_with_client(
 
     // Validate input
     if file_paths.is_empty() {
-        print_error("Must provide at least one file path to compress");
-        return Ok(());
+        return Err(fail_input(
+            "Must provide at least one file path to compress",
+        ));
     }
 
     let request = BatchCompressRequest {
@@ -72,9 +74,7 @@ pub async fn execute_with_client(
                 }
             }
         }
-        Err(e) => {
-            print_error(&format!("Failed to compress files: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to compress files", &e)),
     }
 
     Ok(())

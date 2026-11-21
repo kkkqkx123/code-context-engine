@@ -4,6 +4,7 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
+use crate::error::{fail, fail_client};
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
     DeadLetterAcknowledgeRequest, DeadLetterRetryRequest, IncrementalIndexRequest, IndexRequest,
@@ -98,10 +99,10 @@ pub async fn execute_with_client(
                             }
                         }
                     } else {
-                        print_error(&response.message);
+                        return Err(fail(response.message.clone()));
                     }
                 }
-                Err(e) => print_error(&format!("Index execution failed: {e}")),
+                Err(e) => return Err(fail_client("Index execution failed", &e)),
             }
             Ok(())
         }
@@ -207,7 +208,7 @@ async fn retry_dead_letter(
         print_success(&response.message);
         println!("  affected={}", response.affected);
     } else {
-        print_error(&response.message);
+        return Err(fail(response.message.clone()));
     }
     Ok(())
 }
@@ -242,7 +243,7 @@ async fn acknowledge_dead_letter(
     if response.success {
         print_success(&response.message);
     } else {
-        print_error(&response.message);
+        return Err(fail(response.message.clone()));
     }
     Ok(())
 }
@@ -298,7 +299,7 @@ async fn incremental_index(
             }
         }
     } else {
-        print_error("Incremental index failed");
+        return Err(fail("Incremental index failed"));
     }
 
     Ok(())
@@ -335,7 +336,7 @@ async fn parse_file(client: &Client, file: &str, verbose: bool) -> Result<()> {
             }
         }
     } else {
-        print_error("Parse failed");
+        return Err(fail("Parse failed"));
     }
 
     Ok(())

@@ -7,6 +7,7 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
+use crate::error::{fail, fail_client};
 use crate::output::{print_error, print_success, print_warning};
 use cce_client::Client;
 
@@ -30,17 +31,15 @@ pub async fn execute_reload_with_client(
                     println!("  {}", response.message);
                 }
             } else if !response.message.is_empty() {
-                print_error(&format!(
+                return Err(fail(format!(
                     "Configuration reload failed: {}",
                     response.message
-                ));
+                )));
             } else {
-                print_error("Configuration reload failed");
+                return Err(fail("Configuration reload failed"));
             }
         }
-        Err(e) => {
-            print_error(&format!("Failed to reload configuration: {e}"));
-        }
+        Err(e) => return Err(fail_client("Failed to reload configuration", &e)),
     }
     Ok(())
 }
@@ -64,9 +63,7 @@ pub async fn execute_info_with_client(client: &Client, verbose: bool) -> Result<
                 serde_json::to_string_pretty(&response.embedder).unwrap_or_default()
             );
         }
-        Err(e) => {
-            print_error(&format!("Failed to fetch config info: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to fetch config info", &e)),
     }
 
     Ok(())
@@ -82,8 +79,6 @@ pub async fn execute_validate_with_client(client: &Client, verbose: bool) -> Res
         Ok(response) => {
             if response.valid {
                 print_success("Configuration is valid");
-            } else {
-                print_error("Configuration is invalid");
             }
 
             for error in &response.errors {
@@ -105,10 +100,11 @@ pub async fn execute_validate_with_client(client: &Client, verbose: bool) -> Res
                     _ => println!("  {}", msg),
                 }
             }
+            if !response.valid {
+                return Err(fail("Configuration is invalid"));
+            }
         }
-        Err(e) => {
-            print_error(&format!("Failed to validate configuration: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to validate configuration", &e)),
     }
 
     Ok(())

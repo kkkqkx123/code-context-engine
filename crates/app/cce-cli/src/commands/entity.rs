@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::output::{print_error, print_output, print_success, truncate};
+use crate::error::fail;
+use crate::output::{print_output, print_success, truncate};
 use cce_api::models::{
     CallChainDirectionParams, CallChainQueryParams, CallPathQuery, EntitySearchRequest,
 };
@@ -213,7 +214,7 @@ async fn get_function(
             println!("  Doc comment:  {}", truncate(doc, 80));
         }
     } else {
-        print_error("Failed to get function");
+        return Err(fail("Failed to get function"));
     }
 
     Ok(())
@@ -254,7 +255,7 @@ async fn get_function_calls(
             }
         }
     } else {
-        print_error("Failed to get function calls");
+        return Err(fail("Failed to get function calls"));
     }
 
     Ok(())
@@ -295,7 +296,7 @@ async fn get_function_callers(
             }
         }
     } else {
-        print_error("Failed to get function callers");
+        return Err(fail("Failed to get function callers"));
     }
 
     Ok(())
@@ -350,7 +351,7 @@ async fn get_call_chain(
             }
         }
     } else {
-        print_error("Failed to get call chain");
+        return Err(fail("Failed to get call chain"));
     }
 
     Ok(())
@@ -398,7 +399,7 @@ async fn get_call_path(
             println!("No path found between {} and {}", from, to);
         }
     } else {
-        print_error("Failed to find call path");
+        return Err(fail("Failed to find call path"));
     }
 
     Ok(())
@@ -448,7 +449,7 @@ async fn get_class_inheritance(
             println!("No inheritance relationships found");
         }
     } else {
-        print_error("Failed to get class inheritance");
+        return Err(fail("Failed to get class inheritance"));
     }
 
     Ok(())
@@ -496,7 +497,7 @@ async fn get_class_implementations(
             println!("No implementation relationships found");
         }
     } else {
-        print_error("Failed to get class implementations");
+        return Err(fail("Failed to get class implementations"));
     }
 
     Ok(())
@@ -559,7 +560,7 @@ async fn search_entities(
         println!();
         println!("  Elapsed: {}ms", response.elapsed_ms);
     } else {
-        print_error("Failed to search entities");
+        return Err(fail("Failed to search entities"));
     }
 
     Ok(())

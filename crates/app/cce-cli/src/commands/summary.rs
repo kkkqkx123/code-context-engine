@@ -8,6 +8,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use cce_api::models::SummaryRequest;
 
+use crate::error::{fail, fail_client, fail_input};
 use crate::output::{print_error, print_success, print_warning};
 use cce_client::Client;
 
@@ -64,8 +65,9 @@ pub async fn execute_with_client(options: SummaryOptions, client: &Client) -> Re
 
     // Validate input
     if options.input.files.is_empty() && options.input.directories.is_empty() {
-        print_error("Must provide at least one file path or directory path");
-        return Ok(());
+        return Err(fail_input(
+            "Must provide at least one file path or directory path",
+        ));
     }
 
     let request = SummaryRequest {
@@ -148,12 +150,10 @@ pub async fn execute_with_client(options: SummaryOptions, client: &Client) -> Re
                     }
                 }
             } else {
-                print_error("Summary generation failed");
+                return Err(fail("Summary generation failed"));
             }
         }
-        Err(e) => {
-            print_error(&format!("Failed to generate summaries: {}", e));
-        }
+        Err(e) => return Err(fail_client("Failed to generate summaries", &e)),
     }
 
     Ok(())
