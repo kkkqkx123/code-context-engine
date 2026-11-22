@@ -84,10 +84,13 @@ impl ElasticsearchClient {
                             v.pointer("/aggregations/epochs/buckets")
                                 .and_then(Value::as_array)
                                 .map(|buckets| {
-                                    buckets
+                                    let mut epochs: Vec<i64> = buckets
                                         .iter()
                                         .filter_map(|b| b.get("key").and_then(Value::as_i64))
-                                        .collect()
+                                        .collect();
+                                    epochs.sort_unstable();
+                                    epochs.dedup();
+                                    epochs
                                 })
                                 .unwrap_or_default()
                         })

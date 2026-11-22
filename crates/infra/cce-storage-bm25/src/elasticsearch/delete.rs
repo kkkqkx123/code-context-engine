@@ -8,7 +8,7 @@ use crate::Bm25Error;
 use super::ElasticsearchClient;
 
 impl ElasticsearchClient {
-    async fn delete_by_query(&self, query: &Value) -> Result<usize, Bm25Error> {
+    pub(super) async fn delete_by_query(&self, query: &Value) -> Result<usize, Bm25Error> {
         self.check_breaker().await?;
         let body = json!({ "query": query });
         let result = self

@@ -8,7 +8,6 @@ use cce_storage_common::{DenseSearchQuery, ScoredPoint, VectorPoint, VectorStora
 use cce_types::{PointKind, StorageError};
 
 use crate::client::QdrantClient;
-use crate::retrieval::QdrantRetrieval;
 
 impl VectorStorage for QdrantClient {
     fn backend_name(&self) -> &'static str {
@@ -39,12 +38,7 @@ impl VectorStorage for QdrantClient {
         &self,
         query: DenseSearchQuery,
     ) -> Result<Vec<ScoredPoint>, StorageError> {
-        let retrieval = QdrantRetrieval::new(
-            self.http_client().clone(),
-            self.base_url().to_string(),
-            self.collection_name().to_string(),
-        );
-        retrieval.search_dense(query).await
+        QdrantClient::search_dense(self, query).await
     }
 
     async fn delete_by_file_path_scoped(

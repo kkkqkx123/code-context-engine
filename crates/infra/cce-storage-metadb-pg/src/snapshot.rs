@@ -63,11 +63,14 @@ impl PostgresClient {
         epoch: i64,
     ) -> Result<CanonicalRelationSnapshot, StorageError> {
         self.run(async move {
-            let client = self.pooled().await?;
-            let manifest = snapshot_manifest_in(&client, project_id, epoch)
+            let mut client = self.pooled().await?;
+            let tx = client.transaction().await.map_err(classify_pg)?;
+            let manifest = snapshot_manifest_in(&tx, project_id, epoch)
                 .await?
                 .ok_or_else(|| StorageError::not_found(format!("relation snapshot {epoch}")))?;
-            snapshot_read_in(&client, &manifest).await
+            let snapshot = snapshot_read_in(&tx, &manifest).await?;
+            tx.commit().await.map_err(classify_pg)?;
+            Ok(snapshot)
         })
         .await
     }
@@ -620,11 +623,11 @@ fn snapshot_manifest_from_row(
 }
 
 async fn snapshot_manifest_in(
-    client: &deadpool_postgres::Client,
+    executor: &impl deadpool_postgres::GenericClient,
     project_id: i64,
     epoch: i64,
 ) -> Result<Option<RelationSnapshotManifest>, StorageError> {
-    let row = client
+    let row = executor
         .query_opt(
             &format!(
                 "SELECT {SNAPSHOT_MANIFEST_COLUMNS} FROM relation_snapshot_manifest \
@@ -1033,7 +1036,7 @@ async fn snapshot_write_ready_in(
 }
 
 async fn snapshot_read_in(
-    client: &deadpool_postgres::Client,
+    executor: &impl deadpool_postgres::GenericClient,
     manifest: &RelationSnapshotManifest,
 ) -> Result<CanonicalRelationSnapshot, StorageError> {
     use cce_types::{
@@ -1047,7 +1050,7 @@ async fn snapshot_read_in(
     snapshot.resolver_version = manifest.resolver_version;
     snapshot.path_normalization_version = manifest.path_normalization_version;
 
-    let file_rows = client
+    let file_rows = executor
         .query(
             "SELECT id, path, language, input_hash, file_size, imports_json \
              FROM relation_snapshot_files \
@@ -1072,7 +1075,7 @@ async fn snapshot_read_in(
         });
     }
 
-    let entity_rows = client
+    let entity_rows = executor
         .query(
             "SELECT e.id, f.path, e.scoped_name, e.kind_json, e.overload_discriminator, e.name, \
              e.signature, e.parameters_json, e.return_type, e.span_json, e.depth, \
@@ -1137,7 +1140,7 @@ async fn snapshot_read_in(
             .transpose()?;
     }
 
-    let relation_rows = client
+    let relation_rows = executor
         .query(
             "SELECT caller_symbol_id, target_symbol_id, target_state, raw_target, \
              relation_type_json, span_json, external_type_json, unresolved_reason, \
@@ -1214,7 +1217,7 @@ async fn snapshot_read_in(
         });
     }
 
-    let export_rows = client
+    let export_rows = executor
         .query(
             "SELECT file_id, symbol_id, export_type FROM relation_snapshot_exports \
              WHERE project_id = $1 AND relation_epoch = $2",
@@ -1232,7 +1235,7 @@ async fn snapshot_read_in(
         });
     }
 
-    let dependency_rows = client
+    let dependency_rows = executor
         .query(
             "SELECT source_file_id, target_path, source FROM relation_snapshot_dependencies \
              WHERE project_id = $1 AND relation_epoch = $2",

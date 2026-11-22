@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::debug;
 
 use cce_storage_common::FulltextDocument;
@@ -25,13 +25,28 @@ impl ElasticsearchClient {
         self.check_breaker().await?;
         let start = Instant::now();
         let mut total = 0usize;
+        let mut written_ids: Vec<String> = Vec::new();
         for chunk in documents.chunks(self.config.bulk_size.max(1)) {
-            let result = self.bulk_once(chunk).await;
-            match &result {
-                Ok(_) => self.record_success().await,
-                Err(err) => self.record_failure(err).await,
+            match self.bulk_once(chunk).await {
+                Ok(count) => {
+                    self.record_success().await;
+                    total += count;
+                    written_ids.extend(chunk.iter().map(|doc| doc.document_id.clone()));
+                }
+                Err(err) => {
+                    self.record_failure(&err).await;
+                    // The contract commits a batch as one atomic scope. Remove
+                    // chunks already written before returning so a failure
+                    // never leaves a partial prefix visible to readers.
+                    if let Err(rollback_err) = self.rollback_ids(&written_ids).await {
+                        tracing::warn!(
+                            error = %rollback_err,
+                            "elasticsearch batch rollback failed after write error"
+                        );
+                    }
+                    return Err(err);
+                }
             }
-            total += result?;
         }
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         if let Some(metrics) = &self.metrics {
@@ -39,6 +54,17 @@ impl ElasticsearchClient {
         }
         debug!(count = total, "Elasticsearch bulk index completed");
         Ok(total)
+    }
+
+    /// Remove a batch's already-written documents after a later chunk fails,
+    /// so the batch leaves no partial prefix. Best-effort: the caller keeps
+    /// the original write error and only logs a rollback failure.
+    async fn rollback_ids(&self, ids: &[String]) -> Result<usize, Bm25Error> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        self.delete_by_query(&json!({ "ids": { "values": ids } }))
+            .await
     }
 
     async fn bulk_once(&self, documents: &[FulltextDocument]) -> Result<usize, Bm25Error> {

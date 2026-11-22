@@ -784,6 +784,46 @@ impl QdrantClient {
     pub fn get_recommended_preset(&self, vector_count: usize) -> crate::config::CollectionPreset {
         crate::config::CollectionPreset::from_vector_count(vector_count)
     }
+
+    /// Contract-facing dense search with the same resilience envelope as the
+    /// other remote operations: circuit breaker guard, outcome recording and
+    /// search metrics. Filter pushdown and directory-prefix trimming stay in
+    /// [`crate::retrieval::QdrantRetrieval`].
+    pub async fn search_dense(
+        &self,
+        query: cce_storage_common::DenseSearchQuery,
+    ) -> Result<Vec<cce_storage_common::ScoredPoint>, cce_types::StorageError> {
+        self.check_circuit_breaker()
+            .await
+            .map_err(cce_types::StorageError::from)?;
+
+        let start = Instant::now();
+        let retrieval = crate::retrieval::QdrantRetrieval::new_with_metric(
+            self.http_client().clone(),
+            self.base_url().to_string(),
+            self.collection_name().to_string(),
+            self.config.distance_metric,
+        );
+        let result: Result<Vec<cce_storage_common::ScoredPoint>, cce_types::StorageError> =
+            retrieval.search_dense(query).await;
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        {
+            let mut breaker = self.circuit_breaker.lock().await;
+            match &result {
+                Ok(_) => breaker.record_success(),
+                Err(err) if err.is_transient() => breaker.record_failure(),
+                Err(_) => {}
+            }
+            if let Some(metrics) = &self.metrics {
+                metrics.record_circuit_breaker_state(breaker.state());
+            }
+        }
+        if let Some(metrics) = &self.metrics {
+            metrics.record_search(latency_ms, result.is_ok());
+        }
+        result
+    }
 }
 
 impl Clone for QdrantClient {

@@ -110,7 +110,8 @@ impl Bm25Retrieval {
                     )),
                 )];
                 for path in excluded_files {
-                    let path_term = tantivy::Term::from_field_text(schema.file_path, path);
+                    let normalized = cce_types::normalize_project_path(path);
+                    let path_term = tantivy::Term::from_field_text(schema.file_path, &normalized);
                     exclusion_clauses.push((
                         tantivy::query::Occur::Should,
                         Box::new(tantivy::query::TermQuery::new(

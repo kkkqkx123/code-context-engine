@@ -1489,15 +1489,7 @@ impl MetadataStorage for SqliteClient {
             return Ok(Vec::new());
         }
         let conn = self.read_connection()?;
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some(entity) = EntityRepository::get_by_id(&conn, *id)?
-                && entity.project_id == project_id
-            {
-                out.push(entity);
-            }
-        }
-        Ok(out)
+        EntityRepository::get_by_ids(&conn, project_id, ids)
     }
 
     async fn entities_by_file(

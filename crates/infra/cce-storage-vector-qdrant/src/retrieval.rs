@@ -3,6 +3,7 @@
 use cce_types::StorageError;
 use reqwest::Client;
 
+use crate::config::DistanceMetric;
 use crate::types::Payload;
 use cce_storage_common::{DenseSearchQuery, ScoredPoint, SearchFilter};
 
@@ -14,15 +15,30 @@ pub struct QdrantRetrieval {
     base_url: String,
     /// Collection name to search
     collection_name: String,
+    /// Distance metric backing the collection, used to report scores in the
+    /// crate-wide "higher is better" form.
+    distance_metric: DistanceMetric,
 }
 
 impl QdrantRetrieval {
-    /// Create a new Qdrant retrieval instance
+    /// Create a new Qdrant retrieval instance using the default Cosine metric.
     pub fn new(http_client: Client, base_url: String, collection_name: String) -> Self {
+        Self::new_with_metric(http_client, base_url, collection_name, DistanceMetric::Cosine)
+    }
+
+    /// Create a retrieval instance bound to a collection with an explicit
+    /// distance metric.
+    pub fn new_with_metric(
+        http_client: Client,
+        base_url: String,
+        collection_name: String,
+        distance_metric: DistanceMetric,
+    ) -> Self {
         Self {
             http_client,
             base_url,
             collection_name,
+            distance_metric,
         }
     }
 
@@ -215,14 +231,34 @@ impl QdrantRetrieval {
             .await
             .map_err(|e| StorageError::Query(format!("Failed to parse response: {}", e)))?;
 
-        let results = parse_search_response(json);
+        let results = parse_search_response(json, self.distance_metric);
 
         tracing::trace!("Search returned {} results", results.len());
         Ok(results)
     }
 }
 
-fn parse_search_response(json: serde_json::Value) -> Vec<ScoredPoint> {
+/// Normalize a raw Qdrant score into the contract's "higher is better" form.
+///
+/// Qdrant returns cosine similarity and dot product with the contract
+/// direction already, but returns Euclidean distance where smaller is nearer.
+/// For distance metrics we map `d` to `1/(1+d)` — identical to the local
+/// engine's `to_score` — so callers see one consistent score semantic across
+/// backends. Non-finite or negative distances collapse to zero similarity.
+fn normalize_score(metric: DistanceMetric, raw: f32) -> f32 {
+    match metric {
+        DistanceMetric::Cosine | DistanceMetric::Dot => raw,
+        DistanceMetric::Euclid => {
+            if raw.is_finite() && raw >= 0.0 {
+                1.0 / (1.0 + raw)
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+fn parse_search_response(json: serde_json::Value, metric: DistanceMetric) -> Vec<ScoredPoint> {
     let points = match json.get("result") {
         Some(serde_json::Value::Array(arr)) => arr,
         Some(other) => {
@@ -238,7 +274,8 @@ fn parse_search_response(json: serde_json::Value) -> Vec<ScoredPoint> {
     points
         .iter()
         .filter_map(|item| {
-            let score = item.get("score")?.as_f64()? as f32;
+            let raw_score = item.get("score")?.as_f64()? as f32;
+            let score = normalize_score(metric, raw_score);
             let payload_json = item.get("payload")?;
             let payload = match serde_json::from_value::<Payload>(payload_json.clone()) {
                 Ok(p) => p,
@@ -298,9 +335,18 @@ impl QdrantRetrieval {
             body["filter"] = filter;
         }
 
-        if let Some(score_threshold) = query.score_threshold {
-            body["score_threshold"] = serde_json::json!(score_threshold);
-        }
+        // With Euclid, Qdrant treats score_threshold as a raw distance bound
+        // (smaller is nearer), the opposite of the contract's similarity
+        // lower bound. Push it down only for similarity metrics; for Euclid
+        // we filter locally after normalizing the score below.
+        let euclid_min_score = if self.distance_metric == DistanceMetric::Euclid {
+            query.score_threshold
+        } else {
+            if let Some(score_threshold) = query.score_threshold {
+                body["score_threshold"] = serde_json::json!(score_threshold);
+            }
+            None
+        };
 
         if let Some(hnsw_ef) = query.hnsw_ef {
             body["params"] = serde_json::json!({
@@ -315,6 +361,9 @@ impl QdrantRetrieval {
         );
 
         let mut hits = self.execute_search(&url, body).await?;
+        if let Some(min_score) = euclid_min_score {
+            hits.retain(|hit| hit.score >= min_score);
+        }
         if let Some(prefix) = directory_prefix {
             hits.retain(|hit| {
                 hit.payload.file_path == prefix
@@ -329,6 +378,31 @@ impl QdrantRetrieval {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_normalize_score_contract_direction() {
+        // Similarity metrics already satisfy higher-is-better.
+        assert_eq!(normalize_score(DistanceMetric::Cosine, 0.85), 0.85);
+        assert_eq!(normalize_score(DistanceMetric::Dot, 2.5), 2.5);
+        // Euclid distance is inverted to (0, 1]; smaller distance -> higher score.
+        assert!((normalize_score(DistanceMetric::Euclid, 0.0) - 1.0).abs() < 1e-6);
+        assert!((normalize_score(DistanceMetric::Euclid, 1.0) - 0.5).abs() < 1e-6);
+        assert!(normalize_score(DistanceMetric::Euclid, 2.0) < 0.5);
+        // Invalid distances collapse to zero, never NaN.
+        assert_eq!(normalize_score(DistanceMetric::Euclid, -1.0), 0.0);
+        assert_eq!(normalize_score(DistanceMetric::Euclid, f32::NAN), 0.0);
+    }
+
+    #[test]
+    fn test_parse_search_response_normalizes_euclid() {
+        let json = serde_json::json!({
+            "result": [point_json("near", 0.0, Some(vec![1])), point_json("far", 3.0, None)]
+        });
+        let results = parse_search_response(json, DistanceMetric::Euclid);
+        assert_eq!(results.len(), 2);
+        assert!((results[0].score - 1.0).abs() < 1e-6);
+        assert!((results[1].score - 0.25).abs() < 1e-6);
+    }
 
     #[test]
     fn test_build_filter_with_epoch() {
@@ -514,7 +588,7 @@ mod tests {
             "time": 0.001
         });
 
-        let results = parse_search_response(json);
+        let results = parse_search_response(json, DistanceMetric::Cosine);
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].id, "group_1_emb_0");
         assert_eq!(results[0].score, 0.85);
@@ -532,7 +606,7 @@ mod tests {
             }
         });
 
-        let results = parse_search_response(json);
+        let results = parse_search_response(json, DistanceMetric::Cosine);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "group_1_emb_0");
         assert_eq!(results[0].payload.entity_ids, Some(vec![7]));
@@ -540,13 +614,17 @@ mod tests {
 
     #[test]
     fn test_parse_search_response_empty_result() {
-        let results = parse_search_response(serde_json::json!({ "result": [] }));
+        let results =
+            parse_search_response(serde_json::json!({ "result": [] }), DistanceMetric::Cosine);
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_parse_search_response_missing_result() {
-        let results = parse_search_response(serde_json::json!({ "error": "boom" }));
+        let results = parse_search_response(
+            serde_json::json!({ "error": "boom" }),
+            DistanceMetric::Cosine,
+        );
         assert!(results.is_empty());
     }
 
@@ -561,7 +639,7 @@ mod tests {
             }]
         });
 
-        let results = parse_search_response(json);
+        let results = parse_search_response(json, DistanceMetric::Cosine);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "6f6a4a8a-6a2a-4a2a-9a2a-000000000000");
     }
@@ -575,7 +653,7 @@ mod tests {
             ]
         });
 
-        let results = parse_search_response(json);
+        let results = parse_search_response(json, DistanceMetric::Cosine);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "group_1_emb_0");
     }

@@ -26,6 +26,7 @@ pub struct LocalVectorStore {
     engine: Arc<LocalVectorEngine>,
     collection: String,
     vector_size: usize,
+    distance: SimDistance,
 }
 
 impl std::fmt::Debug for LocalVectorStore {
@@ -33,6 +34,7 @@ impl std::fmt::Debug for LocalVectorStore {
         f.debug_struct("LocalVectorStore")
             .field("collection", &self.collection)
             .field("vector_size", &self.vector_size)
+            .field("distance", &self.distance)
             .finish()
     }
 }
@@ -89,6 +91,7 @@ impl LocalVectorStore {
             engine: Arc::new(engine),
             collection,
             vector_size: config.vector_size,
+            distance,
         })
     }
 
@@ -144,6 +147,7 @@ impl LocalVectorStore {
             engine: Arc::new(engine),
             collection,
             vector_size: config.vector_size,
+            distance,
         })
     }
 
@@ -383,7 +387,7 @@ impl VectorStorage for LocalVectorStore {
         }
         // Open-time creation already ensures the collection; reaching here
         // means it was deleted out-of-band, so recreate with stored size.
-        let config = CollectionConfig::new(self.vector_size, SimDistance::Cosine);
+        let config = CollectionConfig::new(self.vector_size, self.distance);
         self.engine
             .create_collection(&self.collection, &config)
             .map_err(map_simvec_error)?;

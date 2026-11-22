@@ -126,6 +126,41 @@ impl EntityRepository {
         )
     }
 
+    /// Maximum number of ids per batched IN query. Kept below SQLite's
+    /// default bind-parameter limit so the statement always prepares.
+    const ID_BATCH_SIZE: usize = 500;
+
+    /// Get many entities by ID in one batched query (project scoped).
+    ///
+    /// Results are returned in no particular order. Callers that need a
+    /// stable order should sort explicitly. Batching avoids the N+1 pattern
+    /// of issuing one prepared statement per id while staying under the
+    /// bind-parameter limit.
+    pub fn get_by_ids(
+        conn: &Connection,
+        project_id: i64,
+        ids: &[i64],
+    ) -> Result<Vec<EntityRecord>, StorageError> {
+        let mut out = Vec::with_capacity(ids.len());
+        for batch in ids.chunks(Self::ID_BATCH_SIZE) {
+            let placeholders = batch.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, \
+                 span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, \
+                 depth, parent_id, metadata, parameters_json, return_type, doc_comment, \
+                 modifiers_json, project_id, epoch, batch_id, 0.0 AS rank, overload_discriminator \
+                 FROM entities WHERE project_id = ?1 AND id IN ({placeholders})"
+            );
+            let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(batch.len() + 1);
+            params.push(&project_id);
+            for id in batch {
+                params.push(id as &dyn rusqlite::ToSql);
+            }
+            out.extend(execute_query(conn, &sql, &params[..], Self::from_row)?);
+        }
+        Ok(out)
+    }
+
     /// Get entities by file ID
     ///
     /// # Performance Note
@@ -617,6 +652,52 @@ mod tests {
         let result = EntityRepository::get_by_id(&conn, id).expect("Failed to get by id");
         assert!(result.is_some());
         assert_eq!(result.expect("Expected Some value").name, "test_function");
+    }
+
+    #[test]
+    fn test_get_by_ids_batched_and_project_scoped() {
+        let conn = setup_test_db();
+        let tx = conn
+            .unchecked_transaction()
+            .expect("Failed to start transaction");
+
+        let make = |name: &str, project_id: i64| EntityRecord {
+            id: 0,
+            name: name.to_string(),
+            kind: "Function".to_string(),
+            file_id: 1,
+            signature: None,
+            span_start_row: None,
+            span_end_row: None,
+            span_start_column: None,
+            span_end_column: None,
+            span_start_byte: None,
+            span_end_byte: None,
+            scoped_name: None,
+            overload_discriminator: String::new(),
+            depth: None,
+            parent_id: None,
+            metadata: None,
+            parameters_json: None,
+            return_type: None,
+            doc_comment: None,
+            modifiers_json: None,
+            project_id,
+            epoch: 0,
+            batch_id: 0,
+            rank: 0.0,
+        };
+        let a = EntityRepository::insert(&tx, &make("a", 1)).expect("insert a");
+        let b = EntityRepository::insert(&tx, &make("b", 1)).expect("insert b");
+        tx.commit().expect("Failed to commit");
+
+        // A missing id is skipped just like the old per-id lookup did.
+        let results = EntityRepository::get_by_ids(&conn, 1, &[a, 999999, b])
+            .expect("Failed to get by ids");
+        assert_eq!(results.len(), 2, "missing ids must be skipped");
+        let mut names: Vec<_> = results.iter().map(|e| e.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["a", "b"]);
     }
 
     #[test]
