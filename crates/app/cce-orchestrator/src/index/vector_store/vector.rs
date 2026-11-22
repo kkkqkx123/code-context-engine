@@ -11,11 +11,16 @@ use cce_types::{PointKind, StorageError};
 ///
 /// Local is the default embedded engine; Qdrant keeps the remote service for
 /// large-scale deployments. Switching backends requires a full reindex.
+///
+/// The remote variant keeps its concrete product name `Qdrant` because the
+/// lifecycle task needs the typed client. For backend-neutral callers that
+/// speak the same local/remote vocabulary as the fulltext and metadata
+/// stores, `remote()` and `as_remote()` mirror `qdrant()` and `as_qdrant()`.
 #[derive(Clone)]
 pub enum VectorStore {
     /// Embedded local engine (mmap plus WAL plus HNSW).
     Local(Arc<LocalVectorStore>),
-    /// External Qdrant service.
+    /// External Qdrant service (the remote branch).
     Qdrant(Arc<QdrantClient>),
 }
 
@@ -27,6 +32,11 @@ impl VectorStore {
 
     /// Wrap a Qdrant client.
     pub fn qdrant(client: Arc<QdrantClient>) -> Self {
+        Self::Qdrant(client)
+    }
+
+    /// Wrap the remote backend, aliasing `qdrant()` for backend-neutral code.
+    pub fn remote(client: Arc<QdrantClient>) -> Self {
         Self::Qdrant(client)
     }
 
@@ -72,6 +82,14 @@ impl VectorStore {
             Self::Qdrant(client) => Some(client),
             _ => None,
         }
+    }
+
+    /// Borrow the remote client on the remote branch, aliasing `as_qdrant()`.
+    ///
+    /// Backend-neutral callers use this instead of naming the concrete
+    /// product; lifecycle code that needs Qdrant specifics keeps `as_qdrant()`.
+    pub fn as_remote(&self) -> Option<&Arc<QdrantClient>> {
+        self.as_qdrant()
     }
 
     /// Borrow the local store when this is the embedded branch.

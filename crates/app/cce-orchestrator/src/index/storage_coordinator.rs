@@ -170,9 +170,12 @@ impl StorageCoordinator {
     }
 
     /// Metadata backend name for logging.
+    ///
+    /// Delegates to the backend contract so a remote PostgreSQL store reports
+    /// its own name instead of being mislabeled as local.
     pub fn metadata_backend_name(&self) -> &'static str {
         match &self.metadata_store {
-            Some(_) => "local",
+            Some(store) => MetadataStorage::backend_name(store),
             None => "none",
         }
     }

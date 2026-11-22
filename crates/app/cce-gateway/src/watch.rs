@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use base64::Engine as _;
 
-use cce_api::models::{IngestEvent, IngestEventKind, IngestEventRequest, MAX_INGEST_FILE_BYTES};
+use cce_api::models::{
+    IngestEvent, IngestEventKind, IngestEventRequest, IngestEventResponse, MAX_INGEST_FILE_BYTES,
+};
 
 use super::health::write_heartbeat;
 use super::params::SyncParams;
@@ -30,6 +32,18 @@ const FULL_SCAN_INTERVAL: Duration = Duration::from_secs(300);
 fn should_force_full(polls_since_full: usize, last_full_scan: Instant, now: Instant) -> bool {
     polls_since_full >= FULL_SCAN_EVERY_POLLS
         || now.saturating_duration_since(last_full_scan) >= FULL_SCAN_INTERVAL
+}
+
+/// Whether a pushed event batch was fully applied and the baseline may move.
+///
+/// The ingest entry answers 200 with `success=false` and a per-event error
+/// list when only part of a batch applied. Both fields must agree: a failure
+/// must keep the old baseline so unapplied changes are re-pushed next round,
+/// because a forced full rescan rehashes files but never re-emits events for
+/// entries already in the baseline. Treating such a response as success drops
+/// the failed changes silently.
+fn should_advance_baseline(response: &IngestEventResponse) -> bool {
+    response.success && response.errors.is_empty()
 }
 
 /// Build the fingerprint baseline from one scan's usable files.
@@ -197,10 +211,17 @@ pub async fn watch_loop(
         let request = IngestEventRequest { events };
         match client.ingest_event(params.project_id, &request).await {
             Ok(response) => {
-                if !response.errors.is_empty() {
-                    for error in &response.errors {
-                        eprintln!("warning: {error}");
-                    }
+                for error in &response.errors {
+                    eprintln!("warning: {error}");
+                }
+                if !should_advance_baseline(&response) {
+                    // The server answers 200 with success=false when only part
+                    // of the batch was applied. Keep the previous baseline so
+                    // the unapplied changes are detected and pushed again next
+                    // round. Advancing here would drop them: a forced full
+                    // rescan rehashes files but never re-emits events for
+                    // entries already in the baseline, so the loss is silent.
+                    continue;
                 }
             }
             Err(e) => {
@@ -265,5 +286,36 @@ mod tests {
         assert!(should_force_full(FULL_SCAN_EVERY_POLLS, base, base));
         assert!(!should_force_full(0, base, base + Duration::from_secs(299)));
         assert!(should_force_full(0, base, base + FULL_SCAN_INTERVAL));
+    }
+
+    fn event_response(success: bool, errors: Vec<String>) -> IngestEventResponse {
+        IngestEventResponse {
+            success,
+            project_id: 1,
+            applied: 0,
+            removed: 0,
+            errors,
+        }
+    }
+
+    #[test]
+    fn baseline_advances_only_on_fully_applied_batch() {
+        assert!(should_advance_baseline(&event_response(true, Vec::new())));
+    }
+
+    #[test]
+    fn partial_failure_holds_baseline_even_when_errors_field_is_missed() {
+        // Server answers 200 with success=false on partial application; both
+        // signals must block the baseline so failed changes get re-pushed.
+        assert!(!should_advance_baseline(&event_response(
+            false,
+            vec!["a.rs: stage failed".to_string()]
+        )));
+        // Defensive: success=true with errors present is inconsistent but must
+        // never silently advance past a reported failure.
+        assert!(!should_advance_baseline(&event_response(
+            true,
+            vec!["b.rs: hot update failed".to_string()]
+        )));
     }
 }
