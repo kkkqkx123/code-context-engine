@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 
 use cce_api::models::MAX_INGEST_FILE_BYTES;
 use cce_scanner::{FSScanner, FileEntry, ScanOptions};
+use tracing::warn;
 
 use super::params::SyncParams;
 
@@ -20,14 +21,14 @@ pub fn load_cached_entries(path: &std::path::Path) -> HashMap<PathBuf, FileEntry
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return HashMap::new(),
         Err(e) => {
-            eprintln!("warning: scan cache unreadable, falling back to full scan: {e:#}");
+            warn!("scan cache unreadable, falling back to full scan: {e:#}");
             return HashMap::new();
         }
     };
     match serde_json::from_slice::<HashMap<PathBuf, FileEntry>>(&bytes) {
         Ok(entries) => entries,
         Err(e) => {
-            eprintln!("warning: scan cache corrupted, falling back to full scan: {e:#}");
+            warn!("scan cache corrupted, falling back to full scan: {e:#}");
             HashMap::new()
         }
     }
@@ -177,8 +178,8 @@ pub async fn scan_local(
     }
     .context("gateway failed to scan the local directory")?;
     if !report.failures.is_empty() {
-        eprintln!(
-            "warning: {} paths could not be scanned and are skipped",
+        warn!(
+            "{} paths could not be scanned and are skipped",
             report.failures.len()
         );
     }

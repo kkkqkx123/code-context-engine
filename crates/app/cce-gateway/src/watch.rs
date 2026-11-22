@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use base64::Engine as _;
+use tracing::warn;
 
 use cce_api::models::{
     IngestEvent, IngestEventKind, IngestEventRequest, IngestEventResponse, MAX_INGEST_FILE_BYTES,
@@ -118,7 +119,7 @@ pub async fn watch_loop(
         {
             Ok(outcome) => outcome,
             Err(e) => {
-                eprintln!("warning: rescan failed: {e:#}");
+                warn!("rescan failed: {e:#}");
                 continue;
             }
         };
@@ -133,7 +134,7 @@ pub async fn watch_loop(
         if let Some(cache_file) = params.cache_file.as_deref()
             && let Err(e) = save_cached_entries(cache_file, &previous_entries)
         {
-            eprintln!("warning: scan cache write failed: {e:#}");
+            warn!("scan cache write failed: {e:#}");
         }
         let snapshot = outcome.snapshot;
         let current = fingerprint_map(&snapshot);
@@ -202,7 +203,7 @@ pub async fn watch_loop(
                     );
                 }
                 Err(e) => {
-                    eprintln!("warning: fallback sync failed: {e:#}");
+                    warn!("fallback sync failed: {e:#}");
                     continue;
                 }
             }
@@ -212,7 +213,7 @@ pub async fn watch_loop(
         match client.ingest_event(params.project_id, &request).await {
             Ok(response) => {
                 for error in &response.errors {
-                    eprintln!("warning: {error}");
+                    warn!("{error}");
                 }
                 if !should_advance_baseline(&response) {
                     // The server answers 200 with success=false when only part
@@ -225,7 +226,7 @@ pub async fn watch_loop(
                 }
             }
             Err(e) => {
-                eprintln!("warning: event push failed: {e:#}");
+                warn!("event push failed: {e:#}");
                 continue;
             }
         }
@@ -253,13 +254,13 @@ fn read_event(
     let file = snapshot.files.get(identity)?;
     let bytes = std::fs::read(&file.absolute).ok()?;
     if bytes.len() as u64 > MAX_INGEST_FILE_BYTES {
-        eprintln!("warning: {identity} exceeds the ingest bound and is skipped");
+        warn!("{identity} exceeds the ingest bound and is skipped");
         return None;
     }
     if let Some(expected) = file.content_hash.as_deref()
         && cce_ingest_transfer::chunk_hash(&bytes) != expected
     {
-        eprintln!("warning: {identity} changed after scanning and is skipped");
+        warn!("{identity} changed after scanning and is skipped");
         return None;
     }
     Some(IngestEvent {

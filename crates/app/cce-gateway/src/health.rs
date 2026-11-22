@@ -4,6 +4,7 @@
 //! server health; server health is inspected through the server health entries.
 
 use anyhow::{Context, Result};
+use tracing::warn;
 
 use super::params::SyncParams;
 
@@ -77,7 +78,7 @@ pub(crate) fn write_heartbeat(
     };
     let health = health_record(params, baseline_files, started_at, last_full_scan);
     if let Err(e) = write_health_file(path, &health) {
-        eprintln!("warning: health write failed: {e:#}");
+        warn!("health write failed: {e:#}");
     }
 }
 

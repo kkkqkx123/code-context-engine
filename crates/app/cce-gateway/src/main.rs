@@ -125,7 +125,9 @@ fn params_from(args: &Args) -> SyncParams {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let _ = cce_config::Settings::init_with_fallback(None);
-    if let Ok(cfg) = cce_config::Settings::logger() {
+    if let Ok(mut cfg) = cce_config::Settings::logger() {
+        // Diagnostics must stay on stderr; stdout carries progress/protocol data.
+        cfg.output = cce_config::LogOutput::Stderr;
         let _ = cce_logging::init(&cfg);
     }
     let client = Client::with_token(args.server.clone(), args.token.clone())?;

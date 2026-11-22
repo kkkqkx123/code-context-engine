@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use base64::Engine as _;
+use tracing::{error, warn};
 
 use cce_api::models::{
     INGEST_CHUNK_BYTES, IngestBatchRequest, IngestCommitResponse, IngestFileMeta,
@@ -46,7 +47,7 @@ pub async fn sync_once(
     if let Some(cache_file) = params.cache_file.as_deref()
         && let Err(e) = save_cached_entries(cache_file, &outcome.entries)
     {
-        eprintln!("warning: scan cache write failed: {e:#}");
+        warn!("scan cache write failed: {e:#}");
     }
     let snapshot = &outcome.snapshot;
     if params.json_progress {
@@ -117,7 +118,7 @@ pub async fn sync_once(
     .await?;
     if !errors.is_empty() {
         for error in &errors {
-            eprintln!("error: {error}");
+            error!("{error}");
         }
         anyhow::bail!("gateway staged {staged} files with {} errors", errors.len());
     }
