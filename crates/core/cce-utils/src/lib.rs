@@ -25,6 +25,9 @@ pub use hash::{calculate_hash, calculate_hash_with_limit};
 pub mod time;
 pub use time::{current_timestamp_ms, current_timestamp_secs};
 
+pub mod process;
+pub use process::rss_kb;
+
 pub mod token_estimation;
 pub use token_estimation::{TokenEstimator, estimate_tokens};
 

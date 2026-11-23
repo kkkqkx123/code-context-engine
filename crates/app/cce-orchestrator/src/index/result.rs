@@ -2,7 +2,7 @@
 //!
 //! This module provides a summary of indexing operations for reporting purposes.
 
-use cce_storage_common::VectorWriteMetrics;
+use cce_storage_common::{FulltextWriteMetrics, VectorWriteMetrics};
 
 /// Execution outcome for a full index operation.
 ///
@@ -44,6 +44,11 @@ pub struct IndexStageTimings {
     pub export_spool_ms: u64,
     pub manifest_ms: u64,
     pub batch_overhead_ms: u64,
+    pub state_projection_ms: u64,
+    pub checkpoint_ms: u64,
+    pub progress_ms: u64,
+    pub batch_dispatch_ms: u64,
+    pub write_commit_ms: u64,
     pub batches: usize,
     pub vector_store_calls: usize,
     pub entity_store_calls: usize,
@@ -57,6 +62,20 @@ pub struct IndexStageTimings {
     pub vector_hnsw_build_ms: u64,
     pub vector_checkpoints: u64,
     pub vector_checkpoint_ms: u64,
+    pub bm25_commits: u64,
+    pub bm25_documents: u64,
+    pub bm25_document_ms: u64,
+    pub bm25_commit_ms: u64,
+    pub bm25_refresh_ms: u64,
+    pub bm25_merge_ms: u64,
+    pub bm25_staged_documents: u64,
+    pub rss_after_scan_kb: u64,
+    pub rss_after_batches_kb: u64,
+    pub rss_after_relation_kb: u64,
+    pub rss_final_kb: u64,
+    pub rss_peak_batch_kb: u64,
+    pub vector_pending_points_max: u64,
+    pub bm25_pending_documents_max: u64,
 }
 
 impl IndexStageTimings {
@@ -83,6 +102,26 @@ impl IndexStageTimings {
         self.vector_checkpoints = delta(after.checkpoints, before.checkpoints);
         self.vector_checkpoint_ms =
             delta(after.checkpoint_total_nanos, before.checkpoint_total_nanos) / 1_000_000;
+    }
+
+    /// Fold a before/after snapshot of the embedded fulltext writer into the
+    /// stage record. Remote backends have no counters and stay at zero.
+    pub fn record_fulltext_write_delta(
+        &mut self,
+        before: Option<FulltextWriteMetrics>,
+        after: Option<FulltextWriteMetrics>,
+    ) {
+        let (Some(before), Some(after)) = (before, after) else {
+            return;
+        };
+        let delta = |current: u64, previous: u64| current.saturating_sub(previous);
+        self.bm25_commits = delta(after.commits, before.commits);
+        self.bm25_documents = delta(after.documents, before.documents);
+        self.bm25_document_ms = delta(after.document_nanos, before.document_nanos) / 1_000_000;
+        self.bm25_commit_ms = delta(after.commit_nanos, before.commit_nanos) / 1_000_000;
+        self.bm25_refresh_ms = delta(after.refresh_nanos, before.refresh_nanos) / 1_000_000;
+        self.bm25_merge_ms = delta(after.merge_nanos, before.merge_nanos) / 1_000_000;
+        self.bm25_staged_documents = delta(after.staged_documents, before.staged_documents);
     }
 }
 

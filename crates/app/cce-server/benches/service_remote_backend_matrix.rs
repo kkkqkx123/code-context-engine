@@ -10,7 +10,6 @@
 //! `service_remote_backend_index.tsv`, `service_remote_backend_index_stages.tsv`
 //! and `service_remote_backend_stages.tsv` under `benches/results/`.
 
-use std::fs;
 use std::io::{Read, Write as _};
 use std::net::TcpStream;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -65,9 +64,9 @@ fn percentile(sorted: &[u64], fraction: f64) -> u64 {
     sorted[index.min(sorted.len() - 1)]
 }
 
-/// Minimal HTTP probe over a plain TCP connection. The benchmark crate stays
+/// Minimal HTTP request over a plain TCP connection. The benchmark crate stays
 /// dependency-free and fails fast when a service does not answer.
-fn http_probe(base_url: &str, path: &str) -> Result<(u16, String), String> {
+fn http_request(method: &str, base_url: &str, path: &str) -> Result<(u16, String), String> {
     let rest = base_url
         .strip_prefix("http://")
         .ok_or_else(|| format!("only http URLs are supported: {base_url}"))?;
@@ -77,7 +76,9 @@ fn http_probe(base_url: &str, path: &str) -> Result<(u16, String), String> {
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .map_err(|error| format!("set read timeout failed: {error}"))?;
-    let request = format!("GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
     stream
         .write_all(request.as_bytes())
         .map_err(|error| format!("probe write failed: {error}"))?;
@@ -94,6 +95,49 @@ fn http_probe(base_url: &str, path: &str) -> Result<(u16, String), String> {
         .ok_or_else(|| format!("malformed probe response from {authority}{path}"))?;
     let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
     Ok((status, body))
+}
+
+fn http_probe(base_url: &str, path: &str) -> Result<(u16, String), String> {
+    http_request("GET", base_url, path)
+}
+
+/// Remote collections and indexes created by one benchmark project.
+///
+/// They are removed on scope exit so a failed or interrupted benchmark cannot
+/// leave generations of service data behind on the benchmark host.
+struct RemoteFixture {
+    qdrant_url: Option<String>,
+    collection: Option<String>,
+    es_url: Option<String>,
+    index: Option<String>,
+}
+
+impl Drop for RemoteFixture {
+    fn drop(&mut self) {
+        if let (Some(url), Some(collection)) = (&self.qdrant_url, &self.collection) {
+            let path = format!("/collections/{collection}");
+            match http_request("DELETE", url, &path) {
+                Ok((status, _body)) if (200..300).contains(&status) => {
+                    println!("removed qdrant collection {collection}: {status}");
+                }
+                Ok((status, body)) => {
+                    eprintln!("qdrant collection cleanup returned {status}: {body}");
+                }
+                Err(error) => eprintln!("qdrant collection cleanup failed: {error}"),
+            }
+        }
+        if let (Some(url), Some(index)) = (&self.es_url, &self.index) {
+            match http_request("DELETE", url, &format!("/{index}")) {
+                Ok((status, _body)) if (200..300).contains(&status) => {
+                    println!("removed elasticsearch index {index}: {status}");
+                }
+                Ok((status, body)) => {
+                    eprintln!("elasticsearch index cleanup returned {status}: {body}");
+                }
+                Err(error) => eprintln!("elasticsearch index cleanup failed: {error}"),
+            }
+        }
+    }
 }
 
 fn require_healthy(base_url: &str, health_path: &str, version_path: &str, label: &str) -> String {
@@ -226,7 +270,7 @@ fn main() {
     let mut index_stages_out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "service_remote_backend_index_stages.tsv",
-        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tbatches\tvector_store_calls\tentity_store_calls\tbm25_store_calls\tvector_txns_applied\tvector_points_written\tvector_wal_flushes\tvector_wal_txns\tvector_commit_wait_ms\tvector_hnsw_builds\tvector_hnsw_build_ms\tvector_checkpoints\tvector_checkpoint_ms",
+        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tstate_projection_ms\tcheckpoint_ms\tprogress_ms\tbatch_dispatch_ms\twrite_commit_ms\tbatches\tvector_store_calls\tentity_store_calls\tbm25_store_calls\tvector_txns_applied\tvector_points_written\tvector_wal_flushes\tvector_wal_txns\tvector_commit_wait_ms\tvector_hnsw_builds\tvector_hnsw_build_ms\tvector_checkpoints\tvector_checkpoint_ms\tbm25_commits\tbm25_documents\tbm25_document_ms\tbm25_commit_ms\tbm25_refresh_ms\tbm25_merge_ms\tbm25_staged_documents\trss_after_scan_kb\trss_after_batches_kb\trss_after_relation_kb\trss_final_kb\trss_peak_batch_kb\tvector_pending_points_max\tbm25_pending_documents_max",
     );
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
@@ -246,13 +290,21 @@ fn main() {
             let root = tempfile::TempDir::new().expect("fixture root");
             let project = SyntheticProject::generate(size, DEFAULT_LANG_DIST);
             project.materialize(root.path()).expect("materialize");
+            let collection = format!("cce_bench_{}_{}", run_id, slug);
+            let index = format!("cce-bench-{run_id}-{slug}");
+            let _remote_fixture = RemoteFixture {
+                qdrant_url: matches!(vector, VectorBackend::Qdrant).then(|| qdrant_url.clone()),
+                collection: matches!(vector, VectorBackend::Qdrant).then_some(collection.clone()),
+                es_url: matches!(fulltext, FulltextBackend::Remote).then(|| es_url.clone()),
+                index: matches!(fulltext, FulltextBackend::Remote).then_some(index.clone()),
+            };
             let backends = common::TestBackends {
                 vector_backend: vector,
                 fulltext_backend: fulltext,
                 qdrant_url: Some(qdrant_url.clone()),
-                qdrant_collection: Some(format!("cce_bench_{}_{}", run_id, slug)),
+                qdrant_collection: Some(collection),
                 fulltext_url: Some(es_url.clone()),
-                fulltext_index: Some(format!("cce-bench-{run_id}-{slug}")),
+                fulltext_index: Some(index),
                 metadata_backend: cce_config::modules::MetadataBackend::Local,
                 metadata_url: None,
                 embedding_rate_limit: 0,
@@ -293,7 +345,7 @@ fn main() {
             let stages = &indexed.stages;
             let _ = writeln!(
                 index_stages_out,
-                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 size.label(),
                 stages.scan_ms,
                 stages.batch_process_ms,
@@ -315,6 +367,11 @@ fn main() {
                 stages.export_spool_ms,
                 stages.manifest_ms,
                 stages.batch_overhead_ms,
+                stages.state_projection_ms,
+                stages.checkpoint_ms,
+                stages.progress_ms,
+                stages.batch_dispatch_ms,
+                stages.write_commit_ms,
                 stages.batches,
                 stages.vector_store_calls,
                 stages.entity_store_calls,
@@ -328,6 +385,20 @@ fn main() {
                 stages.vector_hnsw_build_ms,
                 stages.vector_checkpoints,
                 stages.vector_checkpoint_ms,
+                stages.bm25_commits,
+                stages.bm25_documents,
+                stages.bm25_document_ms,
+                stages.bm25_commit_ms,
+                stages.bm25_refresh_ms,
+                stages.bm25_merge_ms,
+                stages.bm25_staged_documents,
+                stages.rss_after_scan_kb,
+                stages.rss_after_batches_kb,
+                stages.rss_after_relation_kb,
+                stages.rss_final_kb,
+                stages.rss_peak_batch_kb,
+                stages.vector_pending_points_max,
+                stages.bm25_pending_documents_max,
             );
             println!(
                 "{combination}: indexed {} files in {index_wall_ms} ms",
@@ -440,7 +511,6 @@ fn main() {
                     }
                 }
             }
-            let _ = fs::metadata(root.path());
         }
     });
     let _ = write!(

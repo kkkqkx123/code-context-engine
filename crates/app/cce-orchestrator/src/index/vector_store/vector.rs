@@ -478,6 +478,16 @@ impl VectorBatchWriter {
         }
     }
 
+    /// Number of points waiting for the next backend upsert.
+    pub fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Whether the next push should reach the aggregation threshold.
+    pub fn is_full(&self) -> bool {
+        self.pending.len() >= VECTOR_WRITE_BATCH
+    }
+
     /// Buffer `points`, writing a batched upsert once the threshold is reached.
     pub async fn push(&mut self, points: Vec<VectorPoint>) -> Result<(), StorageError> {
         self.pending.extend(points);

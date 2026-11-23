@@ -12,80 +12,90 @@ use crate::error::OrchestratorError;
 use super::StorageCoordinator;
 use super::mapping::{build_bm25_documents, build_chunk_record, compute_work_unit_hash};
 
+/// Documents and metadata collected before the next fulltext commit.
+///
+/// The full-index loop merges several orchestration batches into one staged
+/// write so Tantivy commits once per aggregation window instead of once per
+/// source batch. Work units stay `Running` until the staged write commits.
+#[derive(Default)]
+pub(crate) struct StagedBm25Write {
+    pub documents: usize,
+    pub entity_mappings: Vec<EntityDetailMapping>,
+    pub chunk_records: Vec<ChunkRecord>,
+    pub hashes: Vec<String>,
+}
+
+impl StagedBm25Write {
+    pub fn is_empty(&self) -> bool {
+        self.documents == 0
+            && self.entity_mappings.is_empty()
+            && self.chunk_records.is_empty()
+            && self.hashes.is_empty()
+    }
+
+    pub fn merge(&mut self, other: StagedBm25Write) {
+        self.documents += other.documents;
+        self.entity_mappings.extend(other.entity_mappings);
+        self.chunk_records.extend(other.chunk_records);
+        self.hashes.extend(other.hashes);
+    }
+}
+
 impl StorageCoordinator {
-    /// Store documents in BM25 from chunked results with batch processing
-    pub async fn store_bm25_batched(
+    /// Build BM25 payloads for one call and stage them in the local writer.
+    ///
+    /// The caller owns the commit boundary: nothing is marked committed here.
+    pub(crate) async fn stage_bm25(
         &self,
         chunks: &[ChunkedResult],
         batch_size: usize,
-    ) -> Result<(), OrchestratorError> {
-        // Filter to only BM25-path chunks first: empty work succeeds
-        // regardless of backend configuration, while a missing client with
-        // pending work surfaces as an error instead of silent success.
+        source_entity_ids: Option<&std::collections::HashMap<(String, i64), i64>>,
+    ) -> Result<StagedBm25Write, OrchestratorError> {
         let bm25_chunks: Vec<&ChunkedResult> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
             .collect();
-
         if bm25_chunks.is_empty() {
-            return Ok(());
+            return Ok(StagedBm25Write::default());
         }
 
-        let bm25 = match &self.fulltext {
-            Some(b) => b,
-            None => {
-                // Runs without a fulltext backend (tests, CLI debug runs)
-                // skip BM25 indexing instead of failing the run; production
-                // always wires a fulltext branch.
-                tracing::warn!(
-                    chunks = bm25_chunks.len(),
-                    "BM25 client is not configured; skipping chunk fulltext indexing"
-                );
-                return Ok(());
-            }
+        let Some(bm25) = self.fulltext.as_ref() else {
+            tracing::warn!(
+                chunks = bm25_chunks.len(),
+                "BM25 client is not configured; skipping chunk fulltext indexing"
+            );
+            return Ok(StagedBm25Write::default());
         };
 
         let wk_cm = self.checkpoint_manager.clone();
         let wk_op = self.operation_id.clone();
-
-        // Build one payload per microbatch, skipping already-committed ones.
-        // Running markers are staged for a single batched insert; resume
-        // replays every microbatch without a Committed marker.
-        struct PendingBatch {
-            documents: Vec<FulltextDocument>,
-            entity_mappings: Vec<EntityDetailMapping>,
-            chunk_records: Vec<ChunkRecord>,
-            hash: Option<String>,
-        }
-        let tracking = wk_cm.is_some() && wk_op.is_some();
         let mut running = Vec::new();
-        let mut pending: Vec<PendingBatch> = Vec::new();
-        // Entity ID map is epoch-scoped and immutable for this pass: load it
-        // once instead of once per microbatch.
-        let source_entity_ids = self.load_source_entity_ids().await?;
+        let mut staged = StagedBm25Write::default();
+        let loaded_ids;
+        let source_entity_ids = match source_entity_ids {
+            Some(ids) => ids,
+            None => {
+                loaded_ids = self.load_source_entity_ids().await?;
+                &loaded_ids
+            }
+        };
         for batch in bm25_chunks.chunks(batch_size) {
-            let hash = if tracking {
+            let hash = if wk_cm.is_some() && wk_op.is_some() {
                 Some(compute_work_unit_hash(batch))
             } else {
                 None
             };
             if let (Some(hash), Some(cm), Some(op_id)) =
                 (hash.as_ref(), wk_cm.as_ref(), wk_op.as_ref())
+                && let Ok(Some(record)) = cm.get_work_unit_by_hash(op_id, "bm25_commit", hash).await
+                && record.status == WorkUnitStatus::Committed
             {
-                match cm.get_work_unit_by_hash(op_id, "bm25_commit", hash).await {
-                    Ok(Some(record)) if record.status == WorkUnitStatus::Committed => {
-                        continue;
-                    }
-                    _ => {}
-                }
+                continue;
             }
 
             let documents = build_bm25_documents(batch, self.project_id, self.epoch());
             let entity_mappings =
                 self.build_bm25_entity_mappings(batch, &documents, &source_entity_ids)?;
-
-            // Persist BM25 chunk records so SQLite enrichment can resolve raw
-            // code, line numbers and entity IDs for BM25-only hits.
             let chunk_records: Result<Vec<ChunkRecord>, OrchestratorError> = batch
                 .iter()
                 .filter(|chunk| !chunk.text.is_empty())
@@ -106,72 +116,66 @@ impl StorageCoordinator {
                     created_at: chrono::Utc::now().to_rfc3339(),
                     updated_at: chrono::Utc::now().to_rfc3339(),
                 });
+                staged.hashes.push(hash.clone());
             }
-            pending.push(PendingBatch {
-                documents,
-                entity_mappings,
-                chunk_records: chunk_records?,
-                hash,
-            });
-        }
-        if tracking {
-            if let (Some(cm), _) = (wk_cm.as_ref(), wk_op.as_ref()) {
-                if let Err(e) = cm.insert_work_units(&running).await {
-                    tracing::warn!(
-                        error = %e,
-                        "Failed to insert BM25 work unit checkpoints"
-                    );
-                }
-            }
-        }
-
-        // Single commit for the whole call instead of one commit per
-        // microbatch: visibility advances only after every payload is built,
-        // and Committed markers flush only after the commit is durable, so a
-        // crash anywhere replays the uncommitted microbatches.
-        let mut all_documents: Vec<FulltextDocument> = Vec::new();
-        let mut all_mappings: Vec<EntityDetailMapping> = Vec::new();
-        let mut all_records: Vec<ChunkRecord> = Vec::new();
-        let mut committed_hashes: Vec<String> = Vec::new();
-        for item in pending {
-            all_documents.extend(item.documents);
-            all_mappings.extend(item.entity_mappings);
-            all_records.extend(item.chunk_records);
-            if let Some(hash) = item.hash {
-                committed_hashes.push(hash);
-            }
-        }
-
-        if !all_documents.is_empty() {
-            bm25.batch_index(&bm25.configured_index_name(), &all_documents)
+            staged.documents += bm25
+                .stage_documents(&bm25.configured_index_name(), &documents)
                 .await?;
+            staged.entity_mappings.extend(entity_mappings);
+            staged.chunk_records.extend(chunk_records?);
         }
-
-        if !all_records.is_empty() || !all_mappings.is_empty() {
-            self.store_chunks_and_mappings(&all_records, &all_mappings)
-                .await?;
-        }
-
-        if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op)
-            && !committed_hashes.is_empty()
+        if let (Some(cm), _) = (wk_cm.as_ref(), wk_op.as_ref())
+            && !running.is_empty()
+            && let Err(e) = cm.insert_work_units(&running).await
         {
-            if let Err(e) = cm
+            tracing::warn!(error = %e, "Failed to insert BM25 work unit checkpoints");
+        }
+        Ok(staged)
+    }
+
+    /// Publish one aggregated BM25 write and advance its work-unit markers.
+    pub(crate) async fn commit_staged_bm25(
+        &self,
+        staged: &StagedBm25Write,
+    ) -> Result<(), OrchestratorError> {
+        if staged.is_empty() {
+            return Ok(());
+        }
+        let Some(bm25) = self.fulltext.as_ref() else {
+            return Ok(());
+        };
+        bm25.commit_staged(&bm25.configured_index_name()).await?;
+
+        if !staged.chunk_records.is_empty() || !staged.entity_mappings.is_empty() {
+            self.store_chunks_and_mappings(&staged.chunk_records, &staged.entity_mappings)
+                .await?;
+        }
+
+        if let (Some(cm), Some(op_id)) =
+            (self.checkpoint_manager.as_ref(), self.operation_id.as_ref())
+            && !staged.hashes.is_empty()
+            && let Err(e) = cm
                 .update_work_unit_statuses(
                     op_id,
                     "bm25_commit",
-                    &committed_hashes,
+                    &staged.hashes,
                     WorkUnitStatus::Committed,
                 )
                 .await
-            {
-                tracing::warn!(
-                    error = %e,
-                    "Failed to update BM25 work unit checkpoints to committed"
-                );
-            }
+        {
+            tracing::warn!(error = %e, "Failed to update BM25 work unit checkpoints to committed");
         }
-
         Ok(())
+    }
+
+    /// Store documents in BM25 from chunked results with batch processing
+    pub async fn store_bm25_batched(
+        &self,
+        chunks: &[ChunkedResult],
+        batch_size: usize,
+    ) -> Result<(), OrchestratorError> {
+        let staged = self.stage_bm25(chunks, batch_size, None).await?;
+        self.commit_staged_bm25(&staged).await
     }
 
     /// Store documents in BM25 from chunked results

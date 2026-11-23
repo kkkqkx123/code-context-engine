@@ -27,7 +27,7 @@ pub mod retrieval;
 pub mod schema;
 
 #[cfg(feature = "local")]
-pub use batch::batch_add_documents;
+pub use batch::{BatchWriteStats, batch_add_documents, commit_documents, stage_documents};
 pub use cce_config::modules::search::TermOperator;
 #[cfg(feature = "local")]
 pub use client::Bm25Client;

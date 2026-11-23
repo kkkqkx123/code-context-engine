@@ -127,9 +127,9 @@ provider 没有继承默认令牌桶，避免夹具回归后再次把等待误�
 
 - 实体写入单测覆盖多文件、嵌套 parent、重载判别式、重复回放和事务中途失败回滚；测试使用
   `expect`，不使用 `unwrap`。
-- SQLite 与 PostgreSQL 契约测试覆盖同一批次的原子性；索引恢复用例覆盖实体提交前失败、提交后
-  派生写入失败两种检查点边界。
-- `cargo fmt` 与 `cargo clippy --all-targets --all-features` 通过。
+- SQLite 单测覆盖整批提交的原子回滚；PostgreSQL 分支实现同样的事务边界，沿用现有契约环境
+  验证。索引恢复用例覆盖实体提交前失败、提交后派生写入失败两种检查点边界。
+- `cargo fmt` 与 `cargo clippy --all-targets --all-features` 在 devs 上通过。
 - devs 上以同一 profile、同一 HNSW preset 重跑 500 与 5,000 文件四档服务矩阵，错误数为 0，
   索引结果与 parent/FTS 查询可复现；对比阶段 TSV 时 `entity_store_calls` 接近批次数，
   `entity_store_ms` 显著下降，墙钟变化由阶段数据解释。
@@ -153,18 +153,43 @@ provider 没有继承默认令牌桶，避免夹具回归后再次把等待误�
   `synchronous` 配置；趋势文件用 `metadata` 列区分 `memory` 与 `file`。
 - 服务后端基准断言 mock provider 的 `embedding_rate_limit` 为 0；配置单测锁定本地 provider
   默认 600/min 解析为不限流；配置参考文档补充限流预算与查询 SLA 的关系。
+- 基准报告工具在表头 schema 变化时重建 TSV，而不是继续追加旧表头下的新列；完整流水线
+  报告也复用同一工具。首轮复测发现的列错位问题由此消除。
 
 ## 远端验证记录
 
-本地不执行编译、测试和基准采集。按 `docs/dev/devs-sync.md` 打包同步到 devs 后，在 devs 上执行
-检查、定向单测和指标复测；日志与 TSV 取回 `.bench_logs/`，结果回填下表。
+本地不执行编译、测试和基准采集。按 `docs/dev/devs-sync.md` 打包同步到 devs 后，全部编译、
+单测和指标采集均在 devs 完成；日志与 TSV 取回 `.bench_logs/`。
 
 | 项目 | 命令或产物 | 结果 |
 |---|---|---|
-| 全目标检查 | `cargo check --workspace --all-targets --all-features` | 待 devs 执行 |
-| 定向单测 | `cargo test -p cce-config -p cce-storage-metadb-sqlite -p cce-orchestrator --lib` | 待 devs 执行 |
-| 同 durability 对照 | `CCE_BENCH_METADATA=file cargo run -p cce-orchestrator --bench index_pipeline_stages` | 待 devs 执行 |
-| 服务四档矩阵 | `cargo bench -p cce-server --bench service_remote_backend_matrix` | 待 devs 执行 |
+| 全目标检查 | `cargo clippy --all-targets --all-features` | 通过 |
+| 定向单测 | `cargo test -p cce-config -p cce-storage-metadb-sqlite -p cce-orchestrator --lib` | 通过，含新增原子回滚用例 |
+| 同 durability 对照 | `CCE_BENCH_METADATA={memory,file} cargo bench -p cce-orchestrator --bench index_pipeline_stages` | 500 文件档 memory 1,050.8 ms、file 1,492.8 ms |
+| 服务四档矩阵 | `CCE_BENCH_SIZE={small,medium} cargo bench -p cce-server --bench service_remote_backend_matrix` | 两档共 8 行，错误数均为 0 |
+| 外部进程采样 | `scripts/devs-benchmark-services.sh sample all` | 163 个样本/服务 |
+
+日志证据：`.bench_logs/clippy-followup-metrics*.log`、`.bench_logs/test-followup-metrics.log`、
+`.bench_logs/bench-followup-metrics-final-*-service-*.log`；TSV 证据：
+`.bench_logs/service_remote_backend_index_stages.tsv`、`.bench_logs/service_remote_backend_matrix.tsv`、
+`.bench_logs/service_remote_backend_stages.tsv`、`.bench_logs/index_pipeline_stages.tsv`、
+`.bench_logs/sample-followup-metrics-final-1795168978.tsv`。
+
+## 复测结论
+
+- 批量实体事务生效：500 文件档 `entity_store_calls=5`、5,000 文件档为 50，与 `batches` 完全
+  一致；5,000 文件档 `entity_store_ms` 从修复前的 68–78 秒降到 10.8–14.8 秒。原子回滚单测通过。
+- 向量写入指标解释了剩余成本：本地分支 5,000 文件写入 5,000 点、50 次 WAL flush/50 个事务，
+  提交等待 5.1–11.4 秒，HNSW 构建为 0。当前每个编排批次结束即 flush 是为了在标记工作单元
+  已提交前保证数据落盘；把跨批次的点合并到 512 点阈值需要同步推迟检查点边界，属于独立的
+  持久化语义改动，本轮不实施。
+- 墙钟：5,000 文件档 local/local 为 84.5 秒，其他三档为 104.6–137.6 秒；后端差距仍在
+  ±30% 内，且向量阶段占比由新指标解释，不再归因为实体事务或 Qdrant/ES 固有缺陷。
+- 查询：四档组合 hybrid c=4 冷请求 p95 为 4–8 ms，`embedding_overhead_ms` 保持为 0，
+  98–100 ms 双峰没有复现；ES bm25 冷请求 p95 为 7–8 ms，本地 Tantivy 为 1–2 ms，
+  仍按独立 SLA 治理。
+- 外部服务：Qdrant CPU 增量 6.41 秒、RSS 峰值约 302 MB；Elasticsearch CPU 增量 5.86 秒、
+  RSS 峰值约 1.65 GB；PostgreSQL 基本空闲。JVM 堆外开销仍需单独计入容量规划。
 
 ## 明确不做
 

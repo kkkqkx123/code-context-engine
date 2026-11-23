@@ -14,10 +14,9 @@
 //! Baseline numbers are appended to `benches/results/index_pipeline_stages.tsv`.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use cce_bench_kit::{DEFAULT_LANG_DIST, ProjectSize, SyntheticProject};
+use cce_bench_kit::{BenchTempDir, DEFAULT_LANG_DIST, ProjectSize, SyntheticProject};
 use cce_orchestrator::index::{
     IndexOptions, IndexOrchestrator, MetadataStore, in_memory_metadata_store,
 };
@@ -51,13 +50,16 @@ fn fresh_metadata(file_backed: bool) -> (MetadataStore, Option<tempfile::TempDir
     (store, guard)
 }
 
-/// Materialize the synthetic project to a fresh temp dir and return its root.
-fn materialize() -> PathBuf {
+/// Materialize the synthetic project to a fresh temp dir and keep it alive.
+fn materialize() -> BenchTempDir {
     let root = cce_bench_kit::fresh_temp_dir("cce_pipe_bench");
     let project = SyntheticProject::generate(SIZE, DEFAULT_LANG_DIST);
     let file_count = project.files.len();
     project.materialize(&root).expect("materialize");
-    println!("materialized {file_count} synthetic files at {root:?}");
+    println!(
+        "materialized {file_count} synthetic files at {:?}",
+        root.path()
+    );
     root
 }
 
@@ -110,11 +112,11 @@ fn main() {
     );
 
     // Warm-up so tree-sitter grammars and sqlite pages are steady-state.
-    let _ = rt.block_on(run_once(&root, metadata.clone()));
+    let _ = rt.block_on(run_once(root.path(), metadata.clone()));
 
     // End-to-end timed pass at the fixed scale tier.
     let t = Instant::now();
-    let indexed = rt.block_on(run_once(&root, metadata.clone()));
+    let indexed = rt.block_on(run_once(root.path(), metadata.clone()));
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     let rate = indexed as f64 / (ms / 1000.0);
     println!(
@@ -139,10 +141,8 @@ fn main() {
     criterion.bench_function("end_to_end_small", |b| {
         b.iter(|| {
             let (fresh, _guard) = fresh_metadata(file_backed);
-            let _ = rt.block_on(run_once(&root, fresh));
+            let _ = rt.block_on(run_once(root.path(), fresh));
         })
     });
     criterion.final_summary();
-
-    let _ = std::fs::remove_dir_all(&root);
 }

@@ -838,6 +838,20 @@ impl MetadataStorage for PostgresClient {
         self.entities_with_files(project_id, epoch).await
     }
 
+    async fn entities_with_files_after(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        after_id: i64,
+    ) -> Result<Vec<EntityWithFile>, StorageError> {
+        Ok(self
+            .entities_with_files(project_id, epoch)
+            .await?
+            .into_iter()
+            .filter(|entry| entry.entity.id > after_id)
+            .collect())
+    }
+
     async fn entities_by_ids(
         &self,
         project_id: i64,

@@ -352,6 +352,26 @@ impl EntityRepository {
 
     /// Get entities for a project at a given epoch with file_path.
     /// Used by RelationSnapshotLoader for cold-start reconstruction.
+    pub fn get_by_project_epoch_with_file_path_after_id(
+        conn: &Connection,
+        project_id: i64,
+        epoch: i64,
+        after_id: i64,
+    ) -> Result<Vec<(EntityRecord, String)>, StorageError> {
+        execute_query(
+            conn,
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, e.overload_discriminator, f.path
+             FROM entities e JOIN files f ON e.file_id = f.id
+             WHERE e.project_id = ?1 AND e.epoch = ?2 AND e.id > ?3",
+            params![project_id, epoch, after_id],
+            |row| {
+                let entity = Self::parse_entity_from_row(row)?;
+                let file_path: String = row.get(24)?;
+                Ok((entity, file_path))
+            },
+        )
+    }
+
     pub fn get_by_project_and_epoch_with_file_path(
         conn: &Connection,
         project_id: i64,
@@ -692,8 +712,8 @@ mod tests {
         tx.commit().expect("Failed to commit");
 
         // A missing id is skipped just like the old per-id lookup did.
-        let results = EntityRepository::get_by_ids(&conn, 1, &[a, 999999, b])
-            .expect("Failed to get by ids");
+        let results =
+            EntityRepository::get_by_ids(&conn, 1, &[a, 999999, b]).expect("Failed to get by ids");
         assert_eq!(results.len(), 2, "missing ids must be skipped");
         let mut names: Vec<_> = results.iter().map(|e| e.name.as_str()).collect();
         names.sort_unstable();

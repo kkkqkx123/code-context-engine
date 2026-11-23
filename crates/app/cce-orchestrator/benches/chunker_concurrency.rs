@@ -32,6 +32,7 @@ const N: usize = 200;
 const SIZE: ProjectSize = ProjectSize::Small;
 
 struct Fixture {
+    _root: cce_bench_kit::BenchTempDir,
     entries: Vec<FileEntry>,
 }
 
@@ -61,7 +62,10 @@ fn fixture() -> Fixture {
             ))
         })
         .collect();
-    Fixture { entries }
+    Fixture {
+        _root: root,
+        entries,
+    }
 }
 
 /// Bounded concurrency for this host: the logical CPU count. CPU-bound

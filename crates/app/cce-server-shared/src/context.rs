@@ -230,19 +230,20 @@ impl SharedContext {
 mod tests {
     use super::*;
     use crate::engine::CodeContextEngine;
+    use crate::test_support::{TestDir, unique_test_dir};
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
     use cce_storage_common::MetadataStorage;
     use std::collections::HashMap;
 
     /// Create a minimal test config with mock provider and model for engine construction
-    fn create_test_config() -> AppConfig {
+    fn create_test_config() -> (AppConfig, TestDir) {
         let mut config = AppConfig::default();
 
         // Each engine opens its own vector store and metadata database under
         // the data dir, so parallel tests must not share one.
-        let data_dir = crate::test_support::unique_test_dir();
-        config.database.sqlite.path = data_dir.join("cce.db").to_string_lossy().to_string();
+        let data_dir = unique_test_dir();
+        config.database.sqlite.path = data_dir.path().join("cce.db").to_string_lossy().to_string();
 
         // Add a mock provider
         let mut providers = HashMap::new();
@@ -272,7 +273,7 @@ mod tests {
         config.llm.embedding_models = models;
         config.embedder.default_model = "test-model".to_string();
 
-        config
+        (config, data_dir)
     }
 
     /// Test relation store accessibility via engine
@@ -282,8 +283,7 @@ mod tests {
     /// through the engine facade.
     #[tokio::test]
     async fn test_metadata_store_accessible_via_engine() {
-        let config = create_test_config();
-        let db_path = config.database.sqlite.path.clone();
+        let (config, _data_dir) = create_test_config();
 
         // Build engine with test config
         let engine = CodeContextEngine::builder()
@@ -309,8 +309,5 @@ mod tests {
             store.projects_all().await.is_ok(),
             "metadata_store should serve contract reads"
         );
-
-        // Clean up temp file
-        let _ = std::fs::remove_file(&db_path);
     }
 }

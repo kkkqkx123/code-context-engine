@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use cce_types::error::common::ErrorClassify;
@@ -14,8 +15,11 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 use crate::metrics::Bm25Metrics;
-use cce_storage_common::{FulltextDocument, FulltextHit, FulltextSearchOptions};
+use cce_storage_common::{
+    FulltextDocument, FulltextHit, FulltextSearchOptions, FulltextWriteMetrics,
+};
 
+use crate::batch::{commit_documents, stage_documents};
 use crate::{Bm25Config, Bm25Error};
 use crate::{
     IndexManager, batch_add_documents, delete_document, delete_documents_by_file_path_and_project,
@@ -32,11 +36,43 @@ const BATCH_RETRY_DEADLINE: Duration = Duration::from_millis(500);
 /// Random jitter ratio added on top of each computed backoff.
 const BATCH_RETRY_JITTER_RATIO: f64 = 0.3;
 
+/// Cumulative timing counters for the embedded writer.
+#[derive(Default)]
+struct WriteCounters {
+    commits: AtomicU64,
+    documents: AtomicU64,
+    staged_documents: AtomicU64,
+    pending_documents: AtomicU64,
+    document_nanos: AtomicU64,
+    commit_nanos: AtomicU64,
+    refresh_nanos: AtomicU64,
+    merge_nanos: AtomicU64,
+}
+
+impl WriteCounters {
+    fn add(&self, counter: &AtomicU64, value: u64) {
+        counter.fetch_add(value, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> FulltextWriteMetrics {
+        FulltextWriteMetrics {
+            commits: self.commits.load(Ordering::Relaxed),
+            documents: self.documents.load(Ordering::Relaxed),
+            document_nanos: self.document_nanos.load(Ordering::Relaxed),
+            commit_nanos: self.commit_nanos.load(Ordering::Relaxed),
+            refresh_nanos: self.refresh_nanos.load(Ordering::Relaxed),
+            merge_nanos: self.merge_nanos.load(Ordering::Relaxed),
+            staged_documents: self.staged_documents.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// BM25 storage client
 pub struct Bm25Client {
     config: Bm25Config,
     index_manager: Option<Arc<RwLock<IndexManager>>>,
     metrics: Option<Arc<dyn Bm25Metrics>>,
+    write_counters: Arc<WriteCounters>,
 }
 
 impl Bm25Client {
@@ -46,6 +82,7 @@ impl Bm25Client {
             config,
             index_manager: None,
             metrics: None,
+            write_counters: Arc::new(WriteCounters::default()),
         }
     }
 
@@ -63,6 +100,11 @@ impl Bm25Client {
     /// Get the metrics collector
     pub fn metrics(&self) -> Option<&Arc<dyn Bm25Metrics>> {
         self.metrics.as_ref()
+    }
+
+    /// Cumulative counters for the embedded index writer.
+    pub fn write_metrics(&self) -> FulltextWriteMetrics {
+        self.write_counters.snapshot()
     }
 
     /// Initialize the BM25 index
@@ -201,13 +243,21 @@ impl Bm25Client {
                 // then add), so replaying the whole batch after a transient
                 // writer/commit failure is safe.
                 match batch_add_documents(&manager_guard, schema, docs) {
-                    Ok(count) => manager_guard.reload_reader().map(|()| count),
+                    Ok(stats) => {
+                        let refresh_started = Instant::now();
+                        manager_guard
+                            .reload_reader()
+                            .map(|()| (stats, refresh_started.elapsed().as_nanos() as u64))
+                    }
                     Err(e) => Err(e),
                 }
             };
 
             match result {
-                Ok(count) => return Ok(count),
+                Ok((stats, refresh_nanos)) => {
+                    self.record_write(stats.documents as u64, 0, &stats, refresh_nanos);
+                    return Ok(stats.documents);
+                }
                 Err(error) => {
                     match transient_backoff(
                         start,
@@ -230,6 +280,101 @@ impl Bm25Client {
                 }
             }
         }
+    }
+
+    /// Add documents to the shared writer without committing or refreshing.
+    ///
+    /// A staged batch becomes visible only after [`commit_staged`](Self::commit_staged).
+    pub async fn stage_documents(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> Result<usize, Bm25Error> {
+        self.validate_index_name(index_name)?;
+        if documents.is_empty() {
+            return Ok(0);
+        }
+        let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
+        let started = Instant::now();
+        let manager_guard = manager.read().await;
+        let docs: Vec<(String, HashMap<String, String>)> = documents
+            .iter()
+            .map(|d| (d.document_id.clone(), d.fields.clone()))
+            .collect();
+        let count = stage_documents(&manager_guard, manager_guard.schema(), docs)?;
+        let nanos = started.elapsed().as_nanos() as u64;
+        self.write_counters
+            .add(&self.write_counters.document_nanos, nanos);
+        self.write_counters
+            .add(&self.write_counters.staged_documents, count as u64);
+        self.write_counters
+            .add(&self.write_counters.pending_documents, count as u64);
+        Ok(count)
+    }
+
+    /// Commit and refresh all documents staged since the previous commit.
+    pub async fn commit_staged(&self, index_name: &str) -> Result<usize, Bm25Error> {
+        self.validate_index_name(index_name)?;
+        let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
+        let manager_guard = manager.read().await;
+        let pending = self
+            .write_counters
+            .pending_documents
+            .load(Ordering::Relaxed);
+        if pending == 0 {
+            return Ok(0);
+        }
+        let stats = commit_documents(&manager_guard)?;
+        let refresh_started = Instant::now();
+        manager_guard.reload_reader()?;
+        let refresh_nanos = refresh_started.elapsed().as_nanos() as u64;
+        self.record_write(pending, 0, &stats, refresh_nanos);
+        self.write_counters
+            .pending_documents
+            .store(0, Ordering::Relaxed);
+        Ok(pending as usize)
+    }
+
+    /// Drain background merges at the end of an indexing run.
+    pub async fn finish_writes(&self) -> Result<(), Bm25Error> {
+        let Some(manager) = self.index_manager.as_ref() else {
+            return Ok(());
+        };
+        let manager_guard = manager.read().await;
+        let started = Instant::now();
+        // Merges run on the writer's background pool. Sample the visible
+        // segment count until it settles instead of consuming the shared
+        // writer; the elapsed time is the observable merge drain at the end
+        // of an indexing run.
+        let mut previous = manager_guard.segment_count()?;
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let current = manager_guard.segment_count()?;
+            if current == previous {
+                break;
+            }
+            previous = current;
+        }
+        let nanos = started.elapsed().as_nanos() as u64;
+        self.write_counters
+            .add(&self.write_counters.merge_nanos, nanos);
+        Ok(())
+    }
+
+    fn record_write(
+        &self,
+        documents: u64,
+        staged: u64,
+        stats: &crate::batch::BatchWriteStats,
+        refresh_nanos: u64,
+    ) {
+        let counters = &self.write_counters;
+        counters.add(&counters.commits, 1);
+        counters.add(&counters.documents, documents);
+        counters.add(&counters.staged_documents, staged);
+        counters.add(&counters.document_nanos, stats.document_nanos);
+        counters.add(&counters.commit_nanos, stats.commit_nanos);
+        counters.add(&counters.refresh_nanos, refresh_nanos);
     }
 
     /// Delete a document by ID
@@ -637,6 +782,7 @@ impl Clone for Bm25Client {
             config: self.config.clone(),
             index_manager: self.index_manager.clone(),
             metrics: self.metrics.clone(),
+            write_counters: Arc::clone(&self.write_counters),
         }
     }
 }

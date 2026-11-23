@@ -6,6 +6,7 @@
 
 use cce_storage_common::fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
+    FulltextWriteMetrics,
 };
 
 #[cfg(feature = "local")]
@@ -13,6 +14,27 @@ use crate::Bm25Client;
 
 #[cfg(feature = "local")]
 impl FulltextStorage for Bm25Client {
+    fn write_metrics(&self) -> Option<FulltextWriteMetrics> {
+        Some(Bm25Client::write_metrics(self))
+    }
+
+    async fn stage_documents(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> Result<usize, FulltextError> {
+        Ok(Bm25Client::stage_documents(self, index_name, documents).await?)
+    }
+
+    async fn commit_staged(&self, index_name: &str) -> Result<usize, FulltextError> {
+        Ok(Bm25Client::commit_staged(self, index_name).await?)
+    }
+
+    async fn finish_writes(&self, index_name: &str) -> Result<(), FulltextError> {
+        let _ = index_name;
+        Ok(Bm25Client::finish_writes(self).await?)
+    }
+
     async fn batch_index(
         &self,
         index_name: &str,

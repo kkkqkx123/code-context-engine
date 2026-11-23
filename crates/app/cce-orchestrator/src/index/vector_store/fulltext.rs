@@ -3,6 +3,7 @@ use std::sync::Arc;
 use cce_storage_bm25::{Bm25Client, ElasticsearchClient};
 use cce_storage_common::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
+    FulltextWriteMetrics,
 };
 use cce_types::StorageError;
 
@@ -65,6 +66,14 @@ impl FulltextStore {
         }
     }
 
+    /// Cumulative local writer counters; the remote branch has none.
+    pub fn write_metrics(&self) -> Option<FulltextWriteMetrics> {
+        match self {
+            Self::Local(client) => FulltextStorage::write_metrics(client.as_ref()),
+            Self::Remote(_) => None,
+        }
+    }
+
     /// Unwrap into the local handle when this is the embedded branch.
     pub fn into_local(self) -> Option<Arc<Bm25Client>> {
         match self {
@@ -114,6 +123,47 @@ impl std::fmt::Debug for FulltextStore {
 }
 
 impl FulltextStorage for FulltextStore {
+    fn write_metrics(&self) -> Option<FulltextWriteMetrics> {
+        FulltextStore::write_metrics(self)
+    }
+
+    async fn stage_documents(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::stage_documents(client.as_ref(), index_name, documents).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::stage_documents(client.as_ref(), index_name, documents).await
+            }
+        }
+    }
+
+    async fn commit_staged(&self, index_name: &str) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::commit_staged(client.as_ref(), index_name).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::commit_staged(client.as_ref(), index_name).await
+            }
+        }
+    }
+
+    async fn finish_writes(&self, index_name: &str) -> Result<(), FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::finish_writes(client.as_ref(), index_name).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::finish_writes(client.as_ref(), index_name).await
+            }
+        }
+    }
+
     async fn batch_index(
         &self,
         index_name: &str,

@@ -6,10 +6,13 @@
 //! batch concurrently with bounded concurrency lives in `process_batch_with_mode`.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::CheckpointManager;
+use crate::index::storage_coordinator::bm25::StagedBm25Write;
+use crate::index::vector_store::VectorBatchWriter;
 use crate::operation::checkpoint::{ParsedCheckpointPayload, decode_parsed_checkpoint};
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_scanner::FileEntry;
@@ -23,7 +26,84 @@ use crate::error::OrchestratorError;
 use crate::index::options::IndexOptions;
 use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState, TrackerFailure};
 
+/// Documents accumulated before the next Tantivy commit.
+const BM25_COMMIT_DOCUMENTS: usize = 2_048;
+
 impl IndexOrchestrator {
+    /// Publish all writes staged across orchestration batches.
+    ///
+    /// Vector and fulltext work units become `Committed` only after their
+    /// respective backends accept the data. The batch checkpoint advances
+    /// past the aggregated range only after both commits succeed.
+    #[allow(clippy::too_many_arguments)]
+    async fn commit_deferred_writes(
+        &self,
+        ctx: &mut FullIndexContext,
+        checkpoint_manager: &Option<Arc<CheckpointManager>>,
+        operation_id: &str,
+        vector_writer: Option<&mut VectorBatchWriter>,
+        vector_hashes: &mut Vec<String>,
+        staged_bm25: &mut StagedBm25Write,
+        pending_batches: &mut Vec<usize>,
+        pending_vector_paths: &mut Vec<PathBuf>,
+        pending_bm25_paths: &mut Vec<PathBuf>,
+        pending_completed_paths: &mut Vec<PathBuf>,
+        advance_through: Option<usize>,
+    ) -> Result<(), OrchestratorError> {
+        let started = Instant::now();
+        if let Some(writer) = vector_writer {
+            self.storage
+                .commit_staged_vectors(writer, vector_hashes)
+                .await?;
+            vector_hashes.clear();
+        }
+        if !staged_bm25.is_empty() {
+            self.storage.commit_staged_bm25(staged_bm25).await?;
+            *staged_bm25 = StagedBm25Write::default();
+        }
+
+        let vector_paths: HashSet<_> = pending_vector_paths.drain(..).collect();
+        for path in vector_paths {
+            self.state_tracker
+                .mark_success(Path::new(&path), ModuleType::Embedding)
+                .await
+                .unwrap_or_else(|e| tracing::warn!(error = %e, "State tracking operation failed"));
+            self.state_tracker
+                .mark_phase_complete(&[path], IndexPhase::Embedding)
+                .await
+                .unwrap_or_else(|e| tracing::warn!(error = %e, "State tracking operation failed"));
+        }
+        let bm25_paths: HashSet<_> = pending_bm25_paths.drain(..).collect();
+        for path in bm25_paths {
+            self.state_tracker
+                .mark_success(Path::new(&path), ModuleType::Bm25)
+                .await
+                .unwrap_or_else(|e| tracing::warn!(error = %e, "State tracking operation failed"));
+        }
+        let completed_paths: HashSet<_> = pending_completed_paths.drain(..).collect();
+        for path in completed_paths {
+            self.state_tracker
+                .mark_phase_complete(&[path], IndexPhase::Completed)
+                .await
+                .unwrap_or_else(|e| tracing::warn!(error = %e, "State tracking operation failed"));
+        }
+
+        if let (Some(cm), Some(target)) = (checkpoint_manager.as_ref(), advance_through) {
+            let last = pending_batches.iter().copied().max().unwrap_or(target);
+            cm.update_current_batch_index(operation_id, (last + 1) as u32)
+                .await
+                .map_err(|e| {
+                    OrchestratorError::index(
+                        "checkpoint_batch_index",
+                        format!("Failed to advance batch checkpoint: {e}"),
+                    )
+                })?;
+        }
+        pending_batches.clear();
+        ctx.stages.write_commit_ms += started.elapsed().as_millis() as u64;
+        Ok(())
+    }
+
     /// Process all remaining batches in the deterministic batch loop.
     ///
     /// Results are stored immediately per batch so memory usage stays bounded
@@ -41,10 +121,22 @@ impl IndexOrchestrator {
         let batch_size = self.batch_config.scan_batch_size;
         let root_dir = options.root_dir.to_string_lossy().to_string();
         let batch_loop_started = Instant::now();
+        let mut vector_writer = self.storage.vector().cloned().map(VectorBatchWriter::new);
+        let mut vector_hashes: Vec<String> = Vec::new();
+        let mut staged_bm25 = StagedBm25Write::default();
+        let mut pending_batches: Vec<usize> = Vec::new();
+        let mut pending_vector_paths: Vec<PathBuf> = Vec::new();
+        let mut pending_bm25_paths: Vec<PathBuf> = Vec::new();
+        let mut pending_completed_paths: Vec<PathBuf> = Vec::new();
+        let mut source_entity_ids: std::collections::HashMap<(String, i64), i64> =
+            std::collections::HashMap::new();
+        let mut max_entity_id = 0i64;
 
         for batch_idx in ctx.start_batch..ctx.total_batches {
             ctx.stages.batches += 1;
+            let state_started = Instant::now();
             self.state_tracker.flush_deferred_persistence().await;
+            ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
             let setup_started = Instant::now();
             let batch = match ctx.file_indexer.get_batch(batch_idx) {
                 Ok(b) => b,
@@ -59,8 +151,10 @@ impl IndexOrchestrator {
             let batch_paths: Vec<_> = batch.iter().map(|f| f.path.clone()).collect();
             let batch_num = batch_idx + 1;
             self.storage.begin_batch(batch_num as i64).await?;
+            ctx.stages.batch_dispatch_ms += setup_started.elapsed().as_millis() as u64;
 
             // Create state tracking for this batch
+            let state_started = Instant::now();
             self.state_tracker
                 .create_full_index_batch(
                     &batch_paths,
@@ -70,8 +164,10 @@ impl IndexOrchestrator {
                     root_dir.clone(),
                 )
                 .await;
+            ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
             // Create batch checkpoint for foreign key constraint
+            let checkpoint_started = Instant::now();
             if let Some(ref cm) = checkpoint_manager {
                 let first_file = batch
                     .first()
@@ -137,6 +233,7 @@ impl IndexOrchestrator {
                 } else {
                     HashMap::new()
                 };
+            ctx.stages.checkpoint_ms += checkpoint_started.elapsed().as_millis() as u64;
             ctx.stages.batch_setup_ms += setup_started.elapsed().as_millis() as u64;
 
             let stage_started = Instant::now();
@@ -202,14 +299,18 @@ impl IndexOrchestrator {
             ctx.stages.relation_spool_ms += spool_started.elapsed().as_millis() as u64;
 
             // Mark batch as completing Parsing phase (after actual processing)
+            let state_started = Instant::now();
             self.state_tracker
                 .mark_phase_complete(&success_paths, IndexPhase::Parsing)
                 .await
                 .unwrap_or_else(|e| {
                     tracing::warn!(error = %e, "State tracking operation failed");
                 });
+            ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
+            let progress_started = Instant::now();
             self.progress.set_total(ctx.total_files);
+            ctx.stages.progress_ms += progress_started.elapsed().as_millis() as u64;
 
             // Store results immediately. Entity rows must commit before any
             // derived write: vectors and BM25 resolve their entity links from
@@ -237,13 +338,21 @@ impl IndexOrchestrator {
                 }
             }
             ctx.stages.entity_store_ms += stage_started.elapsed().as_millis() as u64;
+            if entity_store_ok {
+                self.storage
+                    .extend_source_entity_ids(&mut source_entity_ids, &mut max_entity_id)
+                    .await?;
+            }
 
+            let mut vector_deferred = false;
+            let mut bm25_deferred = false;
             if !batch_result.chunks.is_empty() && entity_store_ok {
                 let mut embedding_store_ok = true;
                 let mut bm25_store_ok = true;
 
                 if options.store_vectors {
                     // Mark all files as updating Embedding module
+                    let state_started = Instant::now();
                     for path in &success_paths {
                         self.state_tracker
                             .update_module_state(
@@ -256,6 +365,7 @@ impl IndexOrchestrator {
                                 tracing::warn!(error = %e, "State tracking operation failed");
                             });
                     }
+                    ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
                     // Only send Embedding-path chunks to vector store
                     let embedding_chunks: Vec<_> = batch_result
@@ -264,27 +374,51 @@ impl IndexOrchestrator {
                         .filter(|c| c.path == cce_parser::ast_to_nl::chunker::ChunkPath::Embedding)
                         .cloned()
                         .collect();
+                    let hash_count_before = vector_hashes.len();
                     let stage_started = Instant::now();
-                    let vector_result = self
-                        .storage
-                        .store_vectors_batched(
-                            &embedding_chunks,
-                            self.batch_config.embedding_batch_size,
-                            self.batch_config.embedding_batch_delay_ms,
-                        )
-                        .await;
+                    let vector_result = if let Some(writer) = vector_writer.as_mut() {
+                        self.storage
+                            .stage_vectors_batched(
+                                &embedding_chunks,
+                                self.batch_config.embedding_batch_size,
+                                self.batch_config.embedding_batch_delay_ms,
+                                Some(writer),
+                                &mut vector_hashes,
+                                Some(&source_entity_ids),
+                            )
+                            .await
+                    } else {
+                        self.storage
+                            .store_vectors_batched(
+                                &embedding_chunks,
+                                self.batch_config.embedding_batch_size,
+                                self.batch_config.embedding_batch_delay_ms,
+                            )
+                            .await
+                    };
                     ctx.stages.vector_store_ms += stage_started.elapsed().as_millis() as u64;
                     ctx.stages.vector_store_calls += 1;
                     match vector_result {
                         Ok(stored) => {
                             ctx.total_vectors += stored;
-                            for path in &success_paths {
-                                self.state_tracker
-                                    .mark_success(path, ModuleType::Embedding)
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        tracing::warn!(error = %e, "State tracking operation failed");
-                                    });
+                            vector_deferred = vector_hashes.len() > hash_count_before
+                                || vector_writer
+                                    .as_ref()
+                                    .is_some_and(|writer| writer.pending_len() > 0);
+                            if vector_deferred {
+                                pending_vector_paths.extend(success_paths.iter().cloned());
+                            } else {
+                                let state_started = Instant::now();
+                                for path in &success_paths {
+                                    self.state_tracker
+                                        .mark_success(path, ModuleType::Embedding)
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            tracing::warn!(error = %e, "State tracking operation failed");
+                                        });
+                                }
+                                ctx.stages.state_projection_ms +=
+                                    state_started.elapsed().as_millis() as u64;
                             }
                         }
                         Err(e) => {
@@ -295,10 +429,8 @@ impl IndexOrchestrator {
                                 "Vector storage failed for batch {}: {}",
                                 batch_num, e
                             ));
-                            // Feed the shared retry/dead-letter machinery the
-                            // same way hot updates do, with the failure's own
-                            // classification.
                             let failure = e.as_module_failure();
+                            let state_started = Instant::now();
                             for path in &success_paths {
                                 self.state_tracker
                                     .mark_failed(path, ModuleType::Embedding, failure.clone())
@@ -307,7 +439,41 @@ impl IndexOrchestrator {
                                         tracing::warn!(error = %e, "State tracking operation failed");
                                     });
                             }
+                            ctx.stages.state_projection_ms +=
+                                state_started.elapsed().as_millis() as u64;
                         }
+                    }
+                    if let Some(writer) = vector_writer.as_ref() {
+                        ctx.stages.vector_pending_points_max = ctx
+                            .stages
+                            .vector_pending_points_max
+                            .max(writer.pending_len() as u64);
+                    }
+                    let writer_full = vector_writer.as_ref().is_some_and(|w| w.is_full());
+                    if writer_full
+                        && let Err(e) = self
+                            .commit_deferred_writes(
+                                ctx,
+                                &checkpoint_manager,
+                                &operation_id,
+                                vector_writer.as_mut(),
+                                &mut vector_hashes,
+                                &mut staged_bm25,
+                                &mut pending_batches,
+                                &mut pending_vector_paths,
+                                &mut pending_bm25_paths,
+                                &mut pending_completed_paths,
+                                None,
+                            )
+                            .await
+                    {
+                        ctx.errors
+                            .push(format!("Deferred write commit failed: {e}"));
+                        ctx.all_batches_completed = false;
+                        break;
+                    }
+                    if writer_full {
+                        vector_deferred = false;
                     }
                 } else {
                     // Vector storage disabled for this run: chunk rows and
@@ -336,7 +502,7 @@ impl IndexOrchestrator {
                 }
 
                 if options.store_bm25 {
-                    // Mark all files as updating Bm25 module
+                    let state_started = Instant::now();
                     for path in &success_paths {
                         self.state_tracker
                             .update_module_state(
@@ -349,37 +515,51 @@ impl IndexOrchestrator {
                                 tracing::warn!(error = %e, "State tracking operation failed");
                             });
                     }
+                    ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
-                    // Only send BM25-path chunks to BM25 index
                     let bm25_chunks: Vec<_> = batch_result
                         .chunks
                         .iter()
                         .filter(|c| c.path == cce_parser::ast_to_nl::chunker::ChunkPath::Bm25)
                         .cloned()
                         .collect();
+                    let documents_before = staged_bm25.documents;
                     let stage_started = Instant::now();
-                    let bm25_result = self.storage.store_bm25(&bm25_chunks).await;
+                    let bm25_result = self
+                        .storage
+                        .stage_bm25(&bm25_chunks, 100, Some(&source_entity_ids))
+                        .await;
                     ctx.stages.bm25_store_ms += stage_started.elapsed().as_millis() as u64;
                     ctx.stages.bm25_store_calls += 1;
                     match bm25_result {
-                        Ok(()) => {
-                            for path in &success_paths {
-                                self.state_tracker
-                                    .mark_success(path, ModuleType::Bm25)
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        tracing::warn!(error = %e, "State tracking operation failed");
-                                    });
+                        Ok(staged) => {
+                            staged_bm25.merge(staged);
+                            bm25_deferred = staged_bm25.documents > documents_before;
+                            if bm25_deferred {
+                                pending_bm25_paths.extend(success_paths.iter().cloned());
+                            } else {
+                                let state_started = Instant::now();
+                                for path in &success_paths {
+                                    self.state_tracker
+                                        .mark_success(path, ModuleType::Bm25)
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            tracing::warn!(error = %e, "State tracking operation failed");
+                                        });
+                                }
+                                ctx.stages.state_projection_ms +=
+                                    state_started.elapsed().as_millis() as u64;
                             }
                         }
                         Err(e) => {
                             bm25_store_ok = false;
-                            tracing::error!(error = %e, "Failed to store BM25 for batch {}", batch_num);
+                            tracing::error!(error = %e, "Failed to stage BM25 for batch {}", batch_num);
                             ctx.errors.push(format!(
                                 "BM25 storage failed for batch {}: {}",
                                 batch_num, e
                             ));
                             let failure = e.as_module_failure();
+                            let state_started = Instant::now();
                             for path in &success_paths {
                                 self.state_tracker
                                     .mark_failed(path, ModuleType::Bm25, failure.clone())
@@ -388,8 +568,43 @@ impl IndexOrchestrator {
                                         tracing::warn!(error = %e, "State tracking operation failed");
                                     });
                             }
+                            ctx.stages.state_projection_ms +=
+                                state_started.elapsed().as_millis() as u64;
                         }
                     }
+                    ctx.stages.bm25_pending_documents_max = ctx
+                        .stages
+                        .bm25_pending_documents_max
+                        .max(staged_bm25.documents as u64);
+                    if staged_bm25.documents >= BM25_COMMIT_DOCUMENTS
+                        && let Err(e) = self
+                            .commit_deferred_writes(
+                                ctx,
+                                &checkpoint_manager,
+                                &operation_id,
+                                vector_writer.as_mut(),
+                                &mut vector_hashes,
+                                &mut staged_bm25,
+                                &mut pending_batches,
+                                &mut pending_vector_paths,
+                                &mut pending_bm25_paths,
+                                &mut pending_completed_paths,
+                                Some(batch_idx),
+                            )
+                            .await
+                    {
+                        ctx.errors.push(format!("Deferred BM25 commit failed: {e}"));
+                        ctx.all_batches_completed = false;
+                        break;
+                    }
+                    if bm25_deferred && staged_bm25.is_empty() {
+                        bm25_deferred = false;
+                    }
+                }
+
+                if (vector_deferred || bm25_deferred) && pending_batches.last() != Some(&batch_idx)
+                {
+                    pending_batches.push(batch_idx);
                 }
 
                 // The Embedding phase is only complete once every attempted
@@ -397,12 +612,19 @@ impl IndexOrchestrator {
                 // storage failure would let a resume trust a phase whose
                 // data was lost.
                 if embedding_store_ok && bm25_store_ok {
-                    self.state_tracker
-                        .mark_phase_complete(&success_paths, IndexPhase::Embedding)
-                        .await
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, "State tracking operation failed");
-                        });
+                    if vector_deferred || bm25_deferred {
+                        pending_completed_paths.extend(success_paths.iter().cloned());
+                    } else {
+                        let state_started = Instant::now();
+                        self.state_tracker
+                            .mark_phase_complete(&success_paths, IndexPhase::Embedding)
+                            .await
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(error = %e, "State tracking operation failed");
+                            });
+                        ctx.stages.state_projection_ms +=
+                            state_started.elapsed().as_millis() as u64;
+                    }
                 }
 
                 // Checkpoint progress is now tracked by CheckpointManager
@@ -439,6 +661,7 @@ impl IndexOrchestrator {
                     });
 
                 // Mark all files as updating Summary module
+                let state_started = Instant::now();
                 for path in &success_paths {
                     self.state_tracker
                         .update_module_state(path, ModuleType::Summary, ModuleUpdateState::Updating)
@@ -447,6 +670,7 @@ impl IndexOrchestrator {
                             tracing::warn!(error = %e, "State tracking operation failed");
                         });
                 }
+                ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
                 let stage_started = Instant::now();
                 let summaries: Vec<cce_parser::summary::FileSummary> =
@@ -510,6 +734,7 @@ impl IndexOrchestrator {
                 // config/key is fixed. Transient fallbacks and clean
                 // generations mark success; degraded counting happens
                 // in the per-file loop.
+                let state_started = Instant::now();
                 for path in &success_paths {
                     let outcome = file_summary_map
                         .get(path.to_string_lossy().as_ref())
@@ -552,6 +777,7 @@ impl IndexOrchestrator {
                         }
                     }
                 }
+                ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
             }
 
             // Accumulate chunks and summaries for the final (post-finalize)
@@ -589,13 +815,21 @@ impl IndexOrchestrator {
             }
             ctx.stages.export_spool_ms += export_spool_started.elapsed().as_millis() as u64;
 
-            // Mark phase as Completed
-            self.state_tracker
-                .mark_phase_complete(&success_paths, IndexPhase::Completed)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "State tracking operation failed");
-                });
+            // Mark phase as Completed once this batch's vector and fulltext
+            // writes are durable; deferred batches carry the marker to their
+            // aggregation commit boundary.
+            let state_started = Instant::now();
+            if vector_deferred || bm25_deferred || !pending_completed_paths.is_empty() {
+                pending_completed_paths.extend(success_paths.iter().cloned());
+            } else {
+                self.state_tracker
+                    .mark_phase_complete(&success_paths, IndexPhase::Completed)
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, "State tracking operation failed");
+                    });
+            }
+            ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
             match classify_batch_action(
                 ctx.errors.len() - errors_before_batch,
@@ -604,7 +838,29 @@ impl IndexOrchestrator {
                 BatchAction::Stop => {
                     // Batch-level infrastructure failure (entity/vector/BM25/
                     // summary storage): every remaining batch would pile up the
-                    // same error, so stop and stay resumable.
+                    // same error, so stop and stay resumable. Earlier staged
+                    // data may still be committed, but the batch boundary must
+                    // not move past the failed batch.
+                    if !pending_batches.is_empty()
+                        && let Err(e) = self
+                            .commit_deferred_writes(
+                                ctx,
+                                &checkpoint_manager,
+                                &operation_id,
+                                vector_writer.as_mut(),
+                                &mut vector_hashes,
+                                &mut staged_bm25,
+                                &mut pending_batches,
+                                &mut pending_vector_paths,
+                                &mut pending_bm25_paths,
+                                &mut pending_completed_paths,
+                                None,
+                            )
+                            .await
+                    {
+                        ctx.errors
+                            .push(format!("Deferred write commit failed: {e}"));
+                    }
                     ctx.all_batches_completed = false;
                     tracing::warn!(
                         batch = batch_num,
@@ -618,6 +874,26 @@ impl IndexOrchestrator {
                     // advanced here, and failed files have no file-level
                     // checkpoint record, so a resume re-enters this batch and
                     // retries them.
+                    if !pending_batches.is_empty()
+                        && let Err(e) = self
+                            .commit_deferred_writes(
+                                ctx,
+                                &checkpoint_manager,
+                                &operation_id,
+                                vector_writer.as_mut(),
+                                &mut vector_hashes,
+                                &mut staged_bm25,
+                                &mut pending_batches,
+                                &mut pending_vector_paths,
+                                &mut pending_bm25_paths,
+                                &mut pending_completed_paths,
+                                None,
+                            )
+                            .await
+                    {
+                        ctx.errors
+                            .push(format!("Deferred write commit failed: {e}"));
+                    }
                     ctx.all_batches_completed = false;
                     tracing::warn!(
                         batch = batch_num,
@@ -629,28 +905,63 @@ impl IndexOrchestrator {
                 BatchAction::Proceed => {}
             }
 
-            // Persist batch checkpoint progress
-            if let Some(cm) = checkpoint_manager.as_ref() {
-                if let Err(e) = cm
+            // Persist batch checkpoint progress. While derived writes are
+            // staged, the boundary stays at the last committed batch.
+            let checkpoint_started = Instant::now();
+            if pending_batches.is_empty()
+                && let Some(cm) = checkpoint_manager.as_ref()
+                && let Err(e) = cm
                     .update_current_batch_index(&operation_id, batch_idx as u32 + 1)
                     .await
-                {
-                    tracing::error!(
-                        error = %e,
-                        "Failed to update batch checkpoint index for batch {}",
-                        batch_num
-                    );
-                    ctx.errors.push(format!(
-                        "Failed to persist checkpoint for batch {}: {}",
-                        batch_idx, e
-                    ));
-                    ctx.all_batches_completed = false;
-                    break;
-                }
+            {
+                tracing::error!(
+                    error = %e,
+                    "Failed to update batch checkpoint index for batch {}",
+                    batch_num
+                );
+                ctx.errors.push(format!(
+                    "Failed to persist checkpoint for batch {}: {}",
+                    batch_idx, e
+                ));
+                ctx.all_batches_completed = false;
+                break;
             }
+            ctx.stages.checkpoint_ms += checkpoint_started.elapsed().as_millis() as u64;
+
+            ctx.stages.rss_peak_batch_kb = ctx
+                .stages
+                .rss_peak_batch_kb
+                .max(cce_utils::rss_kb().unwrap_or(0));
         }
 
+        if !pending_batches.is_empty()
+            && let Err(e) = self
+                .commit_deferred_writes(
+                    ctx,
+                    &checkpoint_manager,
+                    &operation_id,
+                    vector_writer.as_mut(),
+                    &mut vector_hashes,
+                    &mut staged_bm25,
+                    &mut pending_batches,
+                    &mut pending_vector_paths,
+                    &mut pending_bm25_paths,
+                    &mut pending_completed_paths,
+                    ctx.total_batches.checked_sub(1),
+                )
+                .await
+        {
+            ctx.errors
+                .push(format!("Final deferred write commit failed: {e}"));
+            ctx.all_batches_completed = false;
+        }
+        if let Err(e) = self.storage.finish_fulltext_writes().await {
+            ctx.errors.push(format!("BM25 merge drain failed: {e}"));
+        }
+
+        let state_started = Instant::now();
         self.state_tracker.flush_deferred_persistence().await;
+        ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
         let timed_ms = ctx.stages.batch_process_ms
             + ctx.stages.batch_setup_ms
@@ -659,7 +970,12 @@ impl IndexOrchestrator {
             + ctx.stages.bm25_store_ms
             + ctx.stages.summary_ms
             + ctx.stages.relation_spool_ms
-            + ctx.stages.export_spool_ms;
+            + ctx.stages.export_spool_ms
+            + ctx.stages.state_projection_ms
+            + ctx.stages.checkpoint_ms
+            + ctx.stages.progress_ms
+            + ctx.stages.batch_dispatch_ms
+            + ctx.stages.write_commit_ms;
         let loop_ms = batch_loop_started.elapsed().as_millis() as u64;
         ctx.stages.batch_overhead_ms = loop_ms.saturating_sub(timed_ms);
 

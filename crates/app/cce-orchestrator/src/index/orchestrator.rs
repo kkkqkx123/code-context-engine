@@ -522,6 +522,7 @@ impl IndexOrchestrator {
             errors.push(format!("Vector initialization failed: {}", e));
         }
         let vector_write_before = self.storage.vector_write_metrics();
+        let fulltext_write_before = self.storage.fulltext_write_metrics();
         let target_epoch = self.storage.begin_full_index().await?;
         tracing::info!(
             project_id = self.project_id,
@@ -579,6 +580,7 @@ impl IndexOrchestrator {
             .validate_recovered_hashes(&file_indexer, &operation_id, &options, start_batch)
             .await?;
         stages.scan_ms = scan_started.elapsed().as_millis() as u64;
+        stages.rss_after_scan_kb = cce_utils::rss_kb().unwrap_or(0);
 
         let total_files = file_indexer.files().len();
         let total_batches = file_indexer.total_batches();
@@ -717,6 +719,11 @@ impl IndexOrchestrator {
         self.run_batch_loop(&mut ctx, &options, output_mode).await?;
         ctx.stages
             .record_vector_write_delta(vector_write_before, self.storage.vector_write_metrics());
+        ctx.stages.record_fulltext_write_delta(
+            fulltext_write_before,
+            self.storage.fulltext_write_metrics(),
+        );
+        ctx.stages.rss_after_batches_kb = cce_utils::rss_kb().unwrap_or(0);
 
         // Rebuild against one complete symbol snapshot. Parsed relation inputs
         // are replayed from the operation-local spool so peak memory remains
@@ -730,6 +737,7 @@ impl IndexOrchestrator {
         // This guarantees relation data is fully resolved before derived consumers use it.
         let total_relations = self.finalize_index();
         ctx.stages.relation_ms = relation_started.elapsed().as_millis() as u64;
+        ctx.stages.rss_after_relation_kb = cce_utils::rss_kb().unwrap_or(0);
 
         // Export NL documents after the relation index is finalized so
         // relation enhancement is active. Only runs when every batch succeeded
@@ -749,6 +757,7 @@ impl IndexOrchestrator {
         self.finalize_manifest(&mut ctx).await?;
         ctx.stages.manifest_ms = manifest_started.elapsed().as_millis() as u64;
         self.state_tracker.end_deferred_persistence().await;
+        ctx.stages.rss_final_kb = cce_utils::rss_kb().unwrap_or(0);
 
         // Create result with accumulated values
         // Any collected error (scanner skips, file failures, storage faults,

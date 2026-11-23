@@ -136,4 +136,11 @@ async fn remote_metadata_service_smoke() {
         ApiResult::Success(response) => assert!(response.success),
         ApiResult::Error(error) => panic!("export must succeed: {}", error.error.message),
     }
+
+    MetadataStorage::snapshot_delete_project(&store, project_id)
+        .await
+        .expect("cleanup smoke snapshots");
+    MetadataStorage::delete_project_db(&store, project_id)
+        .await
+        .expect("cleanup smoke project");
 }

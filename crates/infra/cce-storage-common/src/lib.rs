@@ -44,7 +44,7 @@ pub mod source;
 
 pub use fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
-    TermOperator, assert_fulltext_storage,
+    FulltextWriteMetrics, TermOperator, assert_fulltext_storage,
 };
 pub use metadb::{MetadataStorage, assert_metadata_storage};
 

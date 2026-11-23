@@ -30,11 +30,11 @@
 
 新增单一管理脚本，提供 `up`、`down`、`status`、`clean` 子命令，不接受系统服务安装方式：
 
-- 下载缓存放在 `/data/kkkqkx/cce/services/cache`，只下载一次。
+- 下载缓存放在 `/opt/cce-services/cache`，只下载一次。
 - 每个服务有独立目录：`bin/`、`data/`、`logs/`、`run/`，数据不落在 repo 内。
 - 进程用 `pid` 文件管理，`down` 只停止脚本启动的进程，不使用全局 `pkill`。
 - 启动后通过 HTTP 健康检查确认可用；健康检查失败时脚本直接失败，不进入基准。
-- 每次基准使用新的数据目录或唯一索引名，运行前清理旧数据，避免跨轮污染。
+- 每次基准使用新的数据目录或唯一索引名；`run` 子命令在命令退出后停止服务并删除本次数据，避免跨轮污染和空间累积。
 - 日志统一写到 `/data/kkkqkx/cce/service-logs/`，结果仍追加到 `.bench_logs/` 对应 TSV。
 
 建议端口与用途：
@@ -83,10 +83,10 @@ ES 包大、启动慢，基准脚本应先等待集群状态变为可用，再�
 
 ## 执行顺序
 
-1. 启动 Qdrant，跑 vector 契约测试与 `qdrant/local` 服务基准，停止 Qdrant。
-2. 启动 ES，跑 fulltext 契约测试与 `local/es` 服务基准，停止 ES。
-3. 同时启动 Qdrant 与 ES，跑 `qdrant/es` 服务基准，随后全部停止。
-4. 可选启动 PostgreSQL，只跑 metadata 契约测试；不把它计入服务矩阵。
+1. 用 `run qdrant -- ...` 跑 vector 契约测试与 `qdrant/local` 服务基准。
+2. 用 `run elasticsearch -- ...` 跑 fulltext 契约测试与 `local/es` 服务基准。
+3. 用 `run all -- ...` 跑 `qdrant/es` 服务基准；`run` 结束后自动停服并清理本轮数据。
+4. 可选用 `run postgres -- ...` 跑 metadata 契约测试；不把它计入服务矩阵。
 5. 插件与高亮基准不需要外部服务，可穿插执行，但结果单独成表。
 
 ## 验收标准

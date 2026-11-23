@@ -589,13 +589,13 @@ mod tests {
     use cce_storage_common::metadb::NewProjectRecord;
     use std::collections::HashMap;
 
-    fn create_test_config() -> AppConfig {
+    fn create_test_config() -> (AppConfig, crate::test_support::TestDir) {
         let mut config = AppConfig::default();
 
         // Each engine opens its own vector store and metadata database under
         // the data dir, so parallel tests must not share one.
         let data_dir = crate::test_support::unique_test_dir();
-        config.database.sqlite.path = data_dir.join("cce.db").to_string_lossy().to_string();
+        config.database.sqlite.path = data_dir.path().join("cce.db").to_string_lossy().to_string();
 
         // Add a mock provider
         let mut providers = HashMap::new();
@@ -625,7 +625,7 @@ mod tests {
         config.llm.embedding_models = models;
         config.embedder.default_model = "test-model".to_string();
 
-        config
+        (config, data_dir)
     }
 
     /// Concurrent get_orchestrator returns same instance
@@ -634,8 +634,7 @@ mod tests {
     /// project and verifies the double-check pattern returns one instance.
     #[tokio::test]
     async fn test_concurrent_orchestrator_creation() {
-        let config = create_test_config();
-        let db_path = config.database.sqlite.path.clone();
+        let (config, _data_dir) = create_test_config();
 
         let engine = CodeContextEngine::builder()
             .config(config)
@@ -675,8 +674,5 @@ mod tests {
             Arc::ptr_eq(&orchestrator1, &orchestrator2),
             "Concurrent get_orchestrator calls should return the same Arc"
         );
-
-        // Clean up temp file
-        let _ = std::fs::remove_file(&db_path);
     }
 }

@@ -134,7 +134,61 @@ pub type FulltextError = cce_types::error::Bm25Error;
 /// observe flushed writes, so callers must invoke `flush` after the last
 /// batch before marking a generation ready. File paths are compared after
 /// normalization on every branch.
+/// Backend-neutral counters for one fulltext write stream.
+///
+/// The embedded branch reports commit, refresh and merge work here; remote
+/// branches keep the default zero snapshot because those counters describe
+/// a local index writer rather than a network service.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FulltextWriteMetrics {
+    pub commits: u64,
+    pub documents: u64,
+    pub document_nanos: u64,
+    pub commit_nanos: u64,
+    pub refresh_nanos: u64,
+    pub merge_nanos: u64,
+    pub staged_documents: u64,
+}
+
 pub trait FulltextStorage: Clone + Send + Sync + 'static {
+    /// Cumulative write counters, when the backend exposes them.
+    fn write_metrics(&self) -> Option<FulltextWriteMetrics> {
+        None
+    }
+
+    /// Stage documents in the local writer without publishing them.
+    ///
+    /// The default keeps the contract's batch-commit semantics for remote
+    /// branches; the embedded branch overrides it to aggregate commits across
+    /// orchestration batches.
+    fn stage_documents(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send {
+        let index_name = index_name.to_string();
+        let documents = documents.to_vec();
+        async move { self.batch_index(&index_name, &documents).await }
+    }
+
+    /// Publish staged documents and refresh the reader once.
+    fn commit_staged(
+        &self,
+        index_name: &str,
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send {
+        let _ = index_name;
+        async { Ok(0) }
+    }
+
+    /// Wait for background merges to drain and account for the wait.
+    fn finish_writes(
+        &self,
+        index_name: &str,
+    ) -> impl Future<Output = Result<(), FulltextError>> + Send {
+        let _ = index_name;
+        async { Ok(()) }
+    }
+
     /// Index a batch of documents into the configured index.
     fn batch_index(
         &self,

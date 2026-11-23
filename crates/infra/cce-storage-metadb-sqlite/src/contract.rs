@@ -1480,6 +1480,22 @@ impl MetadataStorage for SqliteClient {
             .collect())
     }
 
+    async fn entities_with_files_after(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        after_id: i64,
+    ) -> Result<Vec<EntityWithFile>, StorageError> {
+        let conn = self.read_connection()?;
+        let rows = EntityRepository::get_by_project_epoch_with_file_path_after_id(
+            &conn, project_id, epoch, after_id,
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|(entity, file_path)| EntityWithFile { entity, file_path })
+            .collect())
+    }
+
     async fn entities_by_ids(
         &self,
         project_id: i64,

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # On-demand external services for CCE benchmarks on devs.
 #
-# Usage: bash scripts/devs-benchmark-services.sh {up|down|status|metrics|env|clean} [qdrant|elasticsearch|postgres|all]
+# Usage: bash scripts/devs-benchmark-services.sh {up|down|status|metrics|sample|env|clean|run} [target] [-- command ...]
 #
 # Services are started only for a benchmark run and stopped by PID file. The
-# downloaded archives stay cached; each run gets its own data directory.
+# downloaded archives stay cached; `run` removes the data directories it created
+# on exit, including on failure.
 set -u
 
 INSTALL_ROOT=${CCE_SERVICE_ROOT:-/opt/cce-services}
@@ -87,8 +88,22 @@ wait_pg() {
     return 1
 }
 
+require_stopped() {
+    local name=$1
+    if [[ $(service_health "$name") == healthy ]]; then
+        log "$name is already healthy; refusing to manage a service started elsewhere"
+        return 1
+    fi
+}
+
+record_run_data() {
+    local name=$1 data=$2
+    echo "$data" > "$(target_run_dir "$name")/$name.data"
+}
+
 start_qdrant() {
     local dir archive
+    require_stopped qdrant || return 1
     dir=$(qdrant_dir)
     archive="$CACHE/qdrant-x86_64-unknown-linux-musl-$QDRANT_VERSION.tar.gz"
     download "https://github.com/qdrant/qdrant/releases/download/v$QDRANT_VERSION/qdrant-x86_64-unknown-linux-musl.tar.gz" "$archive"
@@ -96,13 +111,10 @@ start_qdrant() {
     data="$(qdrant_data)/$RUN_ID"
     run="$(target_run_dir qdrant)"
     mkdir -p "$dir/bin" "$data" "$run" "$LOG_ROOT/qdrant"
+    record_run_data qdrant "$data"
     if [[ ! -x "$dir/bin/qdrant" ]]; then
         tar -xzf "$archive" -C "$dir/bin"
         chmod +x "$dir/bin/qdrant"
-    fi
-    if curl -fsS --max-time 3 "$QDRANT_URL/healthz" >/dev/null 2>&1; then
-        log "qdrant already healthy: $QDRANT_URL"
-        return 0
     fi
     QDRANT__SERVICE__HTTP_PORT=16333 \
     QDRANT__STORAGE__STORAGE_PATH="$data" \
@@ -115,6 +127,7 @@ start_qdrant() {
 
 start_es() {
     local dir archive
+    require_stopped elasticsearch || return 1
     dir=$(es_dir)
     archive="$CACHE/elasticsearch-$ES_VERSION-linux-x86_64.tar.gz"
     download "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-$ES_VERSION-linux-x86_64.tar.gz" "$archive"
@@ -122,12 +135,9 @@ start_es() {
     data="$(es_data)/$RUN_ID"
     run="$(target_run_dir elasticsearch)"
     mkdir -p "$data" "$run" "$LOG_ROOT/elasticsearch"
+    record_run_data elasticsearch "$data"
     if [[ ! -x "$dir/bin/elasticsearch" ]]; then
         tar -xzf "$archive" -C "$dir" --strip-components=1
-    fi
-    if curl -fsS --max-time 3 "$ES_URL/" >/dev/null 2>&1; then
-        log "elasticsearch already healthy: $ES_URL"
-        return 0
     fi
     ES_JAVA_OPTS="-Xms1g -Xmx1g" \
     ES_JAVA_HOME="$dir/jdk" \
@@ -171,6 +181,7 @@ prepare_pg() {
 
 start_pg() {
     local dir bin data run pid
+    require_stopped postgres || return 1
     prepare_pg
     dir=$(pg_dir)
     bin="$(pg_bin)"
@@ -224,10 +235,35 @@ stop_pg() {
         elif kill -0 "$pid" 2>/dev/null; then
             kill "$pid" && log "postgres: stopped pid $pid"
         fi
-        rm -f "$run/postgres.pid" "$run/postgres.data"
+        rm -f "$run/postgres.pid"
     else
         log "postgres: no pid file"
     fi
+}
+
+stop_service() {
+    case "$1" in
+        qdrant|elasticsearch) stop_pid "$1" ;;
+        postgres) stop_pg ;;
+    esac
+}
+
+wait_stopped() {
+    local name=$1 deadline=$((SECONDS + 60))
+    while (( SECONDS < deadline )); do
+        [[ $(service_health "$name") == stopped ]] && return 0
+        sleep 1
+    done
+    log "$name still healthy after stop request"
+    return 1
+}
+
+prepare_services() {
+    local service
+    for service in $services; do
+        stop_service "$service"
+        wait_stopped "$service" || return 1
+    done
 }
 
 status_service() {
@@ -305,14 +341,32 @@ sample_services() {
     done
 }
 
+clean_current_service() {
+    local name=$1 run data
+    run=$(target_run_dir "$name")
+    data=$(cat "$run/$name.data" 2>/dev/null || true)
+    if [[ -n "$data" && "$data" == "$DATA_ROOT/$name/"* ]]; then
+        rm -rf -- "$data"
+        log "$name: removed run data $data"
+    fi
+    rm -f "$run/$name.data" "$run/$name.pid"
+}
+
 clean_service() {
     local name=$1
+    stop_service "$name"
+    if ! wait_stopped "$name"; then
+        log "$name: refusing to delete data of a running service"
+        return 1
+    fi
     case "$name" in
         qdrant) rm -rf "$(qdrant_data)" ;;
         elasticsearch) rm -rf "$(es_data)" ;;
         postgres) rm -rf "$(pg_data)" ;;
     esac
-    log "$name: removed run data and pid files (installation and cache kept)"
+    mkdir -p "$(target_run_dir "$name")"
+    rm -f "$(target_run_dir "$name")/$name.data"
+    log "$name: removed all run data and pid files (installation and cache kept)"
 }
 
 print_env() {
@@ -327,24 +381,25 @@ EOF
 target=${2:-all}
 services="qdrant elasticsearch postgres"
 [[ "$target" == all ]] || services="$target"
+case "$services" in
+    *qdrant*|*elasticsearch*|*postgres*) ;;
+    *) echo "unknown service: $target" >&2; exit 2 ;;
+esac
 case "$1" in
     up)
+        prepare_services || exit 1
         for service in $services; do
             case "$service" in
                 qdrant) start_qdrant ;;
                 elasticsearch) start_es ;;
                 postgres) start_pg ;;
-                *) echo "unknown service: $service" >&2; exit 2 ;;
-            esac
+            esac || exit 1
         done
         ;;
     down)
         for service in $services; do
-            case "$service" in
-                qdrant|elasticsearch) stop_pid "$service" ;;
-                postgres) stop_pg ;;
-                *) echo "unknown service: $service" >&2; exit 2 ;;
-            esac
+            stop_service "$service"
+            wait_stopped "$service" || true
         done
         ;;
     status)
@@ -360,10 +415,45 @@ case "$1" in
         print_env
         ;;
     clean)
-        for service in $services; do clean_service "$service"; done
+        for service in $services; do clean_service "$service" || exit 1; done
+        ;;
+    run)
+        shift 2
+        [[ "${1:-}" == -- ]] && shift
+        if (( $# == 0 )); then
+            echo "usage: $0 run [target] -- command [args ...]" >&2
+            exit 2
+        fi
+        export CCE_TEST_QDRANT_URL=$QDRANT_URL
+        export CCE_TEST_ES_URL=$ES_URL
+        export CCE_TEST_PG_URL=$PG_URL
+        export PATH="$HOME/.cargo/bin:$PATH"
+        started=()
+        cleanup_started() {
+            local status=$? service
+            for service in "${started[@]}"; do
+                stop_service "$service"
+                wait_stopped "$service" || true
+                clean_current_service "$service"
+            done
+            return "$status"
+        }
+        trap cleanup_started EXIT
+        prepare_services || exit 1
+        for service in $services; do
+            case "$service" in
+                qdrant) start_qdrant ;;
+                elasticsearch) start_es ;;
+                postgres) start_pg ;;
+            esac || exit 1
+            started+=("$service")
+        done
+        log "running: $*"
+        "$@"
+        exit $?
         ;;
     *)
-        echo "usage: $0 {up|down|status|metrics|sample|env|clean} [qdrant|elasticsearch|postgres|all]" >&2
+        echo "usage: $0 {up|down|status|metrics|sample|env|clean|run} [qdrant|elasticsearch|postgres|all]" >&2
         exit 2
         ;;
 esac

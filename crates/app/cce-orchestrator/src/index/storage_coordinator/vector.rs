@@ -65,13 +65,51 @@ impl StorageCoordinator {
         batch_size: usize,
         batch_delay_ms: u64,
     ) -> Result<usize, OrchestratorError> {
+        let mut writer = self.vector.clone().map(VectorBatchWriter::new);
+        let mut hashes = Vec::new();
+        let stored = self
+            .stage_vectors_batched(
+                chunks,
+                batch_size,
+                batch_delay_ms,
+                writer.as_mut(),
+                &mut hashes,
+                None,
+            )
+            .await?;
+        if let Some(writer) = writer.as_mut() {
+            self.commit_staged_vectors(writer, &hashes).await?;
+        }
+        Ok(stored)
+    }
+
+    /// Generate and buffer vectors without publishing a checkpoint boundary.
+    ///
+    /// The full-index loop shares one writer across orchestration batches so
+    /// the embedded backend performs one WAL commit per aggregation window.
+    pub async fn stage_vectors_batched(
+        &self,
+        chunks: &[ChunkedResult],
+        batch_size: usize,
+        batch_delay_ms: u64,
+        writer: Option<&mut VectorBatchWriter>,
+        hashes: &mut Vec<String>,
+        source_entity_ids: Option<&std::collections::HashMap<(String, i64), i64>>,
+    ) -> Result<usize, OrchestratorError> {
         let embedding_count = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
             .count();
         if embedding_count == 0 {
             return self
-                .store_vectors_batched_impl(chunks, batch_size, batch_delay_ms)
+                .stage_vectors_batched_impl(
+                    chunks,
+                    batch_size,
+                    batch_delay_ms,
+                    writer,
+                    hashes,
+                    source_entity_ids,
+                )
                 .await;
         }
         // 0 means auto-derive: microbatch count x per-microbatch budget. A
@@ -86,7 +124,14 @@ impl StorageCoordinator {
         let deadline = std::time::Duration::from_secs(timeout_secs);
         match tokio::time::timeout(
             deadline,
-            self.store_vectors_batched_impl(chunks, batch_size, batch_delay_ms),
+            self.stage_vectors_batched_impl(
+                chunks,
+                batch_size,
+                batch_delay_ms,
+                writer,
+                hashes,
+                source_entity_ids,
+            ),
         )
         .await
         {
@@ -101,11 +146,41 @@ impl StorageCoordinator {
         }
     }
 
-    async fn store_vectors_batched_impl(
+    /// Flush buffered vectors and mark their work units committed.
+    ///
+    /// Both steps happen at the same boundary so a crash before the flush
+    /// leaves every affected work unit uncommitted for replay.
+    pub async fn commit_staged_vectors(
+        &self,
+        writer: &mut VectorBatchWriter,
+        hashes: &[String],
+    ) -> Result<(), OrchestratorError> {
+        writer.flush().await?;
+        if let (Some(cm), Some(op_id)) =
+            (self.checkpoint_manager.as_ref(), self.operation_id.as_ref())
+            && !hashes.is_empty()
+            && let Err(e) = cm
+                .update_work_unit_statuses(
+                    op_id,
+                    "embedding_generation",
+                    hashes,
+                    WorkUnitStatus::Committed,
+                )
+                .await
+        {
+            tracing::warn!(error = %e, "Failed to update embedding work unit checkpoints to committed");
+        }
+        Ok(())
+    }
+
+    async fn stage_vectors_batched_impl(
         &self,
         chunks: &[ChunkedResult],
         batch_size: usize,
         batch_delay_ms: u64,
+        writer: Option<&mut VectorBatchWriter>,
+        hashes: &mut Vec<String>,
+        source_entity_ids: Option<&std::collections::HashMap<(String, i64), i64>>,
     ) -> Result<usize, OrchestratorError> {
         // Filter to only Embedding-path chunks first: empty work succeeds
         // regardless of backend configuration. Runs without an embedder or
@@ -136,23 +211,23 @@ impl StorageCoordinator {
             }
         };
 
-        let vector = match &self.vector {
-            Some(v) => v,
-            None => {
-                tracing::warn!(
-                    chunks = embedding_chunks.len(),
-                    "Vector store is not configured; persisting chunk metadata without vectors"
-                );
-                return self.persist_chunks_without_vectors(&embedding_chunks).await;
-            }
-        };
+        if self.vector.is_none() {
+            tracing::warn!(
+                chunks = embedding_chunks.len(),
+                "Vector store is not configured; persisting chunk metadata without vectors"
+            );
+            return self.persist_chunks_without_vectors(&embedding_chunks).await;
+        }
         self.ensure_project_group_id()?;
 
-        // Accumulate points across embedding microbatches and write them in
-        // larger batches: the embedded backend pays a fixed WAL/fsync/publish
-        // cost per upsert call, so the microbatch-sized writes would dominate.
-        // The writer is flushed before work units are marked committed below.
-        let mut vector_writer = VectorBatchWriter::new(vector.clone());
+        // Points accumulate in the caller-owned writer across embedding
+        // microbatches and, during a full index, across orchestration batches.
+        let writer = writer.ok_or_else(|| {
+            OrchestratorError::index(
+                "vector_writer",
+                "vector batch writer is required when a vector backend is configured",
+            )
+        })?;
 
         let mut total_stored = 0;
 
@@ -214,12 +289,19 @@ impl StorageCoordinator {
             }
         }
         let pending_count = pending_batches.len();
-        let mut committed_hashes: Vec<String> = Vec::new();
+        // Hashes are collected for the caller, which marks them Committed
+        // only after the shared writer has flushed.
 
-        // Entity ID map is epoch-scoped and immutable for this pass: load it
-        // once instead of once per microbatch (each load is a full-table
-        // scan plus JSON parse that grows linearly with the microbatch count).
-        let source_entity_ids = self.load_source_entity_ids().await?;
+        // The full-index loop owns an incremental map; a single-call path
+        // (hot update, dead-letter retry) loads the epoch's rows on demand.
+        let loaded_ids;
+        let source_entity_ids = match source_entity_ids {
+            Some(ids) => ids,
+            None => {
+                loaded_ids = self.load_source_entity_ids().await?;
+                &loaded_ids
+            }
+        };
 
         for (batch_idx, (batch, hash)) in pending_batches.iter().enumerate() {
             // Prepare texts for this batch
@@ -252,10 +334,10 @@ impl StorageCoordinator {
             };
 
             total_stored += self
-                .persist_embedding_batch(batch, &embeddings, &mut vector_writer, &source_entity_ids)
+                .persist_embedding_batch(batch, &embeddings, &mut *writer, &source_entity_ids)
                 .await?;
             if let Some(hash) = hash {
-                committed_hashes.push(hash.clone());
+                hashes.push(hash.clone());
             }
 
             // Sleep between batches to avoid rate limits (skip last batch)
@@ -284,12 +366,12 @@ impl StorageCoordinator {
                             .persist_embedding_batch(
                                 batch,
                                 &embeddings,
-                                &mut vector_writer,
+                                &mut *writer,
                                 &source_entity_ids,
                             )
                             .await?;
                         if let Some(hash) = hash {
-                            committed_hashes.push(hash);
+                            hashes.push(hash);
                         }
                     }
                     Err(err) if is_retryable_llm_error(&err) => {
@@ -306,33 +388,6 @@ impl StorageCoordinator {
                     }
                     Err(e) => return Err(e.into()),
                 }
-            }
-        }
-
-        // Flush every buffered point to the backend before marking any work
-        // unit committed: a batch is marked Committed only once its data is
-        // durable, so a crash before this point replays the uncommitted units.
-        vector_writer.flush().await?;
-
-        // Flush the Committed markers for every successfully persisted
-        // microbatch in one transaction. Units are marked only after their
-        // data is durable, so a crash before this point replays them.
-        if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op)
-            && !committed_hashes.is_empty()
-        {
-            if let Err(e) = cm
-                .update_work_unit_statuses(
-                    op_id,
-                    "embedding_generation",
-                    &committed_hashes,
-                    WorkUnitStatus::Committed,
-                )
-                .await
-            {
-                tracing::warn!(
-                    error = %e,
-                    "Failed to update embedding work unit checkpoints to committed"
-                );
             }
         }
 
@@ -537,15 +592,30 @@ impl StorageCoordinator {
         &self,
     ) -> Result<std::collections::HashMap<(String, i64), i64>, OrchestratorError> {
         let mut result = std::collections::HashMap::new();
+        let mut max_id = 0;
+        self.extend_source_entity_ids(&mut result, &mut max_id)
+            .await?;
+        Ok(result)
+    }
+
+    /// Extend an existing source-id map with entity rows inserted since the
+    /// last call. The row-id cursor keeps a long full-index run from
+    /// rescanning all entities after every orchestration batch.
+    pub(crate) async fn extend_source_entity_ids(
+        &self,
+        result: &mut std::collections::HashMap<(String, i64), i64>,
+        max_id: &mut i64,
+    ) -> Result<(), OrchestratorError> {
         let Some(store) = self.metadata_store.as_ref() else {
-            return Ok(result);
+            return Ok(());
         };
         let rows = store
-            .entities_with_files(self.project_id, self.epoch())
+            .entities_with_files_after(self.project_id, self.epoch(), *max_id)
             .await
             .map_err(OrchestratorError::Storage)?;
         let mut malformed = 0usize;
         for entry in rows {
+            *max_id = (*max_id).max(entry.entity.id);
             let (path, metadata, db_id) = (entry.file_path, entry.entity.metadata, entry.entity.id);
             // Every stored entity carries `__source_entity_id` in its
             // metadata; a row without a parseable one is malformed and its
@@ -577,7 +647,7 @@ impl StorageCoordinator {
                 "Skipped entity rows with malformed metadata while loading source entity IDs"
             );
         }
-        Ok(result)
+        Ok(())
     }
 
     /// Store chunk records in the relation store

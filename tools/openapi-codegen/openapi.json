@@ -9226,6 +9226,10 @@
             "description": "Files with deterministic failures skipped without retry.",
             "minimum": 0
           },
+          "stages": {
+            "$ref": "#/components/schemas/IndexStageTimingsDto",
+            "description": "Per-stage accounting for the run."
+          },
           "success": {
             "type": "boolean"
           },
@@ -9239,6 +9243,322 @@
           },
           "total_vectors": {
             "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "IndexStageTimingsDto": {
+        "type": "object",
+        "description": "Wall-clock accounting for one full-index run.",
+        "required": [
+          "scan_ms",
+          "batch_process_ms",
+          "batch_setup_ms",
+          "entity_store_ms",
+          "vector_store_ms",
+          "bm25_store_ms",
+          "summary_ms",
+          "relation_ms",
+          "export_ms",
+          "relation_spool_ms",
+          "relation_spool_write_ms",
+          "relation_symbols_ms",
+          "symbol_modules_ms",
+          "symbol_type_index_ms",
+          "symbol_overload_ms",
+          "symbol_flat_ms",
+          "symbol_cross_file_ms",
+          "export_spool_ms",
+          "manifest_ms",
+          "batch_overhead_ms",
+          "state_projection_ms",
+          "checkpoint_ms",
+          "progress_ms",
+          "batch_dispatch_ms",
+          "write_commit_ms",
+          "batches",
+          "vector_store_calls",
+          "entity_store_calls",
+          "bm25_store_calls",
+          "vector_txns_applied",
+          "vector_points_written",
+          "vector_wal_flushes",
+          "vector_wal_txns",
+          "vector_commit_wait_ms",
+          "vector_hnsw_builds",
+          "vector_hnsw_build_ms",
+          "vector_checkpoints",
+          "vector_checkpoint_ms",
+          "bm25_commits",
+          "bm25_documents",
+          "bm25_document_ms",
+          "bm25_commit_ms",
+          "bm25_refresh_ms",
+          "bm25_merge_ms",
+          "bm25_staged_documents",
+          "rss_after_scan_kb",
+          "rss_after_batches_kb",
+          "rss_after_relation_kb",
+          "rss_final_kb",
+          "rss_peak_batch_kb",
+          "vector_pending_points_max",
+          "bm25_pending_documents_max"
+        ],
+        "properties": {
+          "batch_dispatch_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batch_overhead_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batch_process_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batch_setup_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bm25_commit_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_commits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_document_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_documents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_merge_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_pending_documents_max": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_refresh_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_staged_documents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_store_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bm25_store_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "checkpoint_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_store_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "entity_store_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_spool_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "manifest_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "progress_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_write_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_symbols_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_after_batches_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_after_relation_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_after_scan_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_final_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_peak_batch_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "scan_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "state_projection_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "summary_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_cross_file_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_flat_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_modules_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_overload_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_type_index_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_checkpoint_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_checkpoints": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_commit_wait_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_hnsw_build_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_hnsw_builds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_pending_points_max": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_points_written": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_store_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vector_store_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_txns_applied": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_wal_flushes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_wal_txns": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "write_commit_ms": {
+            "type": "integer",
+            "format": "int64",
             "minimum": 0
           }
         }
@@ -10612,7 +10932,10 @@
           "rewrite_ms",
           "embedding_ms",
           "embedding_provider_ms",
+          "embedding_first_ms",
           "embedding_overhead_ms",
+          "embedding_cache_hits",
+          "response_render_ms",
           "vector_search_ms",
           "bm25_retrieval_ms",
           "fusion_ms",
@@ -10635,6 +10958,18 @@
             "type": "integer",
             "format": "int64",
             "description": "Wall-clock time spent resolving the project and building the query coordinator.",
+            "minimum": 0
+          },
+          "embedding_cache_hits": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of query embeddings served without a remote call.",
+            "minimum": 0
+          },
+          "embedding_first_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Provider time of the first transport call made by this client.",
             "minimum": 0
           },
           "embedding_ms": {
@@ -10671,6 +11006,12 @@
             "type": "integer",
             "format": "int64",
             "description": "Wall-clock time spent enriching and post-processing results.",
+            "minimum": 0
+          },
+          "response_render_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time spent converting query results into the response DTO.",
             "minimum": 0
           },
           "rewrite_ms": {

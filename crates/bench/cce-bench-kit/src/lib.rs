@@ -10,7 +10,7 @@
 //! to compile and a single source of truth for tier sizes.
 
 use std::fs;
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -278,6 +278,68 @@ pub fn open_report_with_header(manifest_dir: &str, file_name: &str, header: &str
     open_report_at_with_header(&results_path(manifest_dir, file_name), header)
 }
 
+/// Header line for a TSV report declared by a single column list.
+fn tsv_header(columns: &[&str]) -> String {
+    format!("# {}", columns.join("\t"))
+}
+
+/// TSV report whose header and rows come from one column list.
+///
+/// Benchmarks declare columns once; [`write_row`](Self::write_row) validates
+/// the value count before writing, so a schema change cannot silently shift
+/// later columns or append rows under a stale header.
+pub struct TsvReport {
+    file: fs::File,
+    columns: &'static [&'static str],
+}
+
+impl TsvReport {
+    /// Open a report under `<manifest>/benches/results` with a checked header.
+    pub fn open(manifest_dir: &str, file_name: &str, columns: &'static [&'static str]) -> Self {
+        Self::open_at(&results_path(manifest_dir, file_name), columns)
+    }
+
+    /// Open a report at `path` with a checked header.
+    pub fn open_at(path: &Path, columns: &'static [&'static str]) -> Self {
+        let file = open_report_at_with_header(path, &tsv_header(columns));
+        Self { file, columns }
+    }
+
+    /// Column names of this report, in row order.
+    pub fn columns(&self) -> &'static [&'static str] {
+        self.columns
+    }
+
+    /// Write one row. Values must be in the same order as `columns`.
+    pub fn write_row(&mut self, values: &[String]) -> io::Result<()> {
+        if values.len() != self.columns.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "tsv row has {} values but header has {} columns: {}",
+                    values.len(),
+                    self.columns.len(),
+                    self.columns.join(",")
+                ),
+            ));
+        }
+        if let Some((index, _value)) = values
+            .iter()
+            .enumerate()
+            .find(|(_, value)| value.chars().any(|c| matches!(c, '\t' | '\n' | '\r')))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "tsv value for '{}' contains a tab or newline",
+                    self.columns[index]
+                ),
+            ));
+        }
+        writeln!(self.file, "{}", values.join("\t"))
+    }
+}
+
 /// Single-function Rust stub shared by the small scanner fixtures.
 ///
 /// Matches the historical per-file shape those benchmarks always used, so
@@ -299,13 +361,110 @@ pub fn write_simple_tree(root: &Path, count: usize) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Fresh process-scoped scratch directory under the system temp directory.
+/// Process-scoped scratch directory that removes itself when it goes out of scope.
 ///
-/// Any previous run with the same process id is cleared first, then the
-/// directory is created eagerly so callers never handle creation errors.
-pub fn fresh_temp_dir(prefix: &str) -> PathBuf {
+/// Any previous run with the same process id is cleared first, so an
+/// interrupted benchmark cannot leave a stale fixture behind for the next one.
+#[derive(Debug)]
+pub struct BenchTempDir(PathBuf);
+
+impl BenchTempDir {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for BenchTempDir {
+    fn as_ref(&self) -> &Path {
+        self.path()
+    }
+}
+
+impl std::ops::Deref for BenchTempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        self.path()
+    }
+}
+
+impl Drop for BenchTempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Create a fresh scratch directory for one benchmark process.
+pub fn fresh_temp_dir(prefix: &str) -> BenchTempDir {
     let dir = std::env::temp_dir().join(format!("{prefix}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("create bench temp dir");
-    dir
+    BenchTempDir(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("cce-bench-kit-{}-{name}.tsv", std::process::id()))
+    }
+
+    #[test]
+    fn tsv_report_writes_header_and_rows_from_one_schema() {
+        let path = report_path("rows");
+        let _ = fs::remove_file(&path);
+        let mut report = TsvReport::open_at(&path, &["tier", "files"]);
+        report
+            .write_row(&["small".to_string(), "500".to_string()])
+            .expect("row must be written");
+        drop(report);
+
+        let content = fs::read_to_string(&path).expect("report must be readable");
+        assert_eq!(content, "# tier\tfiles\nsmall\t500\n");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tsv_report_replaces_rows_when_schema_changes() {
+        let path = report_path("schema");
+        let _ = fs::remove_file(&path);
+        let mut report = TsvReport::open_at(&path, &["a", "b"]);
+        report
+            .write_row(&["old".to_string(), "row".to_string()])
+            .expect("old row must be written");
+        drop(report);
+
+        let mut report = TsvReport::open_at(&path, &["a", "b", "c"]);
+        report
+            .write_row(&["new".to_string(), "row".to_string(), "three".to_string()])
+            .expect("new row must be written");
+        drop(report);
+
+        let content = fs::read_to_string(&path).expect("report must be readable");
+        assert_eq!(content, "# a\tb\tc\nnew\trow\tthree\n");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tsv_report_rejects_wrong_width_and_embedded_delimiters() {
+        let path = report_path("validation");
+        let _ = fs::remove_file(&path);
+        let mut report = TsvReport::open_at(&path, &["a", "b"]);
+
+        let width_error = report
+            .write_row(&["only-one".to_string()])
+            .expect_err("wrong width must fail");
+        assert_eq!(width_error.kind(), io::ErrorKind::InvalidInput);
+
+        let delimiter_error = report
+            .write_row(&["has\ttab".to_string(), "ok".to_string()])
+            .expect_err("embedded tab must fail");
+        assert_eq!(delimiter_error.kind(), io::ErrorKind::InvalidInput);
+        drop(report);
+
+        let content = fs::read_to_string(&path).expect("report must be readable");
+        assert_eq!(content, "# a\tb\n");
+        let _ = fs::remove_file(&path);
+    }
 }

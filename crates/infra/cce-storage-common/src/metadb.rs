@@ -412,6 +412,17 @@ metadata_storage_contract! {
     project_id: i64,
     epoch: i64,
     ) -> Result<Vec<EntityWithFile>, StorageError>;
+        /// Entity rows of one generation with row ids greater than `after_id`.
+        ///
+        /// Lets a long indexing run extend an in-memory id map instead of
+        /// rescanning every entity after each batch. Backends without a native
+        /// cursor keep the same semantics by filtering the full listing.
+    fn entities_with_files_after(
+    &self,
+    project_id: i64,
+    epoch: i64,
+    after_id: i64,
+    ) -> Result<Vec<EntityWithFile>, StorageError>;
         /// Entity rows by row id scoped to one project.
     fn entities_by_ids(
     &self,

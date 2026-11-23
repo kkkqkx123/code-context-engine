@@ -29,7 +29,7 @@ use crate::CheckpointManager;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_common::MetadataStorage;
+use cce_storage_common::{FulltextStorage, MetadataStorage};
 use cce_storage_vector_qdrant::QdrantClient;
 
 use super::super::error::OrchestratorError;
@@ -293,6 +293,24 @@ impl StorageCoordinator {
     /// Cumulative write-path counters for the configured vector backend.
     pub fn vector_write_metrics(&self) -> Option<VectorWriteMetrics> {
         self.vector.as_ref().and_then(VectorStore::write_metrics)
+    }
+
+    /// Cumulative write-path counters for the configured fulltext backend.
+    pub fn fulltext_write_metrics(&self) -> Option<cce_storage_common::FulltextWriteMetrics> {
+        self.fulltext
+            .as_ref()
+            .and_then(cce_storage_common::FulltextStorage::write_metrics)
+    }
+
+    /// Drain background fulltext merges once all batches are committed.
+    pub async fn finish_fulltext_writes(&self) -> Result<(), OrchestratorError> {
+        if let Some(bm25) = self.fulltext.as_ref() {
+            let index = bm25.configured_index_name();
+            bm25.finish_writes(&index).await.map_err(|e| {
+                OrchestratorError::index("bm25_merge_wait", format!("BM25 merge drain failed: {e}"))
+            })?;
+        }
+        Ok(())
     }
 
     /// Get the configured Qdrant client, if the remote branch is active.
