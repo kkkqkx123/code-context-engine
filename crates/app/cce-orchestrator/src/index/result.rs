@@ -17,6 +17,28 @@ pub enum IndexExecutionOutcome {
     Incomplete { errors: Vec<String> },
 }
 
+/// Cumulative vector-stage work recorded inside the storage coordinator.
+///
+/// Durations are converted to milliseconds when folded into
+/// [`IndexStageTimings`]; the counters stay in nanoseconds until that point.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct VectorStageMetrics {
+    pub embed_nanos: u64,
+    pub point_build_nanos: u64,
+    pub metadata_nanos: u64,
+    pub work_unit_nanos: u64,
+    pub flush_nanos: u64,
+    pub stage_push_nanos: u64,
+    pub entity_lookup_nanos: u64,
+    pub delay_nanos: u64,
+    pub work_unit_query_nanos: u64,
+    pub work_unit_queries: u64,
+    pub microbatches: u64,
+    pub chunk_rows: u64,
+    pub entity_mappings: u64,
+    pub staged_records_max: u64,
+}
+
 /// Wall-clock accounting for one full-index run.
 ///
 /// Per-batch stages accumulate across the run. `batch_overhead_ms` is the
@@ -76,6 +98,34 @@ pub struct IndexStageTimings {
     pub rss_peak_batch_kb: u64,
     pub vector_pending_points_max: u64,
     pub bm25_pending_documents_max: u64,
+    pub vector_embed_ms: u64,
+    pub vector_point_build_ms: u64,
+    pub vector_metadata_ms: u64,
+    pub vector_work_unit_ms: u64,
+    pub vector_flush_ms: u64,
+    pub vector_stage_push_ms: u64,
+    pub vector_entity_lookup_ms: u64,
+    pub vector_delay_ms: u64,
+    pub vector_work_unit_queries: u64,
+    pub vector_work_unit_query_ms: u64,
+    pub vector_microbatches: u64,
+    pub vector_chunk_rows: u64,
+    pub vector_entity_mappings: u64,
+    pub vector_staged_records_max: u64,
+
+    pub relation_spool_entries: u64,
+    pub relation_spool_bytes: u64,
+    pub symbol_table_entries: u64,
+    pub symbol_table_estimated_bytes: u64,
+    pub relation_nodes: u64,
+    pub relation_edges: u64,
+    pub relation_estimated_bytes: u64,
+    pub relation_snapshot_entries: u64,
+    pub relation_snapshot_estimated_bytes: u64,
+    pub export_spool_entries: u64,
+    pub export_spool_bytes: u64,
+    pub entity_id_map_entries: u64,
+    pub entity_id_map_estimated_bytes: u64,
 }
 
 impl IndexStageTimings {
@@ -122,6 +172,27 @@ impl IndexStageTimings {
         self.bm25_refresh_ms = delta(after.refresh_nanos, before.refresh_nanos) / 1_000_000;
         self.bm25_merge_ms = delta(after.merge_nanos, before.merge_nanos) / 1_000_000;
         self.bm25_staged_documents = delta(after.staged_documents, before.staged_documents);
+    }
+
+    /// Fold the storage coordinator's vector-stage counters into the stage
+    /// record. The counters cover one full-index run and are reset at its
+    /// start.
+    pub fn record_vector_stage_metrics(&mut self, metrics: VectorStageMetrics) {
+        let millis = |nanos: u64| nanos / 1_000_000;
+        self.vector_embed_ms = millis(metrics.embed_nanos);
+        self.vector_point_build_ms = millis(metrics.point_build_nanos);
+        self.vector_metadata_ms = millis(metrics.metadata_nanos);
+        self.vector_work_unit_ms = millis(metrics.work_unit_nanos);
+        self.vector_flush_ms = millis(metrics.flush_nanos);
+        self.vector_stage_push_ms = millis(metrics.stage_push_nanos);
+        self.vector_entity_lookup_ms = millis(metrics.entity_lookup_nanos);
+        self.vector_delay_ms = millis(metrics.delay_nanos);
+        self.vector_work_unit_queries = metrics.work_unit_queries;
+        self.vector_work_unit_query_ms = millis(metrics.work_unit_query_nanos);
+        self.vector_microbatches = metrics.microbatches;
+        self.vector_chunk_rows = metrics.chunk_rows;
+        self.vector_entity_mappings = metrics.entity_mappings;
+        self.vector_staged_records_max = metrics.staged_records_max;
     }
 }
 

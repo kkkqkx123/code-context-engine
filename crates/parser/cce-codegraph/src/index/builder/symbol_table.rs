@@ -15,12 +15,13 @@ use crate::symbol_table::{
 use crate::type_inference::{InferenceContext, TypeInferenceEngine};
 use cce_metrics::domain::pipeline::RelationMetrics;
 use cce_parser_core::determine_module_path;
+use cce_types::entity::EntityId;
 use cce_types::language::Language;
 use cce_types::{Entity, ParsedFile, normalize_project_path};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Wall-clock accounting for one bulk symbol-table build.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -30,6 +31,207 @@ pub struct SymbolBuildTimings {
     pub overload_ms: u64,
     pub flat_ms: u64,
     pub cross_file_ms: u64,
+}
+
+/// One streaming symbol-table build. Files are fed in spool order and
+/// released after registration; only the resulting symbol indexes are kept.
+pub struct SymbolBuildSession<'a> {
+    owner: &'a SymbolTableBuilder,
+    project_root: PathBuf,
+    metrics: Option<Arc<RelationMetrics>>,
+    package: Option<Arc<PackageSymbolTable>>,
+    flat_symbols: Vec<(String, EntityId, String, String)>,
+    modules_elapsed: Duration,
+    flat_elapsed: Duration,
+    file_count: usize,
+}
+
+impl<'a> SymbolBuildSession<'a> {
+    fn new(
+        owner: &'a SymbolTableBuilder,
+        project_root: PathBuf,
+        metrics: Option<Arc<RelationMetrics>>,
+    ) -> Self {
+        Self {
+            owner,
+            project_root,
+            metrics,
+            package: None,
+            flat_symbols: Vec::new(),
+            modules_elapsed: Duration::ZERO,
+            flat_elapsed: Duration::ZERO,
+            file_count: 0,
+        }
+    }
+
+    fn package_name(&self) -> String {
+        self.project_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "default".to_string())
+    }
+
+    /// Register one decoded file and drop it when the call returns.
+    pub fn add_file(&mut self, file: &ParsedFile, project_symbols: &ProjectSymbolTable) {
+        let file_started = Instant::now();
+        self.file_count += 1;
+        let package_name = self.package_name();
+        if self.package.is_none() {
+            self.package = Some(Arc::new(PackageSymbolTable::new(
+                package_name.clone(),
+                package_name.clone(),
+                self.project_root.to_string_lossy().to_string(),
+                file.language,
+            )));
+        }
+        let package = self
+            .package
+            .as_ref()
+            .expect("package created on first file");
+
+        let module_path =
+            determine_module_path(Path::new(&file.path), &self.project_root, file.language)
+                .unwrap_or_default();
+
+        let mut module_table = ModuleSymbolTable::new(
+            module_path.clone(),
+            file.path.clone(),
+            file.language,
+            package_name.clone(),
+        );
+
+        for entity in &file.entities {
+            if self.owner.is_entity_exported(entity, file.language) {
+                let location = SymbolLocation::new(file.path.clone(), entity.span, file.language);
+                let metadata = SymbolMetadata::new(entity.name.clone(), entity.kind, location);
+                let visibility = self.owner.detect_visibility(entity, file.language);
+                module_table.add_export(entity.name.clone(), metadata, visibility);
+            }
+        }
+
+        let exports = crate::helpers::extract_exports_from_entities(&file.entities, &file.language);
+        for export in &exports {
+            if !module_table.has_export(&export.function_name)
+                && let Some(entity) = file.entities.iter().find(|e| e.id == export.function_id)
+            {
+                let location = SymbolLocation::new(file.path.clone(), entity.span, file.language);
+                let metadata = SymbolMetadata::new(entity.name.clone(), entity.kind, location);
+                let visibility = self.owner.detect_visibility(entity, file.language);
+                module_table.add_export(export.function_name.clone(), metadata, visibility);
+            }
+        }
+
+        self.owner.wire_imports(file, &mut module_table);
+        self.owner.wire_reexports(file, &mut module_table);
+
+        let local_table = LocalSymbolTable::from_parsed_file(file);
+        module_table.set_local_table(local_table);
+
+        {
+            let mut type_index = crate::symbol_table::TypeMemberIndex::new();
+            crate::policy::type_member::build_type_index_for_file(
+                &file.entities,
+                &module_path,
+                &file.path,
+                &package_name,
+                file.language,
+                &mut type_index,
+            );
+            module_table.set_type_index(type_index);
+        }
+
+        {
+            let inference_ctx = InferenceContext::new().with_type_index(module_table.type_index());
+            let type_ctx = TypeInferenceEngine::infer_types_two_pass(file, &inference_ctx);
+            project_symbols.set_type_inference_context(&file.path, type_ctx);
+        }
+
+        if package.add_module(module_table) {
+            self.owner.record_module_path_conflict();
+        }
+        project_symbols.insert_cross_file_for_file(file);
+
+        let flat_started = Instant::now();
+        for entity in &file.entities {
+            if self.owner.is_entity_exported(entity, file.language) {
+                let qualified_name =
+                    format!("{}::{}", normalize_project_path(&file.path), entity.name);
+                self.flat_symbols.push((
+                    qualified_name,
+                    entity.id,
+                    file.path.clone(),
+                    file.path.clone(),
+                ));
+            }
+        }
+        for export in &exports {
+            let qualified_name = format!(
+                "{}::{}",
+                normalize_project_path(&file.path),
+                export.function_name
+            );
+            self.flat_symbols.push((
+                qualified_name,
+                export.function_id,
+                file.path.clone(),
+                file.path.clone(),
+            ));
+        }
+        self.flat_elapsed += flat_started.elapsed();
+        self.modules_elapsed += file_started.elapsed();
+    }
+
+    /// Finish global index rebuilds and return the accumulated timings.
+    pub fn finish(mut self, project_symbols: &ProjectSymbolTable) -> SymbolBuildTimings {
+        let package = self.package.take().unwrap_or_else(|| {
+            Arc::new(PackageSymbolTable::new(
+                self.package_name(),
+                self.package_name(),
+                self.project_root.to_string_lossy().to_string(),
+                Language::default(),
+            ))
+        });
+
+        let global_started = Instant::now();
+        package.rebuild_exports();
+        project_symbols.add_package(package);
+        project_symbols.rebuild_global_type_index();
+        let type_index_ms = global_started.elapsed().as_millis() as u64;
+        let overload_started = Instant::now();
+        project_symbols.rebuild_overload_sets();
+        let overload_ms = overload_started.elapsed().as_millis() as u64;
+        if let Some(metrics) = &self.metrics {
+            metrics.symbol_table_rebuild_total.increment();
+        }
+
+        let flat_started = Instant::now();
+        project_symbols.insert_symbols_bulk(self.flat_symbols);
+        let flat_ms = (self.flat_elapsed + flat_started.elapsed()).as_millis() as u64;
+
+        if let Some(metrics) = &self.metrics {
+            project_symbols.set_metrics(Arc::clone(metrics));
+        }
+
+        let stats = project_symbols.project_stats();
+        tracing::debug!(
+            files = self.file_count,
+            total_ms = (self.modules_elapsed + global_started.elapsed()).as_millis() as u64,
+            modules_ms = self.modules_elapsed.as_millis() as u64,
+            type_index_ms,
+            overload_ms,
+            flat_ms,
+            cross_file_ms = 0,
+            total_symbols = stats.total_symbols,
+            "Built project symbol table"
+        );
+        SymbolBuildTimings {
+            modules_ms: self.modules_elapsed.as_millis() as u64,
+            type_index_ms,
+            overload_ms,
+            flat_ms,
+            cross_file_ms: 0,
+        }
+    }
 }
 
 /// Symbol table builder for project-level symbol resolution
@@ -264,6 +466,12 @@ impl SymbolTableBuilder {
         project_symbols
     }
 
+    /// Start a streaming build. Callers feed files with `add_file`, finish
+    /// with `finish`, then propagate cross-file variables per file.
+    pub fn begin_build(&self) -> SymbolBuildSession<'_> {
+        SymbolBuildSession::new(self, self.project_root.clone(), self.metrics.clone())
+    }
+
     /// Populate an existing project symbol table in one bulk pass.
     ///
     /// Bulk construction defers global index rebuilds until every file has
@@ -273,188 +481,13 @@ impl SymbolTableBuilder {
         files: &[&ParsedFile],
         project_symbols: &ProjectSymbolTable,
     ) -> SymbolBuildTimings {
-        let build_started = Instant::now();
-
-        // Group files into packages
-        // For now, all files belong to the default package derived from project_root
-        let package_name = self
-            .project_root
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "default".to_string());
-
-        let language = files.first().map(|f| f.language).unwrap_or_default();
-        let package = Arc::new(PackageSymbolTable::new(
-            package_name.clone(),
-            package_name.clone(),
-            self.project_root.to_string_lossy().to_string(),
-            language,
-        ));
-
-        // Build module tables for each file
+        let mut session = self.begin_build();
         for file in files {
-            let module_path =
-                determine_module_path(Path::new(&file.path), &self.project_root, file.language)
-                    .unwrap_or_default();
-
-            let mut module_table = ModuleSymbolTable::new(
-                module_path.clone(),
-                file.path.clone(),
-                file.language,
-                package_name.clone(),
-            );
-
-            // Add exported entities from this file
-            for entity in &file.entities {
-                if self.is_entity_exported(entity, file.language) {
-                    let location =
-                        SymbolLocation::new(file.path.clone(), entity.span, file.language);
-                    let metadata = SymbolMetadata::new(entity.name.clone(), entity.kind, location);
-                    let visibility = self.detect_visibility(entity, file.language);
-                    module_table.add_export(entity.name.clone(), metadata, visibility);
-                }
-            }
-
-            // Also index exports explicitly declared from raw relations
-            let exports =
-                crate::helpers::extract_exports_from_entities(&file.entities, &file.language);
-            for export in &exports {
-                if !module_table.has_export(&export.function_name) {
-                    if let Some(entity) = file.entities.iter().find(|e| e.id == export.function_id)
-                    {
-                        let location =
-                            SymbolLocation::new(file.path.clone(), entity.span, file.language);
-                        let metadata =
-                            SymbolMetadata::new(entity.name.clone(), entity.kind, location);
-                        let visibility = self.detect_visibility(entity, file.language);
-                        module_table.add_export(export.function_name.clone(), metadata, visibility);
-                    }
-                }
-            }
-
-            // wire the file's imports into the module table so Level 2
-            // (import-based) resolution is functional.
-            self.wire_imports(file, &mut module_table);
-
-            // Wire named re-exports so Level 3 (re-export) resolution can
-            // resolve them lazily against the package's module tables.
-            self.wire_reexports(file, &mut module_table);
-
-            // Create LocalSymbolTable for file-level scope resolution
-            let local_table = LocalSymbolTable::from_parsed_file(file);
-            module_table.set_local_table(local_table);
-
-            // Build type-member index for this file
-            {
-                let mut type_index = crate::symbol_table::TypeMemberIndex::new();
-                crate::policy::type_member::build_type_index_for_file(
-                    &file.entities,
-                    &module_path,
-                    &file.path,
-                    &package_name,
-                    file.language,
-                    &mut type_index,
-                );
-                module_table.set_type_index(type_index);
-            }
-
-            // Build lightweight type inference context for this file using
-            // two-pass inference: collect declarations first, then resolve
-            // references (enables forward references and recursive types).
-            {
-                let inference_ctx =
-                    InferenceContext::new().with_type_index(module_table.type_index());
-                let type_ctx = TypeInferenceEngine::infer_types_two_pass(file, &inference_ctx);
-                project_symbols.set_type_inference_context(&file.path, type_ctx);
-            }
-
-            if package.add_module(module_table) {
-                self.record_module_path_conflict();
-            }
+            session.add_file(file, project_symbols);
         }
-
-        let modules_ms = build_started.elapsed().as_millis() as u64;
-
-        // Rebuild package exports from module tables
-        let global_started = Instant::now();
-        package.rebuild_exports();
-        // Add package to project BEFORE rebuilding global type index,
-        // so rebuild_global_type_index can see this package's modules.
-        project_symbols.add_package(package);
-        // Build global type-member aggregation
-        project_symbols.rebuild_global_type_index();
-        let type_index_ms = global_started.elapsed().as_millis() as u64;
-        let overload_started = Instant::now();
-        project_symbols.rebuild_overload_sets();
-        let overload_ms = overload_started.elapsed().as_millis() as u64;
-        if let Some(metrics) = &self.metrics {
-            metrics.symbol_table_rebuild_total.increment();
-        }
-
-        // Keep backward-compatible flat index for RelationResolver
-        let flat_started = Instant::now();
-        let mut flat_symbols = Vec::new();
-        for file in files {
-            for entity in &file.entities {
-                if self.is_entity_exported(entity, file.language) {
-                    let qualified_name =
-                        format!("{}::{}", normalize_project_path(&file.path), entity.name);
-                    flat_symbols.push((
-                        qualified_name,
-                        entity.id,
-                        file.path.clone(),
-                        file.path.clone(),
-                    ));
-                }
-            }
-
-            let exports =
-                crate::helpers::extract_exports_from_entities(&file.entities, &file.language);
-            for export in &exports {
-                let qualified_name = format!(
-                    "{}::{}",
-                    normalize_project_path(&file.path),
-                    export.function_name
-                );
-                flat_symbols.push((
-                    qualified_name,
-                    export.function_id,
-                    file.path.clone(),
-                    file.path.clone(),
-                ));
-            }
-        }
-        project_symbols.insert_symbols_bulk(flat_symbols);
-
-        let flat_ms = flat_started.elapsed().as_millis() as u64;
-
-        if let Some(metrics) = &self.metrics {
-            project_symbols.set_metrics(Arc::clone(metrics));
-        }
-        // Build cross-file return-type cache and propagate into variables.
-        let cross_file_started = Instant::now();
+        let timings = session.finish(project_symbols);
         project_symbols.rebuild_cross_file_propagator(files);
-        let cross_file_ms = cross_file_started.elapsed().as_millis() as u64;
-
-        let stats = project_symbols.project_stats();
-        tracing::debug!(
-            files = files.len(),
-            total_ms = build_started.elapsed().as_millis() as u64,
-            modules_ms,
-            type_index_ms,
-            overload_ms,
-            flat_ms,
-            cross_file_ms,
-            total_symbols = stats.total_symbols,
-            "Built project symbol table"
-        );
-        SymbolBuildTimings {
-            modules_ms,
-            type_index_ms,
-            overload_ms,
-            flat_ms,
-            cross_file_ms,
-        }
+        timings
     }
 
     /// Detect entity visibility using the shared language-aware rules.

@@ -21,6 +21,7 @@
 //! - `file_ops`: cross-backend file removal and hot updates
 //! - `checkpoint`: checkpoint queries
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -35,6 +36,9 @@ use cce_storage_vector_qdrant::QdrantClient;
 use super::super::error::OrchestratorError;
 use super::vector_store::{FulltextStore, MetadataStore, VectorStore};
 use cce_storage_common::VectorWriteMetrics;
+use vector::VectorStageCounters;
+
+use super::result::VectorStageMetrics;
 
 pub(crate) mod bm25;
 pub(crate) mod candidate;
@@ -46,6 +50,48 @@ pub(crate) mod mapping;
 pub(crate) mod vector;
 
 pub use mapping::build_bm25_documents;
+
+/// Exact write boundary where the next storage call fails.
+///
+/// Used only by failure-injection tests; no production configuration can
+/// arm an injector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WriteFailurePoint {
+    VectorBeforeFlush,
+    VectorBeforeWorkUnits,
+    Bm25BeforeCommit,
+    Bm25BeforeDerivedMetadata,
+}
+
+/// Countdown of injected failures at each write boundary.
+#[derive(Debug, Default)]
+pub struct WriteFailureInjector {
+    remaining: StdMutex<HashMap<WriteFailurePoint, usize>>,
+}
+
+impl WriteFailureInjector {
+    /// Arm one boundary for `times` failures.
+    pub fn arm(&self, point: WriteFailurePoint, times: usize) {
+        if let Ok(mut remaining) = self.remaining.lock() {
+            remaining.insert(point, times);
+        }
+    }
+
+    /// Consume one failure token for a boundary.
+    pub fn take(&self, point: WriteFailurePoint) -> bool {
+        let Ok(mut remaining) = self.remaining.lock() else {
+            return false;
+        };
+        let Some(count) = remaining.get_mut(&point) else {
+            return false;
+        };
+        if *count == 0 {
+            return false;
+        }
+        *count -= 1;
+        true
+    }
+}
 
 /// Storage coordinator managing multiple storage backends
 pub struct StorageCoordinator {
@@ -72,6 +118,10 @@ pub struct StorageCoordinator {
     /// Wall-clock deadline for one `store_vectors_batched` pass, in seconds.
     /// 0 means derive: microbatch count x per-request retry budget factor.
     embedding_stage_timeout_secs: u64,
+    /// Per-run vector stage counters, reset by each full-index execution.
+    vector_stage: VectorStageCounters,
+    /// Test-only write failures; never populated by production assembly.
+    test_write_failure: Option<Arc<WriteFailureInjector>>,
 }
 
 impl StorageCoordinator {
@@ -99,7 +149,21 @@ impl StorageCoordinator {
             candidate_relation_epoch: Arc::new(AtomicI64::new(0)),
             quality_metrics: None,
             embedding_stage_timeout_secs: 0,
+            vector_stage: VectorStageCounters::default(),
+            test_write_failure: None,
         })
+    }
+
+    /// Attach a failure injector for commit-boundary tests.
+    pub fn with_test_write_failure(mut self, injector: Arc<WriteFailureInjector>) -> Self {
+        self.test_write_failure = Some(injector);
+        self
+    }
+
+    pub(crate) fn injected_failure(&self, point: WriteFailurePoint) -> bool {
+        self.test_write_failure
+            .as_ref()
+            .is_some_and(|injector| injector.take(point))
     }
 
     /// Set index-quality metrics
@@ -293,6 +357,20 @@ impl StorageCoordinator {
     /// Cumulative write-path counters for the configured vector backend.
     pub fn vector_write_metrics(&self) -> Option<VectorWriteMetrics> {
         self.vector.as_ref().and_then(VectorStore::write_metrics)
+    }
+
+    /// Reset the sub-stage counters before one full-index run.
+    pub fn reset_vector_stage_metrics(&self) {
+        self.vector_stage.reset();
+    }
+
+    /// Snapshot the sub-stage counters after the batch loop.
+    pub fn vector_stage_metrics(&self) -> VectorStageMetrics {
+        self.vector_stage.snapshot()
+    }
+
+    pub(crate) fn add_vector_entity_lookup(&self, elapsed: std::time::Duration) {
+        self.vector_stage.add_entity_lookup(elapsed);
     }
 
     /// Cumulative write-path counters for the configured fulltext backend.

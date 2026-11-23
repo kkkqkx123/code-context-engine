@@ -30,6 +30,7 @@ use cce_scanner::{FSScanner, ScanOptions};
 struct Harness {
     root: PathBuf,
     paths: Vec<(PathBuf, std::fs::Metadata)>,
+    _dir: cce_bench_kit::BenchTempDir,
 }
 
 fn harness() -> &'static Harness {
@@ -45,7 +46,11 @@ fn harness() -> &'static Harness {
         // Collect (path, metadata) once; both strategies hash this exact set.
         let mut paths = Vec::new();
         collect(&dir, &mut paths);
-        Harness { root: dir, paths }
+        Harness {
+            root: dir.path().to_path_buf(),
+            paths,
+            _dir: dir,
+        }
     })
 }
 

@@ -138,6 +138,17 @@ impl ExportSpool {
         self.entries.is_empty()
     }
 
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(crate) fn encoded_bytes(&self) -> u64 {
+        self.entries
+            .iter()
+            .filter_map(|(_, path)| std::fs::metadata(path).ok().map(|meta| meta.len()))
+            .sum()
+    }
+
     fn cleanup(&mut self) {
         if self.directory.exists()
             && let Err(error) = fs::remove_dir_all(&self.directory)

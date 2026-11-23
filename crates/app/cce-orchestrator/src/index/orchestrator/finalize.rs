@@ -9,13 +9,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use cce_codegraph::SymbolBuildTimings;
 use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndexView};
 use cce_export::NlDocumentExporter;
 
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
-use crate::index::relation_build_spool::RelationBuildSpool;
 use crate::index_state::{ModuleType, ModuleUpdateState};
 
 impl IndexOrchestrator {
@@ -85,17 +83,6 @@ impl IndexOrchestrator {
     /// index. The builder is round-local: constructed fresh per run, handed
     /// over to the publisher via shared ownership, and retired afterwards.
     /// No clearing or reuse occurs across runs.
-    fn build_spool_symbols(
-        &self,
-        spool: &RelationBuildSpool,
-        files: &[&cce_types::ParsedFile],
-    ) -> SymbolBuildTimings {
-        let mut symbol_builder =
-            cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
-        symbol_builder.with_metrics(self.relation_metrics());
-        symbol_builder.build_into(files, spool.project_symbols())
-    }
-
     pub(super) async fn build_and_publish_relations(
         &mut self,
         ctx: &mut FullIndexContext,
@@ -181,113 +168,86 @@ impl IndexOrchestrator {
             }
         };
         let total_bytes = spool.total_encoded_bytes();
-        const MEMORY_CACHE_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
-        let use_memory_cache = spool.estimated_decoded_bytes() < MEMORY_CACHE_LIMIT_BYTES
-            && spool.entry_count() < 100_000;
-        let mut symbol_build_ms = 0u64;
-        let mut symbol_timings = SymbolBuildTimings::default();
-        let (registered_files, resolved_files) = if use_memory_cache {
-            tracing::info!(
-                spool_entries = spool.entry_count(),
-                total_bytes,
-                estimated_decoded = spool.estimated_decoded_bytes(),
-                "Using in-memory cache for relation spool replay (single disk read)"
-            );
-            let t_collect = Instant::now();
-            let cached_files = spool.collect_all().map_err(|error| {
+        ctx.stages.relation_spool_entries = spool.entry_count() as u64;
+        ctx.stages.relation_spool_bytes = total_bytes;
+
+        let mut symbol_builder =
+            cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
+        symbol_builder.with_metrics(self.relation_metrics());
+        let project_symbols = spool.project_symbols();
+        let mut session = symbol_builder.begin_build();
+        let symbols_started = Instant::now();
+        spool
+            .for_each(|parsed| session.add_file(parsed, project_symbols))
+            .map_err(|error| {
                 OrchestratorError::index(
                     "relation_build_spool",
-                    format!("Failed to collect spool for memory-cache replay: {error}"),
+                    format!("Failed to build symbols from spool: {error}"),
                 )
             })?;
-            record_pass(t_collect.elapsed(), total_bytes);
-            let symbols_started = Instant::now();
-            let file_refs: Vec<&cce_types::ParsedFile> = cached_files.iter().collect();
-            let timings = self.build_spool_symbols(spool, &file_refs);
-            symbol_timings.modules_ms += timings.modules_ms;
-            symbol_timings.type_index_ms += timings.type_index_ms;
-            symbol_timings.overload_ms += timings.overload_ms;
-            symbol_timings.flat_ms += timings.flat_ms;
-            symbol_timings.cross_file_ms += timings.cross_file_ms;
-            symbol_build_ms += symbols_started.elapsed().as_millis() as u64;
-            let t0 = Instant::now();
-            for parsed in &cached_files {
+        let symbol_timings = session.finish(project_symbols);
+        record_pass(symbols_started.elapsed(), total_bytes);
+        let symbols_ms = symbols_started.elapsed().as_millis() as u64;
+        ctx.stages.symbol_modules_ms += symbol_timings.modules_ms;
+        ctx.stages.symbol_type_index_ms += symbol_timings.type_index_ms;
+        ctx.stages.symbol_overload_ms += symbol_timings.overload_ms;
+        ctx.stages.symbol_flat_ms += symbol_timings.flat_ms;
+        ctx.stages.symbol_cross_file_ms += symbol_timings.cross_file_ms;
+        ctx.stages.relation_symbols_ms += symbols_ms;
+
+        let propagation_started = Instant::now();
+        spool
+            .for_each(|parsed| project_symbols.propagate_cross_file_variables_for_file(parsed))
+            .map_err(|error| {
+                OrchestratorError::index(
+                    "relation_build_spool",
+                    format!("Failed to propagate cross-file symbols: {error}"),
+                )
+            })?;
+        ctx.stages.symbol_cross_file_ms += propagation_started.elapsed().as_millis() as u64;
+        record_pass(propagation_started.elapsed(), total_bytes);
+
+        let t0 = Instant::now();
+        let registered_files = spool
+            .for_each(|parsed| {
                 builder.register_file_entities(parsed);
                 if plugin_enabled {
-                    builder.register_file_plugin_symbols(parsed, spool.project_symbols());
+                    builder.register_file_plugin_symbols(parsed, project_symbols);
                 }
-            }
-            let registered = cached_files.len();
-            record_pass(t0.elapsed(), total_bytes);
-            if let Some(parser) = &self.cached_build_config {
-                Self::inject_governance_edges(&builder, parser);
-            }
-            let t1 = Instant::now();
-            for parsed in &cached_files {
-                builder.resolve_file_relations(parsed, spool.project_symbols());
+            })
+            .map_err(|error| {
+                OrchestratorError::index(
+                    "relation_build_spool",
+                    format!("Failed to replay relation entities: {error}"),
+                )
+            })?;
+        record_pass(t0.elapsed(), total_bytes);
+        if let Some(parser) = &self.cached_build_config {
+            Self::inject_governance_edges(&builder, parser);
+        }
+        let t1 = Instant::now();
+        let resolved_files = spool
+            .for_each(|parsed| {
+                builder.resolve_file_relations(parsed, project_symbols);
                 if plugin_enabled {
-                    builder.inject_plugin_relations(parsed, spool.project_symbols());
+                    builder.inject_plugin_relations(parsed, project_symbols);
                 }
-            }
-            record_pass(t1.elapsed(), total_bytes);
-            (registered, cached_files.len())
-        } else {
-            // Disk-backed replay: build the project symbol table once from a
-            // dedicated pass, then register and resolve from disk.
-            let symbols_started = Instant::now();
-            let mut replayed_files = Vec::new();
-            spool
-                .for_each(|parsed| replayed_files.push(parsed.clone()))
-                .map_err(|error| {
-                    OrchestratorError::index(
-                        "relation_build_spool",
-                        format!("Failed to collect replay files: {error}"),
-                    )
-                })?;
-            let replayed_refs: Vec<&cce_types::ParsedFile> = replayed_files.iter().collect();
-            let timings = self.build_spool_symbols(spool, &replayed_refs);
-            symbol_timings.modules_ms += timings.modules_ms;
-            symbol_timings.type_index_ms += timings.type_index_ms;
-            symbol_timings.overload_ms += timings.overload_ms;
-            symbol_timings.flat_ms += timings.flat_ms;
-            symbol_timings.cross_file_ms += timings.cross_file_ms;
-            symbol_build_ms += symbols_started.elapsed().as_millis() as u64;
+            })
+            .map_err(|error| {
+                OrchestratorError::index(
+                    "relation_build_spool",
+                    format!("Failed to replay relation edges: {error}"),
+                )
+            })?;
+        record_pass(t1.elapsed(), total_bytes);
 
-            let t0 = Instant::now();
-            let registered = spool
-                .for_each(|parsed| {
-                    builder.register_file_entities(parsed);
-                    if plugin_enabled {
-                        builder.register_file_plugin_symbols(parsed, spool.project_symbols());
-                    }
-                })
-                .map_err(|error| {
-                    OrchestratorError::index(
-                        "relation_build_spool",
-                        format!("Failed to replay relation entities: {error}"),
-                    )
-                })?;
-            record_pass(t0.elapsed(), total_bytes);
-            if let Some(parser) = &self.cached_build_config {
-                Self::inject_governance_edges(&builder, parser);
-            }
-            let t1 = Instant::now();
-            let resolved = spool
-                .for_each(|parsed| {
-                    builder.resolve_file_relations(parsed, spool.project_symbols());
-                    if plugin_enabled {
-                        builder.inject_plugin_relations(parsed, spool.project_symbols());
-                    }
-                })
-                .map_err(|error| {
-                    OrchestratorError::index(
-                        "relation_build_spool",
-                        format!("Failed to replay relation edges: {error}"),
-                    )
-                })?;
-            record_pass(t1.elapsed(), total_bytes);
-            (registered, resolved)
-        };
+        let (symbol_entries, symbol_bytes) = project_symbols.capacity_counts();
+        ctx.stages.symbol_table_entries = symbol_entries;
+        ctx.stages.symbol_table_estimated_bytes = symbol_bytes;
+        let (nodes, edges, relation_bytes) = builder.index().capacity_counts();
+        ctx.stages.relation_nodes = nodes;
+        ctx.stages.relation_edges = edges;
+        ctx.stages.relation_estimated_bytes = relation_bytes;
 
         if registered_files != resolved_files {
             // explicit check (not only a debug assertion) — a mismatch
@@ -305,49 +265,59 @@ impl IndexOrchestrator {
         // canonical snapshot is taken.
         builder.derive_implicit_hierarchy_edges(spool.project_symbols());
         builder.record_streamed_build(relation_build_started.elapsed(), registered_files);
+        let (nodes, edges, relation_bytes) = builder.index().capacity_counts();
+        ctx.stages.relation_nodes = nodes;
+        ctx.stages.relation_edges = edges;
+        ctx.stages.relation_estimated_bytes = relation_bytes;
 
         match builder
             .index()
             .to_canonical_snapshot(builder.config_fingerprint())
         {
-            Ok(snapshot) => match &self.relation_publisher {
-                Some(publisher) => {
-                    match publisher
-                        .publish(
-                            self.project_id,
-                            &ctx.operation_id,
-                            snapshot,
-                            builder.index(),
-                        )
-                        .await
-                    {
-                        Ok(publication) => {
-                            ctx.published_relation_epoch = Some(publication.relation_epoch);
-                            // Retain the shared product for read-only queries; the
-                            // round-local builder is retired here (dropped) and
-                            // never touched again, so the shared maps are
-                            // effectively immutable.
-                            self.last_published_snapshot = Some(Arc::clone(&publication.snapshot));
-                            // Share the publisher's product with export
-                            // enhancement. The snapshot is independent of the
-                            // retired builder lifetime.
-                            self.share_published_snapshot_with_exporter(&publication.snapshot);
-                            // the relation phase is only marked complete
-                            // (and files successful) AFTER the snapshot was
-                            // actually built and published. The previous
-                            // per-batch marking ran before the build and could
-                            // report success for an operation whose relation
-                            // phase was skipped entirely (batch failure).
-                            let mut relation_paths: Vec<std::path::PathBuf> = Vec::new();
-                            if let Err(error) = spool.for_each(|parsed| {
-                                relation_paths.push(std::path::PathBuf::from(parsed.path.clone()));
-                            }) {
-                                tracing::warn!(
-                                    error = %error,
-                                    "Failed to replay spool paths for relation state marking"
-                                );
-                            }
-                            self.state_tracker
+            Ok(snapshot) => {
+                let (entries, _edges, estimated_bytes) = builder.index().capacity_counts();
+                ctx.stages.relation_snapshot_entries = entries;
+                ctx.stages.relation_snapshot_estimated_bytes = estimated_bytes;
+                match &self.relation_publisher {
+                    Some(publisher) => {
+                        match publisher
+                            .publish(
+                                self.project_id,
+                                &ctx.operation_id,
+                                snapshot,
+                                builder.index(),
+                            )
+                            .await
+                        {
+                            Ok(publication) => {
+                                ctx.published_relation_epoch = Some(publication.relation_epoch);
+                                // Retain the shared product for read-only queries; the
+                                // round-local builder is retired here (dropped) and
+                                // never touched again, so the shared maps are
+                                // effectively immutable.
+                                self.last_published_snapshot =
+                                    Some(Arc::clone(&publication.snapshot));
+                                // Share the publisher's product with export
+                                // enhancement. The snapshot is independent of the
+                                // retired builder lifetime.
+                                self.share_published_snapshot_with_exporter(&publication.snapshot);
+                                // the relation phase is only marked complete
+                                // (and files successful) AFTER the snapshot was
+                                // actually built and published. The previous
+                                // per-batch marking ran before the build and could
+                                // report success for an operation whose relation
+                                // phase was skipped entirely (batch failure).
+                                let mut relation_paths: Vec<std::path::PathBuf> = Vec::new();
+                                if let Err(error) = spool.for_each(|parsed| {
+                                    relation_paths
+                                        .push(std::path::PathBuf::from(parsed.path.clone()));
+                                }) {
+                                    tracing::warn!(
+                                        error = %error,
+                                        "Failed to replay spool paths for relation state marking"
+                                    );
+                                }
+                                self.state_tracker
                                 .mark_phase_complete(
                                     &relation_paths,
                                     crate::index_state::IndexPhase::RelationBuilding,
@@ -356,43 +326,45 @@ impl IndexOrchestrator {
                                 .unwrap_or_else(|e| {
                                     tracing::warn!(error = %e, "State tracking operation failed");
                                 });
-                            for path in &relation_paths {
-                                self.state_tracker
-                                    .mark_success(path, ModuleType::Relation)
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        tracing::warn!(
-                                            error = %e,
-                                            "State tracking operation failed"
-                                        );
-                                    });
+                                for path in &relation_paths {
+                                    self.state_tracker
+                                        .mark_success(path, ModuleType::Relation)
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "State tracking operation failed"
+                                            );
+                                        });
+                                }
+                            }
+                            Err(error) => {
+                                ctx.errors.push(format!(
+                                    "Failed to publish canonical relation snapshot: {error}"
+                                ));
+                                ctx.all_batches_completed = false;
                             }
                         }
-                        Err(error) => {
-                            ctx.errors.push(format!(
-                                "Failed to publish canonical relation snapshot: {error}"
+                    }
+                    None => {
+                        // No durable publisher configured (tests, CLI debug runs):
+                        // keep the snapshot available for read-only queries instead
+                        // of failing the whole relation phase. Only persistence is
+                        // skipped; production always wires a publisher.
+                        tracing::warn!(
+                            operation_id = %ctx.operation_id,
+                            "No relation snapshot publisher configured; relations stay in-memory only"
+                        );
+                        let base =
+                            Arc::new(cce_codegraph::index::RelationSnapshotIndex::from_index(
+                                builder.index(),
                             ));
-                            ctx.all_batches_completed = false;
-                        }
+                        self.last_published_snapshot = Some(Arc::new(
+                            cce_codegraph::index::LayeredSnapshotIndex::new(base),
+                        ));
                     }
                 }
-                None => {
-                    // No durable publisher configured (tests, CLI debug runs):
-                    // keep the snapshot available for read-only queries instead
-                    // of failing the whole relation phase. Only persistence is
-                    // skipped; production always wires a publisher.
-                    tracing::warn!(
-                        operation_id = %ctx.operation_id,
-                        "No relation snapshot publisher configured; relations stay in-memory only"
-                    );
-                    let base = Arc::new(cce_codegraph::index::RelationSnapshotIndex::from_index(
-                        builder.index(),
-                    ));
-                    self.last_published_snapshot = Some(Arc::new(
-                        cce_codegraph::index::LayeredSnapshotIndex::new(base),
-                    ));
-                }
-            },
+            }
             Err(error) => {
                 ctx.errors.push(format!(
                     "Failed to create canonical relation snapshot: {error}"
@@ -402,15 +374,7 @@ impl IndexOrchestrator {
         }
         let overload_started = Instant::now();
         spool.project_symbols().rebuild_overload_sets();
-        let final_overload_ms = overload_started.elapsed().as_millis() as u64;
-        symbol_timings.overload_ms += final_overload_ms;
-        symbol_build_ms += final_overload_ms;
-        ctx.stages.relation_symbols_ms = symbol_build_ms;
-        ctx.stages.symbol_modules_ms = symbol_timings.modules_ms;
-        ctx.stages.symbol_type_index_ms = symbol_timings.type_index_ms;
-        ctx.stages.symbol_overload_ms = symbol_timings.overload_ms;
-        ctx.stages.symbol_flat_ms = symbol_timings.flat_ms;
-        ctx.stages.symbol_cross_file_ms = symbol_timings.cross_file_ms;
+        ctx.stages.symbol_overload_ms += overload_started.elapsed().as_millis() as u64;
         Ok(())
     }
 

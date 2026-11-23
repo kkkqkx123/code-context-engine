@@ -166,30 +166,6 @@ impl RelationBuildSpool {
         self.entries.len()
     }
 
-    /// Estimated decoded memory usage.
-    ///
-    /// Uses a conservative 4x decompression factor over the on-disk size.
-    /// Caller can use this to decide whether to use the in-memory cache path.
-    pub(crate) fn estimated_decoded_bytes(&self) -> u64 {
-        self.total_encoded_bytes().saturating_mul(4)
-    }
-
-    /// Collect all parsed files into memory.
-    ///
-    /// Used for the memory-cache optimization when the estimated size fits
-    /// within the configured limit. The caller must ensure the spool is not
-    /// too large before invoking this to avoid OOM.
-    pub(crate) fn collect_all(&self) -> Result<Vec<ParsedFile>, RelationBuildSpoolError> {
-        let mut files = Vec::with_capacity(self.entries.len());
-        for entry_path in &self.entries {
-            let encoded = fs::read(entry_path)?;
-            let snapshot: RelBuildEntrySnapshot = deserialize_from_cache(&encoded)
-                .map_err(|e| RelationBuildSpoolError::Serialization(e.to_string()))?;
-            files.push(snapshot.to_parsed());
-        }
-        Ok(files)
-    }
-
     /// Total on-disk encoded bytes (for spool replay observability).
     pub(crate) fn total_encoded_bytes(&self) -> u64 {
         self.entries

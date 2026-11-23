@@ -488,9 +488,15 @@ impl VectorBatchWriter {
         self.pending.len() >= VECTOR_WRITE_BATCH
     }
 
+    /// Append points without publishing them. Used by the staged write,
+    /// which commits points together with their derived metadata.
+    pub fn extend_pending(&mut self, points: Vec<VectorPoint>) {
+        self.pending.extend(points);
+    }
+
     /// Buffer `points`, writing a batched upsert once the threshold is reached.
     pub async fn push(&mut self, points: Vec<VectorPoint>) -> Result<(), StorageError> {
-        self.pending.extend(points);
+        self.extend_pending(points);
         if self.pending.len() >= VECTOR_WRITE_BATCH {
             self.flush().await?;
         }

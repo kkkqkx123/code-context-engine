@@ -15,7 +15,6 @@ tools/openapi-codegen/schema.d.ts
 **/*.rs.bk
 **/*.zip
 **/*.exe
-Cargo.lock
 
 # IDE
 .idea/

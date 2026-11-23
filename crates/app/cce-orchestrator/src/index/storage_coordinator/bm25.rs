@@ -9,8 +9,8 @@ use cce_storage_common::metadb::{WorkUnitCheckpointRecord, WorkUnitStatus};
 
 use crate::error::OrchestratorError;
 
-use super::StorageCoordinator;
 use super::mapping::{build_bm25_documents, build_chunk_record, compute_work_unit_hash};
+use super::{StorageCoordinator, WriteFailurePoint};
 
 /// Documents and metadata collected before the next fulltext commit.
 ///
@@ -79,16 +79,33 @@ impl StorageCoordinator {
                 &loaded_ids
             }
         };
+        let committed: std::collections::HashMap<String, WorkUnitStatus> = if let (
+            Some(cm),
+            Some(op_id),
+        ) =
+            (wk_cm.as_ref(), wk_op.as_ref())
+        {
+            match cm.get_work_units(op_id, "bm25_commit").await {
+                Ok(records) => records
+                    .into_iter()
+                    .map(|record| (record.work_unit_hash, record.status))
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to read BM25 work units; replaying all microbatches");
+                    std::collections::HashMap::new()
+                }
+            }
+        } else {
+            std::collections::HashMap::new()
+        };
         for batch in bm25_chunks.chunks(batch_size) {
             let hash = if wk_cm.is_some() && wk_op.is_some() {
                 Some(compute_work_unit_hash(batch))
             } else {
                 None
             };
-            if let (Some(hash), Some(cm), Some(op_id)) =
-                (hash.as_ref(), wk_cm.as_ref(), wk_op.as_ref())
-                && let Ok(Some(record)) = cm.get_work_unit_by_hash(op_id, "bm25_commit", hash).await
-                && record.status == WorkUnitStatus::Committed
+            if let Some(hash) = hash.as_ref()
+                && committed.get(hash) == Some(&WorkUnitStatus::Committed)
             {
                 continue;
             }
@@ -144,8 +161,20 @@ impl StorageCoordinator {
         let Some(bm25) = self.fulltext.as_ref() else {
             return Ok(());
         };
+        if self.injected_failure(WriteFailurePoint::Bm25BeforeCommit) {
+            return Err(OrchestratorError::index(
+                "test_write_failure",
+                "BM25 commit failed before publishing documents",
+            ));
+        }
         bm25.commit_staged(&bm25.configured_index_name()).await?;
 
+        if self.injected_failure(WriteFailurePoint::Bm25BeforeDerivedMetadata) {
+            return Err(OrchestratorError::index(
+                "test_write_failure",
+                "BM25 derived metadata failed after commit",
+            ));
+        }
         if !staged.chunk_records.is_empty() || !staged.entity_mappings.is_empty() {
             self.store_chunks_and_mappings(&staged.chunk_records, &staged.entity_mappings)
                 .await?;
@@ -267,4 +296,222 @@ struct PendingEntityMapping {
     mapping: EntityDetailMapping,
     doc_ids: Vec<String>,
     seen: std::collections::HashSet<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{StagedBm25Write, StorageCoordinator, WriteFailurePoint};
+    use crate::CheckpointManager;
+    use crate::index::{MetadataStore, WriteFailureInjector};
+    use crate::operation::checkpoint::CreateCheckpointParams;
+    use cce_config::modules::Bm25Config;
+    use cce_storage_bm25::Bm25Client;
+    use cce_storage_common::FulltextDocument;
+    use cce_storage_common::FulltextStorage;
+    use cce_storage_common::MetadataStorage;
+    use cce_storage_common::metadb::{EntityRecord, WorkUnitCheckpointRecord, WorkUnitStatus};
+    use cce_types::OperationKind;
+
+    async fn bm25_storage(
+        injector: Arc<WriteFailureInjector>,
+        op: &str,
+    ) -> (
+        tempfile::TempDir,
+        StorageCoordinator,
+        CheckpointManager,
+        StagedBm25Write,
+        MetadataStore,
+        i64,
+    ) {
+        let index_dir = tempfile::tempdir().expect("bm25 index temp dir");
+        let config = Bm25Config::default()
+            .enabled()
+            .with_index_name("default")
+            .with_index_path(index_dir.path().to_string_lossy().as_ref());
+        let mut client = Bm25Client::new(config);
+        client.connect().await.expect("connect bm25 client");
+        let bm25 = Arc::new(client);
+        let document = FulltextDocument::new("doc-post-commit").with_field("content", "sample");
+        FulltextStorage::stage_documents(bm25.as_ref(), "default", &[document])
+            .await
+            .expect("stage bm25 document");
+
+        let metadata = crate::index::in_memory_metadata_store().expect("metadata store");
+        metadata
+            .ensure_project(7, "/root")
+            .await
+            .expect("register project");
+        metadata
+            .files_record_hashes(7, 3, &[("src/lib.rs".to_string(), "hash".to_string())])
+            .await
+            .expect("seed file row");
+        let file = metadata
+            .file_by_path(7, "src/lib.rs")
+            .await
+            .expect("read seeded file")
+            .expect("seeded file exists");
+        let entity_ids = metadata
+            .entities_insert_returning_ids(&[EntityRecord {
+                id: 0,
+                name: "seed".to_string(),
+                kind: "function".to_string(),
+                file_id: file.id,
+                signature: None,
+                span_start_row: None,
+                span_end_row: None,
+                span_start_column: None,
+                span_end_column: None,
+                span_start_byte: None,
+                span_end_byte: None,
+                scoped_name: None,
+                overload_discriminator: String::new(),
+                depth: None,
+                parent_id: None,
+                metadata: None,
+                parameters_json: None,
+                return_type: None,
+                doc_comment: None,
+                modifiers_json: None,
+                project_id: 7,
+                epoch: 3,
+                batch_id: 1,
+                rank: 0.0,
+            }])
+            .await
+            .expect("seed entity");
+        let entity_id = entity_ids.first().copied().expect("entity id returned");
+
+        let cm = CheckpointManager::new_for_project(7, metadata.clone());
+        cm.create_checkpoint(CreateCheckpointParams {
+            operation_id: op,
+            operation_type: OperationKind::FullIndex,
+            root_dir: "/root",
+            total_files: 1,
+            batch_size: 1,
+            file_list_hash: "hash",
+        })
+        .await
+        .expect("create checkpoint");
+        cm.insert_work_units(&[WorkUnitCheckpointRecord {
+            id: None,
+            project_id: 7,
+            operation_id: op.to_string(),
+            stage: "bm25_commit".to_string(),
+            target_epoch: 3,
+            work_unit_hash: "hash-fail".to_string(),
+            status: WorkUnitStatus::Running,
+            item_count: 1,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        }])
+        .await
+        .expect("insert running work unit");
+
+        let test_cm = CheckpointManager::new_for_project(7, metadata.clone());
+        let storage = StorageCoordinator::new(7)
+            .expect("valid project ID")
+            .with_fulltext_store(crate::index::FulltextStore::local(bm25))
+            .with_metadata_store(metadata.clone())
+            .with_checkpoint_manager(Arc::new(cm), op.to_string())
+            .with_test_write_failure(injector);
+        let staged = StagedBm25Write {
+            documents: 1,
+            entity_mappings: vec![
+                cce_storage_common::metadb::EntityDetailMapping::new(entity_id)
+                    .with_project_id(7)
+                    .with_epoch(4)
+                    .with_bm25_doc_ids(&["doc-post-commit".to_string()]),
+            ],
+            chunk_records: Vec::new(),
+            hashes: vec!["hash-fail".to_string()],
+        };
+        (index_dir, storage, test_cm, staged, metadata, entity_id)
+    }
+
+    #[tokio::test]
+    async fn bm25_failure_before_commit_keeps_work_unit_running() {
+        let injector = Arc::new(WriteFailureInjector::default());
+        injector.arm(WriteFailurePoint::Bm25BeforeCommit, 1);
+        let (_dir, storage, cm, staged, _, _) =
+            bm25_storage(injector.clone(), "bm25-pre-commit").await;
+
+        storage
+            .commit_staged_bm25(&staged)
+            .await
+            .expect_err("pre-commit failure must propagate");
+        assert_eq!(storage.fulltext_write_metrics().map(|m| m.commits), Some(0));
+        assert_eq!(
+            cm.get_work_unit_by_hash("bm25-pre-commit", "bm25_commit", "hash-fail")
+                .await
+                .expect("read work unit")
+                .expect("work unit exists")
+                .status,
+            WorkUnitStatus::Running
+        );
+
+        injector.arm(WriteFailurePoint::Bm25BeforeCommit, 0);
+        storage
+            .commit_staged_bm25(&staged)
+            .await
+            .expect("retry commits");
+        assert_eq!(
+            cm.get_work_unit_by_hash("bm25-pre-commit", "bm25_commit", "hash-fail")
+                .await
+                .expect("read work unit")
+                .expect("work unit exists")
+                .status,
+            WorkUnitStatus::Committed
+        );
+    }
+
+    #[tokio::test]
+    async fn bm25_failure_after_commit_keeps_metadata_unmarked() {
+        let injector = Arc::new(WriteFailureInjector::default());
+        injector.arm(WriteFailurePoint::Bm25BeforeDerivedMetadata, 1);
+        let (_dir, storage, cm, staged, metadata, entity_id) =
+            bm25_storage(injector.clone(), "bm25-post-commit").await;
+
+        storage
+            .commit_staged_bm25(&staged)
+            .await
+            .expect_err("post-commit failure must propagate");
+        assert!(
+            storage
+                .fulltext_write_metrics()
+                .is_some_and(|m| m.commits >= 1),
+            "fulltext commit must have happened before this failure"
+        );
+        assert_eq!(
+            cm.get_work_unit_by_hash("bm25-post-commit", "bm25_commit", "hash-fail")
+                .await
+                .expect("read work unit")
+                .expect("work unit exists")
+                .status,
+            WorkUnitStatus::Running
+        );
+
+        injector.arm(WriteFailurePoint::Bm25BeforeDerivedMetadata, 0);
+        storage
+            .commit_staged_bm25(&staged)
+            .await
+            .expect("retry publishes derived metadata");
+        assert_eq!(
+            cm.get_work_unit_by_hash("bm25-post-commit", "bm25_commit", "hash-fail")
+                .await
+                .expect("read work unit")
+                .expect("work unit exists")
+                .status,
+            WorkUnitStatus::Committed
+        );
+        assert!(
+            metadata
+                .mappings_by_entity(7, entity_id, 4)
+                .await
+                .expect("read mapping")
+                .is_some(),
+            "retry must restore derived mapping"
+        );
+    }
 }

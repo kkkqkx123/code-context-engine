@@ -254,6 +254,30 @@ impl RelationIndex {
         }
     }
 
+    /// Capacity of the primary in-memory relation structures.
+    ///
+    /// `nodes` counts entity and file keys; `edges` counts resolved relation
+    /// edges. The byte figure is an explicit per-entry estimate reported at
+    /// stage boundaries, not a hard memory limit.
+    pub fn capacity_counts(&self) -> (u64, u64, u64) {
+        let nodes = self.function_index.len()
+            + self.entity_file_index.len()
+            + self.resolved_relation_index.len()
+            + self.file_relation_index.len();
+        let edges = self
+            .resolved_relation_index
+            .iter()
+            .map(|entry| entry.value().len())
+            .sum::<usize>()
+            + self
+                .file_relation_index
+                .iter()
+                .map(|entry| entry.value().len())
+                .sum::<usize>();
+        let estimated_bytes = nodes as u64 * 192 + edges as u64 * 96;
+        (nodes as u64, edges as u64, estimated_bytes)
+    }
+
     /// Access the unified file records map.
     ///
     /// Returns a reference to the `RwLock<HashMap<String, FileRecord>>` that

@@ -378,6 +378,20 @@ export PATH="$HOME/.cargo/bin:\$PATH"
 EOF
 }
 
+preflight_resources() {
+    local nofile available
+    nofile=$(ulimit -n)
+    if [[ "$nofile" != unlimited && "$nofile" -lt 65536 ]]; then
+        echo "file descriptor limit $nofile is below 65536; raise the soft limit before benchmarking" >&2
+        return 1
+    fi
+    available=$(df -Pk /var/lib/cce-services | awk 'NR == 2 { print $4 }')
+    if [[ -z "$available" ]] || (( available < 20 * 1024 * 1024 )); then
+        echo "less than 20 GiB free on /var/lib/cce-services; refusing to start services" >&2
+        return 1
+    fi
+}
+
 target=${2:-all}
 services="qdrant elasticsearch postgres"
 [[ "$target" == all ]] || services="$target"
@@ -387,6 +401,7 @@ case "$services" in
 esac
 case "$1" in
     up)
+        preflight_resources || exit 1
         prepare_services || exit 1
         for service in $services; do
             case "$service" in
@@ -418,6 +433,7 @@ case "$1" in
         for service in $services; do clean_service "$service" || exit 1; done
         ;;
     run)
+        preflight_resources || exit 1
         shift 2
         [[ "${1:-}" == -- ]] && shift
         if (( $# == 0 )); then

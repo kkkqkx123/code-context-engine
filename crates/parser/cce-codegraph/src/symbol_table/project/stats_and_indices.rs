@@ -393,20 +393,38 @@ impl ProjectSymbolTable {
     /// types into variable bindings (`x = foo()` -> `x: ReturnTypeOfFoo`).
     pub fn rebuild_cross_file_propagator(&self, files: &[&cce_types::ParsedFile]) {
         self.cross_file_propagator.clear();
-        let file_map: std::collections::HashMap<String, &cce_types::ParsedFile> =
-            files.iter().map(|f| (f.path.clone(), *f)).collect();
-
         for file in files {
-            if let Some(ctx) = self
-                .type_inference_contexts
-                .get(&normalize_project_path(&file.path))
-            {
-                self.cross_file_propagator
-                    .insert_file(&file.path, &ctx, &file.entities);
-            }
+            self.insert_cross_file_for_file(file);
         }
-        // Propagate into variable types.
-        self.propagate_cross_file_variables(&file_map);
+        for file in files {
+            self.propagate_cross_file_variables_for_file(file);
+        }
+    }
+
+    /// Insert one file's return types into the cross-file cache without
+    /// propagating them. Streaming symbol builds call this as each file is
+    /// decoded so the full parsed set never needs to be retained.
+    pub fn insert_cross_file_for_file(&self, file: &cce_types::ParsedFile) {
+        let normalized = normalize_project_path(&file.path);
+        self.type_inference_contexts
+            .entry(normalized.clone())
+            .or_insert_with(|| TypeInferenceContext::new(file.language));
+        if let Some(ctx) = self.type_inference_contexts.get(&normalized) {
+            self.cross_file_propagator
+                .insert_file(&file.path, &ctx, &file.entities);
+        }
+    }
+
+    /// Capacity occupied by the project symbol indexes. The byte estimate is
+    /// an explicit per-entry approximation; it is reported, not enforced.
+    pub fn capacity_counts(&self) -> (u64, u64) {
+        let entries = self.packages.len()
+            + self.packages_by_name.len()
+            + self.external_deps.len()
+            + self.global_index.len()
+            + self.simple_name_index.len()
+            + self.type_inference_contexts.len();
+        (entries as u64, entries as u64 * 128)
     }
 
     /// Update the cross-file cache for a single file (incremental path).
@@ -504,73 +522,5 @@ impl ProjectSymbolTable {
         name: &str,
     ) -> Option<crate::type_inference::TypeBinding> {
         self.cross_file_propagator.get_return_type_by_name(name)
-    }
-
-    /// Propagate cross-file return types into variable bindings using the
-    /// provided file map. This is the bulk propagation path.
-    fn propagate_cross_file_variables(
-        &self,
-        file_map: &std::collections::HashMap<String, &cce_types::ParsedFile>,
-    ) {
-        use crate::type_inference::InferenceOrigin;
-        use cce_types::entity::EntityKind;
-
-        for (raw_path, file) in file_map {
-            let normalized = normalize_project_path(raw_path);
-            // Ensure context exists (create empty if missing).
-            let mut ctx_entry = self
-                .type_inference_contexts
-                .entry(normalized.clone())
-                .or_insert_with(|| crate::type_inference::TypeInferenceContext::new(file.language));
-            let ctx = ctx_entry.value_mut();
-
-            for entity in &file.entities {
-                if entity.kind != EntityKind::Variable {
-                    continue;
-                }
-                if let Some(existing) = ctx.get_variable_type(&entity.name) {
-                    if crate::type_inference::origin_is_authoritative(existing.origin) {
-                        continue;
-                    }
-                }
-                let call_target = entity
-                    .metadata
-                    .get("call_target")
-                    .or_else(|| entity.metadata.get("constructor_type"))
-                    .cloned();
-                if let Some(target) = call_target {
-                    let language = file.language;
-                    let resolved = crate::type_inference::cross_file::resolve_single_call_binding(
-                        &self.cross_file_propagator,
-                        language,
-                        &target,
-                        &mut |arg| {
-                            crate::type_inference::cross_file::infer_arg_shape(ctx, language, arg)
-                        },
-                    );
-                    if let Some((type_name, type_entity_id, shape)) = resolved {
-                        let propagated = crate::type_inference::TypeBinding {
-                            type_name,
-                            type_entity_id,
-                            span: entity.span,
-                            origin: Some(InferenceOrigin::CrossFilePropagation),
-                            shape,
-                        };
-                        let should_insert = ctx.get_variable_type(&entity.name).is_none_or(|e| {
-                            !crate::type_inference::cross_file::candidate_downgrades_existing(
-                                Some(e),
-                                propagated.shape.as_ref(),
-                            ) && crate::type_inference::binding_supersedes(
-                                propagated.origin,
-                                e.origin,
-                            )
-                        });
-                        if should_insert {
-                            ctx.add_variable_type(entity.name.clone(), propagated);
-                        }
-                    }
-                }
-            }
-        }
     }
 }

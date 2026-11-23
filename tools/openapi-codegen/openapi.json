@@ -9302,7 +9302,34 @@
           "rss_final_kb",
           "rss_peak_batch_kb",
           "vector_pending_points_max",
-          "bm25_pending_documents_max"
+          "bm25_pending_documents_max",
+          "vector_embed_ms",
+          "vector_point_build_ms",
+          "vector_metadata_ms",
+          "vector_work_unit_ms",
+          "vector_flush_ms",
+          "vector_stage_push_ms",
+          "vector_entity_lookup_ms",
+          "vector_delay_ms",
+          "vector_work_unit_queries",
+          "vector_work_unit_query_ms",
+          "vector_microbatches",
+          "vector_chunk_rows",
+          "vector_entity_mappings",
+          "vector_staged_records_max",
+          "relation_spool_entries",
+          "relation_spool_bytes",
+          "symbol_table_entries",
+          "symbol_table_estimated_bytes",
+          "relation_nodes",
+          "relation_edges",
+          "relation_estimated_bytes",
+          "relation_snapshot_entries",
+          "relation_snapshot_estimated_bytes",
+          "export_spool_entries",
+          "export_spool_bytes",
+          "entity_id_map_entries",
+          "entity_id_map_estimated_bytes"
         ],
         "properties": {
           "batch_dispatch_ms": {
@@ -9383,6 +9410,16 @@
             "format": "int64",
             "minimum": 0
           },
+          "entity_id_map_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_id_map_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "entity_store_calls": {
             "type": "integer",
             "minimum": 0
@@ -9393,6 +9430,16 @@
             "minimum": 0
           },
           "export_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_spool_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_spool_entries": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
@@ -9412,7 +9459,42 @@
             "format": "int64",
             "minimum": 0
           },
+          "relation_edges": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "relation_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_nodes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_snapshot_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_snapshot_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_entries": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
@@ -9492,6 +9574,16 @@
             "format": "int64",
             "minimum": 0
           },
+          "symbol_table_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_table_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "symbol_type_index_ms": {
             "type": "integer",
             "format": "int64",
@@ -9507,7 +9599,37 @@
             "format": "int64",
             "minimum": 0
           },
+          "vector_chunk_rows": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "vector_commit_wait_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_delay_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_embed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_entity_lookup_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_entity_mappings": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_flush_ms": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
@@ -9522,12 +9644,37 @@
             "format": "int64",
             "minimum": 0
           },
+          "vector_metadata_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_microbatches": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "vector_pending_points_max": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
+          "vector_point_build_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "vector_points_written": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_stage_push_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_staged_records_max": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
@@ -9552,6 +9699,21 @@
             "minimum": 0
           },
           "vector_wal_txns": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_work_unit_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_work_unit_queries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_work_unit_query_ms": {
             "type": "integer",
             "format": "int64",
             "minimum": 0

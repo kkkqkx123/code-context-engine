@@ -523,6 +523,7 @@ impl IndexOrchestrator {
         }
         let vector_write_before = self.storage.vector_write_metrics();
         let fulltext_write_before = self.storage.fulltext_write_metrics();
+        self.storage.reset_vector_stage_metrics();
         let target_epoch = self.storage.begin_full_index().await?;
         tracing::info!(
             project_id = self.project_id,
@@ -723,6 +724,8 @@ impl IndexOrchestrator {
             fulltext_write_before,
             self.storage.fulltext_write_metrics(),
         );
+        ctx.stages
+            .record_vector_stage_metrics(self.storage.vector_stage_metrics());
         ctx.stages.rss_after_batches_kb = cce_utils::rss_kb().unwrap_or(0);
 
         // Rebuild against one complete symbol snapshot. Parsed relation inputs
@@ -742,6 +745,10 @@ impl IndexOrchestrator {
         // Export NL documents after the relation index is finalized so
         // relation enhancement is active. Only runs when every batch succeeded
         // (the accumulated chunks reflect complete data).
+        if let Some(spool) = ctx.export_spool.as_ref() {
+            ctx.stages.export_spool_entries = spool.entry_count() as u64;
+            ctx.stages.export_spool_bytes = spool.encoded_bytes();
+        }
         let export_started = Instant::now();
         if ctx.all_batches_completed
             && ctx

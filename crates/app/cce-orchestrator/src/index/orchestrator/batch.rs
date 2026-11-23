@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::CheckpointManager;
 use crate::index::storage_coordinator::bm25::StagedBm25Write;
-use crate::index::vector_store::VectorBatchWriter;
+use crate::index::storage_coordinator::vector::StagedVectorWrite;
 use crate::operation::checkpoint::{ParsedCheckpointPayload, decode_parsed_checkpoint};
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_scanner::FileEntry;
@@ -41,8 +41,7 @@ impl IndexOrchestrator {
         ctx: &mut FullIndexContext,
         checkpoint_manager: &Option<Arc<CheckpointManager>>,
         operation_id: &str,
-        vector_writer: Option<&mut VectorBatchWriter>,
-        vector_hashes: &mut Vec<String>,
+        vector_staged: Option<&mut StagedVectorWrite>,
         staged_bm25: &mut StagedBm25Write,
         pending_batches: &mut Vec<usize>,
         pending_vector_paths: &mut Vec<PathBuf>,
@@ -51,11 +50,8 @@ impl IndexOrchestrator {
         advance_through: Option<usize>,
     ) -> Result<(), OrchestratorError> {
         let started = Instant::now();
-        if let Some(writer) = vector_writer {
-            self.storage
-                .commit_staged_vectors(writer, vector_hashes)
-                .await?;
-            vector_hashes.clear();
+        if let Some(staged) = vector_staged {
+            self.storage.commit_staged_vectors(staged).await?;
         }
         if !staged_bm25.is_empty() {
             self.storage.commit_staged_bm25(staged_bm25).await?;
@@ -121,8 +117,7 @@ impl IndexOrchestrator {
         let batch_size = self.batch_config.scan_batch_size;
         let root_dir = options.root_dir.to_string_lossy().to_string();
         let batch_loop_started = Instant::now();
-        let mut vector_writer = self.storage.vector().cloned().map(VectorBatchWriter::new);
-        let mut vector_hashes: Vec<String> = Vec::new();
+        let mut vector_staged = self.storage.vector().cloned().map(StagedVectorWrite::new);
         let mut staged_bm25 = StagedBm25Write::default();
         let mut pending_batches: Vec<usize> = Vec::new();
         let mut pending_vector_paths: Vec<PathBuf> = Vec::new();
@@ -339,9 +334,12 @@ impl IndexOrchestrator {
             }
             ctx.stages.entity_store_ms += stage_started.elapsed().as_millis() as u64;
             if entity_store_ok {
+                let entity_lookup_started = Instant::now();
                 self.storage
                     .extend_source_entity_ids(&mut source_entity_ids, &mut max_entity_id)
                     .await?;
+                self.storage
+                    .add_vector_entity_lookup(entity_lookup_started.elapsed());
             }
 
             let mut vector_deferred = false;
@@ -374,16 +372,14 @@ impl IndexOrchestrator {
                         .filter(|c| c.path == cce_parser::ast_to_nl::chunker::ChunkPath::Embedding)
                         .cloned()
                         .collect();
-                    let hash_count_before = vector_hashes.len();
                     let stage_started = Instant::now();
-                    let vector_result = if let Some(writer) = vector_writer.as_mut() {
+                    let vector_result = if let Some(staged) = vector_staged.as_mut() {
                         self.storage
                             .stage_vectors_batched(
                                 &embedding_chunks,
                                 self.batch_config.embedding_batch_size,
                                 self.batch_config.embedding_batch_delay_ms,
-                                Some(writer),
-                                &mut vector_hashes,
+                                Some(staged),
                                 Some(&source_entity_ids),
                             )
                             .await
@@ -401,10 +397,9 @@ impl IndexOrchestrator {
                     match vector_result {
                         Ok(stored) => {
                             ctx.total_vectors += stored;
-                            vector_deferred = vector_hashes.len() > hash_count_before
-                                || vector_writer
-                                    .as_ref()
-                                    .is_some_and(|writer| writer.pending_len() > 0);
+                            vector_deferred = vector_staged
+                                .as_ref()
+                                .is_some_and(|staged| !staged.is_empty());
                             if vector_deferred {
                                 pending_vector_paths.extend(success_paths.iter().cloned());
                             } else {
@@ -443,37 +438,11 @@ impl IndexOrchestrator {
                                 state_started.elapsed().as_millis() as u64;
                         }
                     }
-                    if let Some(writer) = vector_writer.as_ref() {
+                    if let Some(staged) = vector_staged.as_ref() {
                         ctx.stages.vector_pending_points_max = ctx
                             .stages
                             .vector_pending_points_max
-                            .max(writer.pending_len() as u64);
-                    }
-                    let writer_full = vector_writer.as_ref().is_some_and(|w| w.is_full());
-                    if writer_full
-                        && let Err(e) = self
-                            .commit_deferred_writes(
-                                ctx,
-                                &checkpoint_manager,
-                                &operation_id,
-                                vector_writer.as_mut(),
-                                &mut vector_hashes,
-                                &mut staged_bm25,
-                                &mut pending_batches,
-                                &mut pending_vector_paths,
-                                &mut pending_bm25_paths,
-                                &mut pending_completed_paths,
-                                None,
-                            )
-                            .await
-                    {
-                        ctx.errors
-                            .push(format!("Deferred write commit failed: {e}"));
-                        ctx.all_batches_completed = false;
-                        break;
-                    }
-                    if writer_full {
-                        vector_deferred = false;
+                            .max(staged.pending_points() as u64);
                     }
                 } else {
                     // Vector storage disabled for this run: chunk rows and
@@ -582,8 +551,7 @@ impl IndexOrchestrator {
                                 ctx,
                                 &checkpoint_manager,
                                 &operation_id,
-                                vector_writer.as_mut(),
-                                &mut vector_hashes,
+                                vector_staged.as_mut(),
                                 &mut staged_bm25,
                                 &mut pending_batches,
                                 &mut pending_vector_paths,
@@ -847,8 +815,7 @@ impl IndexOrchestrator {
                                 ctx,
                                 &checkpoint_manager,
                                 &operation_id,
-                                vector_writer.as_mut(),
-                                &mut vector_hashes,
+                                vector_staged.as_mut(),
                                 &mut staged_bm25,
                                 &mut pending_batches,
                                 &mut pending_vector_paths,
@@ -880,8 +847,7 @@ impl IndexOrchestrator {
                                 ctx,
                                 &checkpoint_manager,
                                 &operation_id,
-                                vector_writer.as_mut(),
-                                &mut vector_hashes,
+                                vector_staged.as_mut(),
                                 &mut staged_bm25,
                                 &mut pending_batches,
                                 &mut pending_vector_paths,
@@ -940,8 +906,7 @@ impl IndexOrchestrator {
                     ctx,
                     &checkpoint_manager,
                     &operation_id,
-                    vector_writer.as_mut(),
-                    &mut vector_hashes,
+                    vector_staged.as_mut(),
                     &mut staged_bm25,
                     &mut pending_batches,
                     &mut pending_vector_paths,
@@ -962,6 +927,10 @@ impl IndexOrchestrator {
         let state_started = Instant::now();
         self.state_tracker.flush_deferred_persistence().await;
         ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
+
+        ctx.stages.entity_id_map_entries = source_entity_ids.len() as u64;
+        ctx.stages.entity_id_map_estimated_bytes =
+            ctx.stages.entity_id_map_entries.saturating_mul(128);
 
         let timed_ms = ctx.stages.batch_process_ms
             + ctx.stages.batch_setup_ms
