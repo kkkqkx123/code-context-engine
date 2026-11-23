@@ -61,6 +61,7 @@ use cce_circuit_breaker::CircuitBreaker;
 use cce_text::MixedTokenizer;
 use cce_types::error::common::ErrorClassify;
 use reqwest::Client;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -79,6 +80,7 @@ pub struct ElasticsearchClient {
     tokenizer: MixedTokenizer,
     breaker: Arc<Mutex<CircuitBreaker>>,
     metrics: Option<Arc<dyn Bm25Metrics>>,
+    staged_documents: Arc<AtomicUsize>,
 }
 
 impl ElasticsearchClient {
@@ -109,6 +111,7 @@ impl ElasticsearchClient {
                 BREAKER_TIMEOUT,
             ))),
             metrics: None,
+            staged_documents: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -129,6 +132,16 @@ impl ElasticsearchClient {
     /// Effective configuration (index name, timeouts, similarity).
     pub fn config(&self) -> &ElasticsearchConfig {
         &self.config
+    }
+
+    /// Track documents staged by the current indexing run.
+    pub(crate) fn add_staged(&self, count: usize) {
+        self.staged_documents.fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Drain the staged-document counter at commit time.
+    pub(crate) fn drain_staged(&self) -> usize {
+        self.staged_documents.swap(0, Ordering::Relaxed)
     }
 
     /// Whether the remote branch is configured (a URL is present).

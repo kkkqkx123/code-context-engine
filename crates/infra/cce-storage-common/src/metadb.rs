@@ -77,8 +77,9 @@ metadata_storage_contract! {
     ) -> Result<(), StorageError>;
         /// Register a project row; returns the new id.
         ///
-        /// Uniqueness violations on name or root path surface as errors whose
-        /// message contains `UNIQUE constraint failed`.
+        /// Uniqueness violations on name or root path surface as
+        /// `StorageError::UniqueViolation`; callers detect duplicates via
+        /// `StorageError::is_unique_violation`, never by backend error text.
     fn project_insert(
     &self,
     record: &NewProjectRecord,
@@ -1053,15 +1054,6 @@ metadata_storage_contract! {
         /// Aggregate on-disk size (local: main plus per-project files; remote:
         /// whole database size plus per-project estimate where available).
     fn db_size(&self) -> Result<u64, StorageError>;
-        /// Remove a project: local deletes the per-project database files
-        /// (evict handle, then main plus WAL/SHM sidecars); remote deletes the
-        /// project rows across business tables in one transaction.
-        /// Returns the number of removed business records; snapshot-only
-        /// deletion stays on `snapshot_delete_project`.
-    fn delete_project_db(
-    &self,
-    project_id: i64,
-    ) -> Result<usize, StorageError>;
     }
 }
 

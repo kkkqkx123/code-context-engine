@@ -391,6 +391,44 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
             .expect("project count"),
         0
     );
+
+    // Staging roundtrip: both backends report the number of accepted
+    // documents from commit_staged and make them searchable afterwards.
+    // Visibility before commit is intentionally out of contract (O-A).
+    assert!(!store.backend_name().is_empty(), "backend name must be set");
+    let _ = store
+        .commit_staged(index)
+        .await
+        .expect("drain any prior staging");
+    let staged_id = format!("{tag}-staged");
+    let staged_doc = doc(
+        &staged_id,
+        7,
+        1,
+        "zephyrwind stagedtoken payload",
+        "src/staged.rs",
+        false,
+        FileCategory::Code,
+    );
+    let staged = store
+        .stage_documents(index, &[staged_doc])
+        .await
+        .expect("stage document");
+    assert_eq!(staged, 1, "stage reports the accepted document count");
+    let committed = store
+        .commit_staged(index)
+        .await
+        .expect("commit staged");
+    assert_eq!(committed, 1, "commit reports the staged document count");
+    store.finish_writes(index).await.expect("finish writes");
+    let hits = store
+        .search("stagedtoken", &options(7, vec![1]))
+        .await
+        .expect("search after staged commit");
+    assert!(
+        hits.iter().any(|h| h.document_id == staged_id),
+        "committed document must be searchable"
+    );
 }
 
 #[tokio::test]

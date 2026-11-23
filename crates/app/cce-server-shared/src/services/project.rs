@@ -116,14 +116,13 @@ pub async fn create_project(
     let project_id = match store.project_insert(&new_project).await {
         Ok(id) => id,
         Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("UNIQUE constraint failed") {
+            if e.is_unique_violation() {
                 return Err(ProjectCreateError::Conflict(
                     "Project with this name or root path already exists".to_string(),
                 ));
             }
             return Err(ProjectCreateError::Storage(format!(
-                "Failed to create project: {msg}"
+                "Failed to create project: {e}"
             )));
         }
     };

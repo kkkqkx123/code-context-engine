@@ -417,6 +417,55 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
         "unexpected error: {err}"
     );
     assert_eq!(store.count_points_by_group(&bad).await.expect("count"), 0);
+
+    // Epoch-scoped group delete plus collection-wide readback.
+    assert!(!store.backend_name().is_empty(), "backend name must be set");
+    let epoch_group = format!("{tag}-epoch-group");
+    store
+        .upsert_points(&[
+            code_point("eg-1", vec![1.0, 0.0, 0.0, 0.0], "src/eg1.rs", &epoch_group, 3),
+            code_point("eg-2", vec![1.0, 0.0, 0.0, 0.0], "src/eg2.rs", &epoch_group, 3),
+            code_point("eg-3", vec![1.0, 0.0, 0.0, 0.0], "src/eg3.rs", &epoch_group, 4),
+        ])
+        .await
+        .expect("upsert epoch group");
+    let removed = store
+        .delete_by_group_epoch(&epoch_group, 3)
+        .await
+        .expect("delete group epoch");
+    assert_eq!(removed, 2, "both epoch-3 points must be removed");
+    assert_eq!(
+        store.count_points_by_group(&epoch_group).await.expect("count"),
+        1,
+        "only the epoch-4 point remains"
+    );
+    let all = store.scroll_all_points().await.expect("scroll all");
+    assert!(
+        all.iter().any(|p| p.id == "eg-3"),
+        "remaining point must appear in the full scroll"
+    );
+    assert!(
+        store.count_all_points().await.expect("count all") >= 1,
+        "collection count must include the remaining point"
+    );
+    let removed = store
+        .delete_by_group_epoch(&epoch_group, 4)
+        .await
+        .expect("delete remaining epoch");
+    assert_eq!(removed, 1);
+    assert_eq!(
+        store.count_points_by_group(&epoch_group).await.expect("count"),
+        0
+    );
+
+    // clear_collection empties the whole collection without dropping it.
+    store.clear_collection().await.expect("clear collection");
+    assert_eq!(
+        store.count_all_points().await.expect("count all"),
+        0,
+        "collection must be empty after clear"
+    );
+    assert!(store.collection_exists().await.expect("exists"));
 }
 
 #[tokio::test]

@@ -237,6 +237,10 @@ impl VectorStorage for VectorStore {
         }
     }
 
+    fn write_metrics(&self) -> Option<VectorWriteMetrics> {
+        VectorStore::write_metrics(self)
+    }
+
     async fn ensure_collection(&self) -> Result<bool, StorageError> {
         match self {
             Self::Local(store) => VectorStorage::ensure_collection(store.as_ref()).await,

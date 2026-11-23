@@ -5,7 +5,7 @@
 //! checkpoints, and admission audit stay identical: the local backend always
 //! runs (embedded), the PostgreSQL branch runs when `CCE_TEST_PG_URL` points
 //! at a live service and skips otherwise. Each backend works under its own
-//! project ids, and the remote run cleans up with `delete_project_db` plus
+//! project ids, and the remote run cleans up with `project_delete_db` plus
 //! `snapshot_delete_project`.
 
 use cce_storage_common::metadb::{
@@ -557,7 +557,7 @@ async fn local_backend_contract() {
     MetadataStorage::snapshot_delete_project(&client, 7)
         .await
         .expect("delete snapshots");
-    MetadataStorage::delete_project_db(&client, 7)
+    MetadataStorage::project_delete_db(&client, 7)
         .await
         .expect("delete project db");
 }
@@ -589,10 +589,10 @@ async fn remote_backend_contract() {
     MetadataStorage::snapshot_delete_project(&client, other)
         .await
         .expect("delete other snapshots");
-    MetadataStorage::delete_project_db(&client, project)
+    MetadataStorage::project_delete_db(&client, project)
         .await
         .expect("delete project db");
-    MetadataStorage::delete_project_db(&client, other)
+    MetadataStorage::project_delete_db(&client, other)
         .await
         .expect("delete other project db");
 }

@@ -970,10 +970,6 @@ impl MetadataStorage for SqliteClient {
         SqliteClient::db_size_sync(self)
     }
 
-    async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError> {
-        SqliteClient::delete_project_db_sync(self, project_id)
-    }
-
     async fn project_meta_get_int_optional(
         &self,
         project_id: i64,

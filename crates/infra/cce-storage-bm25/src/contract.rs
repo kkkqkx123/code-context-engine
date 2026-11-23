@@ -141,6 +141,28 @@ impl FulltextStorage for Bm25Client {
 /// live on [`crate::ElasticsearchClient`].
 #[cfg(feature = "remote")]
 impl FulltextStorage for crate::ElasticsearchClient {
+    // A remote service has no local writer buffer: staging writes through
+    // immediately and the commit step reports the accumulated document count.
+    async fn stage_documents(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> Result<usize, FulltextError> {
+        let written = crate::ElasticsearchClient::batch_index(self, index_name, documents).await?;
+        crate::ElasticsearchClient::add_staged(self, written);
+        Ok(written)
+    }
+
+    async fn commit_staged(&self, index_name: &str) -> Result<usize, FulltextError> {
+        let _ = index_name;
+        Ok(crate::ElasticsearchClient::drain_staged(self))
+    }
+
+    async fn finish_writes(&self, index_name: &str) -> Result<(), FulltextError> {
+        let _ = index_name;
+        Ok(())
+    }
+
     async fn batch_index(
         &self,
         index_name: &str,

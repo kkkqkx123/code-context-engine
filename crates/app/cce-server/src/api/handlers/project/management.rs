@@ -94,15 +94,10 @@ pub async fn handle_create_project(
                     ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, m))
                 }
                 cce_server_shared::services::project::ProjectCreateError::Storage(m) => {
-                    // Preserve UNIQUE handling already converted to Conflict; other storage errors.
-                    if m.contains("UNIQUE constraint failed") {
-                        ApiResult::Error(ErrorResponse::new(
-                            error_codes::CONFLICT,
-                            "Project with this name or root path already exists",
-                        ))
-                    } else {
-                        ApiResult::Error(ErrorResponse::new(error_codes::STORAGE_ERROR, m))
-                    }
+                    // Uniqueness conflicts are classified structurally in the
+                    // service layer and arrive as `Conflict`; a plain Storage
+                    // error is never a duplicate.
+                    ApiResult::Error(ErrorResponse::new(error_codes::STORAGE_ERROR, m))
                 }
             };
             }

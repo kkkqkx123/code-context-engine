@@ -34,7 +34,21 @@ impl ProjectRepository {
                 now,
             ],
         )
-        .map_err(|e| StorageError::insert("projects", format!("Failed to insert project: {e}")))?;
+        .map_err(|e| {
+            // primary code 19 is SQLITE_CONSTRAINT; project_insert only has
+            // UNIQUE(name) and UNIQUE(root_path) constraints, so classify it
+            // structurally instead of matching the driver's message text.
+            let primary = if let rusqlite::Error::SqliteFailure(ref err, _) = e {
+                Some(err.extended_code & 0xFF)
+            } else {
+                None
+            };
+            if primary == Some(19) {
+                StorageError::unique_violation("project name or root path already exists")
+            } else {
+                StorageError::insert("projects", format!("Failed to insert project: {e}"))
+            }
+        })?;
 
         Ok(tx.last_insert_rowid())
     }
@@ -430,5 +444,22 @@ mod tests {
         let err = ProjectRepository::meta_get_int_optional(&conn, 1, "active_epoch")
             .expect_err("corrupt value must be a failure");
         assert!(matches!(err, StorageError::Validation(_)));
+    }
+
+    #[test]
+    fn duplicate_project_insert_is_structured_unique_violation() {
+        use cce_types::error::common::ErrorClassify;
+
+        let client = crate::SqliteClient::in_memory().expect("in-memory database should open");
+        let mut conn = client.write_connection().expect("connection should open");
+        let tx = conn.transaction().expect("transaction should start");
+        let record = NewProjectRecord::new("dup-name".to_string(), "/tmp/dup".to_string());
+        ProjectRepository::insert(&tx, &record).expect("first insert succeeds");
+        let err = ProjectRepository::insert(&tx, &record).expect_err("duplicate name must fail");
+        assert!(
+            err.is_unique_violation(),
+            "duplicate must be a structured UniqueViolation, not raw text: {err:?}"
+        );
+        assert!(!err.is_retryable(), "unique violation must be permanent");
     }
 }

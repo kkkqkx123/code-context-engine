@@ -156,11 +156,13 @@ pub trait FulltextStorage: Clone + Send + Sync + 'static {
         None
     }
 
-    /// Stage documents in the local writer without publishing them.
+    /// Hand documents to the writer and report how many were accepted.
     ///
-    /// The default keeps the contract's batch-commit semantics for remote
-    /// branches; the embedded branch overrides it to aggregate commits across
-    /// orchestration batches.
+    /// Visibility timing is backend-specific and deliberately not part of
+    /// the contract: the embedded branch buffers until `commit_staged`, while
+    /// remote search-service branches publish on `stage_documents` and let
+    /// `commit_staged` only report the accepted count. Callers must not assume
+    /// documents are invisible before commit.
     fn stage_documents(
         &self,
         index_name: &str,

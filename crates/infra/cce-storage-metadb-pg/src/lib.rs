@@ -710,10 +710,6 @@ impl MetadataStorage for PostgresClient {
         self.db_size().await
     }
 
-    async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError> {
-        self.delete_project_db(project_id).await
-    }
-
     async fn project_meta_get_int_optional(
         &self,
         project_id: i64,

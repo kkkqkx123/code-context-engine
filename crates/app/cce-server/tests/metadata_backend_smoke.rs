@@ -140,7 +140,7 @@ async fn remote_metadata_service_smoke() {
     MetadataStorage::snapshot_delete_project(&store, project_id)
         .await
         .expect("cleanup smoke snapshots");
-    MetadataStorage::delete_project_db(&store, project_id)
+    MetadataStorage::project_delete_db(&store, project_id)
         .await
         .expect("cleanup smoke project");
 }

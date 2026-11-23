@@ -356,7 +356,9 @@ impl StorageCoordinator {
 
     /// Cumulative write-path counters for the configured vector backend.
     pub fn vector_write_metrics(&self) -> Option<VectorWriteMetrics> {
-        self.vector.as_ref().and_then(VectorStore::write_metrics)
+        self.vector
+            .as_ref()
+            .and_then(cce_storage_common::VectorStorage::write_metrics)
     }
 
     /// Reset the sub-stage counters before one full-index run.

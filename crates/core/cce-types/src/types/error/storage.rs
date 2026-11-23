@@ -42,6 +42,12 @@ pub enum StorageError {
     #[error("Validation failed: {0}")]
     Validation(String),
 
+    /// Uniqueness conflict — a row with the same natural key already exists.
+    /// Carries a stable classification so callers never match backend error
+    /// text to detect a duplicate. Retrying cannot succeed.
+    #[error("Unique constraint violation: {0}")]
+    UniqueViolation(String),
+
     /// Not found - uses common NotFoundError
     #[error("{0}")]
     NotFound(#[from] NotFoundError),
@@ -127,6 +133,16 @@ impl StorageError {
         Self::Validation(reason.into())
     }
 
+    /// Create a uniqueness-conflict error.
+    pub fn unique_violation(reason: impl Into<String>) -> Self {
+        Self::UniqueViolation(reason.into())
+    }
+
+    /// Whether this is a uniqueness conflict (duplicate natural key).
+    pub fn is_unique_violation(&self) -> bool {
+        matches!(self, Self::UniqueViolation(_))
+    }
+
     /// Create a sqlite error
     pub fn sqlite(reason: impl Into<String>) -> Self {
         let reason = reason.into();
@@ -173,6 +189,7 @@ impl StorageError {
             Self::Delete { .. } => "STORAGE_DELETE_ERROR",
             Self::Update { .. } => "STORAGE_UPDATE_ERROR",
             Self::Validation(_) => "STORAGE_VALIDATION_ERROR",
+            Self::UniqueViolation(_) => "STORAGE_UNIQUE_VIOLATION",
             Self::NotFound(_) => "STORAGE_NOT_FOUND_ERROR",
             Self::Io(_) => "STORAGE_IO_ERROR",
             Self::Sqlite(_) => "STORAGE_SQLITE_ERROR",
@@ -217,7 +234,7 @@ impl super::common::ErrorClassify for StorageError {
             Self::Qdrant(err) => err.is_retryable(),
             Self::Bm25(err) => err.is_retryable(),
             Self::Io(err) => err.is_retryable(),
-            Self::StorageFull(_) => false,
+            Self::StorageFull(_) | Self::UniqueViolation(_) => false,
             _ => matches!(
                 self,
                 Self::Connection(_)
@@ -258,6 +275,7 @@ impl super::common::ErrorClassify for StorageError {
                     | Self::Table(_)
                     | Self::Delete { .. }
                     | Self::Validation(_)
+                    | Self::UniqueViolation(_)
                     | Self::StorageFull(_)
             ),
         }

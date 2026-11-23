@@ -20,13 +20,14 @@ pub fn classify_pg(error: tokio_postgres::Error) -> StorageError {
     StorageError::connection(format!("pg transport failed: {error}"))
 }
 
-/// Project registration translates unique violations into the same message
-/// the local branch reports so callers can classify conflicts uniformly.
+/// Project registration maps SQLSTATE 23505 (unique_violation) to the same
+/// structured variant the local branch emits. Callers classify conflicts by
+/// `StorageError::is_unique_violation`, never by backend error text.
 pub fn classify_project_insert(error: tokio_postgres::Error) -> StorageError {
     if let Some(db) = error.as_db_error()
         && db.code().code() == "23505"
     {
-        return StorageError::validation(format!("UNIQUE constraint failed: {error}"));
+        return StorageError::unique_violation("project name or root path already exists");
     }
     classify_pg(error)
 }
