@@ -392,29 +392,29 @@ impl QueryCoordinator {
 
     // ========== Entity Search (FTS5) ==========
 
-    /// Search entities using FTS5 full-text search
+    /// Search entities through the shared substring-token contract.
     ///
-    /// This method provides fast entity name and signature searching using SQLite FTS5.
-    /// It's ideal for symbol lookup, autocomplete, and finding entities by partial names.
+    /// Ideal for symbol lookup, autocomplete, and finding entities by partial
+    /// names. The query is space-separated substring terms ANDed across
+    /// `name`, `signature` and `scoped_name`; at most 8 terms are used.
+    /// FTS5-only syntax (prefix `auth*`, phrases, boolean operators, field
+    /// qualifiers) is a local-backend enhancement and is not portable here.
+    /// Result order is backend-defined and not part of the contract.
     ///
     /// # Arguments
     ///
-    /// * `query` - FTS5 query string (supports prefix matching: `auth*`, phrases: `"test function"`, etc.)
+    /// * `query` - space-separated substring terms (portable syntax)
     /// * `project_id` - Project ID to search within
     /// * `limit` - Maximum number of results to return
     ///
     /// # Returns
     ///
-    /// Vector of entity records matching the search query, ordered by relevance.
+    /// Vector of entity records matching the search query, backend-defined order.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// // Search for entities starting with "auth"
-    /// let entities = coordinator.search_entities("auth*", 1, 20)?;
-    ///
-    /// // Search for exact phrase in signature
-    /// let entities = coordinator.search_entities("\"fn test()\"", 1, 10)?;
+    /// let entities = coordinator.search_entities("auth login", 1, 20)?;
     /// ```
     pub async fn search_entities(
         &self,

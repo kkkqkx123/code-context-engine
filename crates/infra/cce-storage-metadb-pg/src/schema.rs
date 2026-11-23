@@ -1,4 +1,4 @@
-pub const POSTGRES_SCHEMA_VERSION: i64 = 4;
+pub const POSTGRES_SCHEMA_VERSION: i64 = 5;
 
 /// Incremental migration bringing pre-V2 databases to the current shape.
 /// Fresh databases get the column from `V1_DDL` directly.
@@ -24,6 +24,19 @@ ALTER TABLE projects DROP COLUMN IF EXISTS extensions;
 ALTER TABLE projects DROP COLUMN IF EXISTS exclude_dirs;
 ALTER TABLE projects DROP COLUMN IF EXISTS respect_gitignore;
 ALTER TABLE projects DROP COLUMN IF EXISTS ignore_patterns;
+"#;
+
+/// Additive trigram indexes for the portable entity substring search.
+///
+/// The remote entity search uses `ILIKE '%token%'` on `name`, `signature` and
+/// `scoped_name`; without trigram indexes each term is a sequential scan.
+/// This migration is index-only: it neither changes stored data nor query
+/// semantics, and can be applied to an existing database without backfill.
+pub const V5_DDL: &str = r#"
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_entities_name_trgm ON entities USING GIN (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_entities_signature_trgm ON entities USING GIN (signature gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_entities_scoped_name_trgm ON entities USING GIN (scoped_name gin_trgm_ops);
 "#;
 
 pub const V1_DDL: &str = r#"

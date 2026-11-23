@@ -392,9 +392,8 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         0
     );
 
-    // Staging roundtrip: both backends report the number of accepted
-    // documents from commit_staged and make them searchable afterwards.
-    // Visibility before commit is intentionally out of contract (O-A).
+    // Staging roundtrip: both built-in backends defer publication so a staged
+    // document is invisible before commit and searchable right after it.
     assert!(!store.backend_name().is_empty(), "backend name must be set");
     let _ = store
         .commit_staged(index)
@@ -415,6 +414,16 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         .await
         .expect("stage document");
     assert_eq!(staged, 1, "stage reports the accepted document count");
+    let before_commit = store
+        .search("stagedtoken", &options(7, vec![1]))
+        .await
+        .expect("search before commit");
+    assert!(
+        !before_commit
+            .iter()
+            .any(|hit| hit.document_id == staged_id),
+        "staged document must be invisible before commit"
+    );
     let committed = store
         .commit_staged(index)
         .await

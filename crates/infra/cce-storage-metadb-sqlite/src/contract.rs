@@ -426,23 +426,21 @@ impl MetadataStorage for SqliteClient {
         epoch: i64,
         excluded_files: &[String],
     ) -> Result<Vec<EntityRecord>, StorageError> {
+        // FTS5 rejects `MATCH ''` with a syntax error, while the contract (and
+        // the remote branch's empty-token path) promise an empty result.
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
         let conn = self.read_connection()?;
-        let entities =
-            EntityRepository::search_fts_at_epoch(&conn, query, project_id, limit, epoch)?;
-        if excluded_files.is_empty() {
-            return Ok(entities);
-        }
-        let excluded: std::collections::HashSet<&str> =
-            excluded_files.iter().map(String::as_str).collect();
-        let mut kept = Vec::with_capacity(entities.len());
-        for entity in entities {
-            let visible = FileRepository::get_by_id(&conn, entity.file_id)?
-                .is_some_and(|file| !excluded.contains(file.path.as_str()));
-            if visible {
-                kept.push(entity);
-            }
-        }
-        Ok(kept)
+        let excluded: Vec<&str> = excluded_files.iter().map(String::as_str).collect();
+        EntityRepository::search_fts_at_epoch_excluding(
+            &conn,
+            query,
+            project_id,
+            limit,
+            epoch,
+            &excluded,
+        )
     }
 
     async fn files_list(

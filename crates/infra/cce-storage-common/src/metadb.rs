@@ -484,10 +484,15 @@ metadata_storage_contract! {
     ) -> Result<i64, StorageError>;
         /// Full-text entity search scoped to one project and epoch.
         ///
-        /// The local branch serves SQLite FTS5; the remote branch serves a
-        /// portable substring match over name, signature and scoped name.
-        /// Rows whose file path is in `excluded_files` are dropped inside the
-        /// branch. An empty query after sanitization returns no rows.
+        /// The portable syntax is space-separated substring terms ANDed over
+        /// name, signature and scoped name, capped at 8 terms. FTS5-only
+        /// syntax (trailing `*`, phrases, boolean operators, field
+        /// qualifiers) is a local-backend enhancement and is NOT part of
+        /// this contract. Result order is backend-defined.
+        ///
+        /// Excluded file paths are filtered before the limit so the page
+        /// size stays meaningful on both branches. An empty query returns
+        /// no rows.
     fn entities_search_fts(
     &self,
     project_id: i64,

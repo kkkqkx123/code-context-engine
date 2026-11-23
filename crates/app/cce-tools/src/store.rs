@@ -7,8 +7,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use cce_storage_common::MetadataStorage;
-use cce_storage_common::metadb::{ChunkRecord, MetadataBackendStore};
+use cce_storage_common::metadb::{
+    ChunkRecord, MetadataBackendStore, MetadataContentStore, MetadataProjectStore,
+};
 pub use cce_storage_common::source::{SourceFileCache, read_source_lines_cached};
 
 use crate::epoch_view::EpochView;
@@ -23,7 +24,7 @@ pub type ToolMetadataStore = MetadataBackendStore<
 /// Fetch chunk records by chunk IDs through the backend-neutral relation
 /// contract, resolving the full epoch view.
 pub async fn get_chunk_records(
-    store: &impl MetadataStorage,
+    store: &impl MetadataContentStore,
     chunk_ids: &[String],
     project_id: i64,
     view: &EpochView,
@@ -42,7 +43,7 @@ pub async fn get_chunk_records(
 }
 
 async fn resolve_chunk_records(
-    store: &impl MetadataStorage,
+    store: &impl MetadataContentStore,
     chunk_ids: &[String],
     project_id: i64,
     view: &EpochView,
@@ -93,7 +94,7 @@ async fn resolve_chunk_records(
 /// Returns `None` when the relation handle is missing or the project row
 /// carries no root path.
 pub async fn resolve_project_root(
-    store: &impl MetadataStorage,
+    store: &impl MetadataProjectStore,
     project_id: i64,
 ) -> Option<PathBuf> {
     store

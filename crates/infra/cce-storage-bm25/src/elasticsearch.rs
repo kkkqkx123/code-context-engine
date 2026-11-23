@@ -54,14 +54,15 @@ mod write;
 
 pub use config::ElasticsearchConfig;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use cce_circuit_breaker::CircuitBreaker;
+use cce_storage_common::FulltextDocument;
 use cce_text::MixedTokenizer;
 use cce_types::error::common::ErrorClassify;
 use reqwest::Client;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -72,6 +73,49 @@ use crate::metrics::Bm25Metrics;
 const BREAKER_THRESHOLD: u32 = 3;
 const BREAKER_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Per-index staging buffer for the deferred-publish semantics shared by both
+/// fulltext branches. Documents staged for an index stay invisible until
+/// `take` publishes them; on a failed write `restore` puts the batch back at
+/// the head so a retry is lossless. Kept independent of the HTTP transport so
+/// the stage/commit state machine is testable without a live Elasticsearch.
+#[derive(Default)]
+pub(crate) struct StagingBuffer {
+    by_index: HashMap<String, Vec<FulltextDocument>>,
+}
+
+impl StagingBuffer {
+    /// Append documents to an index's pending buffer; return the staged count.
+    pub(crate) fn stage(&mut self, index_name: &str, documents: &[FulltextDocument]) -> usize {
+        if documents.is_empty() {
+            return 0;
+        }
+        let entry = self.by_index.entry(index_name.to_string()).or_default();
+        entry.extend_from_slice(documents);
+        documents.len()
+    }
+
+    /// Remove and return all pending documents of an index.
+    pub(crate) fn take(&mut self, index_name: &str) -> Vec<FulltextDocument> {
+        self.by_index.remove(index_name).unwrap_or_default()
+    }
+
+    /// Put a failed batch back at the head of an index's buffer.
+    pub(crate) fn restore(&mut self, index_name: &str, batch: Vec<FulltextDocument>) {
+        let entry = self.by_index.entry(index_name.to_string()).or_default();
+        let mut restored = batch;
+        restored.append(entry);
+        *entry = restored;
+    }
+
+    /// Number of pending documents of an index (test helper).
+    #[cfg(test)]
+    pub(crate) fn pending(&self, index_name: &str) -> usize {
+        self.by_index
+            .get(index_name)
+            .map_or(0, |docs| docs.len())
+    }
+}
+
 /// Elasticsearch-backed fulltext client (remote branch).
 #[derive(Clone)]
 pub struct ElasticsearchClient {
@@ -80,7 +124,10 @@ pub struct ElasticsearchClient {
     tokenizer: MixedTokenizer,
     breaker: Arc<Mutex<CircuitBreaker>>,
     metrics: Option<Arc<dyn Bm25Metrics>>,
-    staged_documents: Arc<AtomicUsize>,
+    /// Per-index staging buffer. `stage_documents` appends here without
+    /// publishing; `commit_staged` drains and writes, restoring the batch on
+    /// write failure so a retry is lossless.
+    staged_documents: Arc<Mutex<StagingBuffer>>,
 }
 
 impl ElasticsearchClient {
@@ -111,7 +158,7 @@ impl ElasticsearchClient {
                 BREAKER_TIMEOUT,
             ))),
             metrics: None,
-            staged_documents: Arc::new(AtomicUsize::new(0)),
+            staged_documents: Arc::new(Mutex::new(StagingBuffer::default())),
         })
     }
 
@@ -134,14 +181,28 @@ impl ElasticsearchClient {
         &self.config
     }
 
-    /// Track documents staged by the current indexing run.
-    pub(crate) fn add_staged(&self, count: usize) {
-        self.staged_documents.fetch_add(count, Ordering::Relaxed);
+    /// Buffer documents for a later commit without publishing them.
+    pub(crate) async fn buffer_stage(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> Result<usize, Bm25Error> {
+        self.validate_index_name(index_name)?;
+        Ok(self
+            .staged_documents
+            .lock()
+            .await
+            .stage(index_name, documents))
     }
 
-    /// Drain the staged-document counter at commit time.
-    pub(crate) fn drain_staged(&self) -> usize {
-        self.staged_documents.swap(0, Ordering::Relaxed)
+    /// Take the pending batch of an index for publication.
+    pub(crate) async fn buffer_take(&self, index_name: &str) -> Vec<FulltextDocument> {
+        self.staged_documents.lock().await.take(index_name)
+    }
+
+    /// Put a failed publish batch back at the head of the buffer.
+    pub(crate) async fn buffer_restore(&self, index_name: &str, batch: Vec<FulltextDocument>) {
+        self.staged_documents.lock().await.restore(index_name, batch);
     }
 
     /// Whether the remote branch is configured (a URL is present).
@@ -224,7 +285,6 @@ impl std::fmt::Debug for ElasticsearchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     use cce_config::modules::{Bm25Config, FulltextRemoteConfig};
     use serde_json::{Value, json};
@@ -474,5 +534,52 @@ mod tests {
         let config = ElasticsearchConfig::from_remote(&remote, &bm25).expect("url suffices");
         assert_eq!(config.base_url, "http://localhost:9200");
         assert_eq!(config.index_name, "code_index");
+    }
+
+    fn staged_doc(id: &str) -> FulltextDocument {
+        FulltextDocument::new(id).with_field("content", "sample")
+    }
+
+    #[test]
+    fn staging_buffer_defers_until_take() {
+        let mut buffer = StagingBuffer::default();
+        assert_eq!(buffer.pending("idx"), 0);
+        assert_eq!(buffer.stage("idx", &[staged_doc("a"), staged_doc("b")]), 2);
+        assert_eq!(buffer.pending("idx"), 2);
+        let taken = buffer.take("idx");
+        assert_eq!(taken.len(), 2);
+        assert_eq!(taken[0].document_id, "a");
+        assert_eq!(buffer.pending("idx"), 0);
+        assert_eq!(buffer.stage("idx", &[]), 0);
+    }
+
+    #[test]
+    fn staging_buffer_restore_puts_failed_batch_at_head() {
+        let mut buffer = StagingBuffer::default();
+        buffer.stage("idx", &[staged_doc("old")]);
+        let first = buffer.take("idx");
+        // A new batch may arrive while the first batch is being published.
+        buffer.stage("idx", &[staged_doc("new")]);
+        // Publish fails: restore the first batch ahead of the newer one.
+        buffer.restore("idx", first);
+        let taken = buffer.take("idx");
+        assert_eq!(
+            taken
+                .iter()
+                .map(|doc| doc.document_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old", "new"]
+        );
+    }
+
+    #[test]
+    fn staging_buffer_isolates_indexes() {
+        let mut buffer = StagingBuffer::default();
+        buffer.stage("a", &[staged_doc("a1")]);
+        buffer.stage("b", &[staged_doc("b1"), staged_doc("b2")]);
+        assert_eq!(buffer.pending("a"), 1);
+        assert_eq!(buffer.pending("b"), 2);
+        assert_eq!(buffer.take("a")[0].document_id, "a1");
+        assert_eq!(buffer.pending("b"), 2, "taking one index must not affect another");
     }
 }

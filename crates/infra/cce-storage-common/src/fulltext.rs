@@ -158,11 +158,11 @@ pub trait FulltextStorage: Clone + Send + Sync + 'static {
 
     /// Hand documents to the writer and report how many were accepted.
     ///
-    /// Visibility timing is backend-specific and deliberately not part of
-    /// the contract: the embedded branch buffers until `commit_staged`, while
-    /// remote search-service branches publish on `stage_documents` and let
-    /// `commit_staged` only report the accepted count. Callers must not assume
-    /// documents are invisible before commit.
+    /// Both built-in branches defer publication: `stage_documents` buffers
+    /// without making documents visible, and `commit_staged` publishes the
+    /// batch and refreshes the reader so it is searchable. Callers must pair
+    /// every stage with a commit; the default body publishes immediately for
+    /// third-party implementations that do not override the staging pair.
     fn stage_documents(
         &self,
         index_name: &str,

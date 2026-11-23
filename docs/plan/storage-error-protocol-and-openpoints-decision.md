@@ -152,7 +152,7 @@ handler 的 `Storage(m)` 分支移除二次 `contains`，统一返回 `STORAGE_E
 
 | 编号 | 事项 | 建议 |
 | --- | --- | --- |
-| O-A' | 远程 fulltext 真正延迟发布 | 需 ES 环境验证 stage→commit 的可见性与失败补偿，独立立项 |
-| O-C' | 补 generation/snapshot 状态机契约测试 | 前置记录构造复杂，建议按域分批补，远程纳入独立 CI job |
-| O-D' | 调用方改用窄域 trait 依赖 | 评估将 `MetadataStorage` 组合 trait 的依赖点替换为 9 个窄 trait 之一 |
-| O-B' | 统一两端实体 FTS 语义 | 沿用既有 O-04，需 PG `tsvector` 与排序变更，独立立项 |
+| O-A' | 远程 fulltext 真正延迟发布 | **第四轮已落地**：远程 stage 改内存缓冲、commit 写+refresh+失败补偿，缓冲状态机单测覆盖；仅远程端到端可见性待 ES 环境验证。详见 `storage-openpoints-detailed-design.md` 第 4 节 |
+| O-C' | 补 generation/snapshot 状态机契约测试 | **第四轮部分落地**：共享 suite 补 overrides batch/clear 与 candidate begin/clear；copy/materialize/gc 与 snapshot 激活链仍需按域分批补。详见同文档第 3 节 |
+| O-D' | 调用方改用窄域 trait 依赖 | **第四轮已落地**：`cce-tools/src/store.rs` 三处改依赖 `MetadataContentStore`/`MetadataProjectStore`。详见同文档第 2 节 |
+| O-B' | ~~统一两端实体 FTS 语义~~（第五轮否决该方向） | 不统一是既定设计；见 `docs/infra/storage/entity-fts-backend-parity-decision.md`。第四轮第 5 节的 tsvector 方案已作废 |

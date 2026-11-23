@@ -284,10 +284,15 @@ pub struct ClassificationRelation {
     pub call_frequency: u64,
 }
 
-/// Entity search request (FTS5)
+/// Entity search request (portable substring syntax)
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EntitySearchRequest {
-    /// Search query (supports FTS5 syntax)
+    /// Space-separated substring terms, combined with AND over entity name,
+    /// signature and scoped name; at most 8 terms are used.
+    ///
+    /// FTS5-only syntax (prefix `*`, phrases, boolean operators, field
+    /// qualifiers) is a local-backend enhancement, not portable across
+    /// storage backends, and must not be relied upon by callers.
     pub query: String,
     /// Project ID to search within
     #[serde(skip_serializing_if = "Option::is_none")]

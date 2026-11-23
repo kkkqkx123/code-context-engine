@@ -1,6 +1,8 @@
-//! Entity search handler using FTS5
+//! Entity search handler (portable substring syntax)
 //!
-//! Provides full-text search for entity names and signatures using SQLite FTS5.
+//! Provides full-text search for entity names and signatures through the
+//! shared metadata contract; the local backend may additionally accept FTS5
+//! syntax, but that enhancement is not portable.
 
 use axum::{Json, extract::State};
 
@@ -24,17 +26,19 @@ pub type EntitySearchApiResponse = ApiResult<EntitySearchResponse>;
 ///
 /// # Query Syntax
 ///
-/// Supports FTS5 query syntax:
-/// - Prefix matching: `auth*` matches "authenticate", "authorization", etc.
-/// - Phrase matching: `"test function"` matches exact phrase
-/// - Boolean operators: `AND`, `OR`, `NOT`
-/// - Field-specific: `name:main` searches only in name field
+/// The shared contract accepts space-separated substring terms combined with
+/// AND across `name`, `signature` and `scoped_name`; at most 8 terms are used
+/// and an empty query returns no rows. Result order is backend-defined.
+///
+/// FTS5-only syntax (`auth*`, `"exact phrase"`, `AND`/`OR`/`NOT`, `name:main`)
+/// is a local-backend enhancement and is not portable across backends. Do not
+/// rely on it when the PostgreSQL branch may serve the request.
 ///
 /// # Examples
 ///
 /// ```json
 /// {
-///   "query": "auth*",
+///   "query": "auth login",
 ///   "project_id": 1,
 ///   "limit": 20
 /// }

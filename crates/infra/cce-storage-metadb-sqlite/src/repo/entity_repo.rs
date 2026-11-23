@@ -16,7 +16,7 @@
 //! 4. **Hot Update Support**: When files are updated, entities are deleted by file_id
 //!    and re-inserted, ensuring consistency between memory and disk.
 
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, Row, ToSql, params};
 
 use crate::helpers::{
     execute_count, execute_insert, execute_insert_batch, execute_query, execute_query_optional,
@@ -249,7 +249,7 @@ impl EntityRepository {
              FROM entities e
              JOIN entities_fts f ON e.id = f.rowid
              WHERE entities_fts MATCH ?1 AND e.project_id = ?2
-             ORDER BY f.rank LIMIT ?3",
+             ORDER BY f.rank, e.id LIMIT ?3",
             params![query, project_id, limit],
             Self::from_row,
         )
@@ -269,10 +269,48 @@ impl EntityRepository {
              FROM entities e
              JOIN entities_fts f ON e.id = f.rowid
              WHERE entities_fts MATCH ?1 AND e.project_id = ?2 AND e.epoch = ?4
-             ORDER BY f.rank LIMIT ?3",
+             ORDER BY f.rank, e.id LIMIT ?3",
             params![query, project_id, limit, epoch],
             Self::from_row,
         )
+    }
+
+    /// Search entities using FTS5 with excluded paths filtered inside SQL.
+    ///
+    /// The shared contract previously fetched `limit` rows first and dropped
+    /// excluded paths in Rust, so a page could return fewer than `limit`
+    /// rows. Filtering before `LIMIT` keeps the page size meaningful and
+    /// matches the remote branch, which already filters in the WHERE clause.
+    pub fn search_fts_at_epoch_excluding(
+        conn: &Connection,
+        query: &str,
+        project_id: i64,
+        limit: i64,
+        epoch: i64,
+        excluded_paths: &[&str],
+    ) -> Result<Vec<EntityRecord>, StorageError> {
+        let mut sql = String::from(
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank, e.overload_discriminator
+             FROM entities e
+             JOIN entities_fts f ON e.id = f.rowid
+             JOIN files fl ON fl.id = e.file_id
+             WHERE entities_fts MATCH ?1 AND e.project_id = ?2 AND e.epoch = ?3",
+        );
+        let mut params: Vec<&dyn ToSql> = vec![&query, &project_id, &epoch];
+        if !excluded_paths.is_empty() {
+            let placeholders = (0..excluded_paths.len())
+                .map(|index| format!("?{}", 4 + index))
+                .collect::<Vec<_>>()
+                .join(", ");
+            sql.push_str(&format!(" AND fl.path NOT IN ({placeholders})"));
+            for path in excluded_paths {
+                params.push(path);
+            }
+        }
+        let limit_index = 4 + excluded_paths.len();
+        sql.push_str(&format!(" ORDER BY f.rank, e.id LIMIT ?{limit_index}"));
+        params.push(&limit);
+        execute_query(conn, &sql, &params, Self::from_row)
     }
 
     /// Get entities by kind within a project

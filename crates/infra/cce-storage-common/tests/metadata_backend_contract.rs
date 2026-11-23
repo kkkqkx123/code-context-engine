@@ -232,6 +232,52 @@ async fn run_contract_suite(store: &impl MetadataStorage, tag: &str, project: i6
         1
     );
 
+    // Generation state machine (row-id free paths, symmetric on both branches).
+    // Batch upsert then clear on a fresh epoch so earlier assertions are intact.
+    store
+        .overrides_upsert_batch(
+            project,
+            12,
+            &[
+                ("gen/a.rs".to_string(), OverrideDisposition::Replaced),
+                ("gen/b.rs".to_string(), OverrideDisposition::Deleted),
+            ],
+        )
+        .await
+        .expect("batch upsert overrides");
+    assert_eq!(
+        store
+            .overrides_for_generation(project, 12)
+            .await
+            .expect("list batch overrides")
+            .len(),
+        2
+    );
+    assert_eq!(
+        store
+            .overrides_clear(project, 12)
+            .await
+            .expect("clear overrides"),
+        2
+    );
+    assert!(
+        store
+            .overrides_for_generation(project, 12)
+            .await
+            .expect("overrides after clear")
+            .is_empty()
+    );
+    // Candidate begin inherits from the active epoch-3 manifest, then clear
+    // removes every candidate row and returns a non-negative count.
+    store
+        .candidate_begin(project, 13, &format!("{tag}-candidate"), Some(3))
+        .await
+        .expect("begin candidate");
+    let _ = store
+        .candidate_clear_epoch(project, 13)
+        .await
+        .expect("clear candidate epoch");
+
     // Checkpoints and work units.
     let checkpoint = CheckpointRecord {
         id: None,
@@ -445,6 +491,46 @@ async fn local_backend_contract() {
             .expect("count entities"),
         1
     );
+
+    // FTS boundary (F-01): the shared contract promises only plain substring
+    // tokens ANDed together, not SQLite FTS5 syntax. Assert that boundary so
+    // neither branch can silently drift into syntax-dependent behaviour.
+    let hits = MetadataStorage::entities_search_fts(&client, 7, "alpha", 10, 9, &[])
+        .await
+        .expect("fts single token");
+    assert_eq!(hits.len(), 1, "plain token must find the entity");
+    assert_eq!(hits[0].name, "alpha");
+    assert!(
+        MetadataStorage::entities_search_fts(&client, 7, "nonexistenttoken", 10, 9, &[])
+            .await
+            .expect("fts miss")
+            .is_empty(),
+        "unmatched token must return no rows"
+    );
+    assert!(
+        MetadataStorage::entities_search_fts(&client, 7, "", 10, 9, &[])
+            .await
+            .expect("fts empty query")
+            .is_empty(),
+        "empty query must return no rows"
+    );
+    // L1: excluded paths are filtered before LIMIT on both branches, so the
+    // hit disappears instead of being hidden by post-truncation filtering.
+    assert!(
+        MetadataStorage::entities_search_fts(
+            &client,
+            7,
+            "alpha",
+            10,
+            9,
+            &["a.rs".to_string()]
+        )
+        .await
+        .expect("fts excluded")
+        .is_empty(),
+        "excluded file path must remove the hit"
+    );
+
     let entity_id: i64 = {
         let conn = client.read_connection().expect("read connection");
         conn.query_row(

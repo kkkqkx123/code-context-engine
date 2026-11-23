@@ -141,21 +141,36 @@ impl FulltextStorage for Bm25Client {
 /// live on [`crate::ElasticsearchClient`].
 #[cfg(feature = "remote")]
 impl FulltextStorage for crate::ElasticsearchClient {
-    // A remote service has no local writer buffer: staging writes through
-    // immediately and the commit step reports the accumulated document count.
+    // Deferred publish: staging only buffers documents in memory; nothing is
+    // visible in Elasticsearch until commit_staged writes and refreshes.
     async fn stage_documents(
         &self,
         index_name: &str,
         documents: &[FulltextDocument],
     ) -> Result<usize, FulltextError> {
-        let written = crate::ElasticsearchClient::batch_index(self, index_name, documents).await?;
-        crate::ElasticsearchClient::add_staged(self, written);
-        Ok(written)
+        crate::ElasticsearchClient::buffer_stage(self, index_name, documents).await
     }
 
     async fn commit_staged(&self, index_name: &str) -> Result<usize, FulltextError> {
-        let _ = index_name;
-        Ok(crate::ElasticsearchClient::drain_staged(self))
+        let batch = crate::ElasticsearchClient::buffer_take(self, index_name).await;
+        if batch.is_empty() {
+            return Ok(0);
+        }
+        match crate::ElasticsearchClient::batch_index(self, index_name, &batch).await {
+            Ok(written) => {
+                // Refresh so the committed batch is immediately visible to
+                // search and count reads, matching the embedded branch where
+                // commit_staged reloads the reader.
+                crate::ElasticsearchClient::flush(self).await?;
+                Ok(written)
+            }
+            Err(err) => {
+                // Restore the whole batch so a retry is lossless. batch_index
+                // already rolls back any partial prefix on its own failure.
+                crate::ElasticsearchClient::buffer_restore(self, index_name, batch).await;
+                Err(err)
+            }
+        }
     }
 
     async fn finish_writes(&self, index_name: &str) -> Result<(), FulltextError> {

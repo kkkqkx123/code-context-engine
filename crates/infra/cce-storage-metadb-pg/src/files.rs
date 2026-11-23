@@ -503,7 +503,7 @@ impl PostgresClient {
             boxed.push(Box::new(project_id));
             boxed.push(Box::new(epoch));
             for token in &tokens {
-                boxed.push(Box::new(format!("%{token}%")));
+                boxed.push(Box::new(like_pattern(token)));
             }
             for path in &excluded {
                 boxed.push(Box::new(path.clone()));
@@ -1705,18 +1705,34 @@ async fn insert_mapping_in(
     Ok(())
 }
 
-/// Sanitize an FTS5 query string into plain substring tokens.
+/// Sanitize a query into the portable substring-token syntax.
 ///
-/// Drops quoting, wildcards and boolean keywords; caps the token count so a
-/// hostile query cannot fan out into an unbounded conjunction.
+/// Field qualifiers (`name:`, `signature:`, `scoped_name:`) are stripped so a
+/// field-scoped term still searches all portable columns instead of matching
+/// nothing. Quotes, parentheses and the trailing `*` are dropped. `%`, `_`
+/// and `\` are kept literal here and escaped at bind time by `like_pattern`:
+/// stripping `_` used to make ordinary code symbols such as `my_func`
+/// unmatchable on the remote branch. Boolean keywords are ignored; the
+/// portable syntax is an AND-conjunction of substring terms only.
 fn sanitize_fts_query(query: &str) -> Vec<String> {
     query
         .split_whitespace()
         .map(|token| {
+            let token = match token.split_once(':') {
+                Some((field, term))
+                    if matches!(
+                        field.to_ascii_lowercase().as_str(),
+                        "name" | "signature" | "scoped_name"
+                    ) =>
+                {
+                    term
+                }
+                _ => token,
+            };
             token
                 .trim_matches(|char| char == '"' || char == '\'' || char == '(' || char == ')')
                 .trim_end_matches('*')
-                .replace(['\\', '%', '_'], "")
+                .replace('\\', "")
         })
         .filter(|token| {
             !token.is_empty()
@@ -1727,4 +1743,44 @@ fn sanitize_fts_query(query: &str) -> Vec<String> {
         })
         .take(MAX_FTS_TOKENS)
         .collect()
+}
+
+/// Build a `LIKE` pattern with literal `%`, `_` and `\`.
+///
+/// The SQL uses `ESCAPE '\'`, so every wildcard metacharacter in a token must
+/// be prefixed with a backslash before wrapping it in `%...%`.
+fn like_pattern(token: &str) -> String {
+    let escaped = token
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_keeps_underscores_and_strips_field_qualifiers() {
+        let tokens = sanitize_fts_query("name:my_func signature:run_task");
+        assert_eq!(tokens, vec!["my_func", "run_task"]);
+    }
+
+    #[test]
+    fn sanitize_drops_boolean_keywords_and_caps_tokens() {
+        let tokens = sanitize_fts_query("a OR b AND c NOT d NEAR e f g h i j");
+        assert_eq!(tokens.len(), MAX_FTS_TOKENS);
+        assert!(!tokens.iter().any(|token| matches!(
+            token.to_ascii_uppercase().as_str(),
+            "OR" | "AND" | "NOT" | "NEAR"
+        )));
+    }
+
+    #[test]
+    fn like_pattern_escapes_wildcards() {
+        assert_eq!(like_pattern("my_func"), r"%my\_func%");
+        assert_eq!(like_pattern("50%_off"), r"%50\%\_off%");
+        assert_eq!(like_pattern("plain"), "%plain%");
+    }
 }
