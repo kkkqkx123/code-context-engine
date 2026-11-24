@@ -21,6 +21,7 @@ pub mod search;
 pub mod storage;
 pub mod summary;
 pub mod symbol_resolution;
+pub mod wiki;
 
 // Re-export all configuration types
 pub use ast_to_nl::*;
@@ -39,3 +40,4 @@ pub use search::*;
 pub use storage::*;
 pub use summary::*;
 pub use symbol_resolution::SymbolResolutionConfig;
+pub use wiki::*;

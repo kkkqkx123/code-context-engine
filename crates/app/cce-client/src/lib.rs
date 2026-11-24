@@ -33,6 +33,7 @@ mod storage;
 mod tools;
 mod transport;
 mod watch;
+mod wiki;
 
 pub use error::{ApiMethod, ClientError};
 pub use transport::{Client, ClientConfig, INTERACTIVE_BUDGET, LONG_TASK_BUDGET, TOKEN_ENV};

@@ -11,19 +11,23 @@
 //! The MCP transport returns tool payloads without the HTTP success envelope.
 //! Covered here: search, aggregated search, file search, keyword search, entity callees/callers,
 //! call chain, project listing, full and incremental indexing, single and
-//! batch fold, and engine health. Graph traversal, storage management,
-//! metrics history, watch, configuration, and ingest entries remain HTTP-only
-//! and are not exposed here.
+//! batch fold, engine health, bounded file reads, file outlines, entity
+//! detail, and read-only graph lookups (module relations and ego
+//! neighborhoods). Storage management, metrics history, watch, configuration,
+//! and ingest entries remain HTTP-only and are not exposed here.
 //!
 //! The tool implementations are grouped by domain in submodules:
 //! `search` (hybrid, aggregated, file-path, and keyword search), `relations` (entity
 //! callees/callers and call chains), `project` (project listing, indexing,
-//! health), `fold` (stateless folding), and `support` (shared helpers). This
-//! module keeps the
+//! health), `fold` (stateless folding), `files` (bounded reads, outlines,
+//! entity detail), `graph_tools` (module relations and ego neighborhoods),
+//! and `support` (shared helpers). This module keeps the
 //! handler struct, the static tool router, and the thin `#[tool]` wrappers so
 //! the rmcp router codegen stays in one place.
 
+mod files;
 mod fold;
+mod graph_tools;
 mod project;
 mod relations;
 mod search;
@@ -39,7 +43,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
+pub use files::{EntityDetailArgs, FileOutlineArgs, ReadFileArgs};
 pub use fold::{FoldArgs, FoldBatchArgs, FoldBatchItemArgs};
+pub use graph_tools::{GraphEgoArgs, GraphModuleArgs};
 pub use project::{IncrementalIndexArgs, IndexProjectArgs, ProjectArgs};
 pub use relations::{CallChainArgs, EntityArgs};
 pub use search::{AggregatedSearchArgs, FileSearchArgs, KeywordSearchArgs, SearchArgs};
@@ -257,6 +263,71 @@ impl McpServerHandler {
         }
         project::health(&self.state, args).await
     }
+
+    #[tool(
+        description = "Read a bounded, line-numbered window of one project source file (read-only, path-guarded to the project root). Returns lines with start/end line numbers and a truncated flag."
+    )]
+    async fn read_file(
+        &self,
+        Parameters(args): Parameters<ReadFileArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = self.ensure_enabled("read_file") {
+            return Ok(err);
+        }
+        files::read_file(&self.state, args).await
+    }
+
+    #[tool(
+        description = "Symbol skeleton of one project file: name, kind, line range and signature per entity. Read-only."
+    )]
+    async fn file_outline(
+        &self,
+        Parameters(args): Parameters<FileOutlineArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = self.ensure_enabled("file_outline") {
+            return Ok(err);
+        }
+        files::file_outline(&self.state, args).await
+    }
+
+    #[tool(
+        description = "Definition detail of one stable symbol id: name, file, signature, line range and doc comment."
+    )]
+    async fn entity_detail(
+        &self,
+        Parameters(args): Parameters<EntityDetailArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = self.ensure_enabled("entity_detail") {
+            return Ok(err);
+        }
+        files::entity_detail(&self.state, args).await
+    }
+
+    #[tool(
+        description = "Module relations of one file: imports, exported stable symbol ids and caller files, with relation epoch."
+    )]
+    async fn graph_module(
+        &self,
+        Parameters(args): Parameters<GraphModuleArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = self.ensure_enabled("graph_module") {
+            return Ok(err);
+        }
+        graph_tools::graph_module(&self.state, args).await
+    }
+
+    #[tool(
+        description = "Bounded ego neighborhood of one entity in the relation graph (nodes, edges, totals). Read-only."
+    )]
+    async fn graph_ego(
+        &self,
+        Parameters(args): Parameters<GraphEgoArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if let Some(err) = self.ensure_enabled("graph_ego") {
+            return Ok(err);
+        }
+        graph_tools::graph_ego(&self.state, args).await
+    }
 }
 
 #[tool_handler]
@@ -292,14 +363,14 @@ mod tests {
         let stdio_names = names_of(McpServerHandler::tool_router().list_all());
         let http_names = names_of(McpServerHandler::tool_router().list_all());
         assert_eq!(stdio_names, http_names);
-        assert_eq!(stdio_names.len(), 14);
+        assert_eq!(stdio_names.len(), 19);
     }
 
     #[test]
-    fn tool_router_exposes_fourteen_tools_without_http_only_entries() {
+    fn tool_router_exposes_nineteen_tools_without_http_only_entries() {
         let router = McpServerHandler::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 19);
         for name in [
             "search",
             "aggregated_search",
@@ -315,12 +386,18 @@ mod tests {
             "fold",
             "fold_batch",
             "health",
+            "read_file",
+            "file_outline",
+            "entity_detail",
+            "graph_module",
+            "graph_ego",
         ] {
             assert!(router.has_route(name), "tool {name} must be exposed");
         }
         for http_only in [
-            "graph_ego",
             "graph_path",
+            "graph_subgraph",
+            "graph_export",
             "storage_status",
             "watch_status",
             "config_info",

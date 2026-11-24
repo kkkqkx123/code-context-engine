@@ -32,6 +32,7 @@ use crate::modules::{
     AstToNlConfig, EmbedderConfig, ExportModuleConfig, GlobalCacheConfig, LicenseHeaderConfig,
     McpConfig, NestProcessorConfig, OrchestratorConfig, ProviderConfig, RelationConfig,
     RerankConfig, ScannerConfig, SearchModuleConfig, SummaryConfig, SymbolResolutionConfig,
+    WikiExportConfig,
 };
 use crate::modules::{Bm25Config, LocalVectorConfig, QdrantConfig, VectorBackend};
 use crate::modules::{ChatModelConfig, EmbeddingModelConfig, RerankModelConfig};
@@ -271,6 +272,9 @@ pub struct AppConfig {
     /// MCP server configuration (optional, disabled by default)
     #[serde(default)]
     pub mcp: McpConfig,
+    /// Wiki context export configuration
+    #[serde(default)]
+    pub wiki: WikiExportConfig,
 }
 
 /// LLM configuration section
@@ -594,6 +598,9 @@ impl Validate for AppConfig {
             errors.push(e);
         }
         if let Err(e) = self.relation.validate_structured() {
+            errors.push(e);
+        }
+        if let Err(e) = self.wiki.validate_structured() {
             errors.push(e);
         }
         if let Err(e) = self.symbol_resolution.validate_structured() {

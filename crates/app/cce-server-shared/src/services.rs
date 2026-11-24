@@ -12,6 +12,7 @@ pub mod relation;
 pub mod search;
 pub mod tools;
 pub mod watch;
+pub mod wiki;
 
 pub use index::build_index_options;
 pub use project::{

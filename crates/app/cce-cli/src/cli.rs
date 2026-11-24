@@ -70,6 +70,10 @@ pub enum Commands {
     #[command(subcommand)]
     Graph(GraphCommands),
 
+    /// Wiki context export for RepoWiki-style generation
+    #[command(subcommand)]
+    Wiki(commands::wiki::WikiCommands),
+
     /// Watch operations
     #[command(subcommand)]
     Watch(WatchCommands),
@@ -230,6 +234,10 @@ impl Cli {
                     self.format,
                 )
                 .await
+            }
+            Commands::Wiki(cmd) => {
+                let client = cce_client::Client::new(&self.server)?;
+                commands::wiki::execute_with_client(cmd, &client, self.verbose, self.format).await
             }
             Commands::Mcp(cmd) => commands::mcp::execute(cmd).await,
         }
@@ -467,6 +475,14 @@ mod tests {
         assert!(matches!(
             parse(&["graph", "ego", "sym_x", "--project-id", "1"]).command,
             Commands::Graph(_)
+        ));
+        assert!(matches!(
+            parse(&["wiki", "context", "--project-id", "1"]).command,
+            Commands::Wiki(_)
+        ));
+        assert!(matches!(
+            parse(&["wiki", "diff", "--project-id", "1", "--baseline", "b.json"]).command,
+            Commands::Wiki(_)
         ));
         assert!(matches!(
             parse(&["watch", "status", "-P", "1"]).command,

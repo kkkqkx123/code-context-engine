@@ -16,6 +16,7 @@ mod search;
 mod storage;
 mod tools;
 mod watch;
+mod wiki;
 
 pub use admission::*;
 pub use config::*;
@@ -33,3 +34,4 @@ pub use search::*;
 pub use storage::*;
 pub use tools::*;
 pub use watch::*;
+pub use wiki::*;

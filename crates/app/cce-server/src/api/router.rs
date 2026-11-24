@@ -197,6 +197,15 @@ pub(crate) fn api_routes() -> Router<SharedContext> {
             api_paths::GRAPH_MODULE_TEMPLATE,
             get(handlers::graph::handle_graph_module),
         )
+        // Wiki context export
+        .route(
+            api_paths::WIKI_CONTEXT_TEMPLATE,
+            get(handlers::wiki::handle_wiki_context),
+        )
+        .route(
+            api_paths::WIKI_DIFF_TEMPLATE,
+            post(handlers::wiki::handle_wiki_diff),
+        )
         // Metrics
         .route(
             api_paths::METRICS,

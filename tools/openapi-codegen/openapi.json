@@ -184,7 +184,7 @@
           "Search"
         ],
         "summary": "Handle entity search request using FTS5",
-        "description": "# Endpoint\n\n`POST /api/entities/search`\n\n# Query Syntax\n\nSupports FTS5 query syntax:\n- Prefix matching: `auth*` matches \"authenticate\", \"authorization\", etc.\n- Phrase matching: `\"test function\"` matches exact phrase\n- Boolean operators: `AND`, `OR`, `NOT`\n- Field-specific: `name:main` searches only in name field\n\n# Examples\n\n```json\n{\n  \"query\": \"auth*\",\n  \"project_id\": 1,\n  \"limit\": 20\n}\n```",
+        "description": "# Endpoint\n\n`POST /api/entities/search`\n\n# Query Syntax\n\nThe shared contract accepts space-separated substring terms combined with\nAND across `name`, `signature` and `scoped_name`; at most 8 terms are used\nand an empty query returns no rows. Result order is backend-defined.\n\nFTS5-only syntax (`auth*`, `\"exact phrase\"`, `AND`/`OR`/`NOT`, `name:main`)\nis a local-backend enhancement and is not portable across backends. Do not\nrely on it when the PostgreSQL branch may serve the request.\n\n# Examples\n\n```json\n{\n  \"query\": \"auth login\",\n  \"project_id\": 1,\n  \"limit\": 20\n}\n```",
         "operationId": "handle_entity_search",
         "requestBody": {
           "content": {
@@ -4799,6 +4799,198 @@
         }
       }
     },
+    "/api/project/{project_id}/wiki/context": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "summary": "Handle Wiki Context Package export.",
+        "operationId": "handle_wiki_context",
+        "parameters": [
+          {
+            "name": "external_deps_mode",
+            "in": "path",
+            "description": "External dependency presentation mode: `symbol` (default) or `package`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "include_snippets",
+            "in": "path",
+            "description": "Whether entity entries carry short source snippets.",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "include_mermaid",
+            "in": "path",
+            "description": "Whether the package carries deterministic Mermaid graph skeletons.",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/wiki/diff": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "summary": "Handle incremental invalidation diff against baseline hashes.",
+        "operationId": "handle_wiki_diff",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WikiDiffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiDiffResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/qdrant/process/restart": {
       "post": {
         "tags": [
@@ -7730,7 +7922,7 @@
       },
       "EntitySearchRequest": {
         "type": "object",
-        "description": "Entity search request (FTS5)",
+        "description": "Entity search request (portable substring syntax)",
         "required": [
           "query"
         ],
@@ -7764,7 +7956,7 @@
           },
           "query": {
             "type": "string",
-            "description": "Search query (supports FTS5 syntax)"
+            "description": "Space-separated substring terms, combined with AND over entity name,\nsignature and scoped name; at most 8 terms are used.\n\nFTS5-only syntax (prefix `*`, phrases, boolean operators, field\nqualifiers) is a local-backend enhancement, not portable across\nstorage backends, and must not be relied upon by callers."
           }
         }
       },
@@ -12443,6 +12635,577 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "WikiCluster": {
+        "type": "object",
+        "description": "One connected component of the relation graph, projected to files.",
+        "required": [
+          "files",
+          "entity_count"
+        ],
+        "properties": {
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "WikiClusters": {
+        "type": "object",
+        "description": "Connected-component clusters of the relation graph.",
+        "required": [
+          "clusters",
+          "truncated"
+        ],
+        "properties": {
+          "clusters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiCluster"
+            },
+            "description": "Largest component first."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiContextResponse": {
+        "type": "object",
+        "description": "The full Wiki Context Package export response.",
+        "required": [
+          "success",
+          "manifest",
+          "files",
+          "entities",
+          "dep_graph",
+          "external_deps",
+          "metrics",
+          "clusters",
+          "reading_path",
+          "relation_epoch"
+        ],
+        "properties": {
+          "clusters": {
+            "$ref": "#/components/schemas/WikiClusters"
+          },
+          "dep_graph": {
+            "$ref": "#/components/schemas/WikiDepGraph"
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiEntityEntry"
+            }
+          },
+          "external_deps": {
+            "$ref": "#/components/schemas/WikiExternalDeps"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileEntry"
+            }
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/WikiManifest"
+          },
+          "mermaid": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WikiMermaid"
+              }
+            ]
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileMetrics"
+            }
+          },
+          "reading_path": {
+            "$ref": "#/components/schemas/WikiReadingPath"
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {
+            "description": "Staleness payload when the relation index is degraded."
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiDepEdge": {
+        "type": "object",
+        "description": "One file-level dependency edge.",
+        "required": [
+          "from_file",
+          "to_file",
+          "target",
+          "relation",
+          "domain",
+          "is_external"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Coarse relation domain of `relation`."
+          },
+          "from_file": {
+            "type": "string"
+          },
+          "is_external": {
+            "type": "boolean"
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relation type string (`dependency.import.standard`, ...)."
+          },
+          "target": {
+            "type": "string",
+            "description": "Raw relation target as written in the source."
+          },
+          "to_file": {
+            "type": "string",
+            "description": "Target file inside the project; empty for external targets."
+          }
+        }
+      },
+      "WikiDepGraph": {
+        "type": "object",
+        "description": "File-level dependency graph.",
+        "required": [
+          "nodes",
+          "edges",
+          "exports",
+          "truncated"
+        ],
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiDepEdge"
+            }
+          },
+          "exports": {
+            "type": "object",
+            "description": "Exported stable symbol ids per file.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sorted project file paths that participate in at least one edge."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiDiffRequest": {
+        "type": "object",
+        "description": "Baseline hashes for an incremental invalidation diff.",
+        "required": [
+          "baseline"
+        ],
+        "properties": {
+          "baseline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileHash"
+            },
+            "description": "File hashes as recorded by a previous export or diff."
+          }
+        }
+      },
+      "WikiDiffResponse": {
+        "type": "object",
+        "description": "Incremental invalidation result for wiki page regeneration.",
+        "required": [
+          "success",
+          "relation_epoch",
+          "changes",
+          "affected_files",
+          "affected_modules"
+        ],
+        "properties": {
+          "affected_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Changed files plus their one-hop dependency neighbours."
+          },
+          "affected_modules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Module labels of the affected files (wiki module pages)."
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileChange"
+            }
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {},
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiEntityEntry": {
+        "type": "object",
+        "description": "One entity (symbol) of the project.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "file_path",
+          "source_location"
+        ],
+        "properties": {
+          "doc_comment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable symbol id, joinable against the graph and relation tools."
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scoped_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snippet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short source snippet; present only when `include_snippets` is on."
+          },
+          "source_location": {
+            "type": "string",
+            "description": "One-based line marker, `L12` or `L12-L34`."
+          }
+        }
+      },
+      "WikiExternalDep": {
+        "type": "object",
+        "description": "One external dependency entry.",
+        "required": [
+          "name",
+          "used_by",
+          "relations"
+        ],
+        "properties": {
+          "external_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "External classification (`standard_library`, `external_library`, ...)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Symbol name (symbol mode) or package name (package mode)."
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relation type strings seen for the dependency, sorted."
+          },
+          "used_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Project files that reference the dependency, sorted."
+          }
+        }
+      },
+      "WikiExternalDeps": {
+        "type": "object",
+        "description": "External dependency listing in the configured presentation mode.",
+        "required": [
+          "mode",
+          "entries",
+          "truncated"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiExternalDep"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "description": "Mode in effect: `symbol` or `package`."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiFileChange": {
+        "type": "object",
+        "description": "One file-level change classification.",
+        "required": [
+          "path",
+          "change"
+        ],
+        "properties": {
+          "change": {
+            "type": "string",
+            "description": "`added`, `changed` or `removed`."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiFileEntry": {
+        "type": "object",
+        "description": "One file of the project.",
+        "required": [
+          "path",
+          "language",
+          "category",
+          "entry_candidate"
+        ],
+        "properties": {
+          "category": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entry_candidate": {
+            "type": "boolean",
+            "description": "Whether the entry-point heuristic marked this file as a reading start."
+          },
+          "language": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiFileHash": {
+        "type": "object",
+        "description": "One file's content hash as remembered by a previous export.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiFileMetrics": {
+        "type": "object",
+        "description": "File-level importance metrics aggregated from entity graph metrics.",
+        "required": [
+          "path",
+          "pagerank",
+          "degree_centrality",
+          "entity_count"
+        ],
+        "properties": {
+          "degree_centrality": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean entity degree centrality inside the file."
+          },
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pagerank": {
+            "type": "number",
+            "format": "double",
+            "description": "Sum of entity PageRank scores inside the file."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiManifest": {
+        "type": "object",
+        "description": "Export manifest: snapshot identity and package-level statistics.",
+        "required": [
+          "project_id",
+          "root_path",
+          "index_epoch",
+          "relation_epoch",
+          "language_stats",
+          "file_count",
+          "entity_count",
+          "external_deps_mode",
+          "include_snippets"
+        ],
+        "properties": {
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "external_deps_mode": {
+            "type": "string",
+            "description": "External dependency presentation mode in effect (`symbol`/`package`)."
+          },
+          "file_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "include_snippets": {
+            "type": "boolean"
+          },
+          "index_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Data epoch of the exported generation."
+          },
+          "language_stats": {
+            "type": "object",
+            "description": "File counts per detected language.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "root_path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiMermaid": {
+        "type": "object",
+        "description": "Deterministic Mermaid skeletons of the dependency graph.",
+        "required": [
+          "file_graph",
+          "module_graph"
+        ],
+        "properties": {
+          "file_graph": {
+            "type": "string",
+            "description": "File-level dependency graph."
+          },
+          "module_graph": {
+            "type": "string",
+            "description": "Module-level (top directory) dependency graph."
+          }
+        }
+      },
+      "WikiReadingEntry": {
+        "type": "object",
+        "description": "One reading-path recommendation.",
+        "required": [
+          "path",
+          "reason",
+          "pagerank"
+        ],
+        "properties": {
+          "pagerank": {
+            "type": "number",
+            "format": "double"
+          },
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`entry_candidate` or `pagerank_order`."
+          }
+        }
+      },
+      "WikiReadingPath": {
+        "type": "object",
+        "description": "Suggested reading order derived from entry candidates and PageRank.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiReadingEntry"
+            }
           }
         }
       }

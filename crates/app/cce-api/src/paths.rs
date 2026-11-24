@@ -97,6 +97,9 @@ pub const SEARCH: &str = "/api/search";
 pub const SEARCH_AGGREGATED: &str = "/api/search/aggregated";
 pub const ENTITY_SEARCH: &str = "/api/entities/search";
 
+pub const WIKI_CONTEXT_TEMPLATE: &str = "/api/project/{project_id}/wiki/context";
+pub const WIKI_DIFF_TEMPLATE: &str = "/api/project/{project_id}/wiki/diff";
+
 pub const TOOLS_COMPRESS: &str = "/api/tools/compress";
 pub const TOOLS_COMPRESS_BATCH: &str = "/api/tools/compress/batch";
 pub const TOOLS_DIAGNOSE: &str = "/api/tools/diagnose";

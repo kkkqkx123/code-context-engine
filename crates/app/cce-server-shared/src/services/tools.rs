@@ -758,3 +758,107 @@ pub async fn parse_file(file_path: &str) -> Result<ParsedFileView, ToolsServiceE
         elapsed_ms: start.elapsed().as_millis() as u64,
     })
 }
+
+/// Bounded source window of one project file.
+#[derive(Debug, Clone)]
+pub struct ReadFileView {
+    /// Project-relative path as requested.
+    pub path: String,
+    /// 1-based first returned line.
+    pub start_line: usize,
+    /// 1-based last returned line.
+    pub end_line: usize,
+    /// Total lines of the file.
+    pub total_lines: usize,
+    pub lines: Vec<String>,
+    /// Whether further lines exist beyond the window.
+    pub truncated: bool,
+}
+
+/// Default lines returned by `read_file`.
+pub const READ_FILE_DEFAULT_LINES: usize = 200;
+/// Hard cap on lines returned by `read_file`.
+pub const READ_FILE_MAX_LINES: usize = 2000;
+
+/// Resolve a project-relative path inside the project root, rejecting
+/// absolute paths and parent-directory traversal.
+fn resolve_project_file(root: &str, relative: &str) -> Result<PathBuf, ToolsServiceError> {
+    let rel = std::path::Path::new(relative);
+    if relative.trim().is_empty() {
+        return Err(ToolsServiceError::InvalidInput(
+            "File path cannot be empty".to_string(),
+        ));
+    }
+    if rel.is_absolute() {
+        return Err(ToolsServiceError::InvalidInput(
+            "File path must be project-relative".to_string(),
+        ));
+    }
+    if rel
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ToolsServiceError::InvalidInput(
+            "File path must not traverse parent directories".to_string(),
+        ));
+    }
+    Ok(std::path::Path::new(root).join(rel))
+}
+
+/// Read a bounded, line-numbered window of one project source file.
+///
+/// `offset` is the 1-based first line; `limit` is clamped to
+/// [`READ_FILE_MAX_LINES`]. The read is path-guarded to the project root so
+/// tool callers cannot escape the repository.
+pub async fn read_file(
+    state: &SharedContext,
+    project_id: i64,
+    path: &str,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<ReadFileView, ToolsServiceError> {
+    if project_id <= 0 {
+        return Err(ToolsServiceError::InvalidInput(
+            "project_id must be positive".to_string(),
+        ));
+    }
+    let root = state
+        .engine
+        .project_registry()
+        .get_or_load(project_id)
+        .await
+        .map_err(|error| ToolsServiceError::Execution(error.to_string()))?
+        .metadata
+        .root_path
+        .clone();
+    let full = resolve_project_file(&root, path)?;
+    let content = read_file_to_utf8_async(&full)
+        .await
+        .map_err(|error| ToolsServiceError::Execution(format!("unable to read file: {error}")))?;
+    let total_lines = content.lines().count();
+    let first = offset.unwrap_or(1).max(1);
+    let take = limit
+        .unwrap_or(READ_FILE_DEFAULT_LINES)
+        .clamp(1, READ_FILE_MAX_LINES);
+    let lines: Vec<String> = content
+        .lines()
+        .skip(first - 1)
+        .take(take)
+        .map(str::to_string)
+        .collect();
+    let start_line = if lines.is_empty() && total_lines > 0 {
+        total_lines
+    } else {
+        first
+    };
+    let end_line = start_line + lines.len().saturating_sub(1);
+    let truncated = first + lines.len() <= total_lines && lines.len() == take;
+    Ok(ReadFileView {
+        path: path.to_string(),
+        start_line,
+        end_line,
+        total_lines,
+        lines,
+        truncated,
+    })
+}

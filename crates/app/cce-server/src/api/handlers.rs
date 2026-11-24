@@ -33,3 +33,4 @@ pub mod storage;
 pub mod summary;
 pub mod tools;
 pub mod watch;
+pub mod wiki;
