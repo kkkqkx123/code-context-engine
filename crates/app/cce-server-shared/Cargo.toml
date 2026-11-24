@@ -41,6 +41,7 @@ cce-api = { version = "0.1.0", path = "../cce-api" }
 
 [dev-dependencies]
 llm-suite-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-rerank", features = ["mock"] }
+tempfile = { workspace = true }
 
 [features]
 default = []

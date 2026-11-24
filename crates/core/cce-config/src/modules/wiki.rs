@@ -1,7 +1,8 @@
 //! Wiki context export configuration
 //!
 //! Controls how the Wiki Context Package (WCP) export renders external
-//! dependency symbols and whether entity entries carry source snippets.
+//! dependency symbols, whether entity entries carry source snippets, and
+//! whether the package includes deterministic Mermaid graph skeletons.
 
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +39,7 @@ impl ExternalDepsMode {
 }
 
 /// Wiki context export configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WikiExportConfig {
     /// How external dependency symbols are aggregated in the export.
@@ -52,6 +53,22 @@ pub struct WikiExportConfig {
     /// Snippets reduce downstream `read_file` round-trips at the cost of a
     /// larger package. Kept off until real runs validate the trade-off.
     pub include_snippets: bool,
+
+    /// Whether the package carries deterministic Mermaid graph skeletons.
+    ///
+    /// Enabled by default so callers get graph skeletons without an explicit
+    /// request override; disable here to shrink every export package.
+    pub include_mermaid: bool,
+}
+
+impl Default for WikiExportConfig {
+    fn default() -> Self {
+        Self {
+            external_deps_mode: ExternalDepsMode::default(),
+            include_snippets: false,
+            include_mermaid: true,
+        }
+    }
 }
 
 impl Validate for WikiExportConfig {

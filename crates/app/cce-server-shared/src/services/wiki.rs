@@ -26,6 +26,7 @@ use cce_config::{ExternalDepsMode, WikiExportConfig};
 use cce_orchestrator::query::GraphService;
 use cce_storage_common::MetadataStorage;
 use cce_types::{ExternalCallType, ResolvedRelation};
+use cce_utils::file::read_file_to_utf8_async;
 
 use crate::context::SharedContext;
 
@@ -64,7 +65,7 @@ pub fn resolve_export_options(
     WikiExportOptions {
         external_deps_mode: external_deps_mode.unwrap_or(config.external_deps_mode),
         include_snippets: include_snippets.unwrap_or(config.include_snippets),
-        include_mermaid: include_mermaid.unwrap_or(true),
+        include_mermaid: include_mermaid.unwrap_or(config.include_mermaid),
     }
 }
 
@@ -424,9 +425,14 @@ pub async fn export_context(
     // snapshot, which is the same source the graph tools serve.
     let index = access.snapshot.index.as_ref();
     let mut entities: Vec<WikiEntityEntry> = Vec::new();
-    let mut snippet_cache: HashMap<String, Option<String>> = HashMap::new();
+    // Entity base fields are collected synchronously from the snapshot; source
+    // snippets are filled in a second, async pass so export never blocks a
+    // tokio worker on disk IO.
+    let mut snippet_targets: Vec<(usize, String, usize, usize)> = Vec::new();
+    let mut entities_truncated = false;
     index.for_each_function(|id, entity| {
         if entities.len() >= MAX_WCP_ENTITIES {
+            entities_truncated = true;
             return;
         }
         let key = index.get_symbol_key_by_entity_id(id);
@@ -436,21 +442,11 @@ pub async fn export_context(
             .unwrap_or_else(|| format!("entity:{}", id.0));
         let file_path = index.get_file_path_by_entity(id).unwrap_or_default();
         let signature = (!entity.signature.is_empty()).then(|| entity.signature.clone());
-        let snippet = if options.include_snippets {
-            let content = snippet_cache
-                .entry(file_path.clone())
-                .or_insert_with(|| read_project_file(&root_path, &file_path))
-                .clone();
-            content.and_then(|content| {
-                snippet_window(
-                    &content,
-                    entity.span.start_position.row,
-                    entity.span.end_position.row,
-                )
-            })
-        } else {
-            None
-        };
+        let start_row = entity.span.start_position.row;
+        let end_row = entity.span.end_position.row;
+        if options.include_snippets && start_row != usize::MAX {
+            snippet_targets.push((entities.len(), file_path.clone(), start_row, end_row));
+        }
         entities.push(WikiEntityEntry {
             id: stable,
             name: entity.name.clone(),
@@ -462,14 +458,26 @@ pub async fn export_context(
             ),
             signature,
             file_path,
-            source_location: location_of(
-                entity.span.start_position.row,
-                entity.span.end_position.row,
-            ),
+            source_location: location_of(start_row, end_row),
             doc_comment: entity.doc_comment.clone(),
-            snippet,
+            snippet: None,
         });
     });
+    if options.include_snippets {
+        let mut snippet_cache: HashMap<String, Option<String>> = HashMap::new();
+        for (entity_index, file_path, start_row, end_row) in snippet_targets {
+            let content = if let Some(cached) = snippet_cache.get(&file_path) {
+                cached.clone()
+            } else {
+                let loaded = read_project_file(&root_path, &file_path).await;
+                snippet_cache.insert(file_path.clone(), loaded.clone());
+                loaded
+            };
+            if let Some(content) = content {
+                entities[entity_index].snippet = snippet_window(&content, start_row, end_row);
+            }
+        }
+    }
     entities.sort_by(|left, right| {
         left.file_path
             .cmp(&right.file_path)
@@ -495,15 +503,13 @@ pub async fn export_context(
             exports.insert(row.path.clone(), file_exports);
         }
         for relation in &module.imports {
-            push_import_edge(
-                &row.path,
-                relation,
-                index,
-                &mut seen_edges,
-                &mut dep_edges,
-                &mut dep_nodes,
-                &mut external_uses,
-            );
+            let mut buffers = ImportEdgeBuffers {
+                seen_edges: &mut seen_edges,
+                dep_edges: &mut dep_edges,
+                dep_nodes: &mut dep_nodes,
+                external_uses: &mut external_uses,
+            };
+            push_import_edge(&mut buffers, &row.path, relation, index);
             if dep_edges.len() >= MAX_WCP_DEP_EDGES {
                 dep_truncated = true;
                 break;
@@ -661,6 +667,7 @@ pub async fn export_context(
         },
         files,
         entities,
+        entities_truncated,
         dep_graph: WikiDepGraph {
             nodes: dep_nodes.into_iter().collect(),
             edges: dep_edges,
@@ -785,25 +792,30 @@ async fn project_root(
 
 /// Read one project source file for snippet extraction; `None` on any IO
 /// failure so export never breaks on a missing or unreadable file.
-fn read_project_file(root: &str, relative: &str) -> Option<String> {
+async fn read_project_file(root: &str, relative: &str) -> Option<String> {
     let path = if Path::new(relative).is_absolute() {
         Path::new(relative).to_path_buf()
     } else {
         Path::new(root).join(relative)
     };
-    std::fs::read_to_string(path).ok()
+    read_file_to_utf8_async(&path).await.ok()
+}
+
+/// Mutable output buffers shared while accumulating file-level dependency
+/// edges from module import relations.
+struct ImportEdgeBuffers<'a> {
+    seen_edges: &'a mut BTreeSet<(String, String, String, String)>,
+    dep_edges: &'a mut Vec<WikiDepEdge>,
+    dep_nodes: &'a mut BTreeSet<String>,
+    external_uses: &'a mut Vec<ExternalUse>,
 }
 
 /// Record one import relation as a file-level edge and an external use.
-#[allow(clippy::too_many_arguments)]
 fn push_import_edge(
+    buffers: &mut ImportEdgeBuffers<'_>,
     from_file: &str,
     relation: &ResolvedRelation,
     index: &impl SnapshotEntityQueryOps,
-    seen_edges: &mut BTreeSet<(String, String, String, String)>,
-    dep_edges: &mut Vec<WikiDepEdge>,
-    dep_nodes: &mut BTreeSet<String>,
-    external_uses: &mut Vec<ExternalUse>,
 ) {
     let relation_name = relation.relation_type.to_string();
     let domain = relation.relation_type.domain().to_string();
@@ -816,7 +828,7 @@ fn push_import_edge(
             .unwrap_or_default()
     };
     if relation.is_external || to_file.is_empty() {
-        external_uses.push(ExternalUse {
+        buffers.external_uses.push(ExternalUse {
             file: from_file.to_string(),
             symbol: relation.callee_name.clone(),
             external_type: relation.external_type.clone(),
@@ -832,12 +844,12 @@ fn push_import_edge(
         relation.callee_name.clone(),
         relation_name.clone(),
     );
-    if seen_edges.insert(key) {
-        dep_nodes.insert(from_file.to_string());
+    if buffers.seen_edges.insert(key) {
+        buffers.dep_nodes.insert(from_file.to_string());
         if !to_file.is_empty() {
-            dep_nodes.insert(to_file.clone());
+            buffers.dep_nodes.insert(to_file.clone());
         }
-        dep_edges.push(WikiDepEdge {
+        buffers.dep_edges.push(WikiDepEdge {
             from_file: from_file.to_string(),
             to_file,
             target: relation.callee_name.clone(),
@@ -851,6 +863,37 @@ fn push_import_edge(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_options_use_config_defaults_and_request_overrides() {
+        let config = WikiExportConfig {
+            external_deps_mode: ExternalDepsMode::Package,
+            include_snippets: true,
+            include_mermaid: false,
+        };
+        let resolved = resolve_export_options(&config, None, None, None);
+        assert_eq!(resolved.external_deps_mode, ExternalDepsMode::Package);
+        assert!(resolved.include_snippets);
+        assert!(!resolved.include_mermaid);
+
+        let overridden = resolve_export_options(
+            &config,
+            Some(ExternalDepsMode::Symbol),
+            Some(false),
+            Some(true),
+        );
+        assert_eq!(overridden.external_deps_mode, ExternalDepsMode::Symbol);
+        assert!(!overridden.include_snippets);
+        assert!(overridden.include_mermaid);
+    }
+
+    #[test]
+    fn default_export_config_keeps_mermaid_enabled() {
+        let config = WikiExportConfig::default();
+        assert_eq!(config.external_deps_mode, ExternalDepsMode::Symbol);
+        assert!(!config.include_snippets);
+        assert!(config.include_mermaid);
+    }
 
     #[test]
     fn package_of_symbol_prefers_path_segments() {

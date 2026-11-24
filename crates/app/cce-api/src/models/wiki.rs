@@ -189,6 +189,8 @@ pub struct WikiContextResponse {
     pub manifest: WikiManifest,
     pub files: Vec<WikiFileEntry>,
     pub entities: Vec<WikiEntityEntry>,
+    /// Whether the entity catalog was truncated at the export cap.
+    pub entities_truncated: bool,
     pub dep_graph: WikiDepGraph,
     pub external_deps: WikiExternalDeps,
     pub metrics: Vec<WikiFileMetrics>,

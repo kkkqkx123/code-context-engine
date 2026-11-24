@@ -780,9 +780,10 @@ pub const READ_FILE_DEFAULT_LINES: usize = 200;
 /// Hard cap on lines returned by `read_file`.
 pub const READ_FILE_MAX_LINES: usize = 2000;
 
-/// Resolve a project-relative path inside the project root, rejecting
-/// absolute paths and parent-directory traversal.
-fn resolve_project_file(root: &str, relative: &str) -> Result<PathBuf, ToolsServiceError> {
+/// Validate a project-relative path with cheap, IO-free checks: reject empty
+/// paths, absolute paths, and parent-directory traversal. Kept pure so the
+/// guards are unit-testable without a filesystem.
+fn validate_project_relative_path(relative: &str) -> Result<(), ToolsServiceError> {
     let rel = std::path::Path::new(relative);
     if relative.trim().is_empty() {
         return Err(ToolsServiceError::InvalidInput(
@@ -802,7 +803,45 @@ fn resolve_project_file(root: &str, relative: &str) -> Result<PathBuf, ToolsServ
             "File path must not traverse parent directories".to_string(),
         ));
     }
-    Ok(std::path::Path::new(root).join(rel))
+    Ok(())
+}
+
+/// Whether `path` sits inside `root` by path-component comparison. Using
+/// components (not string prefixes) avoids treating `/a/project2` as a child
+/// of `/a/project`.
+fn path_is_within(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let mut path_parts = path.components();
+    let mut root_parts = root.components();
+    loop {
+        match root_parts.next() {
+            Some(root_part) => {
+                if path_parts.next() != Some(root_part) {
+                    return false;
+                }
+            }
+            None => return path_parts.next().is_some() || path == root,
+        }
+    }
+}
+
+/// Resolve a project-relative path inside the project root. Both the root and
+/// the target are canonicalized so a symlink inside the project cannot escape
+/// to a path outside the root.
+async fn resolve_project_file(root: &str, relative: &str) -> Result<PathBuf, ToolsServiceError> {
+    validate_project_relative_path(relative)?;
+    let joined = std::path::Path::new(root).join(relative);
+    let canonical_root = tokio::fs::canonicalize(root).await.map_err(|error| {
+        ToolsServiceError::Execution(format!("unable to resolve project root: {error}"))
+    })?;
+    let canonical_target = tokio::fs::canonicalize(&joined).await.map_err(|error| {
+        ToolsServiceError::Execution(format!("unable to resolve file: {error}"))
+    })?;
+    if !path_is_within(&canonical_target, &canonical_root) {
+        return Err(ToolsServiceError::InvalidInput(
+            "File path resolves outside the project root".to_string(),
+        ));
+    }
+    Ok(canonical_target)
 }
 
 /// Read a bounded, line-numbered window of one project source file.
@@ -831,7 +870,7 @@ pub async fn read_file(
         .metadata
         .root_path
         .clone();
-    let full = resolve_project_file(&root, path)?;
+    let full = resolve_project_file(&root, path).await?;
     let content = read_file_to_utf8_async(&full)
         .await
         .map_err(|error| ToolsServiceError::Execution(format!("unable to read file: {error}")))?;
@@ -861,4 +900,64 @@ pub async fn read_file(
         lines,
         truncated,
     })
+}
+
+#[cfg(test)]
+mod path_guard_tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_empty_absolute_and_parent_paths() {
+        assert!(validate_project_relative_path("").is_err());
+        assert!(validate_project_relative_path("   ").is_err());
+        assert!(validate_project_relative_path("/etc/passwd").is_err());
+        assert!(validate_project_relative_path("../secret").is_err());
+        assert!(validate_project_relative_path("src/../../secret").is_err());
+        assert!(validate_project_relative_path("src/main.rs").is_ok());
+    }
+
+    #[test]
+    fn path_is_within_uses_component_boundaries() {
+        let root = std::path::Path::new("/a/project");
+        assert!(path_is_within(
+            std::path::Path::new("/a/project/src/main.rs"),
+            root
+        ));
+        assert!(path_is_within(root, root));
+        assert!(!path_is_within(
+            std::path::Path::new("/a/project2/secret"),
+            root
+        ));
+        assert!(!path_is_within(std::path::Path::new("/a/other/file"), root));
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_symlink_escaping_project_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir created");
+        let root = temp.path().join("project");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir(&root).expect("root created");
+        std::fs::create_dir(&outside).expect("outside created");
+        std::fs::write(outside.join("secret.txt"), "secret").expect("file written");
+        symlink(&outside, root.join("link")).expect("symlink created");
+
+        let result =
+            resolve_project_file(root.to_str().expect("root is utf8"), "link/secret.txt").await;
+        assert!(result.is_err(), "symlink escape must be rejected");
+    }
+
+    #[tokio::test]
+    async fn resolve_accepts_file_inside_project_root() {
+        let temp = tempfile::tempdir().expect("temp dir created");
+        let root = temp.path().join("project");
+        std::fs::create_dir(&root).expect("root created");
+        std::fs::write(root.join("main.rs"), "fn main() {}").expect("file written");
+
+        let resolved = resolve_project_file(root.to_str().expect("root is utf8"), "main.rs")
+            .await
+            .expect("in-project file resolves");
+        assert!(resolved.ends_with("main.rs"));
+    }
 }
