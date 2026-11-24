@@ -329,10 +329,14 @@ impl ServerRelationSnapshotPublisher {
             .await
             .unwrap_or(0);
 
-        // Publish to runtime as base-only snapshot (no delta). The merged
-        // `full_index` is local to this compaction and dropped afterwards, so
-        // the snapshot can share its maps zero-copy
-        let snapshot_index = Arc::new(RelationSnapshotIndex::from_index_shared(&full_index));
+        // Publish the newly activated epoch as a sharded base-only snapshot.
+        // The merged builder graph goes out of scope at the end of compaction.
+        let snapshot_index = Arc::new(RelationSnapshotIndex::from_store(
+            Arc::new(self.store.clone()),
+            project_id,
+            epoch,
+            cce_types::ShardQueryConfig::default(),
+        )?);
         self.runtime
             .publish_snapshot(
                 Arc::clone(&snapshot_index),
@@ -421,12 +425,12 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 self.runtime.report_failure(error.to_string()).await;
                 return Err(error);
             }
-            let published = RelationSnapshotIndex::from_store(
+            let published = Arc::new(RelationSnapshotIndex::from_store(
                 Arc::new(self.store.clone()),
                 project_id,
                 epoch,
                 shard_config.clone(),
-            )?;
+            )?);
             self.runtime
                 .publish_snapshot(
                     Arc::clone(&published),
@@ -437,12 +441,12 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 .await;
         }
 
-        let published = RelationSnapshotIndex::from_store(
+        let published = Arc::new(RelationSnapshotIndex::from_store(
             Arc::new(self.store.clone()),
             project_id,
             epoch,
             shard_config,
-        )?;
+        )?);
         Ok(RelationPublication {
             relation_epoch: epoch,
             snapshot: Arc::new(LayeredSnapshotIndex::new(published)),
@@ -498,19 +502,18 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 // removal). No detached O(project) clone is performed here;
                 // `detached_clone` is reserved for scenarios that genuinely
                 // need an independent mutable copy (e.g. compaction)
-                let loaded =
-                    match RelationSnapshotIndex::from_store(
-                        Arc::new(self.store.clone()),
-                        project_id,
-                        delta.base_epoch,
-                        cce_types::ShardQueryConfig::default(),
-                    ) {
-                        Ok(base) => LayeredSnapshotIndex::new(Arc::new(base)),
-                        Err(error) => {
-                            self.runtime.report_failure(error.to_string()).await;
-                            return Err(error);
-                        }
+                match RelationSnapshotIndex::from_store(
+                    Arc::new(self.store.clone()),
+                    project_id,
+                    delta.base_epoch,
+                    cce_types::ShardQueryConfig::default(),
+                ) {
+                    Ok(base) => LayeredSnapshotIndex::new(Arc::new(base)),
+                    Err(error) => {
+                        self.runtime.report_failure(error.to_string()).await;
+                        return Err(error);
                     }
+                }
             }
         };
 

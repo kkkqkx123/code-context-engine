@@ -425,6 +425,7 @@ fn streamed_artifact_matches_canonical_snapshot_fingerprint() {
             config,
             SnapshotArtifactOptions {
                 fingerprint_chunk_bytes: 96,
+                max_shard_items: 2,
             },
         )
         .expect("artifact should build");

@@ -75,15 +75,14 @@ pub use relation::{
     RELATION_PATH_NORMALIZATION_VERSION, RELATION_RESOLVER_VERSION,
     RELATION_SNAPSHOT_SCHEMA_VERSION, Relation, RelationCapture, RelationLevel,
     RelationShardComponents, RelationShardDescriptor, RelationSnapshotManifest,
-    RelationSnapshotState, RelationSymbolLocation, RelationSymbolRecord, RelationTarget,
-    RelationSnapshotStore, RelationType, RelationVerificationStatus, ResolvedRelation,
+    RelationSnapshotState, RelationSnapshotStore, RelationSymbolLocation, RelationSymbolRecord,
+    RelationTarget, RelationType, RelationVerificationStatus, ResolvedRelation, SHARD_SLOT_COUNT,
     SYMBOL_KEY_CONFLICT_SAMPLE_CAP, ShardDirectory, ShardEntityRef, ShardLocation,
-    SHARD_SLOT_COUNT, ShardQueryConfig, SnapshotArtifactBuilder, SnapshotArtifactCounts,
-    SnapshotArtifactHeader, SnapshotArtifactOptions, SnapshotBatchReader, SnapshotBuildMetadata,
-    SnapshotDelta, StableSymbolId, StableSymbolKey, SymbolKeyConflictRecord, UnresolvedReason,
-    VirtualRelation, VirtualSymbolId, canonical_call_context, canonical_owner_type,
-    external_call_type_json, fingerprint_from_components, normalize_project_path,
-    plan_snapshot_shards,
+    ShardQueryConfig, SnapshotArtifactBuilder, SnapshotArtifactCounts, SnapshotArtifactHeader,
+    SnapshotArtifactOptions, SnapshotBatchReader, SnapshotBuildMetadata, SnapshotDelta,
+    StableSymbolId, StableSymbolKey, SymbolKeyConflictRecord, UnresolvedReason, VirtualRelation,
+    VirtualSymbolId, canonical_call_context, canonical_owner_type, external_call_type_json,
+    fingerprint_from_components, normalize_project_path, plan_snapshot_shards,
 };
 
 pub use error::{ParseError, StorageError};

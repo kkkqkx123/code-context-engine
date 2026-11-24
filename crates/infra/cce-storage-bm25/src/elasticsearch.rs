@@ -110,9 +110,7 @@ impl StagingBuffer {
     /// Number of pending documents of an index (test helper).
     #[cfg(test)]
     pub(crate) fn pending(&self, index_name: &str) -> usize {
-        self.by_index
-            .get(index_name)
-            .map_or(0, |docs| docs.len())
+        self.by_index.get(index_name).map_or(0, |docs| docs.len())
     }
 }
 
@@ -202,7 +200,10 @@ impl ElasticsearchClient {
 
     /// Put a failed publish batch back at the head of the buffer.
     pub(crate) async fn buffer_restore(&self, index_name: &str, batch: Vec<FulltextDocument>) {
-        self.staged_documents.lock().await.restore(index_name, batch);
+        self.staged_documents
+            .lock()
+            .await
+            .restore(index_name, batch);
     }
 
     /// Whether the remote branch is configured (a URL is present).
@@ -580,6 +581,10 @@ mod tests {
         assert_eq!(buffer.pending("a"), 1);
         assert_eq!(buffer.pending("b"), 2);
         assert_eq!(buffer.take("a")[0].document_id, "a1");
-        assert_eq!(buffer.pending("b"), 2, "taking one index must not affect another");
+        assert_eq!(
+            buffer.pending("b"),
+            2,
+            "taking one index must not affect another"
+        );
     }
 }

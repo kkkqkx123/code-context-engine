@@ -90,6 +90,31 @@ impl RelationSnapshotLoader {
         }
     }
 
+    /// Verify a published epoch's manifest, canonical payload and fingerprint
+    /// without materializing the relation graph in memory.
+    pub fn validate_epoch(
+        store: &dyn RelationSnapshotStore,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<RelationSnapshotManifest, StorageError> {
+        let manifest = store
+            .get_manifest(project_id, relation_epoch)?
+            .ok_or_else(|| {
+                StorageError::validation(format!("relation epoch {relation_epoch} has no manifest"))
+            })?;
+        if !matches!(
+            manifest.state,
+            RelationSnapshotState::Ready | RelationSnapshotState::Active
+        ) {
+            return Err(StorageError::validation(format!(
+                "relation epoch {relation_epoch} is not a published base"
+            )));
+        }
+        let snapshot = store.read_snapshot(&manifest)?;
+        Self::validate_manifest(&manifest, &snapshot)?;
+        Ok(manifest)
+    }
+
     pub fn load_canonical(
         snapshot: &CanonicalRelationSnapshot,
     ) -> Result<RelationIndex, StorageError> {
@@ -429,7 +454,10 @@ impl RelationSnapshotLoader {
 
         for stub in target_entities {
             let id = EntityId(stub.entity_id);
-            index.entity_to_symbol_key.write().insert(id, stub.key.clone());
+            index
+                .entity_to_symbol_key
+                .write()
+                .insert(id, stub.key.clone());
             index.entity_file_index.insert(id, stub.file_path.clone());
         }
         for dependency in &snapshot.dependencies {

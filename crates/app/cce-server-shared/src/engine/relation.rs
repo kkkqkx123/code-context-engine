@@ -180,22 +180,14 @@ impl super::CodeContextEngine {
     pub async fn init_relation_runtime(
         &self,
         project_id: i64,
-        index: cce_codegraph::index::core::RelationIndex,
+        snapshot_index: Arc<cce_codegraph::index::RelationSnapshotIndex>,
         relation_epoch: i64,
         integrity: SnapshotIntegrity,
         manifest_id: Option<String>,
     ) -> Result<(), EngineError> {
         let runtime = self.get_relation_runtime(project_id).await?;
-        // The index is moved in by value from the cold-start loader and never
-        // mutated afterwards, so share its maps zero-copy
-        let snapshot_index = cce_codegraph::index::RelationSnapshotIndex::from_index_shared(&index);
         runtime
-            .publish_snapshot(
-                Arc::new(snapshot_index),
-                relation_epoch,
-                integrity,
-                manifest_id,
-            )
+            .publish_snapshot(snapshot_index, relation_epoch, integrity, manifest_id)
             .await;
         Ok(())
     }
@@ -237,6 +229,12 @@ impl super::CodeContextEngine {
                 .await?;
             return Err(EngineError::Config(message.to_string()));
         }
+        let shard_config = self
+            .project_registry
+            .get_or_load(project_id)
+            .await
+            .map(|entry| entry.config.relation.shard)
+            .unwrap_or_default();
         let index = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
             &store,
             project_id,
@@ -249,7 +247,11 @@ impl super::CodeContextEngine {
             .map_err(|e| EngineError::Config(format!("cannot read manifest: {e}")))?
             .map(|manifest| manifest.config_fingerprint)
             .unwrap_or_else(|| "maintenance-republish".to_string());
-        let artifact = match index.build_snapshot_artifact(config_fingerprint, Default::default()) {
+        let artifact = match index.build_snapshot_artifact(
+            config_fingerprint,
+            cce_types::SnapshotArtifactOptions::default()
+                .with_shard_items(shard_config.max_shard_items),
+        ) {
             Ok(artifact) => artifact,
             Err(error) => {
                 self.report_relation_failure(project_id, error.clone())

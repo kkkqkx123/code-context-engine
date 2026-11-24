@@ -56,14 +56,10 @@ impl RelationSnapshotStore for SqliteSnapshotStore {
         shard_id: i64,
     ) -> Result<Option<RelationShardComponents>, StorageError> {
         let conn = self.sqlite.read_connection()?;
-        let manifest = RelationSnapshotRepository::get_manifest(
-            &conn,
-            project_id,
-            relation_epoch,
-        )?
-        .ok_or_else(|| {
-            StorageError::validation(format!("relation epoch {relation_epoch} has no manifest"))
-        })?;
+        let manifest = RelationSnapshotRepository::get_manifest(&conn, project_id, relation_epoch)?
+            .ok_or_else(|| {
+                StorageError::validation(format!("relation epoch {relation_epoch} has no manifest"))
+            })?;
         RelationSnapshotRepository::read_shard_components(&conn, &manifest, shard_id)
     }
 
@@ -117,8 +113,11 @@ impl RelationSnapshotStore for SqliteClient {
         relation_epoch: i64,
         shard_id: i64,
     ) -> Result<Option<RelationShardComponents>, StorageError> {
-        SqliteSnapshotStore::new(self.clone())
-            .read_shard_components(project_id, relation_epoch, shard_id)
+        SqliteSnapshotStore::new(self.clone()).read_shard_components(
+            project_id,
+            relation_epoch,
+            shard_id,
+        )
     }
 
     fn find_base_epoch(
@@ -266,6 +265,109 @@ mod tests {
         assert_eq!(chain.len(), 1);
         assert_eq!(chain[0].epoch, delta_epoch);
         assert_eq!(chain[0].base_epoch, base_epoch);
+    }
+
+    #[test]
+    fn adapter_reads_shard_directory_and_components() {
+        use cce_types::{
+            CanonicalEntity, CanonicalFile, CanonicalRelation, CanonicalRelationTarget, EntityKind,
+            RelationType, SnapshotArtifactOptions, StableSymbolKey,
+        };
+
+        let sqlite = test_sqlite();
+        let mut snapshot = CanonicalRelationSnapshot::new("config".to_string());
+        for path in ["a.rs", "b.rs"] {
+            snapshot.files.push(CanonicalFile {
+                path: path.to_string(),
+                language: "rust".to_string(),
+                input_hash: format!("hash-{path}"),
+                file_size: 1,
+                imports: Vec::new(),
+                exports: Vec::new(),
+            });
+        }
+        let key = |path: &str, name: &str| {
+            StableSymbolKey::new(path, name, EntityKind::Function, &format!("fn {name}()"))
+        };
+        let entity = |path: &str, name: &str, id: u64| CanonicalEntity {
+            key: key(path, name),
+            entity_id: Some(id),
+            name: name.to_string(),
+            signature: format!("fn {name}()"),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Default::default(),
+            depth: 0,
+            parent: None,
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: Default::default(),
+            metadata: Default::default(),
+            is_stdlib: false,
+            stdlib_category: None,
+            subtype: None,
+        };
+        let a_key = key("a.rs", "alpha");
+        let b_key = key("b.rs", "beta");
+        snapshot.entities.push(entity("a.rs", "alpha", 1));
+        snapshot.entities.push(entity("b.rs", "beta", 2));
+        snapshot.relations.push(CanonicalRelation {
+            caller: a_key.clone(),
+            target: CanonicalRelationTarget::Internal { key: b_key },
+            raw_target: "beta".to_string(),
+            relation_type: RelationType::DirectCall,
+            span: Default::default(),
+            stdlib_category: None,
+            overload_signature: None,
+            callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
+            call_frequency: 1,
+            cfg_condition: None,
+        });
+
+        let epoch = sqlite
+            .with_transaction(|tx| {
+                RelationSnapshotRepository::allocate_building(tx, 1, "sharded", "config")
+            })
+            .expect("epoch should allocate");
+        let artifact = cce_types::CanonicalSnapshotArtifact::from_snapshot(
+            &snapshot,
+            SnapshotArtifactOptions::default().with_shard_items(1),
+        )
+        .expect("artifact should build");
+        sqlite
+            .with_transaction(|tx| {
+                RelationSnapshotRepository::write_snapshot_and_mark_ready(tx, 1, epoch, &artifact)
+            })
+            .expect("snapshot should persist");
+
+        let store = SqliteSnapshotStore::new(sqlite);
+        let directory = store
+            .read_shard_directory(1, epoch)
+            .expect("shard directory should read");
+        assert!(
+            directory.descriptors.len() >= 2,
+            "small budget must split shards"
+        );
+        assert_eq!(directory.file_shards.len(), 2);
+        assert_eq!(directory.entity_locations.len(), 2);
+        assert_eq!(directory.target_callers.len(), 1);
+
+        let mut assembled = CanonicalRelationSnapshot::new("config".to_string());
+        for descriptor in &directory.descriptors {
+            let components = store
+                .read_shard_components(1, epoch, descriptor.shard_id)
+                .expect("shard should read")
+                .expect("shard should exist");
+            assembled.files.extend(components.files);
+            assembled.entities.extend(components.entities);
+            assembled.relations.extend(components.relations);
+            assembled.dependencies.extend(components.dependencies);
+        }
+        assembled.normalize();
+        assert_eq!(assembled.fingerprint(), snapshot.fingerprint());
+        let _ = a_key;
     }
 
     #[test]

@@ -270,9 +270,11 @@ impl IndexOrchestrator {
         ctx.stages.relation_edges = edges;
         ctx.stages.relation_estimated_bytes = relation_bytes;
 
+        let artifact_options = cce_types::SnapshotArtifactOptions::default()
+            .with_shard_items(self.relation_config.shard.max_shard_items);
         match builder
             .index()
-            .build_snapshot_artifact(builder.config_fingerprint(), Default::default())
+            .build_snapshot_artifact(builder.config_fingerprint(), artifact_options)
         {
             Ok(artifact) => {
                 let (entries, _edges, estimated_bytes) = builder.index().capacity_counts();
@@ -280,6 +282,18 @@ impl IndexOrchestrator {
                 ctx.stages.relation_snapshot_estimated_bytes = estimated_bytes;
                 ctx.stages.canonical_write_batches = artifact.write_batches();
                 ctx.stages.canonical_write_buffer_peak_bytes = artifact.buffer_peak_bytes();
+                if let Ok(plan) =
+                    cce_types::plan_snapshot_shards(&artifact, artifact_options.max_shard_items)
+                {
+                    ctx.stages.relation_shard_count = plan.descriptors.len() as u64;
+                    ctx.stages.relation_shard_directory_entries =
+                        (plan.path_shards.len() + plan.descriptors.len()) as u64;
+                    ctx.stages.relation_shard_directory_estimated_bytes = plan
+                        .descriptors
+                        .iter()
+                        .map(|descriptor| descriptor.estimated_bytes)
+                        .sum();
+                }
                 match &self.relation_publisher {
                     Some(publisher) => {
                         match publisher

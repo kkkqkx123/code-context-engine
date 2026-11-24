@@ -23,7 +23,12 @@ pub struct QdrantRetrieval {
 impl QdrantRetrieval {
     /// Create a new Qdrant retrieval instance using the default Cosine metric.
     pub fn new(http_client: Client, base_url: String, collection_name: String) -> Self {
-        Self::new_with_metric(http_client, base_url, collection_name, DistanceMetric::Cosine)
+        Self::new_with_metric(
+            http_client,
+            base_url,
+            collection_name,
+            DistanceMetric::Cosine,
+        )
     }
 
     /// Create a retrieval instance bound to a collection with an explicit

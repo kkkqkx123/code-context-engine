@@ -423,9 +423,27 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
     let epoch_group = format!("{tag}-epoch-group");
     store
         .upsert_points(&[
-            code_point("eg-1", vec![1.0, 0.0, 0.0, 0.0], "src/eg1.rs", &epoch_group, 3),
-            code_point("eg-2", vec![1.0, 0.0, 0.0, 0.0], "src/eg2.rs", &epoch_group, 3),
-            code_point("eg-3", vec![1.0, 0.0, 0.0, 0.0], "src/eg3.rs", &epoch_group, 4),
+            code_point(
+                "eg-1",
+                vec![1.0, 0.0, 0.0, 0.0],
+                "src/eg1.rs",
+                &epoch_group,
+                3,
+            ),
+            code_point(
+                "eg-2",
+                vec![1.0, 0.0, 0.0, 0.0],
+                "src/eg2.rs",
+                &epoch_group,
+                3,
+            ),
+            code_point(
+                "eg-3",
+                vec![1.0, 0.0, 0.0, 0.0],
+                "src/eg3.rs",
+                &epoch_group,
+                4,
+            ),
         ])
         .await
         .expect("upsert epoch group");
@@ -435,7 +453,10 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
         .expect("delete group epoch");
     assert_eq!(removed, 2, "both epoch-3 points must be removed");
     assert_eq!(
-        store.count_points_by_group(&epoch_group).await.expect("count"),
+        store
+            .count_points_by_group(&epoch_group)
+            .await
+            .expect("count"),
         1,
         "only the epoch-4 point remains"
     );
@@ -454,7 +475,10 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
         .expect("delete remaining epoch");
     assert_eq!(removed, 1);
     assert_eq!(
-        store.count_points_by_group(&epoch_group).await.expect("count"),
+        store
+            .count_points_by_group(&epoch_group)
+            .await
+            .expect("count"),
         0
     );
 

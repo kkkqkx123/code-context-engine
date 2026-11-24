@@ -202,7 +202,16 @@ mod tests {
 
     struct StubStore {
         snapshots: HashMap<i64, CanonicalRelationSnapshot>,
-        loads: std::sync::atomic::AtomicUsize,
+        loads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Clone for StubStore {
+        fn clone(&self) -> Self {
+            Self {
+                snapshots: self.snapshots.clone(),
+                loads: std::sync::Arc::clone(&self.loads),
+            }
+        }
     }
 
     impl StubStore {
@@ -234,26 +243,143 @@ mod tests {
         }
     }
 
+    fn stub_entity_ids(
+        snapshot: &CanonicalRelationSnapshot,
+    ) -> (
+        HashMap<cce_types::StableSymbolKey, EntityId>,
+        HashMap<cce_types::StableSymbolKey, EntityId>,
+    ) {
+        let mut explicit = HashMap::new();
+        let mut fallback = HashMap::new();
+        let mut used: std::collections::HashSet<u64> = snapshot
+            .entities
+            .iter()
+            .filter_map(|entity| entity.entity_id)
+            .collect();
+        let mut next = snapshot
+            .entities
+            .iter()
+            .filter_map(|entity| entity.entity_id)
+            .max()
+            .map(|id| id + 1)
+            .unwrap_or(1);
+        for entity in &snapshot.entities {
+            let id = match entity.entity_id {
+                Some(id) => EntityId(id),
+                None => {
+                    while used.contains(&next) {
+                        next += 1;
+                    }
+                    used.insert(next);
+                    let id = EntityId(next);
+                    next += 1;
+                    id
+                }
+            };
+            if entity.entity_id.is_some() {
+                explicit.insert(entity.key.clone(), id);
+            } else {
+                fallback.insert(entity.key.clone(), id);
+            }
+        }
+        (explicit, fallback)
+    }
+
     impl RelationSnapshotStore for StubStore {
         fn read_shard_directory(
             &self,
             _project_id: i64,
-            _relation_epoch: i64,
+            relation_epoch: i64,
         ) -> Result<cce_types::ShardDirectory, StorageError> {
-            Err(StorageError::validation(
-                "base cache stub does not provide a shard directory",
-            ))
+            self.loads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let snapshot = self
+                .snapshots
+                .get(&relation_epoch)
+                .ok_or_else(|| StorageError::validation("stub snapshot is missing"))?;
+            let mut directory = cce_types::ShardDirectory::default();
+            directory
+                .descriptors
+                .push(cce_types::RelationShardDescriptor {
+                    shard_id: 0,
+                    file_count: snapshot.files.len(),
+                    entity_count: snapshot.entities.len(),
+                    relation_count: snapshot.relations.len(),
+                    dependency_count: snapshot.dependencies.len(),
+                    estimated_bytes: cce_types::RelationShardDescriptor::estimated_bytes(
+                        snapshot.files.len(),
+                        snapshot.entities.len(),
+                        snapshot.relations.len(),
+                        snapshot.dependencies.len(),
+                    ),
+                    path_start: snapshot
+                        .files
+                        .first()
+                        .map(|file| file.path.clone())
+                        .unwrap_or_default(),
+                    path_end: snapshot
+                        .files
+                        .last()
+                        .map(|file| file.path.clone())
+                        .unwrap_or_default(),
+                });
+            let (ids, fallback_ids) = stub_entity_ids(snapshot);
+            for file in &snapshot.files {
+                directory.file_shards.insert(file.path.clone(), 0);
+            }
+            for entity in &snapshot.entities {
+                let id = ids
+                    .get(&entity.key)
+                    .or_else(|| fallback_ids.get(&entity.key))
+                    .copied()
+                    .ok_or_else(|| StorageError::validation("stub entity id is missing"))?;
+                let location = cce_types::ShardLocation {
+                    shard_id: 0,
+                    entity_id: id.0,
+                    file_path: entity.key.file_path.clone(),
+                    name: "stub".to_string(),
+                };
+                directory.entity_locations.insert(id.0, location.clone());
+                directory
+                    .symbol_locations
+                    .insert(entity.key.clone(), location.clone());
+                directory
+                    .stable_id_locations
+                    .insert(entity.key.stable_id().0, location);
+            }
+            for relation in &snapshot.relations {
+                if let cce_types::CanonicalRelationTarget::Internal { key } = &relation.target {
+                    let target = ids
+                        .get(key)
+                        .or_else(|| fallback_ids.get(key))
+                        .map(|id| id.0)
+                        .ok_or_else(|| StorageError::validation("stub target id is missing"))?;
+                    directory.target_callers.entry(target).or_default().push(0);
+                }
+            }
+            Ok(directory)
         }
 
         fn read_shard_components(
             &self,
             _project_id: i64,
-            _relation_epoch: i64,
-            _shard_id: i64,
+            relation_epoch: i64,
+            shard_id: i64,
         ) -> Result<Option<cce_types::RelationShardComponents>, StorageError> {
-            Err(StorageError::validation(
-                "base cache stub does not provide shard components",
-            ))
+            if shard_id != 0 {
+                return Ok(None);
+            }
+            let snapshot = self
+                .snapshots
+                .get(&relation_epoch)
+                .ok_or_else(|| StorageError::validation("stub snapshot is missing"))?;
+            Ok(Some(cce_types::RelationShardComponents {
+                files: snapshot.files.clone(),
+                entities: snapshot.entities.clone(),
+                relations: snapshot.relations.clone(),
+                dependencies: snapshot.dependencies.clone(),
+                target_entities: Vec::new(),
+            }))
         }
 
         fn get_manifest(
@@ -359,7 +485,7 @@ mod tests {
         }
         StubStore {
             snapshots,
-            loads: std::sync::atomic::AtomicUsize::new(0),
+            loads: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 

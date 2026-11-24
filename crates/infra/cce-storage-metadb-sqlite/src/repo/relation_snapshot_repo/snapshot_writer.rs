@@ -95,7 +95,7 @@ impl RelationSnapshotRepository {
                  ) SELECT ?1, ?2, id, '<file>', ?3, ?4, NULL, ?5, ?6, '<file>', '', '[]',
                           NULL, ?7, 0, NULL, '[]', '{}', '{}', 0, NULL, NULL
                    FROM relation_snapshot_files
-                   WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?8"
+                   WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?8",
             )
             .map_err(query_error)?;
         let mut export_stmt = tx

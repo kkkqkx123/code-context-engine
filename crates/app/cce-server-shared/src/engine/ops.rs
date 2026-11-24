@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use super::EngineError;
 use crate::runtime::{ProjectMeta, RecoveryResult, SnapshotIntegrity, StartupRecoveryCoordinator};
@@ -180,12 +181,22 @@ impl super::CodeContextEngine {
             .unwrap_or(meta.active_relation_epoch);
 
         if relation_epoch > 0 {
-            match RelationSnapshotLoader::load(&metadata_store, project_id, relation_epoch) {
+            let verified =
+                RelationSnapshotLoader::validate_epoch(&metadata_store, project_id, relation_epoch);
+            let facade = verified.and_then(|_| {
+                cce_codegraph::index::RelationSnapshotIndex::from_store(
+                    Arc::new(metadata_store.clone()),
+                    project_id,
+                    relation_epoch,
+                    cce_types::ShardQueryConfig::default(),
+                )
+            });
+            match facade {
                 Ok(index) => {
                     result.entity_count = index.function_count();
                     result.relation_count = index.resolved_relation_count();
-                    // The strict loader has already verified manifest state, versions,
-                    // counts, references, and canonical fingerprint.
+                    // Manifest, counts and canonical fingerprint were verified
+                    // without materializing the full graph.
                     let integrity = if result.entity_count == 0 {
                         SnapshotIntegrity::Empty
                     } else {
@@ -199,7 +210,7 @@ impl super::CodeContextEngine {
 
                     self.init_relation_runtime(
                         project_id,
-                        index,
+                        Arc::new(index),
                         relation_epoch,
                         integrity,
                         manifest_id,

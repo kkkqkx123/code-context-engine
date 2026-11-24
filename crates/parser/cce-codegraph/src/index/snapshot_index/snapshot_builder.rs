@@ -439,7 +439,10 @@ impl LayeredSnapshotIndex {
                 .insert(path.to_string(), RelationEdgeSet::from_edges(relations));
         });
         base.for_each_file_record(|path, record| {
-            merged.file_records.write().insert(path.to_string(), record.clone());
+            merged
+                .file_records
+                .write()
+                .insert(path.to_string(), record.clone());
         });
         base.for_each_dependency(|source, target| {
             merged.dependency_graph.add_dependency(source, target);
@@ -452,9 +455,7 @@ impl LayeredSnapshotIndex {
                     .stable_id_to_entity
                     .write()
                     .insert(key.stable_id().0, id);
-                merged
-                    .entity_file_index
-                    .insert(id, key.file_path.clone());
+                merged.entity_file_index.insert(id, key.file_path.clone());
             }
         }
         for delta in &self.deltas {
@@ -499,8 +500,9 @@ impl LayeredSnapshotIndex {
         }
 
         let mut base_files = Vec::new();
-        self.base
-            .for_each_file_record(|file_id, record| base_files.push((file_id.to_string(), record.clone())));
+        self.base.for_each_file_record(|file_id, record| {
+            base_files.push((file_id.to_string(), record.clone()))
+        });
         for (file_id, record) in &base_files {
             let path = normalize_project_path(&record.info.path);
             if removed_files_ever.contains(file_id.as_str()) {
@@ -645,10 +647,9 @@ impl LayeredSnapshotIndex {
         }
 
         let mut caller_set: HashSet<EntityId> = HashSet::new();
-        self.base
-            .for_each_relation_group(|caller, _| {
-                caller_set.insert(caller);
-            });
+        self.base.for_each_relation_group(|caller, _| {
+            caller_set.insert(caller);
+        });
         for id in &removed_entities {
             caller_set.remove(id);
         }

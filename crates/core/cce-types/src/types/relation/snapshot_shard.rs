@@ -10,9 +10,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::canonical::{StableSymbolKey, stable_json};
-use super::snapshot_artifact::{CanonicalComponentBatch, CanonicalSnapshotArtifact, DEFAULT_SNAPSHOT_BATCH_ITEMS};
+use super::snapshot_artifact::{
+    CanonicalComponentBatch, CanonicalSnapshotArtifact, DEFAULT_SNAPSHOT_BATCH_ITEMS,
+};
 use crate::types::relation::classification::ExternalCallType;
-use crate::types::{CanonicalDependency, CanonicalEntity, CanonicalFile, CanonicalRelation, StorageError};
+use crate::types::{
+    CanonicalDependency, CanonicalEntity, CanonicalFile, CanonicalRelation, StorageError,
+};
 
 /// Number of stable slots before bounded splitting by item budget.
 pub const SHARD_SLOT_COUNT: u64 = 1024;
@@ -87,7 +91,12 @@ pub struct RelationShardDescriptor {
 }
 
 impl RelationShardDescriptor {
-    pub fn estimated_bytes(file_count: usize, entity_count: usize, relation_count: usize, dependency_count: usize) -> u64 {
+    pub fn estimated_bytes(
+        file_count: usize,
+        entity_count: usize,
+        relation_count: usize,
+        dependency_count: usize,
+    ) -> u64 {
         (file_count as u64) * 256
             + (entity_count as u64) * 512
             + (relation_count as u64) * 640
@@ -101,6 +110,7 @@ pub struct ShardLocation {
     pub shard_id: i64,
     pub entity_id: u64,
     pub file_path: String,
+    pub name: String,
 }
 
 /// Lightweight query directory of one canonical epoch.
@@ -110,6 +120,7 @@ pub struct ShardDirectory {
     pub entity_locations: HashMap<u64, ShardLocation>,
     pub symbol_locations: HashMap<StableSymbolKey, ShardLocation>,
     pub stable_id_locations: HashMap<String, ShardLocation>,
+    pub name_locations: HashMap<String, Vec<i64>>,
     pub file_shards: HashMap<String, i64>,
     /// Internal target entity ID -> shard IDs of its callers.
     pub target_callers: HashMap<u64, Vec<i64>>,
@@ -196,12 +207,13 @@ struct PathCounts {
     files: usize,
     entities: usize,
     relations: usize,
+    file_relations: usize,
     dependencies: usize,
 }
 
 impl PathCounts {
     fn budget(self) -> usize {
-        self.files + self.entities + self.relations + self.dependencies
+        self.files + self.entities + self.relations + self.file_relations + self.dependencies
     }
 }
 
@@ -234,10 +246,13 @@ pub fn plan_snapshot_shards(
             }
             CanonicalComponentBatch::Relations(relations) => {
                 for relation in relations {
-                    counts
-                        .entry(relation.caller.file_path)
-                        .or_default()
-                        .relations += 1;
+                    let is_file_caller = relation.caller.is_file_placeholder();
+                    let entry = counts.entry(relation.caller.file_path).or_default();
+                    if is_file_caller {
+                        entry.file_relations += 1;
+                    } else {
+                        entry.relations += 1;
+                    }
                 }
             }
             CanonicalComponentBatch::Dependencies(dependencies) => {
@@ -303,7 +318,11 @@ pub fn plan_snapshot_shards(
             shard_id += 1;
             used = 0;
         }
-        if current.file_count == 0 && current.entity_count == 0 && current.relation_count == 0 && current.dependency_count == 0 {
+        if current.file_count == 0
+            && current.entity_count == 0
+            && current.relation_count == 0
+            && current.dependency_count == 0
+        {
             current.path_start = path.clone();
         }
         current.path_end = path.clone();

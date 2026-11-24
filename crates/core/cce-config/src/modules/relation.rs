@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::validation::{Validate, ValidationResult};
-use cce_types::error::config::ConfigValidationError;
 use cce_types::ShardQueryConfig;
+use cce_types::error::config::ConfigValidationError;
 
 /// Index configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,7 +199,10 @@ impl Validate for RelationConfig {
             ));
         }
         if let Err(error) = self.shard.validate() {
-            errors.push(ConfigValidationError::invalid_field("shard", &error.to_string()));
+            errors.push(ConfigValidationError::invalid_field(
+                "shard",
+                &error.to_string(),
+            ));
         }
         if !(0.0..=1.0).contains(&self.max_fingerprint_scope_ratio) {
             errors.push(ConfigValidationError::out_of_range(

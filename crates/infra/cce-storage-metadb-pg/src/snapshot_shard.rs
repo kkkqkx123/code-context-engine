@@ -9,9 +9,9 @@ use cce_types::{
     ShardEntityRef, ShardLocation, StableSymbolKey, StorageError,
 };
 
+use crate::PostgresClient;
 use crate::error::classify_pg;
 use crate::json::{from_json, optional_from_json};
-use crate::PostgresClient;
 
 impl PostgresClient {
     pub(crate) async fn snapshot_shard_directory(
@@ -46,7 +46,7 @@ impl PostgresClient {
 
             let rows = client
                 .query(
-                    "SELECT e.entity_id, f.path, e.scoped_name, e.kind_json,\n                     e.overload_discriminator, e.stable_id, e.shard_id\n                     FROM relation_snapshot_entities e\n                     JOIN relation_snapshot_files f ON f.id = e.file_id\n                     WHERE e.project_id = $1 AND e.relation_epoch = $2 AND e.entity_id IS NOT NULL",
+                    "SELECT e.entity_id, f.path, e.scoped_name, e.kind_json,\n                     e.overload_discriminator, e.stable_id, e.shard_id, e.name\n                     FROM relation_snapshot_entities e\n                     JOIN relation_snapshot_files f ON f.id = e.file_id\n                     WHERE e.project_id = $1 AND e.relation_epoch = $2 AND e.entity_id IS NOT NULL",
                     &[&project_id, &relation_epoch],
                 )
                 .await
@@ -60,10 +60,12 @@ impl PostgresClient {
                     overload_discriminator: row.try_get(4).map_err(classify_pg)?,
                 };
                 let entity_id: i64 = row.get(0);
+                let name: String = row.get(7);
                 let location = ShardLocation {
                     shard_id: row.get(6),
                     entity_id: entity_id as u64,
                     file_path,
+                    name: name.clone(),
                 };
                 directory
                     .entity_locations
@@ -73,6 +75,10 @@ impl PostgresClient {
                     .symbol_locations
                     .entry(key)
                     .or_insert_with(|| location.clone());
+                let shards = directory.name_locations.entry(name).or_default();
+                if !shards.contains(&location.shard_id) {
+                    shards.push(location.shard_id);
+                }
                 if let Some(stable_id) = row.get::<_, Option<String>>(5) {
                     directory
                         .stable_id_locations
@@ -113,7 +119,8 @@ impl PostgresClient {
 
             let rows = client
                 .query(
-                    "SELECT r.external_type_json, c.shard_id\n                     FROM relation_snapshot_relations r\n                     JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                     WHERE r.project_id = $1 AND r.relation_epoch = $2\n                       AND r.target_state = 'external' AND r.external_type_json IS NOT NULL",
+                    "SELECT r.external_type_json, c.shard_id\n                     FROM relation_snapshot_relations r\n                     JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                     WHERE r.project_id = $1 AND r.relation_epoch = $2\n                       AND r.target_state = 'external' AND r.external_type_json IS NOT NULL
+                       AND c.scoped_name <> '<file>'",
                     &[&project_id, &relation_epoch],
                 )
                 .await
@@ -219,7 +226,12 @@ impl PostgresClient {
             let needed: Vec<i64> = {
                 let rows = client
                     .query(
-                        "SELECT r.target_symbol_id\n                         FROM relation_snapshot_relations r\n                         JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                         WHERE r.project_id = $1 AND r.relation_epoch = $2 AND c.shard_id = $3\n                           AND r.target_symbol_id IS NOT NULL\n                         UNION\n                         SELECT e.parent_symbol_id\n                         FROM relation_snapshot_entities e\n                         WHERE e.project_id = $1 AND e.relation_epoch = $2 AND e.shard_id = $3\n                           AND e.parent_symbol_id IS NOT NULL",
+                        "SELECT r.target_symbol_id\n                         FROM relation_snapshot_relations r\n                         JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                         WHERE r.project_id = $1 AND r.relation_epoch = $2 AND c.shard_id = $3\n                           AND r.target_symbol_id IS NOT NULL\n                         UNION\n                         SELECT e.parent_symbol_id\n                         FROM relation_snapshot_entities e\n                         WHERE e.project_id = $1 AND e.relation_epoch = $2 AND e.shard_id = $3\n                           AND e.parent_symbol_id IS NOT NULL
+                         UNION
+                         SELECT x.symbol_id
+                         FROM relation_snapshot_exports x
+                         JOIN relation_snapshot_files f ON f.id = x.file_id
+                         WHERE x.project_id = $1 AND x.relation_epoch = $2 AND f.shard_id = $3",
                         &[&project_id, &relation_epoch, &shard_id],
                     )
                     .await
@@ -233,9 +245,7 @@ impl PostgresClient {
             if !needed.is_empty() {
                 let rows = client
                     .query(
-                        &entity_query(&format!(
-                            "e.shard_id <> $3 AND e.id = ANY($4)"
-                        )),
+                        &entity_query("e.shard_id <> $3 AND e.id = ANY($4)"),
                         &[
                             &project_id,
                             &relation_epoch,
@@ -367,7 +377,9 @@ fn entity_query(predicate: &str) -> String {
     )
 }
 
-fn read_entity_row(row: &tokio_postgres::Row) -> Result<(i64, StableSymbolKey, CanonicalEntity), StorageError> {
+fn read_entity_row(
+    row: &tokio_postgres::Row,
+) -> Result<(i64, StableSymbolKey, CanonicalEntity), StorageError> {
     let key = StableSymbolKey {
         file_path: row.try_get(1).map_err(classify_pg)?,
         scoped_name: row.try_get(2).map_err(classify_pg)?,

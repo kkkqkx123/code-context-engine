@@ -58,6 +58,10 @@ name = "service_retrieval_matrix"
 harness = false
 
 [[bench]]
+name = "relation_query_matrix"
+harness = false
+
+[[bench]]
 name = "service_remote_backend_matrix"
 harness = false
 

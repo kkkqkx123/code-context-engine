@@ -419,15 +419,10 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         .await
         .expect("search before commit");
     assert!(
-        !before_commit
-            .iter()
-            .any(|hit| hit.document_id == staged_id),
+        !before_commit.iter().any(|hit| hit.document_id == staged_id),
         "staged document must be invisible before commit"
     );
-    let committed = store
-        .commit_staged(index)
-        .await
-        .expect("commit staged");
+    let committed = store.commit_staged(index).await.expect("commit staged");
     assert_eq!(committed, 1, "commit reports the staged document count");
     store.finish_writes(index).await.expect("finish writes");
     let hits = store

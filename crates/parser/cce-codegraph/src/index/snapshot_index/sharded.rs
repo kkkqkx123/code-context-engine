@@ -125,7 +125,10 @@ impl ShardedSnapshotIndex {
         }
     }
 
-    pub(super) fn load_shard(&self, shard_id: i64) -> Result<Arc<InMemoryRelationSnapshotIndex>, StorageError> {
+    pub(super) fn load_shard(
+        &self,
+        shard_id: i64,
+    ) -> Result<Arc<InMemoryRelationSnapshotIndex>, StorageError> {
         {
             let mut lru = self.lru.lock();
             let cached = lru.shards.get(&shard_id).map(Arc::clone);
@@ -136,7 +139,11 @@ impl ShardedSnapshotIndex {
                 return Ok(shard);
             }
         }
-        let exists = self.directory.descriptors.iter().any(|d| d.shard_id == shard_id);
+        let exists = self
+            .directory
+            .descriptors
+            .iter()
+            .any(|d| d.shard_id == shard_id);
         if !exists {
             return Err(StorageError::validation(format!(
                 "shard {shard_id} is not part of relation epoch {}",
@@ -166,7 +173,9 @@ impl ShardedSnapshotIndex {
         lru.order.retain(|id| *id != shard_id);
         lru.order.push_back(shard_id);
         lru.bytes = lru.bytes.saturating_add(bytes);
-        while lru.shards.len() > self.config.shard_lru_shards || lru.bytes > self.config.shard_lru_bytes {
+        while lru.shards.len() > self.config.shard_lru_shards
+            || lru.bytes > self.config.shard_lru_bytes
+        {
             let Some(evicted) = lru.order.pop_front() else {
                 break;
             };
@@ -216,20 +225,6 @@ impl ShardedSnapshotIndex {
             .map(|location| vec![location.shard_id])
     }
 
-    pub(super) fn shard_ids_for_symbol(&self, key: &SymbolKey) -> Option<Vec<i64>> {
-        self.directory
-            .symbol_locations
-            .get(key)
-            .map(|location| vec![location.shard_id])
-    }
-
-    pub(super) fn shard_ids_for_stable_id(&self, stable_id: &str) -> Option<Vec<i64>> {
-        self.directory
-            .stable_id_locations
-            .get(stable_id)
-            .map(|location| vec![location.shard_id])
-    }
-
     pub(super) fn shard_ids_for_file(&self, path: &str) -> Vec<i64> {
         self.directory
             .file_shards
@@ -267,7 +262,10 @@ impl ShardedSnapshotIndex {
         self.directory.file_shards.keys().cloned().collect()
     }
 
-    pub(super) fn file_relations_of(&self, path: &str) -> Result<Vec<ResolvedRelation>, StorageError> {
+    pub(super) fn file_relations_of(
+        &self,
+        path: &str,
+    ) -> Result<Vec<ResolvedRelation>, StorageError> {
         let shards = self.shard_ids_for_file(path);
         let shards = self.load_shards(&shards)?;
         Ok(shards
@@ -276,18 +274,21 @@ impl ShardedSnapshotIndex {
             .collect())
     }
 
-    pub(super) fn relations_of(&self, caller: EntityId) -> Result<Option<Vec<ResolvedRelation>>, StorageError> {
-        let shards = self.shard_ids_for_entity(caller).ok_or_else(|| {
-            StorageError::validation(format!(
-                "caller {} has no shard location",
-                caller.0
-            ))
-        })?;
+    pub(super) fn relations_of(
+        &self,
+        caller: EntityId,
+    ) -> Result<Option<Vec<ResolvedRelation>>, StorageError> {
+        let Some(shards) = self.shard_ids_for_entity(caller) else {
+            return Ok(None);
+        };
         let shards = self.load_shards(&shards)?;
         Ok(shards.first().and_then(|shard| shard.relations_of(caller)))
     }
 
-    pub(super) fn relations_to_entity(&self, callee: EntityId) -> Result<Vec<ResolvedRelation>, StorageError> {
+    pub(super) fn relations_to_entity(
+        &self,
+        callee: EntityId,
+    ) -> Result<Vec<ResolvedRelation>, StorageError> {
         let shards = self.caller_shards(callee);
         let shards = self.load_shards(&shards)?;
         let mut result = Vec::new();
@@ -400,7 +401,12 @@ impl ShardedSnapshotIndex {
     }
 
     pub(super) fn max_entity_id(&self) -> u64 {
-        self.directory.entity_locations.keys().copied().max().unwrap_or(0)
+        self.directory
+            .entity_locations
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(0)
     }
 
     pub(super) fn dependencies_of(&self, source: &str) -> Vec<String> {
@@ -417,18 +423,6 @@ impl ShardedSnapshotIndex {
             .get(file)
             .cloned()
             .unwrap_or_default()
-    }
-
-    pub(super) fn stable_id_of(&self, id: EntityId) -> Option<String> {
-        let location = self.directory.entity_locations.get(&id.0)?;
-        self.directory
-            .stable_id_locations
-            .iter()
-            .find(|(_, stable_location)| {
-                stable_location.shard_id == location.shard_id
-                    && stable_location.entity_id == id.0
-            })
-            .map(|(stable_id, _)| stable_id.clone())
     }
 
     pub(super) fn symbol_key_of(&self, id: EntityId) -> Option<SymbolKey> {
@@ -449,19 +443,5 @@ impl ShardedSnapshotIndex {
             .iter()
             .flat_map(|file| guard.get(file).cloned().unwrap_or_default())
             .collect()
-    }
-
-    pub(super) fn stable_id_maps(
-        &self,
-    ) -> (
-        Arc<RwLock<HashMap<String, EntityId>>>,
-        Arc<RwLock<HashMap<SymbolKey, EntityId>>>,
-        Arc<RwLock<HashMap<EntityId, SymbolKey>>>,
-    ) {
-        (
-            Arc::clone(&self.stable_id_to_entity),
-            Arc::clone(&self.symbol_key_to_entity),
-            Arc::clone(&self.entity_to_symbol_key),
-        )
     }
 }

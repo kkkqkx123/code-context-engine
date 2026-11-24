@@ -45,7 +45,7 @@ impl RelationSnapshotRepository {
 
         let mut statement = conn
             .prepare(
-                "SELECT e.entity_id, f.path, e.scoped_name, e.kind_json,\n                        e.overload_discriminator, e.stable_id, e.shard_id\n                 FROM relation_snapshot_entities e\n                 JOIN relation_snapshot_files f ON f.id = e.file_id\n                 WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND e.entity_id IS NOT NULL",
+                "SELECT e.entity_id, f.path, e.scoped_name, e.kind_json,\n                        e.overload_discriminator, e.stable_id, e.shard_id, e.name\n                 FROM relation_snapshot_entities e\n                 JOIN relation_snapshot_files f ON f.id = e.file_id\n                 WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND e.entity_id IS NOT NULL",
             )
             .map_err(query_error)?;
         let mut rows = statement
@@ -60,10 +60,12 @@ impl RelationSnapshotRepository {
                 kind: from_json(&row.get::<_, String>(3).map_err(query_error)?)?,
                 overload_discriminator: row.get(4).map_err(query_error)?,
             };
+            let name: String = row.get(7).map_err(query_error)?;
             let location = ShardLocation {
                 shard_id: row.get(6).map_err(query_error)?,
                 entity_id: entity_id as u64,
                 file_path,
+                name: name.clone(),
             };
             let stable_id: Option<String> = row.get(5).map_err(query_error)?;
             directory
@@ -74,6 +76,10 @@ impl RelationSnapshotRepository {
                 .symbol_locations
                 .entry(key.clone())
                 .or_insert_with(|| location.clone());
+            let shards = directory.name_locations.entry(name).or_default();
+            if !shards.contains(&location.shard_id) {
+                shards.push(location.shard_id);
+            }
             if let Some(stable_id) = stable_id {
                 directory
                     .stable_id_locations
@@ -93,9 +99,10 @@ impl RelationSnapshotRepository {
             .query(params![project_id, relation_epoch])
             .map_err(query_error)?;
         while let Some(row) = rows.next().map_err(query_error)? {
-            directory
-                .file_shards
-                .insert(row.get(0).map_err(query_error)?, row.get(1).map_err(query_error)?);
+            directory.file_shards.insert(
+                row.get(0).map_err(query_error)?,
+                row.get(1).map_err(query_error)?,
+            );
         }
         drop(rows);
         drop(statement);
@@ -121,7 +128,8 @@ impl RelationSnapshotRepository {
 
         let mut statement = conn
             .prepare(
-                "SELECT r.external_type_json, c.shard_id\n                 FROM relation_snapshot_relations r\n                 JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                 WHERE r.project_id = ?1 AND r.relation_epoch = ?2\n                   AND r.target_state = 'external' AND r.external_type_json IS NOT NULL",
+                "SELECT r.external_type_json, c.shard_id\n                 FROM relation_snapshot_relations r\n                 JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                 WHERE r.project_id = ?1 AND r.relation_epoch = ?2\n                   AND r.target_state = 'external' AND r.external_type_json IS NOT NULL
+                   AND c.scoped_name <> '<file>'",
             )
             .map_err(query_error)?;
         let mut rows = statement
@@ -138,7 +146,10 @@ impl RelationSnapshotRepository {
             if !shards.contains(&shard) {
                 shards.push(shard);
             }
-            *directory.classification_counts.entry(classification).or_default() += 1;
+            *directory
+                .classification_counts
+                .entry(classification)
+                .or_default() += 1;
         }
         drop(rows);
         drop(statement);
@@ -216,7 +227,7 @@ impl RelationSnapshotRepository {
 
         let mut keys: HashMap<i64, StableSymbolKey> = HashMap::new();
         let mut statement = conn
-            .prepare(&ENTITY_QUERY.with_shard("e.shard_id = ?3"))
+            .prepare(&entity_query("e.shard_id = ?3"))
             .map_err(query_error)?;
         let mut rows = statement
             .query(params![project_id, epoch, shard_id])
@@ -234,17 +245,19 @@ impl RelationSnapshotRepository {
         let needed_ids: HashSet<i64> = read_needed_entity_ids(conn, project_id, epoch, shard_id)?;
         if !needed_ids.is_empty() {
             let mut statement = conn
-                .prepare(&ENTITY_QUERY.with_parent(&format!(
+                .prepare(&entity_query(&format!(
                     "e.shard_id <> ?3 AND e.id IN ({})",
                     vec!["?"; needed_ids.len()].join(",")
                 )))
                 .map_err(query_error)?;
             let mut params: Vec<i64> = vec![project_id, epoch, shard_id];
             params.extend(needed_ids.iter().copied());
-            let mut rows = statement.query(rusqlite::params_from_iter(params)).map_err(query_error)?;
+            let mut rows = statement
+                .query(rusqlite::params_from_iter(params))
+                .map_err(query_error)?;
             while let Some(row) = rows.next().map_err(query_error)? {
                 let (id, key, _) = read_entity_row(row)?;
-                let entity_id: Option<i64> = row.get(20).map_err(query_error)?;
+                let entity_id: Option<i64> = row.get(19).map_err(query_error)?;
                 let file_path = key.file_path.clone();
                 if let Some(entity_id) = entity_id {
                     keys.insert(id, key.clone());
@@ -368,27 +381,19 @@ impl RelationSnapshotRepository {
             });
         }
 
-        components.entities.sort_by_key(|entity| entity.key.sort_key());
+        components
+            .entities
+            .sort_by_key(|entity| entity.key.sort_key());
 
         Ok(Some(components))
     }
 }
 
-struct EntityQuery(&'static str);
-
-impl EntityQuery {
-    fn with_shard(&self, predicate: &str) -> String {
-        self.with_parent(predicate)
-    }
-
-    fn with_parent(&self, predicate: &str) -> String {
-        format!(
-            "SELECT e.id, f.path, e.scoped_name, e.kind_json, e.overload_discriminator,\n                    e.name, e.signature, e.parameters_json, e.return_type, e.span_json,\n                    e.depth, e.parent_symbol_id, e.doc_comment, e.modifiers_json,\n                    e.attributes_json, e.metadata_json, e.is_stdlib,\n                    e.stdlib_category_json, e.subtype, e.entity_id\n             FROM relation_snapshot_entities e\n             JOIN relation_snapshot_files f ON f.id = e.file_id\n             WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND {predicate}\n             ORDER BY e.id"
-        )
-    }
+fn entity_query(predicate: &str) -> String {
+    format!(
+        "SELECT e.id, f.path, e.scoped_name, e.kind_json, e.overload_discriminator,\n                e.name, e.signature, e.parameters_json, e.return_type, e.span_json,\n                e.depth, e.parent_symbol_id, e.doc_comment, e.modifiers_json,\n                e.attributes_json, e.metadata_json, e.is_stdlib,\n                e.stdlib_category_json, e.subtype, e.entity_id\n         FROM relation_snapshot_entities e\n         JOIN relation_snapshot_files f ON f.id = e.file_id\n         WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND {predicate}\n         ORDER BY e.id"
+    )
 }
-
-const ENTITY_QUERY: EntityQuery = EntityQuery("");
 
 fn read_entity_row(
     row: &rusqlite::Row<'_>,
@@ -431,7 +436,12 @@ fn read_needed_entity_ids(
     let mut needed = HashSet::new();
     let mut statement = conn
         .prepare(
-            "SELECT r.target_symbol_id\n                 FROM relation_snapshot_relations r\n                 JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                 WHERE r.project_id = ?1 AND r.relation_epoch = ?2 AND c.shard_id = ?3\n                   AND r.target_symbol_id IS NOT NULL\n                 UNION\n                 SELECT e.parent_symbol_id\n                 FROM relation_snapshot_entities e\n                 WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND e.shard_id = ?3\n                   AND e.parent_symbol_id IS NOT NULL",
+            "SELECT r.target_symbol_id\n                 FROM relation_snapshot_relations r\n                 JOIN relation_snapshot_entities c ON c.id = r.caller_symbol_id\n                 WHERE r.project_id = ?1 AND r.relation_epoch = ?2 AND c.shard_id = ?3\n                   AND r.target_symbol_id IS NOT NULL\n                 UNION\n                 SELECT e.parent_symbol_id\n                 FROM relation_snapshot_entities e\n                 WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND e.shard_id = ?3\n                   AND e.parent_symbol_id IS NOT NULL
+                 UNION
+                 SELECT x.symbol_id
+                 FROM relation_snapshot_exports x
+                 JOIN relation_snapshot_files f ON f.id = x.file_id
+                 WHERE x.project_id = ?1 AND x.relation_epoch = ?2 AND f.shard_id = ?3",
         )
         .map_err(query_error)?;
     let mut rows = statement

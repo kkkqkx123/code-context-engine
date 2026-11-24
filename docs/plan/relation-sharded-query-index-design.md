@@ -180,6 +180,12 @@ canonical 写入指标同表输出。
 5. 运行时切换：冷启动、base cache、publisher、导出增强统一使用 store 构造；移除冷启动全图装载。
 6. 容量指标与回归：输出分片数/目录字节/LRU 命中淘汰等，按 medium -> 50,000 档复测 RSS 与查询延迟，回写 issue 文档。
 
+## 落地状态
+
+本次实现已完成：核心目录/组件类型与显式容量参数、SQLite/PG 的 shard_id/stable_id 与目录表、`RelationSnapshotIndex` 外观拆分与分片 LRU 路由、所有快照查询/view 调用点迁移、冷启动/base cache/publisher/导出增强切换、等价性与有界性测试、分片计数接入索引容量报表。运行时读取的硬上界为 `shard_lru_shards × max_shard_items + 目录 + delta 链`；单次查询装载上限为 `shard_query_shards`，超限显式失败。
+
+待实测项：medium 与 50,000 文件档的 RSS/查询 p95 复测与 issue 回写，需在 devs 基准机上按验证计划执行。
+
 ## 明确不做
 
 - 不保留“小项目全量载入、大项目分片”的双路径；容量只由显式参数表达。

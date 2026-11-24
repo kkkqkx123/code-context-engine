@@ -35,6 +35,8 @@ use crate::types::ExportInfo;
 mod query_optimized;
 mod sharded;
 mod snapshot_builder;
+#[cfg(test)]
+mod tests;
 
 pub use query_optimized::{QueryOptimizedIndex, TransitiveFileDeps};
 
@@ -180,22 +182,10 @@ impl InMemoryRelationSnapshotIndex {
         }
     }
 
-    pub(super) fn compute_fingerprint(&self) -> String {
-        let files = active_file_set(&self.file_records, &self.entity_file_index);
-        fingerprint_in_files_from_maps(
-            &self.function_index,
-            &self.entity_file_index,
-            &self.entity_to_symbol_key,
-            &self.resolved_relation_index,
-            &self.file_relation_index,
-            &self.file_records,
-            &self.dependency_graph,
-            &files,
-        )
-    }
-
     pub(super) fn get_function(&self, id: EntityId) -> Option<Entity> {
-        self.function_index.get(&id).map(|entry| entry.value().clone())
+        self.function_index
+            .get(&id)
+            .map(|entry| entry.value().clone())
     }
 
     pub(super) fn function_ids_by_name(&self, name: &str) -> Vec<EntityId> {
@@ -276,6 +266,9 @@ impl InMemoryRelationSnapshotIndex {
     }
 
     pub(super) fn entity_ids_of_file(&self, path: &str) -> Vec<EntityId> {
+        if let Some(rows) = self.file_entities_by_start.read().get(path) {
+            return rows.iter().map(|(_, id)| *id).collect();
+        }
         self.entity_file_index
             .iter()
             .filter(|entry| entry.value().as_str() == path)
@@ -304,14 +297,6 @@ impl InMemoryRelationSnapshotIndex {
 
     pub(super) fn symbol_key_of(&self, id: EntityId) -> Option<SymbolKey> {
         self.entity_to_symbol_key.read().get(&id).cloned()
-    }
-
-    pub(super) fn stable_id_of(&self, id: EntityId) -> Option<String> {
-        self.stable_id_to_entity
-            .read()
-            .iter()
-            .find(|(_, entity_id)| **entity_id == id)
-            .map(|(stable_id, _)| stable_id.clone())
     }
 
     pub(super) fn entity_id_by_symbol(&self, key: &SymbolKey) -> Option<EntityId> {
@@ -408,9 +393,7 @@ impl RelationSnapshotIndex {
         let manifest = store
             .get_manifest(project_id, relation_epoch)?
             .ok_or_else(|| {
-                StorageError::validation(format!(
-                    "relation epoch {relation_epoch} has no manifest"
-                ))
+                StorageError::validation(format!("relation epoch {relation_epoch} has no manifest"))
             })?;
         let base_epoch = if manifest.state == RelationSnapshotState::Delta {
             store
@@ -433,13 +416,8 @@ impl RelationSnapshotIndex {
             })?
         };
         let directory = store.read_shard_directory(project_id, base_epoch)?;
-        let sharded = ShardedSnapshotIndex::new(
-            store,
-            base_manifest,
-            base_epoch,
-            directory,
-            config,
-        )?;
+        let sharded =
+            ShardedSnapshotIndex::new(store, base_manifest, base_epoch, directory, config)?;
         Ok(Self {
             backing: SnapshotBacking::Sharded(Arc::new(sharded)),
         })
@@ -457,28 +435,6 @@ impl RelationSnapshotIndex {
         match &self.backing {
             SnapshotBacking::Sharded(sharded) => Some(sharded.capacity_report()),
             SnapshotBacking::InMemory(_) => None,
-        }
-    }
-
-    pub(super) fn is_sharded(&self) -> bool {
-        matches!(self.backing, SnapshotBacking::Sharded(_))
-    }
-
-    fn memory(&self) -> &InMemoryRelationSnapshotIndex {
-        match &self.backing {
-            SnapshotBacking::InMemory(index) => index,
-            SnapshotBacking::Sharded(_) => {
-                panic!("in-memory relation snapshot accessor called on a sharded view")
-            }
-        }
-    }
-
-    fn sharded(&self) -> &ShardedSnapshotIndex {
-        match &self.backing {
-            SnapshotBacking::Sharded(index) => index,
-            SnapshotBacking::InMemory(_) => {
-                panic!("sharded relation snapshot accessor called on an in-memory view")
-            }
         }
     }
 
@@ -520,9 +476,9 @@ impl RelationSnapshotIndex {
 
     pub fn collect_transitive_dependents(&self, file: &str, max_depth: usize) -> Vec<String> {
         match &self.backing {
-            SnapshotBacking::InMemory(index) => {
-                index.dependency_graph.collect_transitive_dependents(file, max_depth)
-            }
+            SnapshotBacking::InMemory(index) => index
+                .dependency_graph
+                .collect_transitive_dependents(file, max_depth),
             SnapshotBacking::Sharded(sharded) => {
                 transitive_walk(file, max_depth, |path| sharded.dependents_of(path))
             }
@@ -531,9 +487,9 @@ impl RelationSnapshotIndex {
 
     pub fn collect_transitive_dependencies(&self, file: &str, max_depth: usize) -> Vec<String> {
         match &self.backing {
-            SnapshotBacking::InMemory(index) => {
-                index.dependency_graph.collect_transitive_dependencies(file, max_depth)
-            }
+            SnapshotBacking::InMemory(index) => index
+                .dependency_graph
+                .collect_transitive_dependencies(file, max_depth),
             SnapshotBacking::Sharded(sharded) => {
                 transitive_walk(file, max_depth, |path| sharded.dependencies_of(path))
             }
@@ -544,16 +500,16 @@ impl RelationSnapshotIndex {
     pub fn build_metadata_snapshot(&self) -> SnapshotBuildMetadata {
         let diagnostics = self.diagnostics();
         SnapshotBuildMetadata {
-            symbol_key_conflict_count: diagnostics.symbol_key_conflict_count.load(
-                std::sync::atomic::Ordering::Relaxed,
-            ),
+            symbol_key_conflict_count: diagnostics
+                .symbol_key_conflict_count
+                .load(std::sync::atomic::Ordering::Relaxed),
             symbol_key_conflict_samples: diagnostics.symbol_key_conflict_samples(),
-            entity_derived_key_count: diagnostics.entity_derived_key_count.load(
-                std::sync::atomic::Ordering::Relaxed,
-            ),
-            relation_derived_key_count: diagnostics.relation_derived_key_count.load(
-                std::sync::atomic::Ordering::Relaxed,
-            ),
+            entity_derived_key_count: diagnostics
+                .entity_derived_key_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            relation_derived_key_count: diagnostics
+                .relation_derived_key_count
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -596,10 +552,9 @@ impl RelationSnapshotIndex {
             SnapshotBacking::InMemory(index) => {
                 active_file_set(&index.file_records, &index.entity_file_index)
             }
-            SnapshotBacking::Sharded(sharded) => sharded
-                .files()
-                .into_iter()
-                .collect::<HashSet<_>>(),
+            SnapshotBacking::Sharded(sharded) => {
+                sharded.files().into_iter().collect::<HashSet<_>>()
+            }
         };
         self.fingerprint_in_files(&files)
     }
@@ -647,11 +602,11 @@ impl RelationSnapshotIndex {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.fingerprint_in_files(files),
             SnapshotBacking::Sharded(_) => {
-                let mut snapshot = self
-                    .to_canonical_snapshot(String::new())
-                    .unwrap_or_else(|error| {
-                        panic!("sharded canonical snapshot for fingerprint failed: {error}")
-                    });
+                let mut snapshot =
+                    self.to_canonical_snapshot(String::new())
+                        .unwrap_or_else(|error| {
+                            panic!("sharded canonical snapshot for fingerprint failed: {error}")
+                        });
                 snapshot.files.retain(|file| files.contains(&file.path));
                 snapshot
                     .entities
@@ -678,13 +633,24 @@ impl RelationSnapshotIndex {
     pub(super) fn function_ids_by_name(&self, name: &str) -> Vec<EntityId> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.function_ids_by_name(name),
-            SnapshotBacking::Sharded(_) => self.shard_read("function_ids_by_name", |s| {
-                let shards = s.load_shards(&s.all_shard_ids())?;
-                Ok(shards
-                    .iter()
-                    .flat_map(|shard| shard.function_ids_by_name(name))
-                    .collect())
-            }),
+            SnapshotBacking::Sharded(sharded) => {
+                let shard_ids = sharded
+                    .directory
+                    .name_locations
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_default();
+                if shard_ids.is_empty() {
+                    return Vec::new();
+                }
+                self.shard_read("function_ids_by_name", |s| {
+                    let shards = s.load_shards(&shard_ids)?;
+                    Ok(shards
+                        .iter()
+                        .flat_map(|shard| shard.function_ids_by_name(name))
+                        .collect())
+                })
+            }
         }
     }
 
@@ -712,11 +678,16 @@ impl RelationSnapshotIndex {
     pub(super) fn relations_of(&self, caller: EntityId) -> Option<Vec<ResolvedRelation>> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.relations_of(caller),
-            SnapshotBacking::Sharded(_) => self.shard_read("relations_of", |s| s.relations_of(caller)),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("relations_of", |s| s.relations_of(caller))
+            }
         }
     }
 
-    pub(super) fn relations_of_checked(&self, caller: EntityId) -> Result<Vec<ResolvedRelation>, IndexError> {
+    pub(super) fn relations_of_checked(
+        &self,
+        caller: EntityId,
+    ) -> Result<Vec<ResolvedRelation>, IndexError> {
         if !self.contains_function(caller) {
             return Err(IndexError::entity_not_found(caller));
         }
@@ -784,7 +755,9 @@ impl RelationSnapshotIndex {
     pub(super) fn get_file_info(&self, path: &str) -> Option<FileInfo> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.get_file_info(path),
-            SnapshotBacking::Sharded(_) => self.shard_read("get_file_info", |s| s.get_file_info(path)),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("get_file_info", |s| s.get_file_info(path))
+            }
         }
     }
 
@@ -941,7 +914,10 @@ impl RelationSnapshotIndex {
         }
     }
 
-    pub(super) fn for_each_relation_group<F: FnMut(EntityId, &[ResolvedRelation])>(&self, mut visit: F) {
+    pub(super) fn for_each_relation_group<F: FnMut(EntityId, &[ResolvedRelation])>(
+        &self,
+        mut visit: F,
+    ) {
         match &self.backing {
             SnapshotBacking::InMemory(index) => {
                 for entry in index.resolved_relation_index.iter() {
@@ -1016,7 +992,14 @@ impl RelationSnapshotIndex {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let file = self.file_path_of(id).unwrap_or_default();
         self.get_function(id).map_or_else(
-            || SymbolKey::new(&file, "<unknown>", cce_types::EntityKind::Unknown, "<unknown>"),
+            || {
+                SymbolKey::new(
+                    &file,
+                    "<unknown>",
+                    cce_types::EntityKind::Unknown,
+                    "<unknown>",
+                )
+            },
             |entity| SymbolKey::for_entity(&file, &entity.name, &entity),
         )
     }
@@ -1030,7 +1013,14 @@ impl RelationSnapshotIndex {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let file = self.file_path_of(id).unwrap_or_default();
         self.get_function(id).map_or_else(
-            || SymbolKey::new(&file, name_fallback, cce_types::EntityKind::Function, name_fallback),
+            || {
+                SymbolKey::new(
+                    &file,
+                    name_fallback,
+                    cce_types::EntityKind::Function,
+                    name_fallback,
+                )
+            },
             |entity| SymbolKey::for_entity(&file, &entity.name, &entity),
         )
     }
@@ -1148,7 +1138,11 @@ impl LayeredSnapshotIndex {
             if delta.removed_entities.contains(&id) {
                 return false;
             }
-            if delta.added_entities.iter().any(|added| added.entity.id == id) {
+            if delta
+                .added_entities
+                .iter()
+                .any(|added| added.entity.id == id)
+            {
                 return true;
             }
         }
@@ -1182,11 +1176,19 @@ impl LayeredSnapshotIndex {
     }
 
     pub fn fingerprint_in_files(&self, files: &HashSet<String>) -> String {
-        let mut snapshot = self
-            .to_canonical_snapshot(String::new())
-            .unwrap_or_else(|error| {
-                panic!("layered canonical snapshot for fingerprint failed: {error}")
-            });
+        let Ok(mut snapshot) = self.to_canonical_snapshot(String::new()) else {
+            let merged = self.materialize_merged_index();
+            return fingerprint_in_files_from_maps(
+                &merged.function_index,
+                &merged.entity_file_index,
+                &merged.entity_to_symbol_key,
+                &merged.resolved_relation_index,
+                &merged.file_relation_index,
+                &merged.file_records,
+                &merged.dependency_graph,
+                files,
+            );
+        };
         snapshot.files.retain(|file| files.contains(&file.path));
         snapshot
             .entities

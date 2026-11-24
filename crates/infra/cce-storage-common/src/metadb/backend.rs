@@ -107,7 +107,9 @@ where
     ) -> Result<Option<RelationShardComponents>, StorageError> {
         match self {
             Self::Local(store) => store.read_shard_components(project_id, relation_epoch, shard_id),
-            Self::Remote(store) => store.read_shard_components(project_id, relation_epoch, shard_id),
+            Self::Remote(store) => {
+                store.read_shard_components(project_id, relation_epoch, shard_id)
+            }
         }
     }
 

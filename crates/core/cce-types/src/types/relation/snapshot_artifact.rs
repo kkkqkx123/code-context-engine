@@ -23,8 +23,7 @@ use crate::types::{CanonicalRelationSnapshot, StorageError};
 
 pub const DEFAULT_SNAPSHOT_BATCH_ITEMS: usize = 512;
 pub const DEFAULT_FINGERPRINT_CHUNK_BYTES: usize = 8 * 1024 * 1024;
-pub const DEFAULT_ARTIFACT_MAX_SHARD_ITEMS: usize =
-    super::snapshot_shard::DEFAULT_MAX_SHARD_ITEMS;
+pub const DEFAULT_ARTIFACT_MAX_SHARD_ITEMS: usize = super::snapshot_shard::DEFAULT_MAX_SHARD_ITEMS;
 
 static ARTIFACT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 

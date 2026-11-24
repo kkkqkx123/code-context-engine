@@ -291,9 +291,9 @@ impl NlDocumentUpdateProcessor {
             Ok(snapshot) => {
                 let exporter = self.exporter().await;
                 let enhancer_config = cce_export::RelationEnhancerConfig::default();
-                let layered = Arc::new(cce_codegraph::index::LayeredSnapshotIndex::new(
-                    Arc::new(snapshot),
-                ));
+                let layered = Arc::new(cce_codegraph::index::LayeredSnapshotIndex::new(Arc::new(
+                    snapshot,
+                )));
                 exporter.set_relation_enhancement(layered, enhancer_config);
                 *cache = Some(epoch);
                 tracing::info!(

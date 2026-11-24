@@ -9518,6 +9518,12 @@
           "relation_estimated_bytes",
           "relation_snapshot_entries",
           "relation_snapshot_estimated_bytes",
+          "canonical_write_batches",
+          "canonical_write_buffer_peak_bytes",
+          "relation_shard_count",
+          "relation_shard_directory_entries",
+          "relation_shard_directory_estimated_bytes",
+          "published_snapshot_entries",
           "export_spool_entries",
           "export_spool_bytes",
           "entity_id_map_entries",
@@ -9597,6 +9603,16 @@
             "format": "int64",
             "minimum": 0
           },
+          "canonical_write_batches": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "canonical_write_buffer_peak_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "checkpoint_ms": {
             "type": "integer",
             "format": "int64",
@@ -9651,6 +9667,11 @@
             "format": "int64",
             "minimum": 0
           },
+          "published_snapshot_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "relation_edges": {
             "type": "integer",
             "format": "int64",
@@ -9667,6 +9688,21 @@
             "minimum": 0
           },
           "relation_nodes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_shard_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_shard_directory_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_shard_directory_estimated_bytes": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
