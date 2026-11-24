@@ -41,6 +41,16 @@ pub struct WikiManifest {
     /// Data epoch of the exported generation.
     pub index_epoch: i64,
     pub relation_epoch: i64,
+    /// Epoch of the file inventory and entity catalog (the data generation).
+    ///
+    /// Type entities supplemented from metadata share this epoch with the
+    /// file list, so downstream can join entity → file without a cross-epoch
+    /// mismatch.
+    pub entity_epoch: i64,
+    /// Whether `index_epoch`/`entity_epoch` and `relation_epoch` belong to the
+    /// same publication. `false` means the relation snapshot lagged the
+    /// active metadata generation and the package spans two generations.
+    pub epoch_aligned: bool,
     /// File counts per detected language.
     pub language_stats: BTreeMap<String, usize>,
     pub file_count: usize,

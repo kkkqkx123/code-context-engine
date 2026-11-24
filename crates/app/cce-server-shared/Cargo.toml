@@ -38,6 +38,7 @@ cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-export = { version = "0.1.0", path = "../cce-export" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
+moka = { workspace = true }
 
 [dev-dependencies]
 llm-suite-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-rerank", features = ["mock"] }

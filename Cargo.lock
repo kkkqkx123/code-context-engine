@@ -1024,6 +1024,7 @@ dependencies = [
  "chrono",
  "hex",
  "llm-suite-rerank",
+ "moka",
  "rusqlite",
  "serde",
  "serde_json",

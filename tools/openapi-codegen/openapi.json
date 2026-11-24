@@ -13139,6 +13139,8 @@
           "root_path",
           "index_epoch",
           "relation_epoch",
+          "entity_epoch",
+          "epoch_aligned",
           "language_stats",
           "file_count",
           "entity_count",
@@ -13149,6 +13151,15 @@
           "entity_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "entity_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Epoch of the file inventory and entity catalog (the data generation)."
+          },
+          "epoch_aligned": {
+            "type": "boolean",
+            "description": "Whether `index_epoch`/`entity_epoch` and `relation_epoch` belong to the same publication."
           },
           "external_deps_mode": {
             "type": "string",

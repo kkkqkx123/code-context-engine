@@ -10,12 +10,38 @@ use tokio::sync::RwLock;
 use crate::engine::CodeContextEngine;
 use crate::engine::ProjectCache;
 use cce_codegraph::CallChainQuery;
+use cce_codegraph::graph_metrics::EntityMetrics;
 use cce_metrics::ProgressTracker;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
 use cce_orchestrator::query::RelationSearcher;
+use cce_types::EntityId;
+use moka::future::Cache;
 
 type RelationSearcherEntry = (i64, Arc<RelationSearcher>);
 type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;
+
+/// Graph-derived metrics reused across WCP exports of one snapshot.
+///
+/// Keyed by `(project_id, relation_epoch)` inside [`WikiGraphCache`], so a
+/// snapshot change naturally invalidates the entry without explicit eviction.
+#[derive(Debug, Clone)]
+pub struct CachedGraphMetrics {
+    pub entity_metrics: HashMap<EntityId, EntityMetrics>,
+    pub components: Vec<Vec<EntityId>>,
+}
+
+/// Process-wide cache of expensive graph computations shared by the HTTP,
+/// MCP and CLI surfaces. Bounded and TTL-limited; correctness never depends
+/// on a hit.
+pub type WikiGraphCache = Cache<(i64, i64), Arc<CachedGraphMetrics>>;
+
+/// Build the WCP graph cache: small, short-lived, snapshot-keyed.
+fn new_wiki_graph_cache() -> WikiGraphCache {
+    Cache::builder()
+        .max_capacity(64)
+        .time_to_live(std::time::Duration::from_secs(30 * 60))
+        .build()
+}
 
 /// Convert the backend-owned Qdrant lifecycle state into its wire copy.
 ///
@@ -63,6 +89,8 @@ pub struct SharedContext {
     pub qdrant_control: Option<cce_storage_vector_qdrant::QdrantProcessHandle>,
     /// Per-project relation searcher cache (LRU caching for hot queries)
     pub relation_searcher_cache: RelationSearcherCache,
+    /// Snapshot-keyed cache of expensive WCP graph computations.
+    pub wiki_graph_cache: WikiGraphCache,
 }
 
 impl SharedContext {
@@ -85,6 +113,7 @@ impl SharedContext {
             progress_tracker: engine.progress_tracker().clone(),
             qdrant_control: qdrant_handle,
             relation_searcher_cache: Arc::new(RwLock::new(HashMap::new())),
+            wiki_graph_cache: new_wiki_graph_cache(),
         }
     }
 

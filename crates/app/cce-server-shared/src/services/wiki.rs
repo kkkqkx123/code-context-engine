@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
+use std::sync::Arc;
 
 use cce_api::models::{
     WikiClusters, WikiContextResponse, WikiDepEdge, WikiDepGraph, WikiDiffResponse,
@@ -25,10 +26,13 @@ use cce_codegraph::index::view::RelationIndexView;
 use cce_config::{ExternalDepsMode, WikiExportConfig};
 use cce_orchestrator::query::GraphService;
 use cce_storage_common::MetadataStorage;
-use cce_types::{ExternalCallType, ResolvedRelation};
+use cce_storage_common::metadb::{EntityRecord, EntityWithFile};
+use cce_types::{
+    EntityKind, ExternalCallType, ResolvedRelation, StableSymbolKey, normalize_project_path,
+};
 use cce_utils::file::read_file_to_utf8_async;
 
-use crate::context::SharedContext;
+use crate::context::{CachedGraphMetrics, SharedContext};
 
 use super::relation::{RelationServiceError, relation_access, stable_id};
 
@@ -339,6 +343,44 @@ pub fn mermaid_module_graph(edges: &[(String, String)]) -> String {
     out
 }
 
+/// Parse a persisted entity-kind label back into `EntityKind`.
+///
+/// `EntityRecord.kind` stores the `EntityKind` `Display`/serde label
+/// (snake_case), so a JSON string round-trip recovers the variant without a
+/// bespoke match table. Unknown labels are rejected rather than guessed.
+fn parse_entity_kind(raw: &str) -> Option<EntityKind> {
+    serde_json::from_value(serde_json::Value::String(raw.to_string())).ok()
+}
+
+/// Recompute the stable symbol id of a metadata entity.
+///
+/// `StableSymbolKey::stable_id` is a pure function of schema version, file
+/// path, scoped name, kind and overload discriminator — all persisted on
+/// `EntityRecord`. Recomputing it lets a metadata-only entity (e.g. a type
+/// definition absent from the relation snapshot) join the same id space as
+/// relation-snapshot callable entities.
+fn stable_id_of_record(path: &str, record: &EntityRecord) -> Option<String> {
+    let kind = parse_entity_kind(&record.kind)?;
+    let scoped_name = record
+        .scoped_name
+        .clone()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| record.name.clone());
+    let key = StableSymbolKey {
+        file_path: normalize_project_path(path),
+        scoped_name,
+        kind,
+        overload_discriminator: record.overload_discriminator.clone(),
+    };
+    Some(key.stable_id().0)
+}
+
+/// Whether the metadata generation and the relation snapshot came from the
+/// same publication. Mirrors the pairing stored on `ProjectIndexManifest`.
+pub fn epochs_aligned(relation_epoch: i64, manifest_relation_epoch: i64) -> bool {
+    relation_epoch == manifest_relation_epoch
+}
+
 /// Classify baseline hashes against the current visible hashes.
 pub fn classify_changes(
     baseline: &[WikiFileHash],
@@ -419,12 +461,21 @@ pub async fn export_context(
         .await
         .map_err(|error| RelationServiceError::Execution(error.to_string()))?;
 
+    // G: anchor every metadata-side section (files + entity catalog) to one
+    // data epoch, and record whether it pairs with the served relation
+    // snapshot. A mismatch means the package spans two generations.
+    let entity_epoch = manifest.data_epoch;
+    let aligned = epochs_aligned(access.snapshot.relation_epoch, manifest.relation_epoch);
+
     let root_path = project_root(state, project_id).await?;
 
     // Entity catalog and per-file PageRank inputs come from the relation
     // snapshot, which is the same source the graph tools serve.
     let index = access.snapshot.index.as_ref();
     let mut entities: Vec<WikiEntityEntry> = Vec::new();
+    // Stable ids already present in the catalog; used to de-duplicate the
+    // metadata-supplied type entities against relation-snapshot callables.
+    let mut seen_entity_ids: BTreeSet<String> = BTreeSet::new();
     // Entity base fields are collected synchronously from the snapshot; source
     // snippets are filled in a second, async pass so export never blocks a
     // tokio worker on disk IO.
@@ -447,6 +498,7 @@ pub async fn export_context(
         if options.include_snippets && start_row != usize::MAX {
             snippet_targets.push((entities.len(), file_path.clone(), start_row, end_row));
         }
+        seen_entity_ids.insert(stable.clone());
         entities.push(WikiEntityEntry {
             id: stable,
             name: entity.name.clone(),
@@ -463,6 +515,68 @@ pub async fn export_context(
             snippet: None,
         });
     });
+
+    // F: the relation snapshot stores only callable entities. Supplement the
+    // catalog with type definitions (class/struct/enum/trait/...) from the
+    // metadata generation, which is the same epoch as `file_rows`. Their
+    // stable ids are recomputed so downstream joins stay consistent, and
+    // `seen_entity_ids` prevents duplicates when a type is also callable.
+    if !entities_truncated {
+        let meta_entities = store
+            .entities_with_files(project_id, entity_epoch)
+            .await
+            .map_err(|error| RelationServiceError::Execution(error.to_string()))?;
+        for EntityWithFile {
+            entity: record,
+            file_path,
+        } in meta_entities
+        {
+            if entities.len() >= MAX_WCP_ENTITIES {
+                entities_truncated = true;
+                break;
+            }
+            let Some(kind) = parse_entity_kind(&record.kind) else {
+                continue;
+            };
+            if !kind.is_type_definition() {
+                continue;
+            }
+            let Some(stable) = stable_id_of_record(&file_path, &record) else {
+                continue;
+            };
+            if !seen_entity_ids.insert(stable.clone()) {
+                continue;
+            }
+            let start_row = record
+                .span_start_row
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(usize::MAX);
+            let end_row = record
+                .span_end_row
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(usize::MAX);
+            if options.include_snippets && start_row != usize::MAX {
+                snippet_targets.push((entities.len(), file_path.clone(), start_row, end_row));
+            }
+            let scoped_name = record
+                .scoped_name
+                .clone()
+                .filter(|name| !name.is_empty())
+                .or_else(|| Some(record.name.clone()));
+            let signature = record.signature.clone().filter(|value| !value.is_empty());
+            entities.push(WikiEntityEntry {
+                id: stable,
+                name: record.name.clone(),
+                kind: record.kind.clone(),
+                scoped_name,
+                signature,
+                file_path,
+                source_location: location_of(start_row, end_row),
+                doc_comment: record.doc_comment.clone(),
+                snippet: None,
+            });
+        }
+    }
     if options.include_snippets {
         let mut snippet_cache: HashMap<String, Option<String>> = HashMap::new();
         for (entity_index, file_path, start_row, end_row) in snippet_targets {
@@ -550,11 +664,33 @@ pub async fn export_context(
         MAX_WCP_EXTERNAL_DEPS,
     );
 
-    // Importance metrics aggregated per file from entity graph metrics.
+    // H: reuse graph-derived metrics across exports of the same snapshot.
+    // The cache key includes the relation epoch, so a newer snapshot computes
+    // fresh results without explicit invalidation.
     let graph = GraphService::new(access.searcher.clone());
-    let entity_metrics = graph.compute_metrics();
+    let cache_key = (project_id, access.snapshot.relation_epoch);
+    let cached = if let Some(hit) = state.wiki_graph_cache.get(&cache_key).await {
+        hit
+    } else {
+        let entity_metrics = graph.compute_metrics();
+        let components = graph
+            .connected_components()
+            .map_err(|error| RelationServiceError::Execution(error.to_string()))?;
+        let value = Arc::new(CachedGraphMetrics {
+            entity_metrics,
+            components,
+        });
+        state
+            .wiki_graph_cache
+            .insert(cache_key, value.clone())
+            .await;
+        value
+    };
+    let entity_metrics = &cached.entity_metrics;
+
+    // Importance metrics aggregated per file from entity graph metrics.
     let mut per_file: HashMap<String, (f64, f64, usize)> = HashMap::new();
-    for (id, metrics) in &entity_metrics {
+    for (id, metrics) in entity_metrics {
         if let Some(file) = index.get_file_path_by_entity(*id) {
             let slot = per_file.entry(file).or_insert((0.0, 0.0, 0));
             slot.0 += metrics.pagerank;
@@ -578,9 +714,7 @@ pub async fn export_context(
     file_metrics.sort_by(|left, right| left.path.cmp(&right.path));
 
     // Clusters: connected components projected to files, largest first.
-    let components = graph
-        .connected_components()
-        .map_err(|error| RelationServiceError::Execution(error.to_string()))?;
+    let components = &cached.components;
     let clusters_truncated = components.len() > MAX_WCP_CLUSTERS;
     let clusters: Vec<_> = components
         .iter()
@@ -659,6 +793,8 @@ pub async fn export_context(
             root_path,
             index_epoch: manifest.data_epoch,
             relation_epoch: stamp.relation_epoch,
+            entity_epoch,
+            epoch_aligned: aligned,
             language_stats,
             file_count: files.len(),
             entity_count: entities.len(),
@@ -863,6 +999,79 @@ fn push_import_edge(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn type_record(kind: &str, scoped: &str) -> EntityRecord {
+        serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "name": scoped,
+            "kind": kind,
+            "file_id": 1,
+            "signature": None::<String>,
+            "span_start_row": 4_i64,
+            "span_end_row": 9_i64,
+            "span_start_column": 0_i64,
+            "span_end_column": 0_i64,
+            "span_start_byte": 0_i64,
+            "span_end_byte": 0_i64,
+            "scoped_name": scoped,
+            "overload_discriminator": "",
+            "depth": 0_i64,
+            "parent_id": None::<i64>,
+            "metadata": None::<String>,
+            "parameters_json": None::<String>,
+            "return_type": None::<String>,
+            "doc_comment": None::<String>,
+            "modifiers_json": None::<String>,
+            "project_id": 1,
+            "epoch": 1,
+            "batch_id": 1,
+            "rank": 0.0_f32
+        }))
+        .expect("entity record deserializes")
+    }
+
+    #[test]
+    fn parse_entity_kind_round_trips_type_definitions() {
+        assert_eq!(parse_entity_kind("struct"), Some(EntityKind::Struct));
+        assert_eq!(parse_entity_kind("enum"), Some(EntityKind::Enum));
+        assert_eq!(parse_entity_kind("trait"), Some(EntityKind::Trait));
+        assert_eq!(parse_entity_kind("not_a_kind"), None);
+    }
+
+    #[test]
+    fn stable_id_of_record_is_deterministic_and_kind_sensitive() {
+        let record = type_record("struct", "crate::Config");
+        let a = stable_id_of_record("src/config.rs", &record);
+        let b = stable_id_of_record("src/config.rs", &record);
+        assert_eq!(a, b);
+        assert!(a.as_ref().expect("id exists").starts_with("sym_"));
+        let as_enum = type_record("enum", "crate::Config");
+        assert_ne!(a, stable_id_of_record("src/config.rs", &as_enum));
+        let other_path = stable_id_of_record("src/other.rs", &record);
+        assert_ne!(a, other_path);
+    }
+
+    #[test]
+    fn metadata_stable_id_matches_snapshot_key_for_same_identity() {
+        // Contract: a metadata entity and a relation-snapshot entity with the
+        // same logical identity must produce the same stable id, so a type
+        // entity supplemented from metadata joins the graph id space.
+        let path = "src/config.rs";
+        let key = StableSymbolKey {
+            file_path: normalize_project_path(path),
+            scoped_name: "crate::Config".to_string(),
+            kind: EntityKind::Struct,
+            overload_discriminator: String::new(),
+        };
+        let record = type_record("struct", "crate::Config");
+        assert_eq!(stable_id_of_record(path, &record), Some(key.stable_id().0));
+    }
+
+    #[test]
+    fn epochs_aligned_detects_cross_generation_packages() {
+        assert!(epochs_aligned(7, 7));
+        assert!(!epochs_aligned(6, 7));
+    }
 
     #[test]
     fn export_options_use_config_defaults_and_request_overrides() {
