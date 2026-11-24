@@ -4,6 +4,7 @@
 //! behavior (query assembly, execution, conversion) lives in the modules
 //! below exactly once.
 
+pub mod budget;
 pub mod config;
 pub mod graph;
 pub mod index;

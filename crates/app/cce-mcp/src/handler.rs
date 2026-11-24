@@ -31,15 +31,26 @@ mod graph_tools;
 mod project;
 mod relations;
 mod search;
-mod support;
+pub mod support;
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use crate::{budget, profile};
+use cce_config::modules::{McpBudgetConfig, McpProfile};
 use cce_server_shared::context::SharedContext;
+use cce_server_shared::services::budget::{BudgetLimits, BudgetTracker};
 use rmcp::{
-    ErrorData as McpError, ServerHandler,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
+    ErrorData as McpError, RoleServer, ServerHandler,
+    handler::server::router::tool::ToolRouter,
+    handler::server::tool::ToolCallContext,
+    handler::server::wrapper::Parameters,
+    model::{
+        CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+        Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ResultType,
+        ServerCapabilities, ServerConfig,
+    },
+    service::RequestContext,
     tool, tool_handler, tool_router,
 };
 
@@ -55,12 +66,14 @@ pub use search::{AggregatedSearchArgs, FileSearchArgs, KeywordSearchArgs, Search
 #[derive(Clone)]
 pub struct McpServerHandler {
     state: Arc<SharedContext>,
-    /// Optional tool allow-list: when set, tools whose name is not listed are
-    /// rejected at call time. The router stays static so `#[tool_router]`
-    /// codegen does not depend on runtime configuration.
-    enabled_tools: Option<Arc<Vec<String>>>,
-    /// Read only by the generated `ServerHandler::call_tool` impl, which the
-    /// compiler cannot see through, hence the explicit allow.
+    /// Effective tool set resolved from the capability profile and the
+    /// optional explicit allow-list. A call outside this set is rejected.
+    allowed_tools: Arc<BTreeSet<String>>,
+    /// Active capability profile, echoed in the server instructions.
+    profile: McpProfile,
+    /// Resolved budget policy. `None` disables budget enforcement entirely.
+    budget: Option<Arc<BudgetTracker>>,
+    /// Read by the hand-written `ServerHandler` methods.
     #[allow(dead_code)]
     tool_router: ToolRouter<McpServerHandler>,
 }
@@ -68,24 +81,51 @@ pub struct McpServerHandler {
 #[tool_router]
 impl McpServerHandler {
     /// Create a handler backed by the shared application state.
-    pub fn new(state: Arc<SharedContext>, enabled_tools: Option<Vec<String>>) -> Self {
+    ///
+    /// The effective tool set is the intersection of the capability profile
+    /// and the explicit allow-list; the budget tracker is present whenever
+    /// budget enforcement is enabled (always for the wiki-read profile).
+    pub fn new(
+        state: Arc<SharedContext>,
+        profile: McpProfile,
+        enabled_tools: Option<Vec<String>>,
+        budget_config: McpBudgetConfig,
+    ) -> Self {
+        let allowed = profile::resolve_allowed_tools(profile, enabled_tools.as_deref());
+        let budget = budget_config.enabled || profile.is_read_only();
+        let tracker = if budget {
+            let limits = BudgetLimits {
+                max_calls_per_run: budget_config.max_calls_per_run,
+                max_calls_per_page: budget_config.max_calls_per_page,
+                max_active_runs: budget_config.max_active_runs,
+            };
+            Some(Arc::new(BudgetTracker::new(
+                limits,
+                budget_config.cache_ttl_secs,
+                budget_config.cache_enabled,
+            )))
+        } else {
+            None
+        };
         Self {
             state,
-            enabled_tools: enabled_tools.map(Arc::new),
+            allowed_tools: Arc::new(allowed),
+            profile,
+            budget: tracker,
             tool_router: Self::tool_router(),
         }
     }
 
-    /// Reject calls to tools that are not in the configured allow-list.
+    /// Reject calls to tools outside the effective profile/allow-list.
     ///
     /// Returns a structured tool error when disabled, `None` when allowed, so
     /// every tool failure — including configuration rejections — travels
     /// through the same `isError` channel with a machine-readable code.
-    fn ensure_enabled(&self, name: &str) -> Option<CallToolResult> {
-        if !support::is_tool_allowed(self.enabled_tools.as_ref().map(|v| v.as_slice()), name) {
+    fn ensure_allowed(&self, name: &str) -> Option<CallToolResult> {
+        if !profile::is_allowed(&self.allowed_tools, name) {
             return Some(support::tool_failure(
-                cce_types::error_codes::INVALID_REQUEST,
-                format!("tool '{name}' is disabled by configuration"),
+                cce_types::error_codes::TOOL_DISABLED,
+                format!("tool '{name}' is disabled by the active profile or configuration"),
             ));
         }
         None
@@ -98,7 +138,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("search") {
+        if let Some(err) = self.ensure_allowed("search") {
             return Ok(err);
         }
         search::search(&self.state, args).await
@@ -111,7 +151,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<AggregatedSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("aggregated_search") {
+        if let Some(err) = self.ensure_allowed("aggregated_search") {
             return Ok(err);
         }
         search::aggregated_search(&self.state, args).await
@@ -124,7 +164,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FileSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("file_search") {
+        if let Some(err) = self.ensure_allowed("file_search") {
             return Ok(err);
         }
         search::file_search(&self.state, args).await
@@ -137,7 +177,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<KeywordSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("keyword_search") {
+        if let Some(err) = self.ensure_allowed("keyword_search") {
             return Ok(err);
         }
         search::keyword_search(&self.state, args).await
@@ -150,7 +190,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<EntityArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("entity_callees") {
+        if let Some(err) = self.ensure_allowed("entity_callees") {
             return Ok(err);
         }
         relations::entity_callees(&self.state, args).await
@@ -161,7 +201,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<EntityArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("entity_callers") {
+        if let Some(err) = self.ensure_allowed("entity_callers") {
             return Ok(err);
         }
         relations::entity_callers(&self.state, args).await
@@ -174,7 +214,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<CallChainArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("call_chain") {
+        if let Some(err) = self.ensure_allowed("call_chain") {
             return Ok(err);
         }
         relations::call_chain(&self.state, args).await
@@ -182,7 +222,7 @@ impl McpServerHandler {
 
     #[tool(description = "List all registered projects with their IDs, names and root paths.")]
     async fn list_projects(&self) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("list_projects") {
+        if let Some(err) = self.ensure_allowed("list_projects") {
             return Ok(err);
         }
         project::list_projects(&self.state).await
@@ -193,7 +233,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("get_project") {
+        if let Some(err) = self.ensure_allowed("get_project") {
             return Ok(err);
         }
         project::get_project(&self.state, args).await
@@ -206,7 +246,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<IndexProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("index_project") {
+        if let Some(err) = self.ensure_allowed("index_project") {
             return Ok(err);
         }
         project::index_project(&self.state, args).await
@@ -219,7 +259,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<IncrementalIndexArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("incremental_index") {
+        if let Some(err) = self.ensure_allowed("incremental_index") {
             return Ok(err);
         }
         project::incremental_index(&self.state, args).await
@@ -232,7 +272,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FoldArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("fold") {
+        if let Some(err) = self.ensure_allowed("fold") {
             return Ok(err);
         }
         fold::fold(args).await
@@ -245,7 +285,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FoldBatchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("fold_batch") {
+        if let Some(err) = self.ensure_allowed("fold_batch") {
             return Ok(err);
         }
         fold::fold_batch(args).await
@@ -258,7 +298,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("health") {
+        if let Some(err) = self.ensure_allowed("health") {
             return Ok(err);
         }
         project::health(&self.state, args).await
@@ -271,7 +311,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<ReadFileArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("read_file") {
+        if let Some(err) = self.ensure_allowed("read_file") {
             return Ok(err);
         }
         files::read_file(&self.state, args).await
@@ -284,7 +324,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<FileOutlineArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("file_outline") {
+        if let Some(err) = self.ensure_allowed("file_outline") {
             return Ok(err);
         }
         files::file_outline(&self.state, args).await
@@ -297,7 +337,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<EntityDetailArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("entity_detail") {
+        if let Some(err) = self.ensure_allowed("entity_detail") {
             return Ok(err);
         }
         files::entity_detail(&self.state, args).await
@@ -310,7 +350,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<GraphModuleArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("graph_module") {
+        if let Some(err) = self.ensure_allowed("graph_module") {
             return Ok(err);
         }
         graph_tools::graph_module(&self.state, args).await
@@ -323,7 +363,7 @@ impl McpServerHandler {
         &self,
         Parameters(args): Parameters<GraphEgoArgs>,
     ) -> Result<CallToolResult, McpError> {
-        if let Some(err) = self.ensure_enabled("graph_ego") {
+        if let Some(err) = self.ensure_allowed("graph_ego") {
             return Ok(err);
         }
         graph_tools::graph_ego(&self.state, args).await
@@ -333,15 +373,163 @@ impl McpServerHandler {
 #[tool_handler]
 impl ServerHandler for McpServerHandler {
     fn get_info(&self) -> ServerConfig {
+        let profile_label = match self.profile {
+            McpProfile::Full => "full",
+            McpProfile::WikiRead => "wiki_read",
+        };
+        let budget_label = match &self.budget {
+            None => "disabled",
+            Some(_) => "enforced",
+        };
+        let instructions = format!(
+            "Code Context Engine MCP server. Profile: {profile_label}; call budget: {budget_label}. \
+             Provides hybrid and keyword code search, entity/relation queries, index management, \
+             and project listing. Project-scoped tools take an explicit `project_id`; the stateless \
+             `fold` tool takes raw text instead. Read-only tools return a top-level `_budget` \
+             field when a wiki run context is supplied via `_meta.wiki_run`."
+        );
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_instructions(
-                "Code Context Engine MCP server. Provides hybrid and keyword code search, \
-                 entity/relation queries, index management, and project listing. \
-                 Project-scoped tools take an explicit `project_id`; the stateless \
-                 `fold` tool takes raw text instead."
-                    .to_string(),
-            )
+            .with_instructions(instructions)
+    }
+
+    /// Intercept every tool call to apply the capability gate and the
+    /// run-scoped budget before any tool work is performed. The generated
+    /// router still dispatches to the individual `#[tool]` methods, which
+    /// repeat the capability check as a second line of defense.
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        let tool = request.name.to_string();
+
+        // Capability gate: a tool outside the effective set is refused here,
+        // before budget accounting or any query work.
+        if !profile::is_allowed(&self.allowed_tools, &tool) {
+            return Ok(CallToolResponse::Complete(support::tool_failure(
+                cce_types::error_codes::TOOL_DISABLED,
+                format!("tool '{tool}' is disabled by the active profile or configuration"),
+            )));
+        }
+
+        // Read the run context from `_meta` (primary) or common args (fallback).
+        let meta = request.meta.as_ref().map(|m| &m.0.0);
+        let run_context = match budget::parse_run_context(meta, request.arguments.as_ref()) {
+            Ok(value) => value,
+            Err(message) => {
+                return Ok(CallToolResponse::Complete(support::tool_failure(
+                    cce_types::error_codes::INVALID_INPUT,
+                    format!("invalid wiki run context: {message}"),
+                )));
+            }
+        };
+
+        // No budget active, or no run context: behave exactly as before.
+        let (tracker, run_context) = match (&self.budget, run_context) {
+            (Some(tracker), Some(context)) => (tracker, context),
+            _ => {
+                let tcc = ToolCallContext::new(self, request, context);
+                return self.tool_router.call(tcc).await;
+            }
+        };
+
+        let canonical_args = canonical_arguments(request.arguments.as_ref());
+        let cacheable = profile::is_cacheable(&tool);
+
+        // Cache hit: reuse the payload without consuming a step, but still
+        // refuse once the run is exhausted.
+        if cacheable
+            && let Some(payload) = tracker
+                .cache_get(&run_context, &tool, &canonical_args)
+                .await
+        {
+            if let Some(exhausted) = tracker.check_exhausted(&run_context) {
+                return Ok(CallToolResponse::Complete(budget::budget_exhausted_result(
+                    &exhausted,
+                )));
+            }
+            let state = tracker.peek(&run_context, true);
+            let result = CallToolResult::success(vec![ContentBlock::text(payload.to_string())]);
+            return Ok(CallToolResponse::Complete(budget::inject_budget(
+                result, &state,
+            )));
+        }
+
+        // Reserve one step before executing; exhaustion short-circuits here.
+        let state = match tracker.try_consume(&run_context) {
+            cce_server_shared::services::budget::BudgetDecision::Allowed { state } => state,
+            cce_server_shared::services::budget::BudgetDecision::Exhausted(exhausted) => {
+                return Ok(CallToolResponse::Complete(budget::budget_exhausted_result(
+                    &exhausted,
+                )));
+            }
+        };
+
+        let tcc = ToolCallContext::new(self, request, context);
+        let mut result = match self.tool_router.call(tcc).await? {
+            CallToolResponse::Complete(result) => result,
+            other => return Ok(other),
+        };
+
+        if result.is_error.unwrap_or(false) {
+            // Failed executions refund the reserved step and count an attempt.
+            tracker.record_failure(&run_context);
+        } else {
+            if cacheable
+                && let Some(ContentBlock::Text(text)) = result.content.first()
+                && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text.text)
+            {
+                tracker
+                    .cache_put(&run_context, &tool, &canonical_args, payload)
+                    .await;
+            }
+            result = budget::inject_budget(result, &state);
+        }
+        Ok(CallToolResponse::Complete(result))
+    }
+
+    /// Expose only tools visible under the active profile/allow-list.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        let tools = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .filter(|tool| profile::is_allowed(&self.allowed_tools, tool.name.as_ref()))
+            .collect();
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Public),
+        })
+    }
+
+    /// Hide tools outside the effective set from direct lookups as well.
+    fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
+        if !profile::is_allowed(&self.allowed_tools, name) {
+            return None;
+        }
+        self.tool_router.get(name).cloned()
+    }
+}
+
+/// Canonical JSON representation of the call arguments, used as part of the
+/// run-local cache key. `serde_json::Map` iterates in sorted key order, so the
+/// string is stable across equivalent calls.
+fn canonical_arguments(arguments: Option<&rmcp::model::JsonObject>) -> String {
+    match arguments {
+        Some(args) => serde_json::Value::Object(args.clone()).to_string(),
+        None => "{}".to_string(),
     }
 }
 
@@ -410,17 +598,40 @@ mod tests {
         }
     }
 
-    /// Allow-list denial is a pure function of the configured list, so a
-    /// denied tool is denied on stdio and streamable HTTP alike — both
-    /// transports route through this single decision point.
+    /// The capability table is the single source of truth for read/write
+    /// classification. Its key set must exactly match the router: any tool
+    /// added or removed without a matching table row turns this red.
     #[test]
-    fn allow_list_denial_is_identical_on_both_transports() {
-        let allow = Some(vec!["search".to_string()]);
-        let denied = "fold";
-        let allowed = allow.as_deref();
-        assert!(!support::is_tool_allowed(allowed, denied));
-        assert!(support::is_tool_allowed(allowed, "search"));
-        assert!(support::is_tool_allowed(None, denied));
+    fn capability_table_key_set_matches_router() {
+        let router_names: BTreeSet<String> = McpServerHandler::tool_router()
+            .list_all()
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        let table_names: BTreeSet<String> = profile::TOOL_CAPABILITIES
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect();
+        assert_eq!(router_names, table_names);
+    }
+
+    #[test]
+    fn wiki_read_profile_resolves_to_read_only_tools() {
+        let full = profile::resolve_allowed_tools(McpProfile::Full, None);
+        assert_eq!(full.len(), 19);
+        let wiki = profile::resolve_allowed_tools(McpProfile::WikiRead, None);
+        assert!(!wiki.contains("index_project"));
+        assert!(!wiki.contains("incremental_index"));
+        assert!(wiki.contains("read_file"));
+    }
+
+    #[test]
+    fn wiki_read_intersects_explicit_allow_list() {
+        let explicit = vec!["read_file".to_string(), "index_project".to_string()];
+        let set = profile::resolve_allowed_tools(McpProfile::WikiRead, Some(&explicit));
+        assert_eq!(set.len(), 1);
+        assert!(set.contains("read_file"));
+        assert!(!set.contains("index_project"));
     }
 
     /// Direction spellings from either transport canonicalize identically,

@@ -29,6 +29,10 @@ pub const CONFLICT: &str = "CONFLICT";
 pub const NOT_IMPLEMENTED: &str = "NOT_IMPLEMENTED";
 /// A symbol-name seed matched multiple entities; candidates are attached as details.
 pub const AMBIGUOUS_SYMBOL: &str = "AMBIGUOUS_SYMBOL";
+/// A tool is outside the active capability profile or explicit allow-list.
+pub const TOOL_DISABLED: &str = "TOOL_DISABLED";
+/// A read-only run exhausted its call budget; downstream must fall back.
+pub const BUDGET_EXHAUSTED: &str = "BUDGET_EXHAUSTED";
 
 #[cfg(test)]
 mod tests {
@@ -48,5 +52,7 @@ mod tests {
         assert_eq!(CONFLICT, "CONFLICT");
         assert_eq!(NOT_IMPLEMENTED, "NOT_IMPLEMENTED");
         assert_eq!(AMBIGUOUS_SYMBOL, "AMBIGUOUS_SYMBOL");
+        assert_eq!(TOOL_DISABLED, "TOOL_DISABLED");
+        assert_eq!(BUDGET_EXHAUSTED, "BUDGET_EXHAUSTED");
     }
 }

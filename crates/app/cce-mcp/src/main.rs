@@ -23,15 +23,18 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("MCP server is disabled; set `[mcp] enabled = true` in the configuration");
     }
 
+    let policy = cce_mcp::McpPolicy::from_config(&mcp_config);
+    let transport = mcp_config.transport;
+    let http = mcp_config.http.clone();
+
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
-        let state = cce_mcp::build_state(config.clone()).await?;
-        let enabled_tools = mcp_config.enabled_tools.clone();
+        let state = cce_mcp::build_state(config).await?;
 
-        match mcp_config.transport {
+        match transport {
             McpTransport::Stdio => {
                 tracing::info!("Starting MCP server over stdio");
-                cce_mcp::run_stdio(state, enabled_tools).await
+                cce_mcp::run_stdio(state, policy).await
             }
             McpTransport::StreamableHttp => {
                 let cancellation_token = CancellationToken::new();
@@ -42,13 +45,7 @@ fn main() -> anyhow::Result<()> {
                         shutdown_token.cancel();
                     }
                 });
-                cce_mcp::run_http(
-                    state,
-                    mcp_config.http.clone(),
-                    enabled_tools,
-                    cancellation_token,
-                )
-                .await
+                cce_mcp::run_http(state, http, policy, cancellation_token).await
             }
         }
     })

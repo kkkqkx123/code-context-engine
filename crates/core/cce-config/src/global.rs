@@ -612,6 +612,9 @@ impl Validate for AppConfig {
         if let Err(e) = self.rerank.validate_structured() {
             errors.push(e);
         }
+        if let Err(e) = self.mcp.validate_structured() {
+            errors.push(e);
+        }
         if let Err(e) = self.license_header.validate_structured() {
             errors.push(e);
         }

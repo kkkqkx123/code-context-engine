@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use axum::Router;
-use cce_config::modules::McpHttpConfig;
+use cce_config::modules::{McpBudgetConfig, McpConfig, McpHttpConfig, McpProfile};
 use cce_server_shared::context::SharedContext;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
@@ -17,12 +17,41 @@ use tokio_util::sync::CancellationToken;
 
 use crate::handler::McpServerHandler;
 
+/// Tool-surface policy resolved once at startup and shared by every session.
+#[derive(Clone)]
+pub struct McpPolicy {
+    /// Capability profile applied to the tool surface.
+    pub profile: McpProfile,
+    /// Optional explicit tool allow-list.
+    pub enabled_tools: Option<Vec<String>>,
+    /// Server-enforced read-only call budget.
+    pub budget: McpBudgetConfig,
+}
+
+impl McpPolicy {
+    /// Resolve the policy from the top-level MCP configuration.
+    pub fn from_config(config: &McpConfig) -> Self {
+        Self {
+            profile: config.profile,
+            enabled_tools: config.enabled_tools.clone(),
+            budget: config.budget.clone(),
+        }
+    }
+}
+
 /// Build a handler factory bound to the shared application state.
 fn handler_factory(
     state: Arc<SharedContext>,
-    enabled_tools: Option<Vec<String>>,
+    policy: McpPolicy,
 ) -> impl Fn() -> Result<McpServerHandler, std::io::Error> + Send + Sync + 'static {
-    move || Ok(McpServerHandler::new(state.clone(), enabled_tools.clone()))
+    move || {
+        Ok(McpServerHandler::new(
+            state.clone(),
+            policy.profile,
+            policy.enabled_tools.clone(),
+            policy.budget.clone(),
+        ))
+    }
 }
 
 /// Initialize the shared engine state from an already-resolved configuration.
@@ -42,36 +71,29 @@ pub async fn build_state(config: cce_config::AppConfig) -> anyhow::Result<Arc<Sh
 }
 
 /// Serve MCP over stdio, building the state from `config`.
-///
-/// Convenience wrapper around the shared state + [`run_stdio`].
-pub async fn run_stdio_from_config(
-    config: cce_config::AppConfig,
-    enabled_tools: Option<Vec<String>>,
-) -> anyhow::Result<()> {
+pub async fn run_stdio_from_config(config: cce_config::AppConfig) -> anyhow::Result<()> {
+    let policy = McpPolicy::from_config(&config.mcp);
     let state = build_state(config).await?;
-    run_stdio(state, enabled_tools).await
+    run_stdio(state, policy).await
 }
 
 /// Serve MCP over HTTP, building the state from `config`.
 pub async fn run_http_from_config(
     config: cce_config::AppConfig,
-    http: McpHttpConfig,
-    enabled_tools: Option<Vec<String>>,
     cancellation_token: CancellationToken,
 ) -> anyhow::Result<()> {
+    let http = config.mcp.http.clone();
+    let policy = McpPolicy::from_config(&config.mcp);
     let state = build_state(config).await?;
-    run_http(state, http, enabled_tools, cancellation_token).await
+    run_http(state, http, policy, cancellation_token).await
 }
 
 /// Serve MCP over stdio, blocking until the client disconnects.
 ///
 /// Callers must ensure the process's stdout is reserved for MCP frames; all
 /// logging must go to stderr.
-pub async fn run_stdio(
-    state: Arc<SharedContext>,
-    enabled_tools: Option<Vec<String>>,
-) -> anyhow::Result<()> {
-    let handler = McpServerHandler::new(state, enabled_tools);
+pub async fn run_stdio(state: Arc<SharedContext>, policy: McpPolicy) -> anyhow::Result<()> {
+    let handler = McpServerHandler::new(state, policy.profile, policy.enabled_tools, policy.budget);
     let service = handler.serve(transport::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -84,7 +106,7 @@ pub async fn run_stdio(
 pub async fn run_http(
     state: Arc<SharedContext>,
     http: McpHttpConfig,
-    enabled_tools: Option<Vec<String>>,
+    policy: McpPolicy,
     cancellation_token: CancellationToken,
 ) -> anyhow::Result<()> {
     let mut config = StreamableHttpServerConfig::default();
@@ -94,7 +116,7 @@ pub async fn run_http(
     config.cancellation_token = cancellation_token.clone();
 
     let service = StreamableHttpService::new(
-        handler_factory(state, enabled_tools),
+        handler_factory(state, policy),
         LocalSessionManager::default().into(),
         config,
     );

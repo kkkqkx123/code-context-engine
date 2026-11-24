@@ -39,6 +39,8 @@ cce-export = { version = "0.1.0", path = "../cce-export" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
 moka = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 llm-suite-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-rerank", features = ["mock"] }
