@@ -1,6 +1,7 @@
 use cce_types::{
     CanonicalComponentBatch, CanonicalRelationTarget, CanonicalSnapshotArtifact,
     DEFAULT_SNAPSHOT_BATCH_ITEMS, SnapshotArtifactCounts, Span, StableSymbolKey, StorageError,
+    plan_snapshot_shards,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 
@@ -8,16 +9,16 @@ use super::{RelationSnapshotRepository, RelationSnapshotState};
 use super::{optional_json, query_error, require_state, to_json};
 
 const INSERT_FILE: &str = "INSERT INTO relation_snapshot_files
-    (project_id, relation_epoch, path, language, input_hash, file_size, imports_json)
- VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+    (project_id, relation_epoch, path, language, input_hash, file_size, imports_json, shard_id)
+ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
 
 const INSERT_ENTITY: &str = "INSERT INTO relation_snapshot_entities (
     project_id, relation_epoch, file_id, scoped_name, kind_json,
-    overload_discriminator, entity_id, name, signature, parameters_json,
-    return_type, span_json, depth, doc_comment, modifiers_json,
+    overload_discriminator, entity_id, stable_id, shard_id, name, signature,
+    parameters_json, return_type, span_json, depth, doc_comment, modifiers_json,
     attributes_json, metadata_json, is_stdlib, stdlib_category_json, subtype
- ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-           ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)";
+ ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+           ?16, ?17, ?18, ?19, ?20, ?21, ?22)";
 
 const FIND_FILE: &str = "SELECT id FROM relation_snapshot_files
     WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?3";
@@ -43,6 +44,31 @@ impl RelationSnapshotRepository {
     ) -> Result<(), StorageError> {
         require_state(tx, project_id, epoch, RelationSnapshotState::Building)?;
         let counts: SnapshotArtifactCounts = artifact.counts();
+        let plan = plan_snapshot_shards(artifact, artifact.options().max_shard_items)?;
+        let mut shard_stmt = tx
+            .prepare(
+                "INSERT INTO relation_snapshot_shards (
+                    project_id, relation_epoch, shard_id, file_count, entity_count,
+                    relation_count, dependency_count, estimated_bytes, path_start, path_end
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )
+            .map_err(query_error)?;
+        for descriptor in &plan.descriptors {
+            shard_stmt
+                .execute(params![
+                    project_id,
+                    epoch,
+                    descriptor.shard_id,
+                    descriptor.file_count as i64,
+                    descriptor.entity_count as i64,
+                    descriptor.relation_count as i64,
+                    descriptor.dependency_count as i64,
+                    descriptor.estimated_bytes as i64,
+                    descriptor.path_start,
+                    descriptor.path_end,
+                ])
+                .map_err(query_error)?;
+        }
         let mut file_stmt = tx.prepare(INSERT_FILE).map_err(query_error)?;
         let mut entity_stmt = tx.prepare(INSERT_ENTITY).map_err(query_error)?;
         let mut parent_stmt = tx
@@ -63,13 +89,13 @@ impl RelationSnapshotRepository {
             .prepare(
                 "INSERT OR IGNORE INTO relation_snapshot_entities (
                     project_id, relation_epoch, file_id, scoped_name, kind_json,
-                    overload_discriminator, entity_id, name, signature, parameters_json,
-                    return_type, span_json, depth, doc_comment, modifiers_json,
+                    overload_discriminator, entity_id, stable_id, shard_id, name, signature,
+                    parameters_json, return_type, span_json, depth, doc_comment, modifiers_json,
                     attributes_json, metadata_json, is_stdlib, stdlib_category_json, subtype
-                 ) SELECT ?1, ?2, id, '<file>', ?3, ?4, NULL, '<file>', '', '[]',
-                          NULL, ?5, 0, NULL, '[]', '{}', '{}', 0, NULL, NULL
+                 ) SELECT ?1, ?2, id, '<file>', ?3, ?4, NULL, ?5, ?6, '<file>', '', '[]',
+                          NULL, ?7, 0, NULL, '[]', '{}', '{}', 0, NULL, NULL
                    FROM relation_snapshot_files
-                   WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?6",
+                   WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?8"
             )
             .map_err(query_error)?;
         let mut export_stmt = tx
@@ -101,6 +127,7 @@ impl RelationSnapshotRepository {
                                 file.input_hash,
                                 file.file_size as i64,
                                 imports_json,
+                                plan.shard_of(&file.path)?,
                             ])
                             .map_err(|error| unique_or_query("relation_snapshot_files", error))?;
                         // Exports are written with their file after all
@@ -119,6 +146,8 @@ impl RelationSnapshotRepository {
                         let metadata_json = to_json(&entity.metadata)?;
                         let stdlib_category_json = optional_json(&entity.stdlib_category)?;
                         let entity_id = entity.entity_id.map(|id| id as i64);
+                        let stable_id = entity.key.stable_id().0;
+                        let shard_id = plan.shard_of(&entity.key.file_path)?;
                         let depth = entity.depth as i64;
                         let is_stdlib = i64::from(entity.is_stdlib);
                         entity_stmt
@@ -130,6 +159,8 @@ impl RelationSnapshotRepository {
                                 kind_json,
                                 entity.key.overload_discriminator,
                                 entity_id,
+                                stable_id,
+                                shard_id,
                                 entity.name,
                                 entity.signature,
                                 parameters_json,
@@ -169,6 +200,8 @@ impl RelationSnapshotRepository {
                                     epoch,
                                     kind_json,
                                     relation.caller.overload_discriminator,
+                                    relation.caller.stable_id().0,
+                                    plan.shard_of(&relation.caller.file_path)?,
                                     span_json,
                                     relation.caller.file_path,
                                 ])

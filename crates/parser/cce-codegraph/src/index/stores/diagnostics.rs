@@ -56,6 +56,16 @@ impl RelationDiagnostics {
         }
     }
 
+    /// Snapshot the bounded conflict samples for publication diagnostics.
+    pub fn symbol_key_conflict_samples(&self) -> Vec<SymbolKeyConflictRecord> {
+        self.symbol_key_conflict_samples
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+
     /// Get diagnostic summary snapshot.
     pub fn summary(&self) -> DiagnosticSummary {
         let symbol_key_conflicts = self

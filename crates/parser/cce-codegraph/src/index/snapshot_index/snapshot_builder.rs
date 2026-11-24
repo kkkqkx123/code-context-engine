@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::index::core::{RelationIndex, SymbolKey};
+use crate::index::core::{RelationEdgeSet, RelationIndex, SymbolKey};
 use crate::index::delta::RelationDeltaOps;
 use cce_types::{
     AddedEntity, CanonicalDependency, CanonicalEntity, CanonicalExport, CanonicalFile,
@@ -13,7 +13,9 @@ use cce_types::{
     canonical_owner_type, normalize_project_path,
 };
 
-use super::{LayeredSnapshotIndex, QueryOptimizedIndex, RelationSnapshotIndex, TransitiveFileDeps};
+use super::{
+    InMemoryRelationSnapshotIndex, LayeredSnapshotIndex, QueryOptimizedIndex, TransitiveFileDeps,
+};
 
 /// Per-file stack of `(removed, added)` relation diffs, in chain order.
 type FileRelationDiffs<'a> =
@@ -32,7 +34,7 @@ impl RelationIndex {
         config_fingerprint: String,
         options: SnapshotArtifactOptions,
     ) -> Result<cce_types::CanonicalSnapshotArtifact, String> {
-        let view = RelationSnapshotIndex {
+        let view = InMemoryRelationSnapshotIndex {
             function_index: Arc::clone(&self.function_index),
             name_index: Arc::clone(&self.name_index),
             entity_file_index: Arc::clone(&self.entity_file_index),
@@ -150,7 +152,7 @@ impl RelationIndex {
 }
 
 fn canonical_relation(
-    view: &RelationSnapshotIndex,
+    view: &InMemoryRelationSnapshotIndex,
     caller_id: EntityId,
     relation: &ResolvedRelation,
 ) -> CanonicalRelation {
@@ -158,7 +160,7 @@ fn canonical_relation(
 }
 
 fn canonical_relation_with_caller(
-    view: &RelationSnapshotIndex,
+    view: &InMemoryRelationSnapshotIndex,
     caller: SymbolKey,
     relation: &ResolvedRelation,
 ) -> CanonicalRelation {
@@ -191,7 +193,7 @@ fn canonical_relation_with_caller(
     }
 }
 
-impl RelationSnapshotIndex {
+impl InMemoryRelationSnapshotIndex {
     /// Stable symbol key of an entity, degrading to a derived key rebuilt
     /// from the entity's own fields when the reverse map has no entry.
     ///
@@ -423,38 +425,37 @@ impl LayeredSnapshotIndex {
     pub fn materialize_merged_index(&self) -> RelationIndex {
         let base = &self.base;
         let merged = RelationIndex::new();
-        for entry in base.function_index.iter() {
-            merged.insert_function(*entry.key(), entry.value().clone());
-        }
-        for entry in base.entity_file_index.iter() {
-            merged
-                .entity_file_index
-                .insert(*entry.key(), entry.value().clone());
-        }
-        for entry in base.resolved_relation_index.iter() {
+        base.for_each_entity(|id, entity| {
+            merged.insert_function(id, entity.clone());
+        });
+        base.for_each_relation_group(|caller, relations| {
             merged
                 .resolved_relation_index
-                .insert(*entry.key(), entry.value().clone());
-        }
-        for entry in base.file_relation_index.iter() {
+                .insert(caller, RelationEdgeSet::from_edges(relations));
+        });
+        base.for_each_file_relation(|path, relations| {
             merged
                 .file_relation_index
-                .insert(entry.key().clone(), entry.value().clone());
-        }
-        for (k, v) in base.file_records.read().iter() {
-            merged.file_records.write().insert(k.clone(), v.clone());
-            for target in base.dependency_graph.get_dependencies(k) {
-                merged.dependency_graph.add_dependency(k, &target);
+                .insert(path.to_string(), RelationEdgeSet::from_edges(relations));
+        });
+        base.for_each_file_record(|path, record| {
+            merged.file_records.write().insert(path.to_string(), record.clone());
+        });
+        base.for_each_dependency(|source, target| {
+            merged.dependency_graph.add_dependency(source, target);
+        });
+        for key in base.stable_symbol_keys() {
+            if let Some(id) = base.entity_id_by_symbol_key(&key) {
+                merged.symbol_key_to_entity.write().insert(key.clone(), id);
+                merged.entity_to_symbol_key.write().insert(id, key.clone());
+                merged
+                    .stable_id_to_entity
+                    .write()
+                    .insert(key.stable_id().0, id);
+                merged
+                    .entity_file_index
+                    .insert(id, key.file_path.clone());
             }
-        }
-        for (k, v) in base.symbol_key_to_entity.read().iter() {
-            merged.symbol_key_to_entity.write().insert(k.clone(), *v);
-        }
-        for (k, v) in base.entity_to_symbol_key.read().iter() {
-            merged.entity_to_symbol_key.write().insert(*k, v.clone());
-        }
-        for (k, v) in base.stable_id_to_entity.read().iter() {
-            merged.stable_id_to_entity.write().insert(k.clone(), *v);
         }
         for delta in &self.deltas {
             merged.apply_delta(delta);
@@ -497,7 +498,10 @@ impl LayeredSnapshotIndex {
             }
         }
 
-        for (file_id, record) in self.base.file_records.read().iter() {
+        let mut base_files = Vec::new();
+        self.base
+            .for_each_file_record(|file_id, record| base_files.push((file_id.to_string(), record.clone())));
+        for (file_id, record) in &base_files {
             let path = normalize_project_path(&record.info.path);
             if removed_files_ever.contains(file_id.as_str()) {
                 continue;
@@ -579,12 +583,14 @@ impl LayeredSnapshotIndex {
                 final_added_entities.insert(added.entity.id, added);
             }
         }
-        for entity_entry in self.base.function_index.iter() {
-            let entity_id = *entity_entry.key();
+        let mut base_entities = Vec::new();
+        self.base
+            .for_each_entity(|id, entity| base_entities.push((id, entity.clone())));
+        for (entity_id, entity) in &base_entities {
+            let entity_id = *entity_id;
             if removed_entities.contains(&entity_id) {
                 continue;
             }
-            let entity = entity_entry.value();
             let key = self
                 .get_symbol_key_by_entity_id(entity_id)
                 .unwrap_or_else(|| self.base.entity_key_or_derived(entity_id));
@@ -638,12 +644,11 @@ impl LayeredSnapshotIndex {
             });
         }
 
-        let mut caller_set: HashSet<EntityId> = self
-            .base
-            .resolved_relation_index
-            .iter()
-            .map(|e| *e.key())
-            .collect();
+        let mut caller_set: HashSet<EntityId> = HashSet::new();
+        self.base
+            .for_each_relation_group(|caller, _| {
+                caller_set.insert(caller);
+            });
         for id in &removed_entities {
             caller_set.remove(id);
         }
@@ -708,12 +713,7 @@ impl LayeredSnapshotIndex {
         }
         for file in &snapshot.files {
             let caller_key = SymbolKey::new(&file.path, "<file>", EntityKind::Module, "<file>");
-            let mut edges: Vec<ResolvedRelation> = self
-                .base
-                .file_relation_index
-                .get(&file.path)
-                .map(|entry| entry.edges.clone())
-                .unwrap_or_default();
+            let mut edges: Vec<ResolvedRelation> = self.base.file_relations_of(&file.path);
             if let Some(diffs) = file_relation_diffs_by_path.get(file.path.as_str()) {
                 for (removed, added) in diffs {
                     for relation in removed.iter() {
@@ -780,7 +780,7 @@ impl LayeredSnapshotIndex {
             })
             .collect();
         for file in &snapshot.files {
-            let mut targets: Vec<String> = self.base.dependency_graph.get_dependencies(&file.path);
+            let mut targets: Vec<String> = self.base.dependencies_of(&file.path);
             for (d, diff_map) in self.deltas.iter().zip(&dependency_diffs_by_delta) {
                 targets.retain(|t| !d.removed_files.contains(t));
                 if let Some(diff) = diff_map.get(file.path.as_str()) {

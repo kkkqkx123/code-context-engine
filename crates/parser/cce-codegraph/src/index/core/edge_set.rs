@@ -123,6 +123,15 @@ pub struct RelationEdgeSet {
 }
 
 impl RelationEdgeSet {
+    /// Rebuild a set from a read-only edge slice (verification/materialization only).
+    pub(crate) fn from_edges(edges: &[ResolvedRelation]) -> Self {
+        let mut set = Self::default();
+        for edge in edges {
+            set.insert(edge.clone());
+        }
+        set
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.edges.len()
     }

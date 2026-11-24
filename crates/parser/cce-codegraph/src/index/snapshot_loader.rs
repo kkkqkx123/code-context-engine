@@ -6,8 +6,8 @@ use cce_types::entity::ParseStatus;
 use cce_types::relation::RelationSnapshotStore;
 use cce_types::{
     CanonicalEntity, CanonicalRelationSnapshot, CanonicalRelationTarget, Entity, EntityId,
-    FileInfo, RelationSnapshotManifest, RelationSnapshotState, ResolvedRelation, StableSymbolKey,
-    StorageError,
+    FileInfo, RelationShardComponents, RelationSnapshotManifest, RelationSnapshotState,
+    ResolvedRelation, ShardEntityRef, StableSymbolKey, StorageError,
 };
 
 use super::core::{ExportInfo, ExportType, RelationIndex};
@@ -38,7 +38,7 @@ impl RelationSnapshotLoader {
             RelationSnapshotState::Ready | RelationSnapshotState::Active => {
                 let snapshot = store.read_snapshot(&manifest)?;
                 Self::validate_manifest(&manifest, &snapshot)?;
-                Self::build_index(&snapshot)
+                Self::build_index(&snapshot, &[])
             }
             RelationSnapshotState::Delta => {
                 let base_epoch = store
@@ -63,7 +63,7 @@ impl RelationSnapshotLoader {
                     })?;
 
                 let base_snapshot = store.read_snapshot(&base_manifest)?;
-                let index = Self::build_index(&base_snapshot)?;
+                let index = Self::build_index(&base_snapshot, &[])?;
 
                 let deltas = store.get_delta_chain(project_id, base_epoch, relation_epoch)?;
                 const DELTA_CHAIN_COMPACTION_THRESHOLD: usize = 10;
@@ -96,7 +96,31 @@ impl RelationSnapshotLoader {
         snapshot
             .validate_versions()
             .map_err(StorageError::Validation)?;
-        Self::build_index(snapshot)
+        Self::build_index(snapshot, &[])
+    }
+
+    /// Assemble one published shard into a read-only index.
+    ///
+    /// Only the shard's canonical rows are materialized. Internal targets that
+    /// live in other shards are registered as identity-only stubs so their
+    /// EntityId and stable key survive without loading those shards.
+    pub(crate) fn build_shard_index(
+        manifest: &RelationSnapshotManifest,
+        components: &RelationShardComponents,
+    ) -> Result<RelationIndex, StorageError> {
+        let mut snapshot = CanonicalRelationSnapshot::new(manifest.config_fingerprint.clone());
+        snapshot.schema_version = manifest.schema_version;
+        snapshot.parser_version = manifest.parser_version;
+        snapshot.resolver_version = manifest.resolver_version;
+        snapshot.path_normalization_version = manifest.path_normalization_version;
+        snapshot.files = components.files.clone();
+        snapshot.entities = components.entities.clone();
+        snapshot.relations = components.relations.clone();
+        snapshot.dependencies = components.dependencies.clone();
+        snapshot.build_metadata.symbol_key_conflict_count = manifest.symbol_key_conflict_count;
+        snapshot.build_metadata.symbol_key_conflict_samples =
+            manifest.symbol_key_conflict_samples.clone();
+        Self::build_index(&snapshot, &components.target_entities)
     }
 
     fn validate_manifest(
@@ -146,7 +170,10 @@ impl RelationSnapshotLoader {
         Ok(())
     }
 
-    fn build_index(snapshot: &CanonicalRelationSnapshot) -> Result<RelationIndex, StorageError> {
+    fn build_index(
+        snapshot: &CanonicalRelationSnapshot,
+        target_entities: &[ShardEntityRef],
+    ) -> Result<RelationIndex, StorageError> {
         let index = RelationIndex::new();
         let mut symbol_ids: HashMap<StableSymbolKey, EntityId> = HashMap::new();
 
@@ -250,6 +277,11 @@ impl RelationSnapshotLoader {
             }
         }
 
+        for stub in target_entities {
+            symbol_ids
+                .entry(stub.key.clone())
+                .or_insert(EntityId(stub.entity_id));
+        }
         for canonical in &snapshot.entities {
             let entity_id = required_id(&symbol_ids, &canonical.key, "entity")?;
             let parent = canonical
@@ -395,6 +427,11 @@ impl RelationSnapshotLoader {
             .entity_id_counter
             .store(max_id + 1, std::sync::atomic::Ordering::Relaxed);
 
+        for stub in target_entities {
+            let id = EntityId(stub.entity_id);
+            index.entity_to_symbol_key.write().insert(id, stub.key.clone());
+            index.entity_file_index.insert(id, stub.file_path.clone());
+        }
         for dependency in &snapshot.dependencies {
             index
                 .dependency_graph
@@ -477,6 +514,27 @@ mod tests {
     }
 
     impl RelationSnapshotStore for StubSnapshotStore {
+        fn read_shard_directory(
+            &self,
+            _project_id: i64,
+            _relation_epoch: i64,
+        ) -> Result<cce_types::ShardDirectory, StorageError> {
+            Err(StorageError::validation(
+                "loader stub does not provide a shard directory",
+            ))
+        }
+
+        fn read_shard_components(
+            &self,
+            _project_id: i64,
+            _relation_epoch: i64,
+            _shard_id: i64,
+        ) -> Result<Option<cce_types::RelationShardComponents>, StorageError> {
+            Err(StorageError::validation(
+                "loader stub does not provide shard components",
+            ))
+        }
+
         fn get_manifest(
             &self,
             project_id: i64,

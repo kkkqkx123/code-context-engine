@@ -385,8 +385,11 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
 
         self.runtime.set_updating().await;
         let integrity = Self::integrity(artifact);
+        let shard_config = cce_types::ShardQueryConfig::default();
 
-        // Build the runtime projection from the in-memory index BEFORE the
+        // Validate the terminal builder before writing the artifact. The
+        // published projection is constructed from the activated epoch so it
+        // owns only its shard directory and bounded LRU.
         // SQLite write  so publication does not re-read what it just
         // persisted. Validation replaces the previous load-back as the
         // integrity check.
@@ -394,12 +397,6 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             self.runtime.report_failure(error.clone()).await;
             return Err(StorageError::Validation(error));
         }
-        // Shared handover: `index` is the round-local terminal builder's
-        // graph, retired at publish and never mutated afterwards, so its maps
-        // are shared zero-copy into the runtime projection. No deep copy is
-        // taken here; the snapshot owns the retired graph.
-        let snapshot_index = Arc::new(RelationSnapshotIndex::from_index_shared(index));
-
         let epoch = match self
             .writer
             .allocate_and_write_artifact(project_id, operation_id, artifact)
@@ -424,9 +421,15 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 self.runtime.report_failure(error.to_string()).await;
                 return Err(error);
             }
+            let published = RelationSnapshotIndex::from_store(
+                Arc::new(self.store.clone()),
+                project_id,
+                epoch,
+                shard_config.clone(),
+            )?;
             self.runtime
                 .publish_snapshot(
-                    Arc::clone(&snapshot_index),
+                    Arc::clone(&published),
                     epoch,
                     integrity,
                     Some(operation_id.to_string()),
@@ -434,9 +437,15 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 .await;
         }
 
+        let published = RelationSnapshotIndex::from_store(
+            Arc::new(self.store.clone()),
+            project_id,
+            epoch,
+            shard_config,
+        )?;
         Ok(RelationPublication {
             relation_epoch: epoch,
-            snapshot: Arc::new(LayeredSnapshotIndex::new(snapshot_index)),
+            snapshot: Arc::new(LayeredSnapshotIndex::new(published)),
         })
     }
 
@@ -490,16 +499,18 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 // `detached_clone` is reserved for scenarios that genuinely
                 // need an independent mutable copy (e.g. compaction)
                 let loaded =
-                    match RelationSnapshotLoader::load(&self.store, project_id, delta.base_epoch) {
-                        Ok(index) => index,
+                    match RelationSnapshotIndex::from_store(
+                        Arc::new(self.store.clone()),
+                        project_id,
+                        delta.base_epoch,
+                        cce_types::ShardQueryConfig::default(),
+                    ) {
+                        Ok(base) => LayeredSnapshotIndex::new(Arc::new(base)),
                         Err(error) => {
                             self.runtime.report_failure(error.to_string()).await;
                             return Err(error);
                         }
-                    };
-                LayeredSnapshotIndex::new(Arc::new(RelationSnapshotIndex::from_index_shared(
-                    &loaded,
-                )))
+                    }
             }
         };
 

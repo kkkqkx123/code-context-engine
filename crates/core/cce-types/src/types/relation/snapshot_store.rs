@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use crate::types::relation::{CanonicalRelationSnapshot, SymbolKeyConflictRecord};
+use crate::types::relation::{
+    CanonicalRelationSnapshot, RelationShardComponents, ShardDirectory, SymbolKeyConflictRecord,
+};
 use crate::types::{SnapshotDelta, StorageError};
 
 /// Lifecycle state of a persisted relation snapshot epoch
@@ -83,11 +85,30 @@ pub trait RelationSnapshotStore: Send + Sync {
         epoch: i64,
     ) -> Result<Option<RelationSnapshotManifest>, StorageError>;
 
-    /// Read the full snapshot referenced by a manifest
+    /// Read the full snapshot referenced by a manifest.
+    ///
+    /// Verification and compaction only; the query runtime uses the shard
+    /// directory and per-shard components instead.
     fn read_snapshot(
         &self,
         manifest: &RelationSnapshotManifest,
     ) -> Result<CanonicalRelationSnapshot, StorageError>;
+
+    /// Read the lightweight routing directory of one canonical epoch.
+    fn read_shard_directory(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<ShardDirectory, StorageError>;
+
+    /// Read the canonical rows of one shard. `None` means the shard does not
+    /// belong to this epoch; empty components are a valid shard.
+    fn read_shard_components(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+        shard_id: i64,
+    ) -> Result<Option<RelationShardComponents>, StorageError>;
 
     /// Walk the delta chain backwards to find the nearest base epoch
     fn find_base_epoch(
@@ -120,6 +141,23 @@ impl<T: RelationSnapshotStore + ?Sized> RelationSnapshotStore for Arc<T> {
         manifest: &RelationSnapshotManifest,
     ) -> Result<CanonicalRelationSnapshot, StorageError> {
         T::read_snapshot(self.as_ref(), manifest)
+    }
+
+    fn read_shard_directory(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<ShardDirectory, StorageError> {
+        T::read_shard_directory(self.as_ref(), project_id, relation_epoch)
+    }
+
+    fn read_shard_components(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+        shard_id: i64,
+    ) -> Result<Option<RelationShardComponents>, StorageError> {
+        T::read_shard_components(self.as_ref(), project_id, relation_epoch, shard_id)
     }
 
     fn find_base_epoch(

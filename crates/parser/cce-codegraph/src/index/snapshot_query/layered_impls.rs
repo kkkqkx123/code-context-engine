@@ -630,19 +630,19 @@ impl SnapshotSymbolQueryOps for LayeredSnapshotIndex {
         // This handles cases where the symbol key's file_path differs from the
         // entity's registered file path (e.g. exports referencing an entity
         // registered under a different file).
-        for entry in self.base.function_index.iter() {
-            if entry.value().name == key.scoped_name {
-                let entity_id = *entry.key();
-                if !self
+        let mut fallback = None;
+        self.base.for_each_entity(|entity_id, entity| {
+            if fallback.is_none()
+                && entity.name == key.scoped_name
+                && !self
                     .deltas
                     .iter()
                     .any(|d| d.removed_entities.contains(&entity_id))
-                {
-                    return Some(entity_id);
-                }
+            {
+                fallback = Some(entity_id);
             }
-        }
-        None
+        });
+        fallback
     }
 
     fn get_entity_id_by_stable_symbol_id(&self, stable_id: &str) -> Option<EntityId> {
@@ -737,7 +737,7 @@ impl super::TransitiveFileQueryOps for LayeredSnapshotIndex {
                         }
                     }
                 }
-                for dep in self.base.dependency_graph.get_dependents(cur) {
+                for dep in self.base.dependents_of(cur) {
                     if visited.insert(dep.clone()) {
                         result.insert(dep.clone());
                         next_queue.push(dep);
@@ -783,7 +783,7 @@ impl super::TransitiveFileQueryOps for LayeredSnapshotIndex {
                         }
                     }
                 }
-                for dep in self.base.dependency_graph.get_dependencies(cur) {
+                for dep in self.base.dependencies_of(cur) {
                     if visited.insert(dep.clone()) {
                         result.insert(dep.clone());
                         next_queue.push(dep);

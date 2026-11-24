@@ -1,7 +1,10 @@
 //! Deterministic backend handle for metadata persistence.
 
 use cce_types::relation::RelationSnapshotStore;
-use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta, StorageError};
+use cce_types::{
+    CanonicalRelationSnapshot, RelationShardComponents, RelationSnapshotManifest, ShardDirectory,
+    SnapshotDelta, StorageError,
+};
 
 /// A metadata persistence handle with exactly one active backend branch.
 ///
@@ -82,6 +85,29 @@ where
         match self {
             Self::Local(store) => store.read_snapshot(manifest),
             Self::Remote(store) => store.read_snapshot(manifest),
+        }
+    }
+
+    fn read_shard_directory(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<ShardDirectory, StorageError> {
+        match self {
+            Self::Local(store) => store.read_shard_directory(project_id, relation_epoch),
+            Self::Remote(store) => store.read_shard_directory(project_id, relation_epoch),
+        }
+    }
+
+    fn read_shard_components(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+        shard_id: i64,
+    ) -> Result<Option<RelationShardComponents>, StorageError> {
+        match self {
+            Self::Local(store) => store.read_shard_components(project_id, relation_epoch, shard_id),
+            Self::Remote(store) => store.read_shard_components(project_id, relation_epoch, shard_id),
         }
     }
 

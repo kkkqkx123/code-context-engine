@@ -132,18 +132,22 @@ impl super::CodeContextEngine {
             }
         }
 
+        let shard_config = self
+            .project_registry
+            .get_or_load(project_id)
+            .await
+            .map(|entry| entry.config.relation.shard.clone())
+            .unwrap_or_default();
         runtime.set_updating().await;
-        match cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            &store,
+        match cce_codegraph::index::RelationSnapshotIndex::from_store(
+            Arc::new(store),
             project_id,
             active_epoch,
+            shard_config,
         ) {
-            Ok(index) => {
-                // The loaded index is local to this refresh and never mutated
-                // afterwards, so share its maps zero-copy into the snapshot
-                // instead of deep-copying the whole graph
-                let snapshot_index =
-                    cce_codegraph::index::RelationSnapshotIndex::from_index_shared(&index);
+            Ok(snapshot_index) => {
+                // The published view holds only a bounded shard directory and
+                // LRU; no full graph is loaded on the cold path.
                 runtime
                     .publish_snapshot(
                         Arc::new(snapshot_index),

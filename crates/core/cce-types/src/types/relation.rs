@@ -27,6 +27,7 @@ pub mod classification;
 pub mod resolution;
 pub mod resolved;
 pub mod snapshot_artifact;
+pub mod snapshot_shard;
 pub mod snapshot_store;
 pub mod target;
 
@@ -46,9 +47,15 @@ pub use resolution::{
 };
 pub use resolved::{RelationSymbolLocation, RelationSymbolRecord, ResolvedRelation};
 pub use snapshot_artifact::{
-    CanonicalComponentBatch, CanonicalSnapshotArtifact, DEFAULT_FINGERPRINT_CHUNK_BYTES,
-    DEFAULT_SNAPSHOT_BATCH_ITEMS, SnapshotArtifactBuilder, SnapshotArtifactCounts,
-    SnapshotArtifactHeader, SnapshotArtifactOptions, SnapshotBatchReader,
+    CanonicalComponentBatch, CanonicalSnapshotArtifact, DEFAULT_ARTIFACT_MAX_SHARD_ITEMS,
+    DEFAULT_FINGERPRINT_CHUNK_BYTES, DEFAULT_SNAPSHOT_BATCH_ITEMS, SnapshotArtifactBuilder,
+    SnapshotArtifactCounts, SnapshotArtifactHeader, SnapshotArtifactOptions, SnapshotBatchReader,
+};
+pub use snapshot_shard::{
+    DEFAULT_MAX_SHARD_ITEMS, DEFAULT_SHARD_LRU_BYTES, DEFAULT_SHARD_LRU_SHARDS,
+    DEFAULT_SHARD_QUERY_SHARDS, RelationShardComponents, RelationShardDescriptor,
+    SHARD_SLOT_COUNT, ShardDirectory, ShardEntityRef, ShardLocation, ShardQueryConfig,
+    SnapshotShardPlan, external_call_type_json, plan_snapshot_shards, shard_slot,
 };
 pub use snapshot_store::{RelationSnapshotManifest, RelationSnapshotState, RelationSnapshotStore};
 pub use target::RelationTarget;

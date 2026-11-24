@@ -1,0 +1,452 @@
+[package]
+name = "cce-e2e-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-text = { path = "../../core/cce-text" }
+cce-plugin = { path = "../../core/cce-plugin" }
+cce-llm = { path = "../../core/cce-llm" }
+cce-parser = { path = "../../parser/cce-parser" }
+cce-codegraph = { path = "../../parser/cce-codegraph" }
+cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
+cce-storage-common = { path = "../../infra/cce-storage-common" }
+cce-storage-vector-local = { path = "../../infra/cce-storage-vector-local" }
+cce-storage-vector-qdrant = { path = "../../infra/cce-storage-vector-qdrant" }
+cce-storage-metadb-sqlite = { path = "../../infra/cce-storage-metadb-sqlite" }
+cce-scanner = { path = "../../infra/cce-scanner" }
+cce-llm-client = { path = "../../infra/cce-llm-client" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-plugin-runtime = { path = "../cce-plugin-runtime" }
+cce-orchestrator = { path = "../cce-orchestrator" }
+chrono = { workspace = true }
+compact_str = { workspace = true }
+dashmap = { workspace = true }
+dotenvy = { workspace = true }
+rkyv = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+cce-bench-kit = { version = "0.1.0", path = "../../bench/cce-bench-kit" }
+
+[[example]]
+name = "rust_basic"
+path = "examples/rust/basic.rs"
+
+[[example]]
+name = "export_rs"
+path = "examples/rust/export_rs.rs"
+
+[[example]]
+name = "java_spring_boot_export"
+path = "examples/java/spring_boot_export.rs"
+
+[[example]]
+name = "multi_language_basic"
+path = "examples/multi_language/basic.rs"
+
+[[example]]
+name = "gen_bench_oncecell"
+path = "examples/rust/gen_bench_oncecell.rs"
+
+[[example]]
+name = "gen_bench_ripgrep"
+path = "examples/rust/gen_bench_ripgrep.rs"
+
+[[example]]
+name = "debug_matrix"
+path = "examples/rust/debug_matrix.rs"
+
+[[example]]
+name = "dump_retrieval"
+path = "examples/rust/dump_retrieval.rs"
+
+[[example]]
+name = "benchmark_oncecell"
+path = "examples/rust/benchmark_oncecell.rs"
+
+[[example]]
+name = "cross_language_oncecell"
+path = "examples/rust/cross_language_oncecell.rs"
+
+[[example]]
+name = "benchmark_ripgrep"
+path = "examples/rust/benchmark_ripgrep.rs"
+
+[[example]]
+name = "bm25_para_ripgrep"
+path = "examples/rust/bm25_para_ripgrep.rs"
+
+[[example]]
+name = "bm25_para_oncecell"
+path = "examples/rust/bm25_para_oncecell.rs"
+
+[[example]]
+name = "bm25_para_flask"
+path = "examples/python/bm25_para_flask.rs"
+
+[[example]]
+name = "bm25_para_express"
+path = "examples/javascript/bm25_para_express.rs"
+
+[[example]]
+name = "bm25_para_gin"
+path = "examples/go/bm25_para_gin.rs"
+
+[[example]]
+name = "bm25_para_spring_boot"
+path = "examples/java/bm25_para_spring_boot.rs"
+
+[[example]]
+name = "bm25_para_jackson_core"
+path = "examples/java/bm25_para_jackson_core.rs"
+
+[[example]]
+name = "bm25_para_mediatr"
+path = "examples/csharp/bm25_para_mediatr.rs"
+
+[[example]]
+name = "bm25_para_media_server"
+path = "examples/cpp/bm25_para_media_server.rs"
+
+[[example]]
+name = "gen_bench_flask"
+path = "examples/python/gen_bench_flask.rs"
+
+[[example]]
+name = "benchmark_flask"
+path = "examples/python/benchmark_flask.rs"
+
+[[example]]
+name = "gen_bench_gin"
+path = "examples/go/gen_bench_gin.rs"
+
+[[example]]
+name = "benchmark_gin"
+path = "examples/go/benchmark_gin.rs"
+
+[[example]]
+name = "gen_bench_express"
+path = "examples/javascript/gen_bench_express.rs"
+
+[[example]]
+name = "benchmark_express"
+path = "examples/javascript/benchmark_express.rs"
+
+[[example]]
+name = "gen_bench_spring_boot"
+path = "examples/java/gen_bench_spring_boot.rs"
+
+[[example]]
+name = "benchmark_spring_boot"
+path = "examples/java/benchmark_spring_boot.rs"
+
+[[example]]
+name = "gen_bench_jackson_core"
+path = "examples/java/gen_bench_jackson_core.rs"
+
+[[example]]
+name = "benchmark_jackson_core"
+path = "examples/java/benchmark_jackson_core.rs"
+
+[[example]]
+name = "gen_bench_mediatr"
+path = "examples/csharp/gen_bench_mediatr.rs"
+
+[[example]]
+name = "benchmark_mediatr"
+path = "examples/csharp/benchmark_mediatr.rs"
+
+[[example]]
+name = "export_py"
+path = "examples/python/export_py.rs"
+
+[[example]]
+name = "dump_document_chunks"
+path = "examples/rust/dump_document_chunks.rs"
+
+[[example]]
+name = "dbg_bm25_ranked"
+path = "examples/rust/dbg_bm25_ranked.rs"
+
+[[example]]
+name = "dbg_direct_chunks"
+path = "examples/rust/dbg_direct_chunks.rs"
+
+[[example]]
+name = "export_doc"
+path = "examples/rust/export_doc.rs"
+
+[[example]]
+name = "summary_doc"
+path = "examples/rust/summary_doc.rs"
+
+[[example]]
+name = "benchmark_retrieval_oncecell"
+path = "examples/rust/benchmark_retrieval_oncecell.rs"
+
+[[example]]
+name = "benchmark_retrieval_ripgrep"
+path = "examples/rust/benchmark_retrieval_ripgrep.rs"
+
+[[example]]
+name = "benchmark_retrieval_flask"
+path = "examples/python/benchmark_retrieval_flask.rs"
+
+[[example]]
+name = "benchmark_retrieval_express"
+path = "examples/javascript/benchmark_retrieval_express.rs"
+
+[[example]]
+name = "benchmark_retrieval_gin"
+path = "examples/go/benchmark_retrieval_gin.rs"
+
+[[example]]
+name = "benchmark_retrieval_spring_boot"
+path = "examples/java/benchmark_retrieval_spring_boot.rs"
+
+[[example]]
+name = "benchmark_retrieval_jackson_core"
+path = "examples/java/benchmark_retrieval_jackson_core.rs"
+
+[[example]]
+name = "benchmark_retrieval_mediatr"
+path = "examples/csharp/benchmark_retrieval_mediatr.rs"
+
+[[example]]
+name = "benchmark_retrieval_media_server"
+path = "examples/cpp/benchmark_retrieval_media_server.rs"
+
+[[example]]
+name = "benchmark_agg_oncecell"
+path = "examples/rust/benchmark_agg_oncecell.rs"
+
+[[example]]
+name = "benchmark_agg_ripgrep"
+path = "examples/rust/benchmark_agg_ripgrep.rs"
+
+[[example]]
+name = "benchmark_agg_flask"
+path = "examples/rust/benchmark_agg_flask.rs"
+
+[[example]]
+name = "alignment_report"
+path = "examples/rust/alignment_report.rs"
+
+[[example]]
+name = "gen_rerank_oncecell"
+path = "examples/rust/gen_rerank_oncecell.rs"
+
+[[example]]
+name = "benchmark_rerank_oncecell"
+path = "examples/rust/benchmark_rerank_oncecell.rs"
+
+[[example]]
+name = "zz_diag_rerank"
+path = "examples/rust/zz_diag_rerank.rs"
+
+[[example]]
+name = "debug_convert"
+path = "examples/rust/debug_convert.rs"
+
+[[example]]
+name = "export_cs"
+path = "examples/csharp/export_cs.rs"
+
+[[example]]
+name = "export_java"
+path = "examples/java/export_java.rs"
+
+[[example]]
+name = "export_go"
+path = "examples/go/export_go.rs"
+
+[[example]]
+name = "export_js"
+path = "examples/javascript/export_js.rs"
+
+[[example]]
+name = "export_type_inference"
+path = "examples/type_inference/export_type_inference.rs"
+
+[[example]]
+name = "export_ts"
+path = "examples/typescript/export_ts.rs"
+
+[[example]]
+name = "export_kt"
+path = "examples/kotlin/export_kt.rs"
+
+[[example]]
+name = "export_php"
+path = "examples/php/export_php.rs"
+
+[[example]]
+name = "export_rb"
+path = "examples/ruby/export_rb.rs"
+
+[[example]]
+name = "export_lua"
+path = "examples/lua/export_lua.rs"
+
+[[example]]
+name = "export_dart"
+path = "examples/dart/export_dart.rs"
+
+[[example]]
+name = "export_scala"
+path = "examples/scala/export_scala.rs"
+
+[[example]]
+name = "export_c"
+path = "examples/c/export_c.rs"
+
+[[example]]
+name = "export_cpp"
+path = "examples/cpp/export_cpp.rs"
+
+[[example]]
+name = "dump_media_server"
+path = "examples/cpp/dump_media_server.rs"
+
+[[example]]
+name = "gen_bench_media_server"
+path = "examples/cpp/gen_bench_media_server.rs"
+
+[[example]]
+name = "benchmark_media_server"
+path = "examples/cpp/benchmark_media_server.rs"
+
+[[example]]
+name = "export_sh"
+path = "examples/bash/export_sh.rs"
+
+[[example]]
+name = "annotation_oncecell"
+path = "examples/rust/annotation_oncecell.rs"
+
+[[example]]
+name = "annotation_ripgrep"
+path = "examples/rust/annotation_ripgrep.rs"
+
+[[example]]
+name = "annotation_flask"
+path = "examples/python/annotation_flask.rs"
+
+[[example]]
+name = "annotation_gin"
+path = "examples/go/annotation_gin.rs"
+
+[[example]]
+name = "annotation_express"
+path = "examples/javascript/annotation_express.rs"
+
+[[example]]
+name = "annotation_spring_boot"
+path = "examples/java/annotation_spring_boot.rs"
+
+[[example]]
+name = "annotation_mediatr"
+path = "examples/csharp/annotation_mediatr.rs"
+
+[[example]]
+name = "export_file_fold"
+path = "examples/tools/export_file_fold.rs"
+
+[[example]]
+name = "query_review_oncecell"
+path = "examples/rust/query_review_oncecell.rs"
+
+[[example]]
+name = "query_review_flask"
+path = "examples/python/query_review_flask.rs"
+
+[[example]]
+name = "query_review_ripgrep"
+path = "examples/rust/query_review_ripgrep.rs"
+
+[[example]]
+name = "query_review_express"
+path = "examples/javascript/query_review_express.rs"
+
+[[example]]
+name = "query_review_gin"
+path = "examples/go/query_review_gin.rs"
+
+[[example]]
+name = "query_review_spring_boot"
+path = "examples/java/query_review_spring_boot.rs"
+
+[[example]]
+name = "query_review_jackson_core"
+path = "examples/java/query_review_jackson_core.rs"
+
+[[example]]
+name = "query_review_mediatr"
+path = "examples/csharp/query_review_mediatr.rs"
+
+[[example]]
+name = "query_review_media_server"
+path = "examples/cpp/query_review_media_server.rs"
+
+[[example]]
+name = "relation_review_oncecell"
+path = "examples/rust/relation_review_oncecell.rs"
+
+[[example]]
+name = "relation_review_flask"
+path = "examples/python/relation_review_flask.rs"
+
+[[example]]
+name = "relation_review_ripgrep"
+path = "examples/rust/relation_review_ripgrep.rs"
+
+[[example]]
+name = "relation_review_express"
+path = "examples/javascript/relation_review_express.rs"
+
+[[example]]
+name = "relation_review_gin"
+path = "examples/go/relation_review_gin.rs"
+
+[[example]]
+name = "relation_review_spring_boot"
+path = "examples/java/relation_review_spring_boot.rs"
+
+[[example]]
+name = "relation_review_jackson_core"
+path = "examples/java/relation_review_jackson_core.rs"
+
+[[example]]
+name = "relation_review_mediatr"
+path = "examples/csharp/relation_review_mediatr.rs"
+
+[[example]]
+name = "relation_review_media_server"
+path = "examples/cpp/relation_review_media_server.rs"
+
+[[example]]
+name = "dbg_group_shape"
+path = "examples/python/dbg_group_shape.rs"
+
+[[example]]
+name = "judgment_range_check"
+path = "examples/judgment_range_check.rs"
+
+[[example]]
+name = "full_pipeline_perf"
+path = "examples/full_pipeline_perf.rs"

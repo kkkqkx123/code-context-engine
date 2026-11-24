@@ -282,17 +282,18 @@ impl NlDocumentUpdateProcessor {
         if *cache == Some(epoch) {
             return Ok(());
         }
-        match RelationSnapshotLoader::load(&store, self.project_id, epoch) {
-            Ok(index) => {
+        match cce_codegraph::index::RelationSnapshotIndex::from_store(
+            Arc::new(store),
+            self.project_id,
+            epoch,
+            cce_types::ShardQueryConfig::default(),
+        ) {
+            Ok(snapshot) => {
                 let exporter = self.exporter().await;
                 let enhancer_config = cce_export::RelationEnhancerConfig::default();
-                // The loaded index is owned by this refresh and never mutated
-                // afterwards, so its maps can be shared into the snapshot
-                // without a deep copy.
-                let snapshot = Arc::new(
-                    cce_codegraph::index::RelationSnapshotIndex::from_index_shared(&index),
-                );
-                let layered = Arc::new(cce_codegraph::index::LayeredSnapshotIndex::new(snapshot));
+                let layered = Arc::new(cce_codegraph::index::LayeredSnapshotIndex::new(
+                    Arc::new(snapshot),
+                ));
                 exporter.set_relation_enhancement(layered, enhancer_config);
                 *cache = Some(epoch);
                 tracing::info!(

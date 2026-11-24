@@ -11,7 +11,10 @@ use std::sync::mpsc;
 use super::PostgresClient;
 use cce_storage_common::MetadataStorage;
 use cce_types::relation::RelationSnapshotStore;
-use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta, StorageError};
+use cce_types::{
+    CanonicalRelationSnapshot, RelationShardComponents, RelationSnapshotManifest, ShardDirectory,
+    SnapshotDelta, StorageError,
+};
 
 impl RelationSnapshotStore for PostgresClient {
     fn get_manifest(
@@ -33,6 +36,33 @@ impl RelationSnapshotStore for PostgresClient {
         let project_id = manifest.project_id;
         let epoch = manifest.relation_epoch;
         block_on(async move { MetadataStorage::snapshot_read(&client, project_id, epoch).await })
+    }
+
+    fn read_shard_directory(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<ShardDirectory, StorageError> {
+        let client = self.clone();
+        block_on(async move {
+            client
+                .snapshot_shard_directory(project_id, relation_epoch)
+                .await
+        })
+    }
+
+    fn read_shard_components(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+        shard_id: i64,
+    ) -> Result<Option<RelationShardComponents>, StorageError> {
+        let client = self.clone();
+        block_on(async move {
+            client
+                .snapshot_shard_components(project_id, relation_epoch, shard_id)
+                .await
+        })
     }
 
     fn find_base_epoch(

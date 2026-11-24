@@ -23,6 +23,8 @@ use crate::types::{CanonicalRelationSnapshot, StorageError};
 
 pub const DEFAULT_SNAPSHOT_BATCH_ITEMS: usize = 512;
 pub const DEFAULT_FINGERPRINT_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+pub const DEFAULT_ARTIFACT_MAX_SHARD_ITEMS: usize =
+    super::snapshot_shard::DEFAULT_MAX_SHARD_ITEMS;
 
 static ARTIFACT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -203,6 +205,7 @@ pub struct CanonicalSnapshotArtifact {
     snapshot_fingerprint: String,
     write_batches: u64,
     buffer_peak_bytes: u64,
+    options: SnapshotArtifactOptions,
 }
 
 impl Drop for CanonicalSnapshotArtifact {
@@ -234,6 +237,10 @@ impl CanonicalSnapshotArtifact {
 
     pub fn buffer_peak_bytes(&self) -> u64 {
         self.buffer_peak_bytes
+    }
+
+    pub fn options(&self) -> SnapshotArtifactOptions {
+        self.options
     }
 
     pub fn batches(&self, batch_items: usize) -> SnapshotBatchReader {
@@ -309,12 +316,22 @@ impl CanonicalSnapshotArtifact {
 #[derive(Debug, Clone, Copy)]
 pub struct SnapshotArtifactOptions {
     pub fingerprint_chunk_bytes: usize,
+    /// Explicit item budget used to build the shard directory at write time.
+    pub max_shard_items: usize,
+}
+
+impl SnapshotArtifactOptions {
+    pub fn with_shard_items(mut self, max_shard_items: usize) -> Self {
+        self.max_shard_items = max_shard_items;
+        self
+    }
 }
 
 impl Default for SnapshotArtifactOptions {
     fn default() -> Self {
         Self {
             fingerprint_chunk_bytes: DEFAULT_FINGERPRINT_CHUNK_BYTES,
+            max_shard_items: DEFAULT_ARTIFACT_MAX_SHARD_ITEMS,
         }
     }
 }
@@ -335,6 +352,7 @@ pub struct SnapshotArtifactBuilder {
     relation_sort: ExternalSorter,
     dependency_sort: ExternalSorter,
     buffer_peak_bytes: u64,
+    options: SnapshotArtifactOptions,
 }
 
 impl SnapshotArtifactBuilder {
@@ -361,6 +379,7 @@ impl SnapshotArtifactBuilder {
             header,
             counts: SnapshotArtifactCounts::default(),
             buffer_peak_bytes: 0,
+            options,
         })
     }
 
@@ -464,6 +483,7 @@ impl SnapshotArtifactBuilder {
             snapshot_fingerprint,
             write_batches,
             buffer_peak_bytes: self.buffer_peak_bytes,
+            options: self.options,
         })
     }
 }
@@ -629,6 +649,7 @@ mod tests {
             &snapshot,
             SnapshotArtifactOptions {
                 fingerprint_chunk_bytes: 128,
+                max_shard_items: 2,
             },
         )
         .expect("artifact should build");

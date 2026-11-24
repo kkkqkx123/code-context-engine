@@ -2,6 +2,7 @@
 
 mod snapshot_delta;
 mod snapshot_reader;
+mod snapshot_shard_reader;
 mod snapshot_writer;
 
 use std::collections::HashMap;

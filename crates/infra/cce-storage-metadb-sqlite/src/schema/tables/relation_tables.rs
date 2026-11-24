@@ -33,6 +33,22 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
          );
          CREATE UNIQUE INDEX IF NOT EXISTS idx_relation_manifest_operation
             ON relation_snapshot_manifest(project_id, operation_id);
+         CREATE TABLE IF NOT EXISTS relation_snapshot_shards (
+            project_id INTEGER NOT NULL,
+            relation_epoch INTEGER NOT NULL,
+            shard_id INTEGER NOT NULL,
+            file_count INTEGER NOT NULL,
+            entity_count INTEGER NOT NULL,
+            relation_count INTEGER NOT NULL,
+            dependency_count INTEGER NOT NULL,
+            estimated_bytes INTEGER NOT NULL,
+            path_start TEXT NOT NULL,
+            path_end TEXT NOT NULL,
+            PRIMARY KEY(project_id, relation_epoch, shard_id),
+            FOREIGN KEY(project_id, relation_epoch)
+                REFERENCES relation_snapshot_manifest(project_id, relation_epoch)
+                ON DELETE CASCADE
+         );
          CREATE TABLE IF NOT EXISTS relation_snapshot_files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
@@ -42,6 +58,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             input_hash TEXT NOT NULL,
             file_size INTEGER NOT NULL,
             imports_json TEXT NOT NULL,
+            shard_id INTEGER NOT NULL DEFAULT 0,
             UNIQUE(project_id, relation_epoch, path),
             FOREIGN KEY(project_id, relation_epoch)
                 REFERENCES relation_snapshot_manifest(project_id, relation_epoch)
@@ -56,6 +73,8 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             kind_json TEXT NOT NULL,
             overload_discriminator TEXT NOT NULL,
             entity_id INTEGER,
+            stable_id TEXT,
+            shard_id INTEGER NOT NULL DEFAULT 0,
             name TEXT NOT NULL,
             signature TEXT NOT NULL,
             parameters_json TEXT NOT NULL,
@@ -108,6 +127,12 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             ON relation_snapshot_relations(project_id, relation_epoch, caller_symbol_id);
          CREATE INDEX IF NOT EXISTS idx_relation_snapshot_relations_target
             ON relation_snapshot_relations(project_id, relation_epoch, target_symbol_id);
+         CREATE INDEX IF NOT EXISTS idx_relation_snapshot_entities_stable_id
+            ON relation_snapshot_entities(project_id, relation_epoch, stable_id);
+         CREATE INDEX IF NOT EXISTS idx_relation_snapshot_entities_shard
+            ON relation_snapshot_entities(project_id, relation_epoch, shard_id);
+         CREATE INDEX IF NOT EXISTS idx_relation_snapshot_files_shard
+            ON relation_snapshot_files(project_id, relation_epoch, shard_id);
          CREATE TABLE IF NOT EXISTS relation_snapshot_exports (
             project_id INTEGER NOT NULL,
             relation_epoch INTEGER NOT NULL,

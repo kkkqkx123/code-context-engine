@@ -1,195 +1,129 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::index::core::SymbolKey;
-use crate::index::view::{RelationIndexView, fingerprint_in_files_from_maps};
+use crate::index::snapshot_index::RelationSnapshotIndex;
+use crate::index::view::RelationIndexView;
 use crate::types::ExportInfo;
 use cce_types::{Entity, EntityId, FileInfo, ImportTable, ResolvedRelation};
 
-impl RelationIndexView for crate::index::snapshot_index::RelationSnapshotIndex {
+impl RelationIndexView for RelationSnapshotIndex {
     fn file_contains(&self, path: &str) -> bool {
-        self.file_records.read().contains_key(path)
+        RelationSnapshotIndex::contains_file(self, path)
     }
 
     fn for_each_file<F: FnMut(&str, &FileInfo)>(&self, mut f: F) {
-        let guard = self.file_records.read();
-        for (path, record) in guard.iter() {
-            f(path, &record.info);
-        }
+        self.for_each_file_record(|path, record| f(path, &record.info));
     }
 
     fn function_contains(&self, id: EntityId) -> bool {
-        self.function_index.contains_key(&id)
+        RelationSnapshotIndex::contains_function(self, id)
     }
 
-    fn for_each_function<F: FnMut(EntityId, &Entity)>(&self, mut f: F) {
-        for entry in self.function_index.iter() {
-            f(*entry.key(), entry.value());
-        }
+    fn for_each_function<F: FnMut(EntityId, &Entity)>(&self, f: F) {
+        self.for_each_entity(f);
     }
 
     fn entity_file_of(&self, id: EntityId) -> Option<String> {
-        self.entity_file_index.get(&id).map(|v| v.clone())
+        self.file_path_of(id)
     }
 
     fn relations_of(&self, caller: EntityId) -> Option<Vec<ResolvedRelation>> {
-        self.resolved_relation_index
-            .get(&caller)
-            .map(|v| v.edges.clone())
+        RelationSnapshotIndex::relations_of(self, caller)
     }
 
-    fn for_each_resolved_relation<F: FnMut(EntityId, &[ResolvedRelation])>(&self, mut f: F) {
-        for entry in self.resolved_relation_index.iter() {
-            f(*entry.key(), &entry.value().edges);
-        }
+    fn for_each_resolved_relation<F: FnMut(EntityId, &[ResolvedRelation])>(&self, f: F) {
+        self.for_each_relation_group(f);
     }
 
     fn file_relations_of(&self, path: &str) -> Vec<ResolvedRelation> {
-        self.file_relation_index
-            .get(path)
-            .map(|v| v.edges.clone())
-            .unwrap_or_default()
+        RelationSnapshotIndex::file_relations_of(self, path)
     }
 
-    fn for_each_file_relation<F: FnMut(&str, &[ResolvedRelation])>(&self, mut f: F) {
-        for entry in self.file_relation_index.iter() {
-            f(entry.key(), &entry.value().edges);
-        }
+    fn for_each_file_relation<F: FnMut(&str, &[ResolvedRelation])>(&self, f: F) {
+        self.for_each_file_relation(f);
     }
 
     fn callers_of(&self, callee: EntityId) -> Vec<EntityId> {
-        // Both reverse maps are built from the resolved relation set and are
-        // therefore authoritative: a miss means no callers.
-        if let Some(callers) = self.reverse_callee_index.get(&callee) {
-            return callers.clone();
-        }
-        if let Some(callers) = self.query_optimized.get_callers(callee) {
-            return callers.clone();
-        }
-        Vec::new()
+        RelationSnapshotIndex::callers_of(self, callee)
     }
 
     fn imports_of(&self, path: &str) -> Option<ImportTable> {
-        self.file_records
-            .read()
-            .get(path)
-            .map(|r| r.imports.clone())
+        RelationSnapshotIndex::get_import_table(self, path)
     }
 
     fn for_each_import<F: FnMut(&str, &ImportTable)>(&self, mut f: F) {
-        let guard = self.file_records.read();
-        for (path, record) in guard.iter() {
-            f(path, &record.imports);
-        }
+        self.for_each_file_record(|path, record| f(path, &record.imports));
     }
 
     fn exports_of(&self, path: &str) -> Option<Vec<ExportInfo>> {
-        self.file_records
-            .read()
-            .get(path)
-            .map(|r| r.exports.iter().cloned().collect())
+        RelationSnapshotIndex::get_exports(self, path)
     }
 
     fn for_each_export<F: FnMut(&str, &[ExportInfo])>(&self, mut f: F) {
-        let guard = self.file_records.read();
-        for (path, record) in guard.iter() {
-            f(path, &record.exports);
-        }
+        self.for_each_file_record(|path, record| {
+            let exports: Vec<ExportInfo> = record.exports.iter().cloned().collect();
+            f(path, &exports);
+        });
     }
 
     fn symbol_key_of(&self, id: EntityId) -> Option<SymbolKey> {
-        self.entity_to_symbol_key.read().get(&id).cloned()
+        RelationSnapshotIndex::symbol_key_of(self, id)
     }
 
     fn dependency_files(&self) -> Vec<String> {
-        self.dependency_graph.get_all_files()
+        RelationSnapshotIndex::dependency_files(self)
     }
 
     fn dependencies_of(&self, source: &str) -> Vec<String> {
-        self.dependency_graph.get_dependencies(source)
+        RelationSnapshotIndex::dependencies_of(self, source)
     }
 
     fn dependents_of(&self, file: &str) -> Vec<String> {
-        self.dependency_graph.get_dependents(file)
+        RelationSnapshotIndex::dependents_of(self, file)
     }
 
     fn collect_transitive_dependents(&self, file: &str, max_depth: usize) -> Vec<String> {
-        self.dependency_graph
-            .collect_transitive_dependents(file, max_depth)
+        RelationSnapshotIndex::collect_transitive_dependents(self, file, max_depth)
     }
 
     fn collect_transitive_dependencies(&self, file: &str, max_depth: usize) -> Vec<String> {
-        self.dependency_graph
-            .collect_transitive_dependencies(file, max_depth)
+        RelationSnapshotIndex::collect_transitive_dependencies(self, file, max_depth)
     }
 
     fn entities_by_file(&self) -> HashMap<String, Vec<Entity>> {
         let mut grouped: HashMap<String, Vec<Entity>> = HashMap::new();
-        for entry in self.entity_file_index.iter() {
-            let entity_id = *entry.key();
-            let file_path = entry.value();
-            if !self.function_index.contains_key(&entity_id) {
-                continue;
+        self.for_each_entity(|id, entity| {
+            if let Some(file) = self.file_path_of(id) {
+                grouped.entry(file).or_default().push(entity.clone());
             }
-            if let Some(entity) = self.function_index.get(&entity_id) {
-                grouped
-                    .entry(file_path.clone())
-                    .or_default()
-                    .push(entity.value().clone());
-            }
-        }
+        });
         grouped
     }
 
     fn entities_of_file(&self, path: &str) -> Vec<Entity> {
-        let feb_guard = self.file_entities_by_start.read();
-        let Some(rows) = feb_guard.get(path) else {
-            return Vec::new();
-        };
-        rows.iter()
-            .filter_map(|(_, id)| self.function_index.get(id).map(|e| e.value().clone()))
+        self.entity_ids_of_file(path)
+            .into_iter()
+            .filter_map(|id| self.get_function(id))
             .collect()
     }
 
     fn file_callers_of(&self, callee: EntityId) -> Vec<String> {
-        self.file_callers_by_callee
-            .get(&callee)
-            .map(|v| v.iter().cloned().collect())
-            .unwrap_or_default()
+        RelationSnapshotIndex::file_callers_of(self, callee)
     }
 
     fn stable_symbol_keys(&self) -> Vec<SymbolKey> {
-        self.symbol_key_to_entity.read().keys().cloned().collect()
+        RelationSnapshotIndex::stable_symbol_keys(self)
     }
 
     fn stable_symbol_keys_in_files(&self, files: &HashSet<String>) -> Vec<SymbolKey> {
-        let mut keys = Vec::new();
-        let guard = self.file_symbol_keys.read();
-        for file in files {
-            if let Some(vec) = guard.get(file.as_str()) {
-                keys.extend(vec.iter().cloned());
-            }
-        }
-        keys
+        RelationSnapshotIndex::stable_symbol_keys_in_files(self, files)
     }
 
     fn max_entity_id(&self) -> u64 {
-        self.function_index
-            .iter()
-            .map(|entry| entry.key().0)
-            .max()
-            .unwrap_or(0)
+        RelationSnapshotIndex::max_entity_id(self)
     }
 
     fn fingerprint_in_files(&self, files: &HashSet<String>) -> String {
-        fingerprint_in_files_from_maps(
-            &self.function_index,
-            &self.entity_file_index,
-            &self.entity_to_symbol_key,
-            &self.resolved_relation_index,
-            &self.file_relation_index,
-            &self.file_records,
-            &self.dependency_graph,
-            files,
-        )
+        RelationSnapshotIndex::fingerprint_in_files(self, files)
     }
 }

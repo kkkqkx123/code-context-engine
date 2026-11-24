@@ -1,0 +1,4 @@
+/target/
+/outputs/
+*.tmp
+/data/

@@ -83,12 +83,15 @@ impl RelationBaseCache {
     ///
     /// The returned view shares the cached base zero-copy; it must only be
     /// used read-only (see the module documentation).
-    pub fn get_or_load(
+    pub fn get_or_load<S>(
         &self,
-        store: &dyn RelationSnapshotStore,
+        store: &S,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Arc<LayeredSnapshotIndex>, StorageError> {
+    ) -> Result<Arc<LayeredSnapshotIndex>, StorageError>
+    where
+        S: RelationSnapshotStore + Clone + 'static,
+    {
         if let Some(cached) = self.projects.get(&project_id)
             && cached.epoch == epoch
         {
@@ -97,13 +100,12 @@ impl RelationBaseCache {
                 cached.deltas.clone(),
             )));
         }
-        let loaded = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            store, project_id, epoch,
-        )?;
-        // Zero-copy: the snapshot shares the loaded index's maps; the mutable
-        // index itself is dropped immediately after.
-        let base_snapshot = Arc::new(RelationSnapshotIndex::from_index_shared(&loaded));
-        drop(loaded);
+        let base_snapshot = Arc::new(RelationSnapshotIndex::from_store(
+            Arc::new(store.clone()),
+            project_id,
+            epoch,
+            cce_types::ShardQueryConfig::default(),
+        )?);
         self.projects.insert(
             project_id,
             CachedBase {
@@ -233,6 +235,27 @@ mod tests {
     }
 
     impl RelationSnapshotStore for StubStore {
+        fn read_shard_directory(
+            &self,
+            _project_id: i64,
+            _relation_epoch: i64,
+        ) -> Result<cce_types::ShardDirectory, StorageError> {
+            Err(StorageError::validation(
+                "base cache stub does not provide a shard directory",
+            ))
+        }
+
+        fn read_shard_components(
+            &self,
+            _project_id: i64,
+            _relation_epoch: i64,
+            _shard_id: i64,
+        ) -> Result<Option<cce_types::RelationShardComponents>, StorageError> {
+            Err(StorageError::validation(
+                "base cache stub does not provide shard components",
+            ))
+        }
+
         fn get_manifest(
             &self,
             project_id: i64,

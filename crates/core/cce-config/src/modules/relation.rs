@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::validation::{Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
+use cce_types::ShardQueryConfig;
 
 /// Index configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +162,10 @@ pub struct RelationConfig {
 
     /// Index configuration
     pub index: IndexConfig,
+
+    /// Explicit capacity controls for the sharded query index.
+    #[serde(default)]
+    pub shard: ShardQueryConfig,
 }
 
 impl Default for RelationConfig {
@@ -175,6 +180,7 @@ impl Default for RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::default(),
+            shard: ShardQueryConfig::default(),
         }
     }
 }
@@ -191,6 +197,9 @@ impl Validate for RelationConfig {
                 "max_call_depth",
                 "must be greater than 0 when index is enabled",
             ));
+        }
+        if let Err(error) = self.shard.validate() {
+            errors.push(ConfigValidationError::invalid_field("shard", &error.to_string()));
         }
         if !(0.0..=1.0).contains(&self.max_fingerprint_scope_ratio) {
             errors.push(ConfigValidationError::out_of_range(
@@ -222,6 +231,7 @@ impl RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::small_codebase(),
+            shard: ShardQueryConfig::default(),
         }
     }
 
@@ -237,6 +247,7 @@ impl RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::large_codebase(),
+            shard: ShardQueryConfig::default(),
         }
     }
 
@@ -252,6 +263,7 @@ impl RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::disabled(),
+            shard: ShardQueryConfig::default(),
         }
     }
 

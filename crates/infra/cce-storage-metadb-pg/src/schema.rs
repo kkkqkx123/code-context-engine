@@ -311,6 +311,21 @@ CREATE TABLE IF NOT EXISTS relation_snapshot_manifest (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_relation_manifest_operation
     ON relation_snapshot_manifest (project_id, operation_id);
+CREATE TABLE IF NOT EXISTS relation_snapshot_shards (
+    project_id BIGINT NOT NULL,
+    relation_epoch BIGINT NOT NULL,
+    shard_id BIGINT NOT NULL,
+    file_count BIGINT NOT NULL,
+    entity_count BIGINT NOT NULL,
+    relation_count BIGINT NOT NULL,
+    dependency_count BIGINT NOT NULL,
+    estimated_bytes BIGINT NOT NULL,
+    path_start TEXT NOT NULL,
+    path_end TEXT NOT NULL,
+    PRIMARY KEY (project_id, relation_epoch, shard_id),
+    FOREIGN KEY (project_id, relation_epoch)
+        REFERENCES relation_snapshot_manifest (project_id, relation_epoch) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS relation_snapshot_files (
     id BIGSERIAL PRIMARY KEY,
     project_id BIGINT NOT NULL,
@@ -320,6 +335,7 @@ CREATE TABLE IF NOT EXISTS relation_snapshot_files (
     input_hash TEXT NOT NULL,
     file_size BIGINT NOT NULL,
     imports_json TEXT NOT NULL,
+    shard_id BIGINT NOT NULL DEFAULT 0,
     UNIQUE (project_id, relation_epoch, path),
     FOREIGN KEY (project_id, relation_epoch)
         REFERENCES relation_snapshot_manifest (project_id, relation_epoch) ON DELETE CASCADE
@@ -333,6 +349,8 @@ CREATE TABLE IF NOT EXISTS relation_snapshot_entities (
     kind_json TEXT NOT NULL,
     overload_discriminator TEXT NOT NULL,
     entity_id BIGINT,
+    stable_id TEXT,
+    shard_id BIGINT NOT NULL DEFAULT 0,
     name TEXT NOT NULL,
     signature TEXT NOT NULL,
     parameters_json TEXT NOT NULL,
@@ -381,6 +399,12 @@ CREATE INDEX IF NOT EXISTS idx_relation_snapshot_relations_caller
     ON relation_snapshot_relations (project_id, relation_epoch, caller_symbol_id);
 CREATE INDEX IF NOT EXISTS idx_relation_snapshot_relations_target
     ON relation_snapshot_relations (project_id, relation_epoch, target_symbol_id);
+CREATE INDEX IF NOT EXISTS idx_relation_snapshot_entities_stable_id
+    ON relation_snapshot_entities (project_id, relation_epoch, stable_id);
+CREATE INDEX IF NOT EXISTS idx_relation_snapshot_entities_shard
+    ON relation_snapshot_entities (project_id, relation_epoch, shard_id);
+CREATE INDEX IF NOT EXISTS idx_relation_snapshot_files_shard
+    ON relation_snapshot_files (project_id, relation_epoch, shard_id);
 CREATE TABLE IF NOT EXISTS relation_snapshot_exports (
     project_id BIGINT NOT NULL,
     relation_epoch BIGINT NOT NULL,

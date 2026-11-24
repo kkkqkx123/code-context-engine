@@ -27,7 +27,7 @@ impl crate::index::snapshot_index::LayeredSnapshotIndex {
                 }
             }
         }
-        self.base.symbol_key_to_entity.read().get(key).copied()
+        self.base.entity_id_by_symbol_key(key)
     }
 }
 
@@ -637,19 +637,11 @@ impl RelationIndexView for crate::index::snapshot_index::LayeredSnapshotIndex {
 
     fn stable_symbol_keys_in_files(&self, files: &HashSet<String>) -> Vec<SymbolKey> {
         let mut keys: HashMap<EntityId, SymbolKey> = HashMap::new();
-        let fsk_guard = self.base.file_symbol_keys.read();
-        let ske_guard = self.base.symbol_key_to_entity.read();
-        for file in files {
-            if let Some(vec) = fsk_guard.get(file.as_str()) {
-                for key in vec.iter() {
-                    if let Some(id) = ske_guard.get(key) {
-                        keys.insert(*id, key.clone());
-                    }
-                }
+        for key in self.base.stable_symbol_keys_in_files(files) {
+            if let Some(id) = self.base.entity_id_by_symbol_key(&key) {
+                keys.insert(id, key);
             }
         }
-        drop(fsk_guard);
-        drop(ske_guard);
         for d in &self.deltas {
             for removed in &d.removed_entities {
                 keys.remove(removed);

@@ -1,9 +1,6 @@
 [submodule "crates/tantivy"]
 	path = crates/tantivy
 	url = https://github.com/kkkqkx123/tantivy.git
-[submodule "crates/app/cce-e2e-tests"]
-	path = crates/app/cce-e2e-tests
-	url = https://github.com/kkkqkx123/code-context-engine-e2e.git
 [submodule "crates/simvec"]
 	path = crates/simvec
 	url = https://github.com/kkkqkx123/simvec.git
@@ -31,3 +28,6 @@
 [submodule "crates/gpui-kit"]
 	path = crates/gpui-kit
 	url = https://github.com/kkkqkx123/gpui-kit
+[submodule "cce-e2e-fixtures"]
+	path = crates/app/cce-e2e-tests/fixtures
+	url = https://github.com/kkkqkx123/cce-e2e-fixtures.git

@@ -52,7 +52,7 @@ Crates: cce-admission, cce-api, cce-client, cce-cli, cce-gateway, cce-mcp, cce-o
 
 ### Git Submodules
 - `crates/tantivy` — Vendored tantivy fork (https://github.com/kkkqkx123/tantivy.git)
-- `crates/app/cce-e2e-tests` — E2E test suite (https://github.com/kkkqkx123/code-context-engine-e2e.git)
+- `crates/app/cce-e2e-tests` — E2E test suite, source code merged into this repository; only `fixtures/` is a submodule (https://github.com/kkkqkx123/cce-e2e-fixtures.git)
 - `crates/simvec` — Embedded local vector engine (https://github.com/kkkqkx123/simvec.git), a workspace member: run its tests/benches with `cargo test -p simvec` / `cargo bench -p simvec`
 
 ## Command Execution

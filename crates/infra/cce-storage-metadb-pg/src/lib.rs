@@ -17,6 +17,7 @@ mod projection;
 mod rows;
 mod schema;
 mod snapshot;
+mod snapshot_shard;
 mod sync_snapshot;
 
 use std::sync::{Arc, OnceLock};

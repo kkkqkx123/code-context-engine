@@ -1,5 +1,16 @@
 # 关系查询索引分片化重构方案
 
+## 细化实施约定
+
+本阶段把文档中的架构约束落成以下可执行边界，避免引入第二套查询语义：
+
+1. **核心类型**：在 `cce-types` 中定义分片目录、分片组件与分片容量配置。目录包含分片计数、实体/符号/稳定 ID/文件到分片的定位映射、反向调用分片集合、外部调用分类分片集合与文件依赖邻接表；它只含 ID 与计数，不含实体正文。分片组件复用 canonical 行类型，并附带跨分片内部目标的实体引用，保证目标实体 ID 不丢失。
+2. **持久化**：SQLite/PG 的 `relation_snapshot_entities` 增加持久 `stable_id` 与 `shard_id`，`relation_snapshot_files` 增加 `shard_id`，新增 `relation_snapshot_shards` 表。写入端用 artifact 的二次流式扫描生成分片计划；分片计划不改变 fingerprint 输入。目录与组件读取都限定 `project_id + relation_epoch`，旧 epoch 随 manifest 级联回收。
+3. **查询外观**：`RelationSnapshotIndex` 变成确定性枚举外观：`InMemory` 保留原共享 map 实现（构建期/验证/单测），`Sharded` 为有界 LRU 的分片实现。原结构改名为 `InMemoryRelationSnapshotIndex`。`LayeredSnapshotIndex` 与导出路径不再访问 base 的内部 map，全部走外观方法；`materialize_merged_index` 仅保留为验证工具。
+4. **路由**：点查按目录定位单片；反向调用、分类查询按目录给出的调用者分片集合逐片装载并合并；全局计数与稳定符号键直接读目录；文件依赖传递查询在目录邻接表上逐跳完成。单次查询装载分片数受配置约束，超限返回明确错误，不静默丢边。
+5. **切换**：冷启动、base cache、publisher 与导出增强共用同一个外观构造入口 `RelationSnapshotIndex::from_store`；完整发布在 epoch 激活后用 store + epoch 构造外观并替换运行时，构建期索引随即释放。compaction 继续生成新 epoch 的新目录并原子切换。
+6. **验证**：等价性用同一夹具比较内存外观与分片外观的全部查询、canonical 输出及 fingerprint；有界性检查 LRU 上限与单次查询装载上限；存储层测试覆盖目录/组件、stable_id 定位、反向调用分片、失败写入不激活。
+
 ## 目标
 
 关闭 `docs/plan/relation-index-memory-analysis.md` 的剩余主项：让查询侧关系索引不再要求
@@ -162,12 +173,12 @@ canonical 写入指标同表输出。
 
 ## 执行顺序
 
-1. 扩展 `RelationSnapshotStore` 与 SQLite/PG 的分片读取端口，先补存储层测试。
-2. 实现分片目录构建与写入，接入 artifact 发布后的写库阶段；验证 fingerprint 不变。
-3. 拆分 `RelationSnapshotIndex` 为内存实现 + 外观，先让外观在内存 backing 下保持现有测试全绿。
-4. 实现分片 backing 的 LRU、查询路由与 `RelationIndexView`；补齐等价性测试。
-5. 切换 runtime、base cache、publisher、export enhancer 到分片外观，删除冷启动全量装载路径。
-6. 接入容量指标，按 medium -> 50,000 档复测 RSS 与查询延迟，回写 issue 文档。
+1. 核心类型与分片计划：目录/组件/容量配置、`SnapshotArtifactOptions::max_shard_items`、artifact 流式分片计划与稳定路径哈希。
+2. 持久化：SQLite/PG schema、写入端 shard_id/stable_id/目录行，读取端目录与组件查询；补存储层等价性测试。
+3. 查询外观：拆分内存实现与外观，迁移所有直接 map 访问到外观方法；先保证内存 backing 下语义不变。
+4. 分片 backing：LRU、查询路由、`Snapshot*QueryOps` 与 `RelationIndexView` 实现；补等价性与有界性测试。
+5. 运行时切换：冷启动、base cache、publisher、导出增强统一使用 store 构造；移除冷启动全图装载。
+6. 容量指标与回归：输出分片数/目录字节/LRU 命中淘汰等，按 medium -> 50,000 档复测 RSS 与查询延迟，回写 issue 文档。
 
 ## 明确不做
 

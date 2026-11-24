@@ -1,7 +1,10 @@
 //! SQLite adapter for the relation snapshot read port.
 
 use cce_types::relation::RelationSnapshotStore;
-use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta, StorageError};
+use cce_types::{
+    CanonicalRelationSnapshot, RelationShardComponents, RelationSnapshotManifest, ShardDirectory,
+    SnapshotDelta, StorageError,
+};
 
 use crate::client::SqliteClient;
 use crate::repo::relation_snapshot_repo::RelationSnapshotRepository;
@@ -35,6 +38,33 @@ impl RelationSnapshotStore for SqliteSnapshotStore {
     ) -> Result<CanonicalRelationSnapshot, StorageError> {
         let conn = self.sqlite.read_connection()?;
         RelationSnapshotRepository::read_snapshot(&conn, manifest)
+    }
+
+    fn read_shard_directory(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<ShardDirectory, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::read_shard_directory(&conn, project_id, relation_epoch)
+    }
+
+    fn read_shard_components(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+        shard_id: i64,
+    ) -> Result<Option<RelationShardComponents>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        let manifest = RelationSnapshotRepository::get_manifest(
+            &conn,
+            project_id,
+            relation_epoch,
+        )?
+        .ok_or_else(|| {
+            StorageError::validation(format!("relation epoch {relation_epoch} has no manifest"))
+        })?;
+        RelationSnapshotRepository::read_shard_components(&conn, &manifest, shard_id)
     }
 
     fn find_base_epoch(
@@ -71,6 +101,24 @@ impl RelationSnapshotStore for SqliteClient {
         manifest: &RelationSnapshotManifest,
     ) -> Result<CanonicalRelationSnapshot, StorageError> {
         SqliteSnapshotStore::new(self.clone()).read_snapshot(manifest)
+    }
+
+    fn read_shard_directory(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+    ) -> Result<ShardDirectory, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).read_shard_directory(project_id, relation_epoch)
+    }
+
+    fn read_shard_components(
+        &self,
+        project_id: i64,
+        relation_epoch: i64,
+        shard_id: i64,
+    ) -> Result<Option<RelationShardComponents>, StorageError> {
+        SqliteSnapshotStore::new(self.clone())
+            .read_shard_components(project_id, relation_epoch, shard_id)
     }
 
     fn find_base_epoch(
