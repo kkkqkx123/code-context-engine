@@ -388,6 +388,33 @@ impl EntityRepository {
         )
     }
 
+    /// Get entity rows of one generation restricted to a set of file paths.
+    pub fn get_by_project_epoch_with_paths(
+        conn: &Connection,
+        project_id: i64,
+        epoch: i64,
+        paths: &[String],
+    ) -> Result<Vec<(EntityRecord, String)>, StorageError> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", paths.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, e.overload_discriminator, f.path
+             FROM entities e JOIN files f ON e.file_id = f.id
+             WHERE e.project_id = ?1 AND e.epoch = ?2 AND f.path IN ({placeholders})"
+        );
+        let mut params: Vec<&dyn ToSql> = vec![&project_id, &epoch];
+        params.extend(paths.iter().map(|path| path as &dyn ToSql));
+        execute_query(conn, &sql, &params, |row| {
+            let entity = Self::parse_entity_from_row(row)?;
+            let file_path: String = row.get(24)?;
+            Ok((entity, file_path))
+        })
+    }
+
     /// Get entities for a project at a given epoch with file_path.
     /// Used by RelationSnapshotLoader for cold-start reconstruction.
     pub fn get_by_project_epoch_with_file_path_after_id(

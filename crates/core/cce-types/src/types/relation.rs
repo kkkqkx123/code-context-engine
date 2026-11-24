@@ -26,6 +26,7 @@ pub mod canonical;
 pub mod classification;
 pub mod resolution;
 pub mod resolved;
+pub mod snapshot_artifact;
 pub mod snapshot_store;
 pub mod target;
 
@@ -44,6 +45,11 @@ pub use resolution::{
     RelationCapture, RelationVerificationStatus, VirtualRelation, VirtualSymbolId,
 };
 pub use resolved::{RelationSymbolLocation, RelationSymbolRecord, ResolvedRelation};
+pub use snapshot_artifact::{
+    CanonicalComponentBatch, CanonicalSnapshotArtifact, DEFAULT_FINGERPRINT_CHUNK_BYTES,
+    DEFAULT_SNAPSHOT_BATCH_ITEMS, SnapshotArtifactBuilder, SnapshotArtifactCounts,
+    SnapshotArtifactHeader, SnapshotArtifactOptions, SnapshotBatchReader,
+};
 pub use snapshot_store::{RelationSnapshotManifest, RelationSnapshotState, RelationSnapshotStore};
 pub use target::RelationTarget;
 

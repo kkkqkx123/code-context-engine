@@ -685,7 +685,7 @@ pub fn fingerprint_from_components(components: &FingerprintComponents) -> String
     cce_utils::hash::hash_serializable(&payload)
 }
 
-fn relation_sort_key(relation: &CanonicalRelation) -> String {
+pub(crate) fn relation_sort_key(relation: &CanonicalRelation) -> String {
     let target = match &relation.target {
         CanonicalRelationTarget::Internal { key } => key.sort_key(),
         CanonicalRelationTarget::External { classification } => stable_json(classification),
@@ -701,7 +701,7 @@ fn relation_sort_key(relation: &CanonicalRelation) -> String {
     )
 }
 
-fn stable_json<T: Serialize>(value: &T) -> String {
+pub(crate) fn stable_json<T: Serialize>(value: &T) -> String {
     match serde_json::to_string(value) {
         Ok(json) => json,
         Err(error) => format!("serialization_error:{error}"),

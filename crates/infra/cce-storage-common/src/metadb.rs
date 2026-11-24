@@ -22,7 +22,9 @@
 use std::future::Future;
 
 use cce_types::StorageError;
-use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta};
+use cce_types::{
+    CanonicalRelationSnapshot, CanonicalSnapshotArtifact, RelationSnapshotManifest, SnapshotDelta,
+};
 
 mod checkpoint;
 mod chunk;
@@ -423,6 +425,17 @@ metadata_storage_contract! {
     project_id: i64,
     epoch: i64,
     after_id: i64,
+    ) -> Result<Vec<EntityWithFile>, StorageError>;
+        /// Entity rows of one generation restricted to the given file paths.
+        ///
+        /// Bounded backhaul for per-batch entity-id resolution: callers ask
+        /// only for the files in the current batch instead of loading the
+        /// whole project's entity table.
+    fn entities_with_files_in_paths(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        paths: &[String],
     ) -> Result<Vec<EntityWithFile>, StorageError>;
         /// Entity rows by row id scoped to one project.
     fn entities_by_ids(
@@ -888,14 +901,13 @@ metadata_storage_contract! {
     operation_id: &str,
     config_fingerprint: &str,
     ) -> Result<i64, StorageError>;
-        /// Persist a full snapshot and mark its epoch ready, atomically.
-    fn snapshot_write_ready(
-    &self,
-    project_id: i64,
-    epoch: i64,
-    snapshot: &CanonicalRelationSnapshot,
-    input_fingerprint: &str,
-    snapshot_fingerprint: &str,
+        /// Persist a canonical snapshot artifact and mark its epoch ready,
+        /// atomically. Rows are consumed in bounded batches from the artifact.
+    fn snapshot_write_artifact(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        artifact: &CanonicalSnapshotArtifact,
     ) -> Result<(), StorageError>;
         /// Read back the canonical snapshot of an epoch.
     fn snapshot_read(

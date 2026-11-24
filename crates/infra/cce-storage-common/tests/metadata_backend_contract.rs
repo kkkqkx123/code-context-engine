@@ -377,8 +377,11 @@ async fn run_contract_suite(store: &impl MetadataStorage, tag: &str, project: i6
         .await
         .expect("allocate snapshot epoch");
     let snapshot = CanonicalRelationSnapshot::new("config".to_string());
+    let artifact =
+        cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+            .expect("artifact should build");
     store
-        .snapshot_write_ready(project, epoch, &snapshot, "config", "snap")
+        .snapshot_write_artifact(project, epoch, &artifact)
         .await
         .expect("write snapshot");
     let readback = store
@@ -517,17 +520,10 @@ async fn local_backend_contract() {
     // L1: excluded paths are filtered before LIMIT on both branches, so the
     // hit disappears instead of being hidden by post-truncation filtering.
     assert!(
-        MetadataStorage::entities_search_fts(
-            &client,
-            7,
-            "alpha",
-            10,
-            9,
-            &["a.rs".to_string()]
-        )
-        .await
-        .expect("fts excluded")
-        .is_empty(),
+        MetadataStorage::entities_search_fts(&client, 7, "alpha", 10, 9, &["a.rs".to_string()])
+            .await
+            .expect("fts excluded")
+            .is_empty(),
         "excluded file path must remove the hit"
     );
 

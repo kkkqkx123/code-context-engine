@@ -33,6 +33,17 @@ use super::{StorageCoordinator, WriteFailurePoint};
 /// preserve it; re-exported here for sibling and test use.
 pub(crate) use crate::error::EMBEDDING_STAGE_TIMEOUT_CODE;
 
+/// Read the parse-time entity id persisted in an entity row's metadata.
+fn source_id_from_metadata(metadata: Option<&str>) -> Option<i64> {
+    metadata
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<std::collections::HashMap<String, String>>(raw).ok())
+        .and_then(|map| {
+            map.get("__source_entity_id")
+                .and_then(|value| value.parse::<i64>().ok())
+        })
+}
+
 /// Per-microbatch wall-clock budget used to derive the embedding stage
 /// deadline when none is configured: the single-request HTTP timeout (30s)
 /// multiplied by a factor covering the client's retry/backoff budget for
@@ -851,6 +862,56 @@ impl StorageCoordinator {
         Ok((points, chunk_records, entity_mappings))
     }
 
+    /// Resolve only the entity ids referenced by the current batch.
+    ///
+    /// The full-index loop calls this after persisting a batch's entities, so
+    /// the map's lifetime and size follow the orchestration batch instead of
+    /// the whole project. Cross-file references still resolve because the
+    /// lookup is keyed by `(path, source entity id)` in durable storage.
+    pub(crate) async fn resolve_source_entity_ids(
+        &self,
+        chunks: &[ChunkedResult],
+    ) -> Result<std::collections::HashMap<(String, i64), i64>, OrchestratorError> {
+        let Some(store) = self.metadata_store.as_ref() else {
+            return Ok(std::collections::HashMap::new());
+        };
+        let wanted: std::collections::HashSet<(String, i64)> = chunks
+            .iter()
+            .flat_map(|chunk| {
+                chunk
+                    .metadata
+                    .content_entity_ids()
+                    .iter()
+                    .copied()
+                    .filter(|id| id.0 != u64::MAX && id.0 != u64::MAX - 1)
+                    .map(|id| (chunk.metadata.file_path.clone(), id.0 as i64))
+            })
+            .collect();
+        if wanted.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut paths: Vec<String> = wanted.iter().map(|(path, _)| path.clone()).collect();
+        paths.sort();
+        paths.dedup();
+        let started = Instant::now();
+        let rows = store
+            .entities_with_files_in_paths(self.project_id, self.epoch(), &paths)
+            .await
+            .map_err(OrchestratorError::Storage)?;
+        self.add_vector_entity_lookup(started.elapsed());
+        let mut resolved = std::collections::HashMap::with_capacity(wanted.len());
+        for entry in rows {
+            let Some(source_id) = source_id_from_metadata(entry.entity.metadata.as_deref()) else {
+                continue;
+            };
+            let key = (entry.file_path, source_id);
+            if wanted.contains(&key) {
+                resolved.insert(key, entry.entity.id);
+            }
+        }
+        Ok(resolved)
+    }
+
     pub(crate) async fn load_source_entity_ids(
         &self,
     ) -> Result<std::collections::HashMap<(String, i64), i64>, OrchestratorError> {
@@ -883,15 +944,7 @@ impl StorageCoordinator {
             // Every stored entity carries `__source_entity_id` in its
             // metadata; a row without a parseable one is malformed and its
             // entity -> vector link will miss in the mapping lookup.
-            let source_id = metadata
-                .as_deref()
-                .and_then(|raw| {
-                    serde_json::from_str::<std::collections::HashMap<String, String>>(raw).ok()
-                })
-                .and_then(|map| {
-                    map.get("__source_entity_id")
-                        .and_then(|value| value.parse::<i64>().ok())
-                });
+            let source_id = source_id_from_metadata(metadata.as_deref());
             match source_id {
                 Some(source_id) => {
                     result.insert((path, source_id), db_id);

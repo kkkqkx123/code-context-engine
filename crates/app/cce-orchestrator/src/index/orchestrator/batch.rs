@@ -125,7 +125,7 @@ impl IndexOrchestrator {
         let mut pending_completed_paths: Vec<PathBuf> = Vec::new();
         let mut source_entity_ids: std::collections::HashMap<(String, i64), i64> =
             std::collections::HashMap::new();
-        let mut max_entity_id = 0i64;
+        let mut source_entity_id_peak = 0u64;
 
         for batch_idx in ctx.start_batch..ctx.total_batches {
             ctx.stages.batches += 1;
@@ -334,12 +334,17 @@ impl IndexOrchestrator {
             }
             ctx.stages.entity_store_ms += stage_started.elapsed().as_millis() as u64;
             if entity_store_ok {
-                let entity_lookup_started = Instant::now();
-                self.storage
-                    .extend_source_entity_ids(&mut source_entity_ids, &mut max_entity_id)
+                // Resolve only the ids this batch's chunks reference. The map
+                // is replaced every batch instead of accumulating across the
+                // whole project, while the lookup remains exact through the
+                // durable `(path, source id)` index.
+                source_entity_ids = self
+                    .storage
+                    .resolve_source_entity_ids(&batch_result.chunks)
                     .await?;
-                self.storage
-                    .add_vector_entity_lookup(entity_lookup_started.elapsed());
+                source_entity_id_peak = source_entity_id_peak.max(source_entity_ids.len() as u64);
+            } else {
+                source_entity_ids.clear();
             }
 
             let mut vector_deferred = false;
@@ -928,7 +933,7 @@ impl IndexOrchestrator {
         self.state_tracker.flush_deferred_persistence().await;
         ctx.stages.state_projection_ms += state_started.elapsed().as_millis() as u64;
 
-        ctx.stages.entity_id_map_entries = source_entity_ids.len() as u64;
+        ctx.stages.entity_id_map_entries = source_entity_id_peak;
         ctx.stages.entity_id_map_estimated_bytes =
             ctx.stages.entity_id_map_entries.saturating_mul(128);
 

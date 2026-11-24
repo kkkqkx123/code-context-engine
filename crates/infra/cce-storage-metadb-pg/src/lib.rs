@@ -32,7 +32,10 @@ use cce_storage_common::metadb::{
     WorkUnitCheckpointRecord, WorkUnitStatus,
 };
 use cce_types::error::common::ErrorClassify;
-use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta, StorageError};
+use cce_types::{
+    CanonicalRelationSnapshot, CanonicalSnapshotArtifact, RelationSnapshotManifest, SnapshotDelta,
+    StorageError,
+};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
@@ -605,22 +608,14 @@ impl MetadataStorage for PostgresClient {
             .await
     }
 
-    async fn snapshot_write_ready(
+    async fn snapshot_write_artifact(
         &self,
         project_id: i64,
         epoch: i64,
-        snapshot: &CanonicalRelationSnapshot,
-        input_fingerprint: &str,
-        snapshot_fingerprint: &str,
+        artifact: &CanonicalSnapshotArtifact,
     ) -> Result<(), StorageError> {
-        self.snapshot_write_ready(
-            project_id,
-            epoch,
-            snapshot,
-            input_fingerprint,
-            snapshot_fingerprint,
-        )
-        .await
+        self.snapshot_write_artifact(project_id, epoch, artifact)
+            .await
     }
 
     async fn snapshot_read(
@@ -837,6 +832,16 @@ impl MetadataStorage for PostgresClient {
         epoch: i64,
     ) -> Result<Vec<EntityWithFile>, StorageError> {
         self.entities_with_files(project_id, epoch).await
+    }
+
+    async fn entities_with_files_in_paths(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        paths: &[String],
+    ) -> Result<Vec<EntityWithFile>, StorageError> {
+        self.entities_with_files_in_paths(project_id, epoch, paths)
+            .await
     }
 
     async fn entities_with_files_after(

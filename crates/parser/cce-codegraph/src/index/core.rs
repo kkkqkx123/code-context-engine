@@ -274,7 +274,10 @@ impl RelationIndex {
                 .iter()
                 .map(|entry| entry.value().len())
                 .sum::<usize>();
-        let estimated_bytes = nodes as u64 * 192 + edges as u64 * 96;
+        // Empirical per-node footprint from the 50,000-file stage run: the
+        // relation index, not the spool, accounts for the post-batch RSS jump.
+        const NODE_BYTES: u64 = 6 * 1024;
+        let estimated_bytes = nodes as u64 * NODE_BYTES + edges as u64 * 96;
         (nodes as u64, edges as u64, estimated_bytes)
     }
 

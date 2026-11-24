@@ -3,13 +3,13 @@
 //! Resolution belongs exclusively to `IndexBuilder`. This service persists the
 //! already-resolved canonical graph and never attempts target resolution itself.
 
-use std::collections::HashSet;
-
 use cce_storage_common::MetadataStorage;
 use cce_types::relation::RelationSnapshotState;
-use cce_types::{
-    CanonicalRelationSnapshot, CanonicalRelationTarget, StableSymbolKey, StorageError,
-};
+use cce_types::{CanonicalRelationSnapshot, CanonicalSnapshotArtifact, StorageError};
+#[cfg(test)]
+use cce_types::{CanonicalRelationTarget, StableSymbolKey};
+#[cfg(test)]
+use std::collections::HashSet;
 
 use super::vector_store::MetadataStore;
 
@@ -22,23 +22,45 @@ impl ResolutionPipelineService {
         Self { store }
     }
 
-    /// Allocate a building epoch and write snapshot data (without activating).
+    /// Write an already materialized snapshot.
     ///
-    /// Returns the epoch number on success. The caller should update memory
-    /// (e.g. `RelationRuntime::publish_snapshot`) before calling [`Self::activate`].
+    /// Compaction and tests own a snapshot value; the full-index build path
+    /// calls [`Self::allocate_and_write_artifact`] directly so it never
+    /// materializes a second full graph.
     pub async fn allocate_and_write(
         &self,
         project_id: i64,
         operation_id: &str,
         snapshot: &CanonicalRelationSnapshot,
     ) -> Result<i64, StorageError> {
-        snapshot
-            .validate_versions()
-            .map_err(StorageError::Validation)?;
-        validate_snapshot(snapshot).map_err(StorageError::Validation)?;
+        let artifact = CanonicalSnapshotArtifact::from_snapshot(snapshot, Default::default())?;
+        self.allocate_and_write_artifact(project_id, operation_id, &artifact)
+            .await
+    }
 
-        let input_fingerprint = snapshot.input_fingerprint();
-        let snapshot_fingerprint = snapshot.fingerprint();
+    /// Allocate a building epoch and persist a canonical artifact.
+    ///
+    /// The artifact has already computed both fingerprints and carries every
+    /// canonical row on disk, so publication does not hold a full snapshot in
+    /// memory alongside the relation index.
+    pub async fn allocate_and_write_artifact(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        artifact: &CanonicalSnapshotArtifact,
+    ) -> Result<i64, StorageError> {
+        let header = artifact.header();
+        if header.schema_version != cce_types::RELATION_SNAPSHOT_SCHEMA_VERSION
+            || header.parser_version != cce_types::RELATION_PARSER_VERSION
+            || header.resolver_version != cce_types::RELATION_RESOLVER_VERSION
+            || header.path_normalization_version != cce_types::RELATION_PATH_NORMALIZATION_VERSION
+        {
+            return Err(StorageError::Validation(
+                "relationship snapshot version is not supported".to_string(),
+            ));
+        }
+
+        let snapshot_fingerprint = artifact.snapshot_fingerprint();
         let store = &self.store;
 
         if let Some(existing) = store
@@ -47,9 +69,7 @@ impl ResolutionPipelineService {
         {
             match existing.state {
                 RelationSnapshotState::Active | RelationSnapshotState::Ready => {
-                    if existing.snapshot_fingerprint.as_deref()
-                        != Some(snapshot_fingerprint.as_str())
-                    {
+                    if existing.snapshot_fingerprint.as_deref() != Some(snapshot_fingerprint) {
                         return Err(StorageError::Validation(format!(
                             "existing relation operation {operation_id} has a different snapshot"
                         )));
@@ -66,17 +86,11 @@ impl ResolutionPipelineService {
         }
 
         let epoch = store
-            .snapshot_allocate(project_id, operation_id, &snapshot.config_fingerprint)
+            .snapshot_allocate(project_id, operation_id, &header.config_fingerprint)
             .await?;
 
         let write_result = store
-            .snapshot_write_ready(
-                project_id,
-                epoch,
-                snapshot,
-                &input_fingerprint,
-                &snapshot_fingerprint,
-            )
+            .snapshot_write_artifact(project_id, epoch, artifact)
             .await;
         if let Err(error) = write_result {
             let reason = error.to_string();
@@ -124,6 +138,7 @@ impl ResolutionPipelineService {
     }
 }
 
+#[cfg(test)]
 fn validate_snapshot(snapshot: &CanonicalRelationSnapshot) -> Result<(), String> {
     let files: HashSet<&str> = snapshot
         .files

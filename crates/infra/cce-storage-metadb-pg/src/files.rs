@@ -1141,6 +1141,47 @@ impl PostgresClient {
         .await
     }
 
+    pub(crate) async fn entities_with_files_in_paths(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        paths: &[String],
+    ) -> Result<Vec<EntityWithFile>, StorageError> {
+        let paths = paths.to_vec();
+        self.run(async move {
+            if paths.is_empty() {
+                return Ok(Vec::new());
+            }
+            let client = self.pooled().await?;
+            let columns = ENTITY_COLUMNS
+                .split(',')
+                .map(|column| format!("e.{}", column.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rows = client
+                .query(
+                    &format!(
+                        "SELECT {columns}, f.path AS file_path FROM entities e \
+                         JOIN files f ON f.id = e.file_id \
+                         WHERE e.project_id = $1 AND e.epoch = $2 AND f.path = ANY($3) \
+                         ORDER BY e.id"
+                    ),
+                    &[&project_id, &epoch, &paths],
+                )
+                .await
+                .map_err(classify_pg)?;
+            rows.iter()
+                .map(|row| {
+                    Ok(EntityWithFile {
+                        entity: entity_from_row(row)?,
+                        file_path: row.try_get("file_path").map_err(classify_pg)?,
+                    })
+                })
+                .collect()
+        })
+        .await
+    }
+
     pub(crate) async fn entities_with_files(
         &self,
         project_id: i64,

@@ -416,16 +416,12 @@ mod tests {
                 RelationSnapshotRepository::allocate_building(tx, 1, "operation", "config")
             })
             .expect("epoch should allocate");
+        let artifact =
+            cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+                .expect("artifact should build");
         client
             .with_transaction(|tx| {
-                RelationSnapshotRepository::write_snapshot_and_mark_ready(
-                    tx,
-                    1,
-                    epoch,
-                    &snapshot,
-                    &snapshot.input_fingerprint(),
-                    &snapshot.fingerprint(),
-                )
+                RelationSnapshotRepository::write_snapshot_and_mark_ready(tx, 1, epoch, &artifact)
             })
             .expect("snapshot should persist");
         let conn = client
@@ -473,16 +469,12 @@ mod tests {
                 RelationSnapshotRepository::allocate_building(tx, 1, "operation", "config")
             })
             .expect("epoch should allocate");
+        let artifact =
+            cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+                .expect("artifact should build");
         client
             .with_transaction(|tx| {
-                RelationSnapshotRepository::write_snapshot_and_mark_ready(
-                    tx,
-                    1,
-                    epoch,
-                    &snapshot,
-                    &snapshot.input_fingerprint(),
-                    &snapshot.fingerprint(),
-                )
+                RelationSnapshotRepository::write_snapshot_and_mark_ready(tx, 1, epoch, &artifact)
             })
             .expect("snapshot should persist");
 
@@ -589,16 +581,12 @@ mod tests {
                 RelationSnapshotRepository::allocate_building(tx, 1, "operation", "config")
             })
             .expect("epoch should allocate");
+        let artifact =
+            cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+                .expect("artifact should build");
         client
             .with_transaction(|tx| {
-                RelationSnapshotRepository::write_snapshot_and_mark_ready(
-                    tx,
-                    1,
-                    epoch,
-                    &snapshot,
-                    &snapshot.input_fingerprint(),
-                    &snapshot.fingerprint(),
-                )
+                RelationSnapshotRepository::write_snapshot_and_mark_ready(tx, 1, epoch, &artifact)
             })
             .expect("snapshot should persist");
 

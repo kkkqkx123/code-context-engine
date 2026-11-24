@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::index::core::{RelationIndex, SymbolKey};
@@ -6,15 +7,189 @@ use crate::index::delta::RelationDeltaOps;
 use cce_types::{
     AddedEntity, CanonicalDependency, CanonicalEntity, CanonicalExport, CanonicalFile,
     CanonicalRelation, CanonicalRelationSnapshot, CanonicalRelationTarget, EntityId, EntityKind,
-    FileInfo, ResolvedRelation, SnapshotBuildMetadata, canonical_call_context,
+    FileInfo, RELATION_PARSER_VERSION, RELATION_PATH_NORMALIZATION_VERSION,
+    RELATION_RESOLVER_VERSION, RELATION_SNAPSHOT_SCHEMA_VERSION, ResolvedRelation,
+    SnapshotArtifactHeader, SnapshotArtifactOptions, SnapshotBuildMetadata, canonical_call_context,
     canonical_owner_type, normalize_project_path,
 };
 
-use super::{LayeredSnapshotIndex, RelationSnapshotIndex};
+use super::{LayeredSnapshotIndex, QueryOptimizedIndex, RelationSnapshotIndex, TransitiveFileDeps};
 
 /// Per-file stack of `(removed, added)` relation diffs, in chain order.
 type FileRelationDiffs<'a> =
     HashMap<&'a str, Vec<(&'a Vec<ResolvedRelation>, &'a Vec<ResolvedRelation>)>>;
+
+impl RelationIndex {
+    /// Stream canonical components into a disk-backed artifact.
+    ///
+    /// The index and the artifact never coexist as two full in-memory graph
+    /// representations: every component is serialized as it is read and the
+    /// fingerprints are accumulated in bounded external-sort chunks. The
+    /// temporary query view shares the source maps without building derived
+    /// query indexes.
+    pub fn build_snapshot_artifact(
+        &self,
+        config_fingerprint: String,
+        options: SnapshotArtifactOptions,
+    ) -> Result<cce_types::CanonicalSnapshotArtifact, String> {
+        let view = RelationSnapshotIndex {
+            function_index: Arc::clone(&self.function_index),
+            name_index: Arc::clone(&self.name_index),
+            entity_file_index: Arc::clone(&self.entity_file_index),
+            resolved_relation_index: Arc::clone(&self.resolved_relation_index),
+            reverse_callee_index: Arc::clone(&self.reverse_callee_index),
+            file_relation_index: Arc::clone(&self.file_relation_index),
+            file_callers_by_callee: Arc::clone(&self.file_callers_by_callee),
+            file_records: Arc::clone(&self.file_records),
+            dependency_graph: Arc::clone(&self.dependency_graph),
+            symbol_key_to_entity: Arc::clone(&self.symbol_key_to_entity),
+            entity_to_symbol_key: Arc::clone(&self.entity_to_symbol_key),
+            stable_id_to_entity: Arc::clone(&self.stable_id_to_entity),
+            file_symbol_keys: Arc::clone(&self.file_symbol_keys),
+            file_entities_by_start: Arc::clone(&self.file_entities_by_start),
+            diagnostics: Arc::clone(&self.diagnostics),
+            query_optimized: Arc::new(QueryOptimizedIndex::empty()),
+            transitive_deps: Arc::new(TransitiveFileDeps::empty()),
+            classification_stats_cache: Arc::new(parking_lot::RwLock::new(None)),
+        };
+        let header = SnapshotArtifactHeader {
+            schema_version: RELATION_SNAPSHOT_SCHEMA_VERSION,
+            parser_version: RELATION_PARSER_VERSION,
+            resolver_version: RELATION_RESOLVER_VERSION,
+            path_normalization_version: RELATION_PATH_NORMALIZATION_VERSION,
+            config_fingerprint,
+            base_relation_epoch: None,
+            build_metadata: view.build_metadata_snapshot(),
+        };
+        let mut builder =
+            cce_types::SnapshotArtifactBuilder::new(header, options).map_err(|e| e.to_string())?;
+
+        for record in self.file_records.read().values() {
+            let mut exports = Vec::new();
+            for export in record.exports.iter() {
+                exports.push(CanonicalExport {
+                    symbol: view.entity_key_or_derived(export.function_id),
+                    export_type: format!("{:?}", export.export_type).to_lowercase(),
+                });
+            }
+            builder
+                .push_file(CanonicalFile {
+                    path: normalize_project_path(&record.info.path),
+                    language: record.info.language.clone(),
+                    input_hash: record.info.file_hash.clone(),
+                    file_size: record.info.file_size,
+                    imports: record.imports.standardized_imports.clone(),
+                    exports,
+                })
+                .map_err(|e| e.to_string())?;
+        }
+
+        for entity_entry in self.function_index.iter() {
+            let entity_id = *entity_entry.key();
+            let entity = entity_entry.value();
+            builder
+                .push_entity(CanonicalEntity {
+                    key: view.entity_key_or_derived(entity_id),
+                    entity_id: Some(entity_id.0),
+                    name: entity.name.clone(),
+                    signature: entity.signature.clone(),
+                    parameters: entity.parameters.clone(),
+                    return_type: entity.return_type.clone(),
+                    span: entity.span,
+                    depth: entity.depth,
+                    parent: entity
+                        .parent
+                        .map(|parent_id| view.entity_key_or_derived(parent_id)),
+                    doc_comment: entity.doc_comment.clone(),
+                    modifiers: entity.modifiers.clone(),
+                    attributes: entity.attributes.clone().into_iter().collect(),
+                    metadata: entity.metadata.clone().into_iter().collect(),
+                    is_stdlib: entity.is_stdlib,
+                    stdlib_category: entity.stdlib_category,
+                    subtype: entity.subtype.clone(),
+                })
+                .map_err(|e| e.to_string())?;
+        }
+
+        for relation_entry in self.resolved_relation_index.iter() {
+            for relation in relation_entry.value().iter() {
+                builder
+                    .push_relation(canonical_relation(&view, relation.caller, relation))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        for relation_entry in self.file_relation_index.iter() {
+            let caller_key =
+                SymbolKey::new(relation_entry.key(), "<file>", EntityKind::Module, "<file>");
+            for relation in relation_entry.value().iter() {
+                builder
+                    .push_relation(canonical_relation_with_caller(
+                        &view,
+                        caller_key.clone(),
+                        relation,
+                    ))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
+        for record in self.file_records.read().values() {
+            let path = normalize_project_path(&record.info.path);
+            for target in self.dependency_graph.get_dependencies(&path) {
+                builder
+                    .push_dependency(CanonicalDependency {
+                        source_file: path.clone(),
+                        target_file: normalize_project_path(&target),
+                        source: "resolved_or_import".to_string(),
+                    })
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
+        builder.finish().map_err(|e| e.to_string())
+    }
+}
+
+fn canonical_relation(
+    view: &RelationSnapshotIndex,
+    caller_id: EntityId,
+    relation: &ResolvedRelation,
+) -> CanonicalRelation {
+    canonical_relation_with_caller(view, view.relation_key_or_derived(caller_id, ""), relation)
+}
+
+fn canonical_relation_with_caller(
+    view: &RelationSnapshotIndex,
+    caller: SymbolKey,
+    relation: &ResolvedRelation,
+) -> CanonicalRelation {
+    let target = if let Some(callee_id) = relation.callee_id {
+        CanonicalRelationTarget::Internal {
+            key: view.relation_key_or_derived(callee_id, &relation.callee_name),
+        }
+    } else if relation.is_external && relation.external_type.is_some() {
+        CanonicalRelationTarget::External {
+            classification: relation.external_type.clone(),
+        }
+    } else {
+        CanonicalRelationTarget::Unresolved {
+            reason: cce_types::UnresolvedReason::SymbolNotFound,
+        }
+    };
+    CanonicalRelation {
+        caller,
+        target,
+        raw_target: relation.callee_name.clone(),
+        relation_type: relation.relation_type,
+        span: relation.span,
+        stdlib_category: relation.stdlib_category,
+        overload_signature: relation.overload_signature.clone(),
+        callee_symbol: relation.callee_symbol.clone(),
+        owner_type: canonical_owner_type(&relation.owner_type),
+        call_context: canonical_call_context(&relation.call_context),
+        call_frequency: relation.call_frequency,
+        cfg_condition: relation.cfg_condition.clone(),
+    }
+}
 
 impl RelationSnapshotIndex {
     /// Stable symbol key of an entity, degrading to a derived key rebuilt

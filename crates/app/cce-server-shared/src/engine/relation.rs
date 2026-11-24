@@ -245,8 +245,8 @@ impl super::CodeContextEngine {
             .map_err(|e| EngineError::Config(format!("cannot read manifest: {e}")))?
             .map(|manifest| manifest.config_fingerprint)
             .unwrap_or_else(|| "maintenance-republish".to_string());
-        let snapshot = match index.to_canonical_snapshot(config_fingerprint) {
-            Ok(snapshot) => snapshot,
+        let artifact = match index.build_snapshot_artifact(config_fingerprint, Default::default()) {
+            Ok(artifact) => artifact,
             Err(error) => {
                 self.report_relation_failure(project_id, error.clone())
                     .await?;
@@ -261,7 +261,7 @@ impl super::CodeContextEngine {
                     "maintenance-{}",
                     chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
                 ),
-                snapshot,
+                &artifact,
                 &index,
             )
             .await
@@ -352,6 +352,9 @@ impl super::CodeContextEngine {
     ) -> Result<(), EngineError> {
         let publisher = self.get_relation_snapshot_publisher(project_id).await?;
         let snapshot = cce_types::CanonicalRelationSnapshot::new("maintenance-empty".to_string());
+        let artifact =
+            cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+                .map_err(|error| EngineError::Config(error.to_string()))?;
         publisher
             .publish(
                 project_id,
@@ -359,7 +362,7 @@ impl super::CodeContextEngine {
                     "maintenance-empty-{}",
                     chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
                 ),
-                snapshot,
+                &artifact,
                 &cce_codegraph::index::RelationIndex::new(),
             )
             .await

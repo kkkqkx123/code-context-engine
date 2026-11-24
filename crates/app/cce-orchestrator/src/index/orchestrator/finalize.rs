@@ -272,19 +272,21 @@ impl IndexOrchestrator {
 
         match builder
             .index()
-            .to_canonical_snapshot(builder.config_fingerprint())
+            .build_snapshot_artifact(builder.config_fingerprint(), Default::default())
         {
-            Ok(snapshot) => {
+            Ok(artifact) => {
                 let (entries, _edges, estimated_bytes) = builder.index().capacity_counts();
                 ctx.stages.relation_snapshot_entries = entries;
                 ctx.stages.relation_snapshot_estimated_bytes = estimated_bytes;
+                ctx.stages.canonical_write_batches = artifact.write_batches();
+                ctx.stages.canonical_write_buffer_peak_bytes = artifact.buffer_peak_bytes();
                 match &self.relation_publisher {
                     Some(publisher) => {
                         match publisher
                             .publish(
                                 self.project_id,
                                 &ctx.operation_id,
-                                snapshot,
+                                &artifact,
                                 builder.index(),
                             )
                             .await
@@ -297,6 +299,11 @@ impl IndexOrchestrator {
                                 // effectively immutable.
                                 self.last_published_snapshot =
                                     Some(Arc::clone(&publication.snapshot));
+                                let report = publication.snapshot.quality_report();
+                                ctx.stages.published_snapshot_entries = (report.file_count
+                                    + report.entity_count
+                                    + report.relation_count)
+                                    as u64;
                                 // Share the publisher's product with export
                                 // enhancement. The snapshot is independent of the
                                 // retired builder lifetime.

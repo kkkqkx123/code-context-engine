@@ -4,7 +4,9 @@
 //! by the embedded SQLite branch and the remote PostgreSQL branch.
 
 use cce_types::StorageError;
-use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta};
+use cce_types::{
+    CanonicalRelationSnapshot, CanonicalSnapshotArtifact, RelationSnapshotManifest, SnapshotDelta,
+};
 
 use crate::SqliteClient;
 
@@ -434,12 +436,7 @@ impl MetadataStorage for SqliteClient {
         let conn = self.read_connection()?;
         let excluded: Vec<&str> = excluded_files.iter().map(String::as_str).collect();
         EntityRepository::search_fts_at_epoch_excluding(
-            &conn,
-            query,
-            project_id,
-            limit,
-            epoch,
-            &excluded,
+            &conn, query, project_id, limit, epoch, &excluded,
         )
     }
 
@@ -783,22 +780,15 @@ impl MetadataStorage for SqliteClient {
         })
     }
 
-    async fn snapshot_write_ready(
+    async fn snapshot_write_artifact(
         &self,
         project_id: i64,
         epoch: i64,
-        snapshot: &CanonicalRelationSnapshot,
-        input_fingerprint: &str,
-        snapshot_fingerprint: &str,
+        artifact: &CanonicalSnapshotArtifact,
     ) -> Result<(), StorageError> {
         self.with_transaction(|tx| {
             RelationSnapshotRepository::write_snapshot_and_mark_ready(
-                tx,
-                project_id,
-                epoch,
-                snapshot,
-                input_fingerprint,
-                snapshot_fingerprint,
+                tx, project_id, epoch, artifact,
             )
         })
     }
@@ -1468,6 +1458,21 @@ impl MetadataStorage for SqliteClient {
         let conn = self.read_connection()?;
         let rows =
             EntityRepository::get_by_project_and_epoch_with_file_path(&conn, project_id, epoch)?;
+        Ok(rows
+            .into_iter()
+            .map(|(entity, file_path)| EntityWithFile { entity, file_path })
+            .collect())
+    }
+
+    async fn entities_with_files_in_paths(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        paths: &[String],
+    ) -> Result<Vec<EntityWithFile>, StorageError> {
+        let conn = self.read_connection()?;
+        let rows =
+            EntityRepository::get_by_project_epoch_with_paths(&conn, project_id, epoch, paths)?;
         Ok(rows
             .into_iter()
             .map(|(entity, file_path)| EntityWithFile { entity, file_path })
@@ -3330,6 +3335,30 @@ mod tests {
             entities: vec![entity_batch_record(name, epoch)],
             parent_indices: vec![None],
         }
+    }
+
+    #[tokio::test]
+    async fn entity_rows_can_be_read_by_file_paths_only() {
+        let client = SqliteClient::in_memory().expect("in-memory client");
+        MetadataStorage::ensure_project(&client, 1, "/tmp/paths")
+            .await
+            .expect("project");
+        let epoch = 19;
+        let files = vec![
+            entity_batch_file("a.rs", "in_a", epoch),
+            entity_batch_file("b.rs", "in_b", epoch),
+        ];
+        MetadataStorage::entities_replace_files(&client, 1, epoch, 3, &files)
+            .await
+            .expect("entity batch");
+
+        let scoped =
+            MetadataStorage::entities_with_files_in_paths(&client, 1, epoch, &["a.rs".to_string()])
+                .await
+                .expect("scoped entity rows");
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].file_path, "a.rs");
+        assert_eq!(scoped[0].entity.name, "in_a");
     }
 
     #[tokio::test]

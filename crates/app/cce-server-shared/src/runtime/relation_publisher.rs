@@ -12,7 +12,7 @@ use cce_orchestrator::index::{
     RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
 };
 use cce_storage_common::MetadataStorage;
-use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
+use cce_types::{CanonicalSnapshotArtifact, SnapshotDelta, StorageError};
 use tokio::sync::Mutex;
 
 use super::{RelationRuntime, SnapshotIntegrity};
@@ -54,11 +54,12 @@ impl ServerRelationSnapshotPublisher {
         }
     }
 
-    fn integrity(snapshot: &CanonicalRelationSnapshot) -> SnapshotIntegrity {
-        if snapshot.files.is_empty()
-            && snapshot.entities.is_empty()
-            && snapshot.relations.is_empty()
-            && snapshot.dependencies.is_empty()
+    fn integrity(artifact: &CanonicalSnapshotArtifact) -> SnapshotIntegrity {
+        let counts = artifact.counts();
+        if counts.files == 0
+            && counts.entities == 0
+            && counts.relations == 0
+            && counts.dependencies == 0
         {
             SnapshotIntegrity::Empty
         } else {
@@ -283,23 +284,24 @@ impl ServerRelationSnapshotPublisher {
             manifest.config_fingerprint
         };
 
-        let snapshot = match full_index.to_canonical_snapshot(config_fingerprint) {
-            Ok(s) => s,
-            Err(error) => {
-                self.runtime.report_failure(error.clone()).await;
-                return Err(StorageError::Validation(error));
-            }
-        };
+        let artifact =
+            match full_index.build_snapshot_artifact(config_fingerprint, Default::default()) {
+                Ok(artifact) => artifact,
+                Err(error) => {
+                    self.runtime.report_failure(error.clone()).await;
+                    return Err(StorageError::Validation(error));
+                }
+            };
         // The merged snapshot is a full base; `base_relation_epoch` is only
         // meaningful for `publish()`'s CAS check and is not persisted, so
         // leaving it unset keeps the written fingerprint identical to the
         // one recomputed on load.
 
         // Publish as a full snapshot (allocates new epoch, writes full tables)
-        let integrity = Self::integrity(&snapshot);
+        let integrity = Self::integrity(&artifact);
         let epoch = match self
             .writer
-            .allocate_and_write(project_id, operation_id, &snapshot)
+            .allocate_and_write_artifact(project_id, operation_id, &artifact)
             .await
         {
             Ok(epoch) => epoch,
@@ -359,7 +361,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         &self,
         project_id: i64,
         operation_id: &str,
-        snapshot: CanonicalRelationSnapshot,
+        artifact: &CanonicalSnapshotArtifact,
         index: &RelationIndex,
     ) -> Result<RelationPublication, StorageError> {
         let _guard = self.publish_lock.lock().await;
@@ -368,7 +370,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         // epoch has not advanced past it. This prevents concurrent hot-update
         // candidates built from the same baseline from silently overwriting
         // each other.
-        if let Some(base_epoch) = snapshot.base_relation_epoch {
+        if let Some(base_epoch) = artifact.header().base_relation_epoch {
             let active_epoch = self
                 .store
                 .project_meta_get_int(project_id, "active_relation_epoch")
@@ -382,7 +384,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         }
 
         self.runtime.set_updating().await;
-        let integrity = Self::integrity(&snapshot);
+        let integrity = Self::integrity(artifact);
 
         // Build the runtime projection from the in-memory index BEFORE the
         // SQLite write  so publication does not re-read what it just
@@ -400,7 +402,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
 
         let epoch = match self
             .writer
-            .allocate_and_write(project_id, operation_id, &snapshot)
+            .allocate_and_write_artifact(project_id, operation_id, artifact)
             .await
         {
             Ok(epoch) => epoch,

@@ -22,6 +22,9 @@ pub use comment_cleaner::{clean_comment_markers, strip_comment_markers};
 pub mod hash;
 pub use hash::{calculate_hash, calculate_hash_with_limit};
 
+pub mod external_sort;
+pub use external_sort::{ExternalSorter, SortedRecords};
+
 pub mod time;
 pub use time::{current_timestamp_ms, current_timestamp_secs};
 

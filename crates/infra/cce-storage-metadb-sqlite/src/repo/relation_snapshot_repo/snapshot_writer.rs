@@ -1,206 +1,56 @@
-use std::collections::{BTreeMap, HashMap};
-
 use cce_types::{
-    CanonicalEntity, CanonicalRelationSnapshot, CanonicalRelationTarget, Span, StableSymbolKey,
-    StorageError,
+    CanonicalComponentBatch, CanonicalRelationTarget, CanonicalSnapshotArtifact,
+    DEFAULT_SNAPSHOT_BATCH_ITEMS, SnapshotArtifactCounts, Span, StableSymbolKey, StorageError,
 };
-use rusqlite::{ToSql, Transaction, params};
-
-use crate::helpers::execute_insert_batch;
+use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::{RelationSnapshotRepository, RelationSnapshotState};
-use super::{optional_json, query_error, require_state, required, to_json};
+use super::{optional_json, query_error, require_state, to_json};
+
+const INSERT_FILE: &str = "INSERT INTO relation_snapshot_files
+    (project_id, relation_epoch, path, language, input_hash, file_size, imports_json)
+ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+
+const INSERT_ENTITY: &str = "INSERT INTO relation_snapshot_entities (
+    project_id, relation_epoch, file_id, scoped_name, kind_json,
+    overload_discriminator, entity_id, name, signature, parameters_json,
+    return_type, span_json, depth, doc_comment, modifiers_json,
+    attributes_json, metadata_json, is_stdlib, stdlib_category_json, subtype
+ ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+           ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)";
+
+const FIND_FILE: &str = "SELECT id FROM relation_snapshot_files
+    WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?3";
+
+const FIND_ENTITY: &str = "SELECT e.id FROM relation_snapshot_entities e
+    JOIN relation_snapshot_files f ON f.id = e.file_id
+    WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND f.path = ?3
+      AND e.scoped_name = ?4 AND e.kind_json = ?5 AND e.overload_discriminator = ?6";
 
 impl RelationSnapshotRepository {
-    /// Write only final query/recovery data. No Canonical DTO blob is retained.
+    /// Persist a canonical snapshot artifact in bounded batches.
     ///
-    /// All inserts reuse a single prepared statement per table instead
-    /// of re-parsing SQL per row; the caller's transaction preserves the
-    /// all-or-nothing snapshot contract (the manifest stays `building` until
-    /// every row is written).
+    /// All row lookups go through the snapshot's unique indexes instead of a
+    /// project-wide `HashMap` of file paths and symbol keys, so the writer's
+    /// memory is bounded by one artifact batch rather than by project size.
+    /// The caller's transaction keeps the all-or-nothing snapshot contract:
+    /// the manifest stays `building` until every row is written.
     pub fn write_snapshot_and_mark_ready(
         tx: &Transaction<'_>,
         project_id: i64,
         epoch: i64,
-        snapshot: &CanonicalRelationSnapshot,
-        input_fingerprint: &str,
-        snapshot_fingerprint: &str,
+        artifact: &CanonicalSnapshotArtifact,
     ) -> Result<(), StorageError> {
         require_state(tx, project_id, epoch, RelationSnapshotState::Building)?;
-
-        // === 1. Files ===
-        let file_sql = "INSERT INTO relation_snapshot_files
-            (project_id, relation_epoch, path, language, input_hash, file_size, imports_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
-        let file_ids: HashMap<String, i64> = {
-            let imports_json: Vec<String> = snapshot
-                .files
-                .iter()
-                .map(|file| to_json(&file.imports))
-                .collect::<Result<_, _>>()?;
-            let file_sizes: Vec<i64> = snapshot
-                .files
-                .iter()
-                .map(|file| file.file_size as i64)
-                .collect();
-            let mut rows: Vec<Vec<&dyn ToSql>> = Vec::with_capacity(snapshot.files.len());
-            for (i, file) in snapshot.files.iter().enumerate() {
-                rows.push(vec![
-                    &project_id,
-                    &epoch,
-                    &file.path,
-                    &file.language,
-                    &file.input_hash,
-                    &file_sizes[i],
-                    &imports_json[i],
-                ]);
-            }
-            let row_ids = execute_insert_batch(tx, file_sql, &rows, "relation_snapshot_files")?;
-            snapshot
-                .files
-                .iter()
-                .zip(row_ids)
-                .map(|(file, row_id)| (file.path.clone(), row_id))
-                .collect()
-        };
-
-        // === 2. Entities ===
-        let mut storage_entities: Vec<CanonicalEntity> = snapshot.entities.clone();
-        {
-            let mut placeholders: Vec<StableSymbolKey> = snapshot
-                .relations
-                .iter()
-                .map(|relation| relation.caller.clone())
-                .filter(|key| key.is_file_placeholder())
-                .collect();
-            placeholders.sort_by_key(|key| key.sort_key());
-            placeholders.dedup_by(|a, b| a.sort_key() == b.sort_key());
-            for key in placeholders {
-                storage_entities.push(CanonicalEntity {
-                    key,
-                    entity_id: None,
-                    name: "<file>".to_string(),
-                    signature: String::new(),
-                    parameters: Vec::new(),
-                    return_type: None,
-                    span: Span::default(),
-                    depth: 0,
-                    parent: None,
-                    doc_comment: None,
-                    modifiers: Vec::new(),
-                    attributes: BTreeMap::new(),
-                    metadata: BTreeMap::new(),
-                    is_stdlib: false,
-                    stdlib_category: None,
-                    subtype: None,
-                });
-            }
-        }
-        let entity_sql = "INSERT INTO relation_snapshot_entities (
-            project_id, relation_epoch, file_id, scoped_name, kind_json,
-            overload_discriminator, entity_id, name, signature, parameters_json,
-            return_type, span_json, depth, doc_comment, modifiers_json,
-            attributes_json, metadata_json, is_stdlib, stdlib_category_json, subtype
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                   ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)";
-        let symbol_ids: HashMap<StableSymbolKey, i64> = {
-            let kind_json: Vec<String> = storage_entities
-                .iter()
-                .map(|entity| to_json(&entity.key.kind))
-                .collect::<Result<_, _>>()?;
-            let parameters_json: Vec<String> = storage_entities
-                .iter()
-                .map(|entity| to_json(&entity.parameters))
-                .collect::<Result<_, _>>()?;
-            let span_json: Vec<String> = storage_entities
-                .iter()
-                .map(|entity| to_json(&entity.span))
-                .collect::<Result<_, _>>()?;
-            let modifiers_json: Vec<String> = storage_entities
-                .iter()
-                .map(|entity| to_json(&entity.modifiers))
-                .collect::<Result<_, _>>()?;
-            let attributes_json: Vec<String> = storage_entities
-                .iter()
-                .map(|entity| to_json(&entity.attributes))
-                .collect::<Result<_, _>>()?;
-            let metadata_json: Vec<String> = storage_entities
-                .iter()
-                .map(|entity| to_json(&entity.metadata))
-                .collect::<Result<_, _>>()?;
-            let stdlib_category_json: Vec<Option<String>> = storage_entities
-                .iter()
-                .map(|entity| optional_json(&entity.stdlib_category))
-                .collect::<Result<_, _>>()?;
-            let entity_ids: Vec<Option<i64>> = storage_entities
-                .iter()
-                .map(|entity| entity.entity_id.map(|id| id as i64))
-                .collect();
-            let depths: Vec<i64> = storage_entities
-                .iter()
-                .map(|entity| entity.depth as i64)
-                .collect();
-            let is_stdlibs: Vec<i64> = storage_entities
-                .iter()
-                .map(|entity| i64::from(entity.is_stdlib))
-                .collect();
-            let mut rows: Vec<Vec<&dyn ToSql>> = Vec::with_capacity(storage_entities.len());
-            for (i, entity) in storage_entities.iter().enumerate() {
-                let file_id = required(&file_ids, &entity.key.file_path, "entity file")?;
-                rows.push(vec![
-                    &project_id,
-                    &epoch,
-                    file_id,
-                    &entity.key.scoped_name,
-                    &kind_json[i],
-                    &entity.key.overload_discriminator,
-                    &entity_ids[i],
-                    &entity.name,
-                    &entity.signature,
-                    &parameters_json[i],
-                    &entity.return_type,
-                    &span_json[i],
-                    &depths[i],
-                    &entity.doc_comment,
-                    &modifiers_json[i],
-                    &attributes_json[i],
-                    &metadata_json[i],
-                    &is_stdlibs[i],
-                    &stdlib_category_json[i],
-                    &entity.subtype,
-                ]);
-            }
-            let row_ids =
-                execute_insert_batch(tx, entity_sql, &rows, "relation_snapshot_entities")?;
-            storage_entities
-                .iter()
-                .zip(row_ids)
-                .map(|(entity, row_id)| (entity.key.clone(), row_id))
-                .collect()
-        };
-
-        // === 3. Parent fix-ups (prepared once) ===
-        {
-            let mut parent_stmt = tx
-                .prepare(
-                    "UPDATE relation_snapshot_entities SET parent_symbol_id = ?3
-                     WHERE project_id = ?1 AND id = ?2",
-                )
-                .map_err(|e| {
-                    StorageError::Transaction(format!("failed to prepare parent update: {e}"))
-                })?;
-            for entity in &snapshot.entities {
-                if let Some(parent) = &entity.parent {
-                    let entity_id = required(&symbol_ids, &entity.key, "entity")?;
-                    let parent_id = required(&symbol_ids, parent, "parent entity")?;
-                    parent_stmt
-                        .execute(params![project_id, entity_id, parent_id])
-                        .map_err(query_error)?;
-                }
-            }
-        }
-
-        // === 4. Relations ===
+        let counts: SnapshotArtifactCounts = artifact.counts();
+        let mut file_stmt = tx.prepare(INSERT_FILE).map_err(query_error)?;
+        let mut entity_stmt = tx.prepare(INSERT_ENTITY).map_err(query_error)?;
+        let mut parent_stmt = tx
+            .prepare(
+                "UPDATE relation_snapshot_entities SET parent_symbol_id = ?3
+                 WHERE project_id = ?1 AND id = ?2",
+            )
+            .map_err(query_error)?;
         let relation_sql = "INSERT INTO relation_snapshot_relations (
             project_id, relation_epoch, caller_symbol_id, target_symbol_id,
             target_state, raw_target, relation_type_json, span_json,
@@ -208,166 +58,208 @@ impl RelationSnapshotRepository {
             call_context_json, owner_type, overload_signature, callee_symbol_json,
             call_frequency, cfg_condition
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)";
-        {
-            let relation_type_json: Vec<String> = snapshot
-                .relations
-                .iter()
-                .map(|relation| to_json(&relation.relation_type))
-                .collect::<Result<_, _>>()?;
-            let span_json: Vec<String> = snapshot
-                .relations
-                .iter()
-                .map(|relation| to_json(&relation.span))
-                .collect::<Result<_, _>>()?;
-            let stdlib_category_json: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| optional_json(&relation.stdlib_category))
-                .collect::<Result<_, _>>()?;
-            let call_context_json: Vec<String> = snapshot
-                .relations
-                .iter()
-                .map(|relation| to_json(&relation.call_context))
-                .collect::<Result<_, _>>()?;
-            let owner_types: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| relation.owner_type.clone())
-                .collect();
-            let overload_signatures: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| relation.overload_signature.clone())
-                .collect();
-            let callee_symbols: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| optional_json(&relation.callee_symbol))
-                .collect::<Result<_, _>>()?;
-            let call_frequencies: Vec<i64> = snapshot
-                .relations
-                .iter()
-                .map(|relation| relation.call_frequency as i64)
-                .collect();
-            let cfg_conditions: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| relation.cfg_condition.clone())
-                .collect();
-            let target_ids: Vec<Option<i64>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| match &relation.target {
-                    CanonicalRelationTarget::Internal { key } => {
-                        required(&symbol_ids, key, "relation target").map(|id| Some(*id))
-                    }
-                    _ => Ok(None),
-                })
-                .collect::<Result<_, StorageError>>()?;
-            let target_states: Vec<String> = snapshot
-                .relations
-                .iter()
-                .map(|relation| match &relation.target {
-                    CanonicalRelationTarget::Internal { .. } => "internal".to_string(),
-                    CanonicalRelationTarget::External { .. } => "external".to_string(),
-                    CanonicalRelationTarget::Unresolved { .. } => "unresolved".to_string(),
-                })
-                .collect();
-            let externals: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| match &relation.target {
-                    CanonicalRelationTarget::External { classification } => {
-                        optional_json(classification)
-                    }
-                    _ => Ok(None),
-                })
-                .collect::<Result<_, StorageError>>()?;
-            let unresolveds: Vec<Option<String>> = snapshot
-                .relations
-                .iter()
-                .map(|relation| match &relation.target {
-                    CanonicalRelationTarget::Unresolved { reason } => {
-                        Some(reason.as_str().to_string())
-                    }
-                    _ => None,
-                })
-                .collect();
-            let mut rows: Vec<Vec<&dyn ToSql>> = Vec::with_capacity(snapshot.relations.len());
-            for (i, relation) in snapshot.relations.iter().enumerate() {
-                let caller_id = required(&symbol_ids, &relation.caller, "relation caller")?;
-                rows.push(vec![
-                    &project_id,
-                    &epoch,
-                    caller_id,
-                    &target_ids[i],
-                    &target_states[i],
-                    &relation.raw_target,
-                    &relation_type_json[i],
-                    &span_json[i],
-                    &externals[i],
-                    &unresolveds[i],
-                    &stdlib_category_json[i],
-                    &call_context_json[i],
-                    &owner_types[i],
-                    &overload_signatures[i],
-                    &callee_symbols[i],
-                    &call_frequencies[i],
-                    &cfg_conditions[i],
-                ]);
-            }
-            execute_insert_batch(tx, relation_sql, &rows, "relation_snapshot_relations")?;
-        }
+        let mut relation_stmt = tx.prepare(relation_sql).map_err(query_error)?;
+        let mut placeholder_stmt = tx
+            .prepare(
+                "INSERT OR IGNORE INTO relation_snapshot_entities (
+                    project_id, relation_epoch, file_id, scoped_name, kind_json,
+                    overload_discriminator, entity_id, name, signature, parameters_json,
+                    return_type, span_json, depth, doc_comment, modifiers_json,
+                    attributes_json, metadata_json, is_stdlib, stdlib_category_json, subtype
+                 ) SELECT ?1, ?2, id, '<file>', ?3, ?4, NULL, '<file>', '', '[]',
+                          NULL, ?5, 0, NULL, '[]', '{}', '{}', 0, NULL, NULL
+                   FROM relation_snapshot_files
+                   WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?6",
+            )
+            .map_err(query_error)?;
+        let mut export_stmt = tx
+            .prepare(
+                "INSERT INTO relation_snapshot_exports
+                 (project_id, relation_epoch, file_id, symbol_id, export_type)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(query_error)?;
+        let mut dependency_stmt = tx
+            .prepare(
+                "INSERT INTO relation_snapshot_dependencies
+                 (project_id, relation_epoch, source_file_id, target_path, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(query_error)?;
 
-        // === 5. Exports ===
-        let export_sql = "INSERT INTO relation_snapshot_exports
-            (project_id, relation_epoch, file_id, symbol_id, export_type)
-         VALUES (?1, ?2, ?3, ?4, ?5)";
-        {
-            let mut rows: Vec<Vec<&dyn ToSql>> = Vec::new();
-            for file in &snapshot.files {
-                let file_id = required(&file_ids, &file.path, "export file")?;
-                for export in &file.exports {
-                    let Some(symbol_id) = symbol_ids.get(&export.symbol) else {
-                        // Re-exports of external symbols have no local entity;
-                        // skip them instead of failing the whole publish.
-                        tracing::warn!(
-                            file = %file.path,
-                            symbol = ?export.symbol,
-                            "Skipping export with no local snapshot entity"
-                        );
-                        continue;
-                    };
-                    rows.push(vec![
-                        &project_id,
-                        &epoch,
-                        file_id,
-                        symbol_id,
-                        &export.export_type,
-                    ]);
+        for batch in artifact.batches(DEFAULT_SNAPSHOT_BATCH_ITEMS) {
+            match batch.map_err(|error| StorageError::Transaction(error.to_string()))? {
+                CanonicalComponentBatch::Files(files) => {
+                    for file in files {
+                        let imports_json = to_json(&file.imports)?;
+                        file_stmt
+                            .execute(params![
+                                project_id,
+                                epoch,
+                                file.path,
+                                file.language,
+                                file.input_hash,
+                                file.file_size as i64,
+                                imports_json,
+                            ])
+                            .map_err(|error| unique_or_query("relation_snapshot_files", error))?;
+                        // Exports are written with their file after all
+                        // entities exist, so only the file row is created here.
+                    }
+                }
+                CanonicalComponentBatch::Entities(entities) => {
+                    let mut ids = Vec::with_capacity(entities.len());
+                    for entity in &entities {
+                        let file_id = find_file(tx, project_id, epoch, &entity.key.file_path)?;
+                        let kind_json = to_json(&entity.key.kind)?;
+                        let parameters_json = to_json(&entity.parameters)?;
+                        let span_json = to_json(&entity.span)?;
+                        let modifiers_json = to_json(&entity.modifiers)?;
+                        let attributes_json = to_json(&entity.attributes)?;
+                        let metadata_json = to_json(&entity.metadata)?;
+                        let stdlib_category_json = optional_json(&entity.stdlib_category)?;
+                        let entity_id = entity.entity_id.map(|id| id as i64);
+                        let depth = entity.depth as i64;
+                        let is_stdlib = i64::from(entity.is_stdlib);
+                        entity_stmt
+                            .execute(params![
+                                project_id,
+                                epoch,
+                                file_id,
+                                entity.key.scoped_name,
+                                kind_json,
+                                entity.key.overload_discriminator,
+                                entity_id,
+                                entity.name,
+                                entity.signature,
+                                parameters_json,
+                                entity.return_type,
+                                span_json,
+                                depth,
+                                entity.doc_comment,
+                                modifiers_json,
+                                attributes_json,
+                                metadata_json,
+                                is_stdlib,
+                                stdlib_category_json,
+                                entity.subtype,
+                            ])
+                            .map_err(|error| {
+                                unique_or_query("relation_snapshot_entities", error)
+                            })?;
+                        ids.push(tx.last_insert_rowid());
+                    }
+                    for (entity, id) in entities.iter().zip(ids) {
+                        if let Some(parent) = &entity.parent {
+                            let parent_id = find_entity(tx, project_id, epoch, parent)?;
+                            parent_stmt
+                                .execute(params![project_id, id, parent_id])
+                                .map_err(query_error)?;
+                        }
+                    }
+                }
+                CanonicalComponentBatch::Relations(relations) => {
+                    for relation in relations {
+                        if relation.caller.is_file_placeholder() {
+                            let kind_json = to_json(&relation.caller.kind)?;
+                            let span_json = to_json(&Span::default())?;
+                            placeholder_stmt
+                                .execute(params![
+                                    project_id,
+                                    epoch,
+                                    kind_json,
+                                    relation.caller.overload_discriminator,
+                                    span_json,
+                                    relation.caller.file_path,
+                                ])
+                                .map_err(query_error)?;
+                        }
+                        let caller_id = find_entity(tx, project_id, epoch, &relation.caller)?;
+                        let (target_id, target_state, external_json, unresolved_reason) =
+                            match &relation.target {
+                                CanonicalRelationTarget::Internal { key } => (
+                                    Some(find_entity(tx, project_id, epoch, key)?),
+                                    "internal",
+                                    None,
+                                    None,
+                                ),
+                                CanonicalRelationTarget::External { classification } => {
+                                    (None, "external", optional_json(classification)?, None)
+                                }
+                                CanonicalRelationTarget::Unresolved { reason } => {
+                                    (None, "unresolved", None, Some(reason.as_str().to_string()))
+                                }
+                            };
+                        let relation_type_json = to_json(&relation.relation_type)?;
+                        let span_json = to_json(&relation.span)?;
+                        let stdlib_category_json = optional_json(&relation.stdlib_category)?;
+                        let call_context_json = to_json(&relation.call_context)?;
+                        let callee_symbol_json = optional_json(&relation.callee_symbol)?;
+                        relation_stmt
+                            .execute(params![
+                                project_id,
+                                epoch,
+                                caller_id,
+                                target_id,
+                                target_state,
+                                relation.raw_target,
+                                relation_type_json,
+                                span_json,
+                                external_json,
+                                unresolved_reason,
+                                stdlib_category_json,
+                                call_context_json,
+                                relation.owner_type,
+                                relation.overload_signature,
+                                callee_symbol_json,
+                                relation.call_frequency as i64,
+                                relation.cfg_condition,
+                            ])
+                            .map_err(query_error)?;
+                    }
+                }
+                CanonicalComponentBatch::Dependencies(dependencies) => {
+                    for dependency in dependencies {
+                        let source_id = find_file(tx, project_id, epoch, &dependency.source_file)?;
+                        dependency_stmt
+                            .execute(params![
+                                project_id,
+                                epoch,
+                                source_id,
+                                dependency.target_file,
+                                dependency.source,
+                            ])
+                            .map_err(query_error)?;
+                    }
                 }
             }
-            execute_insert_batch(tx, export_sql, &rows, "relation_snapshot_exports")?;
         }
 
-        // === 6. Dependencies ===
-        let dependency_sql = "INSERT INTO relation_snapshot_dependencies
-            (project_id, relation_epoch, source_file_id, target_path, source)
-         VALUES (?1, ?2, ?3, ?4, ?5)";
-        {
-            let mut rows: Vec<Vec<&dyn ToSql>> = Vec::with_capacity(snapshot.dependencies.len());
-            for dependency in &snapshot.dependencies {
-                let source_id = required(&file_ids, &dependency.source_file, "dependency source")?;
-                rows.push(vec![
-                    &project_id,
-                    &epoch,
-                    source_id,
-                    &dependency.target_file,
-                    &dependency.source,
-                ]);
+        // Exports need both file rows and entity rows, so they are emitted
+        // from a dedicated streaming pass over the artifact's file rows.
+        artifact.for_each_file(|file| {
+            let file_id = find_file(tx, project_id, epoch, &file.path)?;
+            for export in file.exports {
+                let Ok(symbol_id) = find_entity(tx, project_id, epoch, &export.symbol) else {
+                    tracing::warn!(
+                        file = %file.path,
+                        symbol = ?export.symbol,
+                        "Skipping export with no local snapshot entity"
+                    );
+                    continue;
+                };
+                export_stmt
+                    .execute(params![
+                        project_id,
+                        epoch,
+                        file_id,
+                        symbol_id,
+                        export.export_type,
+                    ])
+                    .map_err(query_error)?;
             }
-            execute_insert_batch(tx, dependency_sql, &rows, "relation_snapshot_dependencies")?;
-        }
+            Ok(())
+        })?;
 
         let changed = tx
             .execute(
@@ -380,15 +272,15 @@ impl RelationSnapshotRepository {
                 params![
                     project_id,
                     epoch,
-                    input_fingerprint,
-                    snapshot_fingerprint,
-                    snapshot.files.len() as i64,
-                    snapshot.entities.len() as i64,
-                    snapshot.relations.len() as i64,
-                    snapshot.dependencies.len() as i64,
+                    artifact.input_fingerprint(),
+                    artifact.snapshot_fingerprint(),
+                    counts.files as i64,
+                    counts.entities as i64,
+                    counts.relations as i64,
+                    counts.dependencies as i64,
                     chrono::Utc::now().timestamp(),
-                    snapshot.build_metadata.symbol_key_conflict_count as i64,
-                    to_json(&snapshot.build_metadata.symbol_key_conflict_samples)?
+                    artifact.header().build_metadata.symbol_key_conflict_count as i64,
+                    to_json(&artifact.header().build_metadata.symbol_key_conflict_samples)?,
                 ],
             )
             .map_err(query_error)?;
@@ -435,4 +327,63 @@ impl RelationSnapshotRepository {
 
         Ok(())
     }
+}
+
+fn find_file(
+    tx: &Transaction<'_>,
+    project_id: i64,
+    epoch: i64,
+    path: &str,
+) -> Result<i64, StorageError> {
+    tx.query_row(FIND_FILE, params![project_id, epoch, path], |row| {
+        row.get(0)
+    })
+    .optional()
+    .map_err(query_error)?
+    .ok_or_else(|| StorageError::validation(format!("snapshot file {path} is missing")))
+}
+
+fn find_entity(
+    tx: &Transaction<'_>,
+    project_id: i64,
+    epoch: i64,
+    key: &StableSymbolKey,
+) -> Result<i64, StorageError> {
+    let kind_json = to_json(&key.kind)?;
+    tx.query_row(
+        FIND_ENTITY,
+        params![
+            project_id,
+            epoch,
+            key.file_path,
+            key.scoped_name,
+            kind_json,
+            key.overload_discriminator,
+        ],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(query_error)?
+    .ok_or_else(|| {
+        StorageError::validation(format!(
+            "snapshot symbol {} in {} is missing",
+            key.scoped_name, key.file_path
+        ))
+    })
+}
+
+fn unique_or_query(table: &str, error: rusqlite::Error) -> StorageError {
+    if matches!(
+        error,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ffi::ErrorCode::ConstraintViolation,
+                ..
+            },
+            _
+        )
+    ) {
+        return StorageError::unique_violation(format!("duplicate key in {table}: {}", error));
+    }
+    query_error(error)
 }

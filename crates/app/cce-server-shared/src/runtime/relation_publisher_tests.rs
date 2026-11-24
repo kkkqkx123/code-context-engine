@@ -4,7 +4,7 @@ use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_orchestrator::index::{MetadataStore, in_memory_metadata_store};
 use cce_orchestrator::index::{RelationPublication, RelationSnapshotPublisher};
 use cce_storage_common::MetadataStorage;
-use cce_types::{CanonicalRelationSnapshot, SnapshotDelta};
+use cce_types::{CanonicalRelationSnapshot, CanonicalSnapshotArtifact, SnapshotDelta};
 use std::sync::Arc;
 
 use cce_codegraph::index::snapshot_query::{
@@ -126,6 +126,11 @@ fn test_layered_base_from_index(
     LayeredSnapshotIndex::new(Arc::new(RelationSnapshotIndex::from_index_shared(index)))
 }
 
+fn published_artifact(snapshot: &CanonicalRelationSnapshot) -> CanonicalSnapshotArtifact {
+    CanonicalSnapshotArtifact::from_snapshot(snapshot, Default::default())
+        .expect("test artifact should build")
+}
+
 #[tokio::test]
 async fn cas_rejects_concurrent_publish_with_stale_base_epoch() {
     let store = setup_store().await;
@@ -138,7 +143,7 @@ async fn cas_rejects_concurrent_publish_with_stale_base_epoch() {
         .publish(
             1,
             "operation-a",
-            first_snapshot.clone(),
+            &published_artifact(&first_snapshot),
             &snapshot_index(&first_snapshot),
         )
         .await
@@ -148,7 +153,12 @@ async fn cas_rejects_concurrent_publish_with_stale_base_epoch() {
     let mut stale = snapshot();
     stale.base_relation_epoch = Some(0); // active_epoch is now first.relation_epoch
     let err = publisher
-        .publish(1, "operation-b", stale.clone(), &snapshot_index(&stale))
+        .publish(
+            1,
+            "operation-b",
+            &published_artifact(&stale),
+            &snapshot_index(&stale),
+        )
         .await
         .expect_err("stale base_epoch should be rejected");
     assert!(
@@ -177,7 +187,7 @@ async fn publish_is_restart_equivalent_and_idempotent() {
         .publish(
             1,
             "operation-1",
-            first_snapshot.clone(),
+            &published_artifact(&first_snapshot),
             &snapshot_index(&first_snapshot),
         )
         .await
@@ -187,7 +197,7 @@ async fn publish_is_restart_equivalent_and_idempotent() {
         .publish(
             1,
             "operation-1",
-            second_snapshot.clone(),
+            &published_artifact(&second_snapshot),
             &snapshot_index(&second_snapshot),
         )
         .await
@@ -242,7 +252,7 @@ async fn delta_publish_is_immediately_visible_to_runtime_queries() {
         .publish(
             1,
             "operation-base",
-            base_snapshot.clone(),
+            &published_artifact(&base_snapshot),
             &snapshot_index(&base_snapshot),
         )
         .await
@@ -393,7 +403,7 @@ async fn delta_publish_is_immediately_visible_to_runtime_queries() {
         .publish(
             1,
             "operation-base-2",
-            base2_snapshot.clone(),
+            &published_artifact(&base2_snapshot),
             &snapshot_index(&base2_snapshot),
         )
         .await
@@ -445,7 +455,7 @@ async fn cold_path_delta_publish_is_scoped_without_full_merge() {
         .publish(
             1,
             "operation-base",
-            base_snapshot.clone(),
+            &published_artifact(&base_snapshot),
             &snapshot_index(&base_snapshot),
         )
         .await
@@ -592,7 +602,7 @@ async fn chain_hot_publish_merges_accumulated_deltas_for_runtime() {
         .publish(
             1,
             "operation-base",
-            base_snapshot.clone(),
+            &published_artifact(&base_snapshot),
             &snapshot_index(&base_snapshot),
         )
         .await
@@ -840,7 +850,12 @@ async fn delta_with_provided_base_is_rejected_by_scoped_validation() {
     let base_snapshot = snapshot();
     let base_index = Arc::new(snapshot_index(&base_snapshot));
     let base = publisher
-        .publish(1, "operation-base", base_snapshot.clone(), &base_index)
+        .publish(
+            1,
+            "operation-base",
+            &published_artifact(&base_snapshot),
+            &base_index,
+        )
         .await
         .expect("base snapshot should publish");
 
@@ -1010,7 +1025,7 @@ async fn maybe_compact_merges_delta_chain_at_threshold() {
         .publish(
             1,
             "operation-base",
-            base_snapshot.clone(),
+            &published_artifact(&base_snapshot),
             &snapshot_index(&base_snapshot),
         )
         .await
@@ -1086,7 +1101,7 @@ async fn maybe_compact_defers_while_candidate_building() {
         .publish(
             1,
             "operation-base",
-            base_snapshot.clone(),
+            &published_artifact(&base_snapshot),
             &snapshot_index(&base_snapshot),
         )
         .await

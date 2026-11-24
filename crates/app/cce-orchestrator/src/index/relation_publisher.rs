@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndex};
-use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
+use cce_types::{CanonicalSnapshotArtifact, SnapshotDelta, StorageError};
 use std::sync::Arc;
 
 /// Result returned after a complete relation snapshot is made active.
@@ -29,14 +29,14 @@ pub struct RelationPublication {
 pub trait RelationSnapshotPublisher: Send + Sync {
     /// Validate, persist, activate, and expose a complete snapshot.
     ///
-    /// `index` is the in-memory relation index the snapshot was exported
+    /// `index` is the in-memory relation index the artifact was exported
     /// from; implementations build the query-time runtime projection from it
-    /// directly  instead of re-reading what was just persisted.
+    /// directly instead of re-reading what was just persisted.
     async fn publish(
         &self,
         project_id: i64,
         operation_id: &str,
-        snapshot: CanonicalRelationSnapshot,
+        artifact: &CanonicalSnapshotArtifact,
         index: &RelationIndex,
     ) -> Result<RelationPublication, StorageError>;
 

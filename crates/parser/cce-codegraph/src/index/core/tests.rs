@@ -382,3 +382,58 @@ fn snapshot_carries_conflict_metadata_without_affecting_fingerprint() {
             .is_empty()
     );
 }
+
+#[test]
+fn streamed_artifact_matches_canonical_snapshot_fingerprint() {
+    use crate::index::entity_index::EntityIndexOps;
+    use crate::index::file_index::FileIndexOps;
+    use crate::index::test_support::{internal_edge, unresolved_edge};
+    use cce_types::{FileInfo, SnapshotArtifactOptions};
+
+    let index = RelationIndex::new();
+    let first = create_test_function_entity(1, "caller");
+    let second = create_test_function_entity(2, "callee");
+    for (entity, path) in [(&first, "src/a.rs"), (&second, "src/b.rs")] {
+        let mut info = FileInfo::default();
+        info.id = path.to_string();
+        info.path = path.to_string();
+        info.language = "rust".to_string();
+        index.add_file(info);
+        index.add_function_with_path(entity.id, entity.clone(), path.to_string());
+        index.register_symbol_key(path, &entity.name, entity, entity.id);
+    }
+    index.add_resolved_relation(internal_edge(
+        EntityId(1),
+        EntityId(2),
+        "callee",
+        RelationType::DirectCall,
+    ));
+    index.add_file_relation(
+        "src/a.rs",
+        unresolved_edge(EntityId(1), "missing", RelationType::DirectCall),
+    );
+    index
+        .dependency_graph
+        .add_dependency("src/a.rs", "src/b.rs");
+
+    let config = "streamed-config".to_string();
+    let snapshot = index
+        .to_canonical_snapshot(config.clone())
+        .expect("canonical snapshot should build");
+    let artifact = index
+        .build_snapshot_artifact(
+            config,
+            SnapshotArtifactOptions {
+                fingerprint_chunk_bytes: 96,
+            },
+        )
+        .expect("artifact should build");
+
+    assert_eq!(artifact.snapshot_fingerprint(), &snapshot.fingerprint());
+    assert_eq!(artifact.input_fingerprint(), &snapshot.input_fingerprint());
+    let counts = artifact.counts();
+    assert_eq!(counts.files, snapshot.files.len());
+    assert_eq!(counts.entities, snapshot.entities.len());
+    assert_eq!(counts.relations, snapshot.relations.len());
+    assert_eq!(counts.dependencies, snapshot.dependencies.len());
+}

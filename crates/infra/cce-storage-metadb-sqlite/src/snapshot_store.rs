@@ -125,15 +125,14 @@ mod tests {
                 RelationSnapshotRepository::allocate_building(tx, project_id, "operation", "config")
             })
             .expect("epoch should allocate");
+        let snapshot = test_snapshot();
+        let artifact =
+            cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+                .expect("artifact should build");
         sqlite
             .with_transaction(|tx| {
                 RelationSnapshotRepository::write_snapshot_and_mark_ready(
-                    tx,
-                    project_id,
-                    epoch,
-                    &test_snapshot(),
-                    &test_snapshot().input_fingerprint(),
-                    &test_snapshot().fingerprint(),
+                    tx, project_id, epoch, &artifact,
                 )?;
                 RelationSnapshotRepository::activate(tx, project_id, epoch)
             })
