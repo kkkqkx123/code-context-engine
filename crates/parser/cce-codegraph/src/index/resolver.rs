@@ -4,10 +4,10 @@
 //! a global symbol table and classifying external calls (standard library,
 //! external packages, or unknown).
 
-use super::core::{RelationEdgeIdentity, RelationIndex, relation_identity};
+use super::build_view::BuildEntityView;
+use super::core::{RelationEdgeIdentity, relation_identity};
 use super::dependency_index::DependencyIndex;
 use crate::config_parser::UntypedDependency;
-use crate::index::EntityIndexOps;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 use crate::symbol_table::ResolutionContext;
@@ -237,7 +237,7 @@ impl RelationResolver {
         raw_data: &RawRelationData,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
     ) -> Option<ResolvedRelation> {
         // Single-entry entry point: exists to serve existing tests. Production
         // callers must go through `resolve_batch`/`resolve_with_scope_map` so
@@ -278,7 +278,7 @@ impl RelationResolver {
         raw_data: &RawRelationData,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         entity_map: &HashMap<EntityId, &Entity>,
     ) -> Option<ResolvedRelation> {
         // Determine if this is a stdlib call.
@@ -907,7 +907,7 @@ impl RelationResolver {
         &self,
         name: &str,
         caller_file: &str,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         symbol_table: &ProjectSymbolTable,
     ) -> Option<EntityId> {
         if let Some((scope, simple)) = Self::split_funcref_scope(name) {
@@ -948,7 +948,7 @@ impl RelationResolver {
         &self,
         id: EntityId,
         caller_file: &str,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
     ) -> bool {
         entity_index
             .get_function_by_entity_id(id)
@@ -974,7 +974,7 @@ impl RelationResolver {
     fn pick_funcref_winner(
         ids: impl Iterator<Item = EntityId>,
         caller_file: &str,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
     ) -> Option<EntityId> {
         let mut best_same: Option<(EntityId, usize)> = None;
         let mut best_foreign: Option<(EntityId, usize)> = None;
@@ -1012,7 +1012,7 @@ impl RelationResolver {
         scope: &str,
         simple: &str,
         caller_file: &str,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         symbol_table: &ProjectSymbolTable,
     ) -> Option<EntityId> {
         let direct: Vec<EntityId> = entity_index
@@ -1047,7 +1047,7 @@ impl RelationResolver {
         &self,
         id: EntityId,
         scope: &str,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         symbol_table: &ProjectSymbolTable,
     ) -> bool {
         let (Some(candidate), Some(candidate_file)) = (
@@ -1119,7 +1119,7 @@ impl RelationResolver {
         callee_name: &str,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         receiver_type: Option<&str>,
     ) -> Vec<String> {
         let mut names = Vec::new();
@@ -1147,7 +1147,7 @@ impl RelationResolver {
         &self,
         dst_name: &str,
         receiver_type: Option<&str>,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         symbol_table: &ProjectSymbolTable,
     ) -> Option<String> {
         if dst_name.contains("::") {
@@ -1177,7 +1177,7 @@ impl RelationResolver {
         &self,
         receiver_type: &str,
         method: &str,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         symbol_table: &ProjectSymbolTable,
     ) -> Option<String> {
         const MAX_PROMOTION_DEPTH: usize = 8;
@@ -1603,7 +1603,7 @@ impl RelationResolver {
         raw_relations: &[RawRelationData],
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
     ) -> Vec<ResolvedRelation> {
         // Build the scope map once per file instead of per relation.
         let entity_map: HashMap<EntityId, &Entity> =
@@ -1663,7 +1663,7 @@ impl RelationResolver {
         raw_data: &RawRelationData,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
         entity_map: &HashMap<EntityId, &Entity>,
         resolved: &ResolvedRelation,
     ) -> Vec<ResolvedRelation> {
@@ -1938,7 +1938,7 @@ impl RelationResolver {
         raw_data: &RawRelationData,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
-        entity_index: &RelationIndex,
+        entity_index: &impl BuildEntityView,
     ) -> Option<String> {
         if !raw_data.dst_name.contains('.') {
             return None;

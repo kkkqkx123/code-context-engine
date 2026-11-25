@@ -223,8 +223,9 @@ impl<'a> SymbolBuildSession<'a> {
 
         let global_started = Instant::now();
         package.rebuild_exports();
-        project_symbols.add_package(package);
+        project_symbols.add_package(Arc::clone(&package));
         project_symbols.rebuild_global_type_index();
+        package.clear_type_indexes();
         let type_index_ms = global_started.elapsed().as_millis() as u64;
         let overload_started = Instant::now();
         project_symbols.rebuild_overload_sets();

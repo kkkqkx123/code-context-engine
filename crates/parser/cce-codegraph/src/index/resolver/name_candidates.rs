@@ -5,6 +5,7 @@
 //! external packages, or unknown).
 
 use super::RelationResolver;
+use crate::index::build_view::BuildEntityView;
 use crate::index::core::RelationIndex;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
@@ -18,10 +19,10 @@ use std::collections::HashMap;
 
 /// File-scoped inputs shared by every name-candidate resolution within one
 /// parsed file.
-pub(crate) struct NameCandidateContext<'a> {
+pub(crate) struct NameCandidateContext<'a, E: BuildEntityView> {
     pub parsed: &'a ParsedFile,
     pub symbol_table: &'a ProjectSymbolTable,
-    pub entity_index: &'a RelationIndex,
+    pub entity_index: &'a E,
     pub resolution_context: &'a ResolutionContext,
     /// Per-file local→global entity ID remap (see
     /// [`RelationIndex::entity_id_remap_for`]).
@@ -144,11 +145,11 @@ impl RelationResolver {
     /// Mixing the two spaces without translation silently corrupts edges
     /// whenever a global callee ID numerically collides with one of the
     /// caller file's local IDs.
-    pub(crate) fn resolve_name_candidate(
+    pub(crate) fn resolve_name_candidate<E: BuildEntityView>(
         &self,
         name: &str,
         is_stdlib: bool,
-        ctx: &NameCandidateContext<'_>,
+        ctx: &NameCandidateContext<'_, E>,
     ) -> (Option<SymbolRef>, Option<EntityId>) {
         let NameCandidateContext {
             parsed,
@@ -346,11 +347,11 @@ impl RelationResolver {
         (last != name).then_some(last)
     }
 
-    fn should_block_last_segment_fallback(
+    fn should_block_last_segment_fallback<E: BuildEntityView>(
         &self,
         name: &str,
         is_stdlib: bool,
-        ctx: &NameCandidateContext<'_>,
+        ctx: &NameCandidateContext<'_, E>,
     ) -> bool {
         // Receiver type knowledge is resolved here (the resolver owns the
         // inference lookups); the decision rules stay centralized in the
@@ -388,10 +389,10 @@ impl RelationResolver {
     /// names the mixed-in member, not a local definition. When the receiver
     /// is the mixin target and the source alias is a relative import, the
     /// member is resolved in the source module's file.
-    pub(crate) fn resolve_mixin_member(
+    pub(crate) fn resolve_mixin_member<E: BuildEntityView>(
         &self,
         name: &str,
-        ctx: &NameCandidateContext<'_>,
+        ctx: &NameCandidateContext<'_, E>,
     ) -> Option<EntityId> {
         let (receiver, member) = name.rsplit_once(['.', ':'])?;
         if receiver.is_empty()

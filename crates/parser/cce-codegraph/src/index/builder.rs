@@ -19,6 +19,7 @@ pub use symbol_table::{
     file_module_path, infer_file_type_context, project_package_name,
 };
 
+use super::build_store::BuildRelationStore;
 use super::core::{ExportInfo, ExportType, RelationIndex};
 use crate::dependency_graph::FileDependencyGraph;
 use crate::index::{
@@ -677,11 +678,10 @@ impl IndexBuilder {
     fn make_file_processor<'a>(
         &'a self,
         config: &'a BuilderConfig,
-    ) -> file_processor::FileProcessor<'a> {
+    ) -> file_processor::FileProcessor<'a, RelationIndex> {
         let mut processor = file_processor::FileProcessor::with_registry(
             &self.index,
             config,
-            &self.dependency_graph,
             self.plugin_registry.as_deref(),
         );
         processor.with_metrics(self.metrics.clone());
@@ -776,68 +776,176 @@ impl IndexBuilder {
     /// skipped. Re-running is idempotent: edges already present are not
     /// duplicated.
     pub fn derive_implicit_hierarchy_edges(&self, symbols: &ProjectSymbolTable) {
-        use crate::index::HierarchyQueryOps;
-        use cce_types::RelationType;
-        use cce_types::relation::CallContext;
+        derive_implicit_hierarchy_edges(&self.index, symbols);
+    }
 
-        let global = symbols.global_type_index();
-        let edges = crate::policy::hierarchy::derive_go_implements(&global);
-        drop(global);
-        if edges.is_empty() {
-            return;
+    /// Convert this configured builder into a disk-backed full-build builder.
+    ///
+    /// The in-memory index is dropped here; only configuration, plugin wiring
+    /// and metrics survive into the build session.
+    pub fn into_disk_builder(self, store: BuildRelationStore) -> DiskRelationBuilder {
+        DiskRelationBuilder {
+            store,
+            config_fingerprint: self.config_fingerprint(),
+            config: self.config,
+            plugin_registry: self.plugin_registry,
+            metrics: self.metrics,
         }
-        let mut inserted = 0usize;
-        for edge in edges {
-            let struct_global = self
-                .index
-                .entity_id_remap_for(&cce_types::normalize_project_path(&edge.struct_file))
-                .as_ref()
-                .and_then(|remap| remap.get(&edge.struct_id))
-                .copied();
-            let iface_global = self
-                .index
-                .entity_id_remap_for(&cce_types::normalize_project_path(&edge.iface_file))
-                .as_ref()
-                .and_then(|remap| remap.get(&edge.iface_id))
-                .copied();
-            let (Some(struct_global), Some(iface_global)) = (struct_global, iface_global) else {
-                continue;
-            };
-            if self
-                .index
-                .get_implemented_interfaces(struct_global)
-                .contains(&iface_global)
-            {
-                continue;
-            }
-            let span = self
-                .index
-                .get_function_by_entity_id(struct_global)
-                .map(|entity| entity.span)
-                .unwrap_or_default();
-            self.index.add_resolved_relation(ResolvedRelation {
-                caller: struct_global,
-                callee_id: Some(iface_global),
-                callee_name: edge.iface_name.clone(),
-                relation_type: RelationType::Implementation,
-                span,
-                is_external: false,
-                external_type: None,
-                callee_symbol: None,
-                stdlib_category: None,
-                owner_type: None,
-                call_context: CallContext::Direct,
-                overload_signature: None,
-                call_frequency: 1,
-                cfg_condition: None,
-            });
-            inserted += 1;
-        }
-        tracing::debug!(
-            derived_go_implements = inserted,
-            "Derived implicit Go interface-satisfaction edges"
+    }
+}
+
+/// Full-build relation builder writing into an operation-local disk store.
+pub struct DiskRelationBuilder {
+    store: BuildRelationStore,
+    config_fingerprint: String,
+    config: BuilderConfig,
+    plugin_registry: Option<Arc<PluginRegistry>>,
+    metrics: Option<Arc<RelationMetrics>>,
+}
+
+impl DiskRelationBuilder {
+    pub fn store(&self) -> &BuildRelationStore {
+        &self.store
+    }
+
+    pub fn config_fingerprint(&self) -> &str {
+        &self.config_fingerprint
+    }
+
+    pub fn metrics(&self) -> Option<&Arc<RelationMetrics>> {
+        self.metrics.as_ref()
+    }
+
+    pub fn plugin_registry(&self) -> Option<&Arc<PluginRegistry>> {
+        self.plugin_registry.as_ref()
+    }
+
+    fn make_file_processor(&self) -> file_processor::FileProcessor<'_, BuildRelationStore> {
+        let mut processor = file_processor::FileProcessor::with_registry(
+            &self.store,
+            &self.config,
+            self.plugin_registry.as_deref(),
+        );
+        processor.with_metrics(self.metrics.clone());
+        processor
+    }
+
+    pub fn register_file_entities(&self, file: &cce_types::ParsedFile) {
+        self.make_file_processor().index_file_core(file);
+    }
+
+    pub fn resolve_file_relations(
+        &self,
+        file: &cce_types::ParsedFile,
+        symbols: &ProjectSymbolTable,
+    ) {
+        let processor = self.make_file_processor();
+        let resolver = processor.create_resolver();
+        processor.process_relations(file, symbols, &resolver);
+    }
+
+    pub fn register_file_plugin_symbols(
+        &self,
+        file: &cce_types::ParsedFile,
+        symbols: &ProjectSymbolTable,
+    ) {
+        plugin_symbol_replay::register_file_plugin_symbols(
+            &self.store,
+            self.plugin_registry.as_deref(),
+            file,
+            symbols,
         );
     }
+
+    pub fn inject_plugin_relations(
+        &self,
+        file: &cce_types::ParsedFile,
+        symbols: &ProjectSymbolTable,
+    ) {
+        plugin_symbol_replay::inject_plugin_relations(
+            &self.store,
+            self.plugin_registry.as_deref(),
+            file,
+            symbols,
+        );
+    }
+
+    pub fn derive_implicit_hierarchy_edges(&self, symbols: &ProjectSymbolTable) {
+        derive_implicit_hierarchy_edges(&self.store, symbols);
+    }
+
+    pub fn record_build(&self, elapsed: std::time::Duration, file_count: usize, edges: usize) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_build(elapsed.as_secs_f64() * 1000.0, edges, file_count);
+        }
+    }
+}
+
+/// Materialize Go implicit interface-satisfaction edges into a build sink.
+pub(crate) fn derive_implicit_hierarchy_edges<I: crate::index::build_view::BuildIndexSink>(
+    sink: &I,
+    symbols: &ProjectSymbolTable,
+) {
+    use cce_types::RelationType;
+    use cce_types::relation::CallContext;
+
+    let global = symbols.global_type_index();
+    let edges = crate::policy::hierarchy::derive_go_implements(&global);
+    drop(global);
+    if edges.is_empty() {
+        return;
+    }
+    let mut inserted = 0usize;
+    for edge in edges {
+        let struct_global = sink
+            .entity_id_remap_for(&cce_types::normalize_project_path(&edge.struct_file))
+            .as_ref()
+            .and_then(|remap| remap.get(&edge.struct_id))
+            .copied();
+        let iface_global = sink
+            .entity_id_remap_for(&cce_types::normalize_project_path(&edge.iface_file))
+            .as_ref()
+            .and_then(|remap| remap.get(&edge.iface_id))
+            .copied();
+        let (Some(struct_global), Some(iface_global)) = (struct_global, iface_global) else {
+            continue;
+        };
+        let already_present = sink
+            .relations_of_caller(struct_global)
+            .iter()
+            .any(|relation| {
+                relation.callee_id == Some(iface_global)
+                    && relation.relation_type == RelationType::Implementation
+            });
+        if already_present {
+            continue;
+        }
+        let span = sink
+            .get_function_by_entity_id(struct_global)
+            .map(|entity| entity.span)
+            .unwrap_or_default();
+        sink.add_resolved_relation(ResolvedRelation {
+            caller: struct_global,
+            callee_id: Some(iface_global),
+            callee_name: edge.iface_name.clone(),
+            relation_type: RelationType::Implementation,
+            span,
+            is_external: false,
+            external_type: None,
+            callee_symbol: None,
+            stdlib_category: None,
+            owner_type: None,
+            call_context: CallContext::Direct,
+            overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
+        });
+        inserted += 1;
+    }
+    tracing::debug!(
+        derived_go_implements = inserted,
+        "Derived implicit Go interface-satisfaction edges"
+    );
 }
 
 impl Default for IndexBuilder {

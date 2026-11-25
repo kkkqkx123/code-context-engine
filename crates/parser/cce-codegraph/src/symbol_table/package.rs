@@ -509,6 +509,14 @@ impl PackageSymbolTable {
         None
     }
 
+    /// Drop per-module type indexes after they have been merged into the
+    /// project-global type index. Module resolution never reads them again.
+    pub fn clear_type_indexes(&self) {
+        for mut entry in self.modules.iter_mut() {
+            Arc::make_mut(entry.value_mut()).clear_type_index();
+        }
+    }
+
     /// Get all modules (shared references)
     pub fn all_modules(&self) -> Vec<Arc<super::module::ModuleSymbolTable>> {
         self.modules.iter().map(|m| Arc::clone(m.value())).collect()

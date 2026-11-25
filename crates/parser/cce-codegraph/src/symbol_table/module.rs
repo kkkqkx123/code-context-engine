@@ -509,6 +509,12 @@ impl ModuleSymbolTable {
     pub fn set_type_index(&mut self, index: TypeMemberIndex) {
         self.type_index = index;
     }
+
+    /// Release the per-module type index after it has been merged into the
+    /// project-global type index. Resolution only reads the global index.
+    pub fn clear_type_index(&mut self) {
+        self.type_index = TypeMemberIndex::new();
+    }
 }
 
 #[cfg(test)]

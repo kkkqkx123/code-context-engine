@@ -179,8 +179,7 @@ impl RelationBuildSpool {
         &self.project_symbols
     }
 
-    #[cfg(test)]
-    fn directory(&self) -> &Path {
+    pub(crate) fn directory(&self) -> &Path {
         &self.directory
     }
 

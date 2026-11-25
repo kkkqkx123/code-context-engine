@@ -34,6 +34,8 @@
 //! 1. `LocalCallResolver`: Resolves calls within a single file
 //! 2. `RelationResolver`: Resolves cross-file calls and builds the full index
 
+pub mod build_store;
+pub mod build_view;
 pub mod builder;
 pub mod compact;
 pub mod core;
@@ -54,9 +56,11 @@ pub mod view;
 mod test_support;
 
 // Re-export main types
+pub use build_store::BuildRelationStore;
+pub use build_view::{BuildEntityView, BuildIndexSink};
 pub use builder::{
-    IndexBuilder, build_file_type_index, file_module_path, infer_file_type_context,
-    project_package_name,
+    DiskRelationBuilder, IndexBuilder, build_file_type_index, file_module_path,
+    infer_file_type_context, project_package_name,
 };
 pub use compact::CompactRelationIndex;
 pub use core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex, SymbolKey};

@@ -31,6 +31,7 @@ tree-sitter = { workspace = true }
 
 # Concurrency / data structures
 dashmap = { workspace = true }
+rusqlite = { workspace = true }
 parking_lot = { workspace = true }
 sha2 = { workspace = true }
 rayon = { workspace = true }

@@ -4,13 +4,10 @@
 
 use super::config::BuilderConfig;
 use super::macro_body_call_extractor::extract_macro_body_calls;
-use crate::dependency_graph::FileDependencyGraph;
-use crate::index::core::{ExportInfo, RelationIndex};
+use crate::index::build_view::{BuildEntityView, BuildIndexSink};
+use crate::index::core::ExportInfo;
 use crate::index::resolver::RelationResolver;
-use crate::index::{
-    EntityIndexOps, ExportIndexOps, FileIndexOps, ImportIndexOps, LocalCallResolver,
-    LocalCallResolverConfig,
-};
+use crate::index::{LocalCallResolver, LocalCallResolverConfig};
 use crate::symbol_table::ProjectSymbolTable;
 use cce_metrics::domain::pipeline::RelationMetrics;
 use cce_parser_core::{AstParser, set_language_resolver};
@@ -25,10 +22,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// File processor for handling parsed files
-pub struct FileProcessor<'a> {
-    index: &'a RelationIndex,
+pub struct FileProcessor<'a, I: BuildIndexSink> {
+    index: &'a I,
     config: &'a BuilderConfig,
-    dependency_graph: &'a Arc<FileDependencyGraph>,
     plugin_registry: Option<&'a PluginRegistry>,
     metrics: Option<Arc<RelationMetrics>>,
     /// Shared lazy AST parser for the fallback import-extraction path
@@ -37,18 +33,16 @@ pub struct FileProcessor<'a> {
     ast_parser: Option<&'a Mutex<AstParser>>,
 }
 
-impl<'a> FileProcessor<'a> {
+impl<'a, I: BuildIndexSink> FileProcessor<'a, I> {
     /// Create a new file processor with an optional plugin registry.
     pub fn with_registry(
-        index: &'a RelationIndex,
+        index: &'a I,
         config: &'a BuilderConfig,
-        dependency_graph: &'a Arc<FileDependencyGraph>,
         plugin_registry: Option<&'a PluginRegistry>,
     ) -> Self {
         Self {
             index,
             config,
-            dependency_graph,
             plugin_registry,
             metrics: None,
             ast_parser: None,
@@ -171,12 +165,12 @@ impl<'a> FileProcessor<'a> {
             import_count: imports.import_count(),
             depends_on: dependencies.clone(),
         };
-        self.index.add_file(file_info);
+        BuildIndexSink::add_file(self.index, file_info);
 
         // 1.5 Record file dependencies in the dependency graph
         if self.config.policy.track_cross_file_deps {
             for dependency_path in &dependencies {
-                self.dependency_graph
+                self.index
                     .add_dependency(&normalized_path, &normalize_project_path(dependency_path));
             }
         }
@@ -329,7 +323,7 @@ impl<'a> FileProcessor<'a> {
                 (new_id, entity, normalized_path.clone())
             })
             .collect();
-        self.index.add_functions_with_paths(remapped_entities);
+        BuildIndexSink::add_entities_with_paths(self.index, remapped_entities);
 
         let scoped_names = file.resolve_all_scoped_names();
         let canonical_lookup: std::collections::HashSet<EntityId> =
@@ -347,12 +341,13 @@ impl<'a> FileProcessor<'a> {
             // duplicate-sibling ordinal, which the stable key folds into its
             // discriminator.
             let new_id = remap.get(&entity.id).copied().unwrap_or(entity.id);
-            if self.index.function_index().contains_key(&new_id)
+            if BuildIndexSink::function_contains(self.index, new_id)
                 && let Some(scoped_name) = scoped_names.get(&entity.id)
             {
                 let mut temp_entity = entity.clone();
                 temp_entity.id = new_id;
-                let registered = self.index.register_symbol_key(
+                let registered = BuildIndexSink::register_symbol_key(
+                    self.index,
                     &normalized_path,
                     scoped_name,
                     &temp_entity,
@@ -379,17 +374,13 @@ impl<'a> FileProcessor<'a> {
             })
             .collect();
 
-        self.index
-            .entity_id_remaps
-            .write()
-            .insert(normalized_path.clone(), remap);
+        BuildIndexSink::set_entity_remap(self.index, normalized_path.clone(), remap);
 
         // 3. Add imports
-        self.index
-            .add_import_table(normalized_path.clone(), imports);
+        BuildIndexSink::add_import_table(self.index, normalized_path.clone(), imports);
 
         if !exports.is_empty() {
-            self.index.add_exports(normalized_path, exports);
+            BuildIndexSink::add_exports(self.index, normalized_path, exports);
         }
     }
 
@@ -402,12 +393,7 @@ impl<'a> FileProcessor<'a> {
     ) {
         // Retrieve the entity ID remap table built by index_file_core.
         let normalized_path = normalize_project_path(&file.path);
-        let file_remap = self
-            .index
-            .entity_id_remaps
-            .read()
-            .get(&normalized_path)
-            .cloned();
+        let file_remap = BuildEntityView::entity_id_remap_for(self.index, &normalized_path);
         // Helper: map a ParsedFile-local ID to its global ID, or pass through
         // unchanged if the ID was already global (i.e. belongs to an unchanged file).
         let remap_id = |id: EntityId| -> EntityId {
@@ -465,8 +451,11 @@ impl<'a> FileProcessor<'a> {
                     self.index,
                     &entity_map,
                 ) {
-                    self.index
-                        .add_file_relation(&normalized_path, remap_resolved(resolved));
+                    BuildIndexSink::add_file_relation(
+                        self.index,
+                        &normalized_path,
+                        remap_resolved(resolved),
+                    );
                 }
                 continue;
             }
@@ -601,7 +590,7 @@ impl<'a> FileProcessor<'a> {
         if max_relations == 0 {
             // 0 = unlimited: retain every resolved relation.
             for relation in all_relations {
-                self.index.add_resolved_relation(relation);
+                BuildIndexSink::add_resolved_relation(self.index, relation);
             }
             return;
         }
@@ -634,7 +623,7 @@ impl<'a> FileProcessor<'a> {
         }
 
         for relation in all_relations {
-            self.index.add_resolved_relation(relation);
+            BuildIndexSink::add_resolved_relation(self.index, relation);
         }
     }
 

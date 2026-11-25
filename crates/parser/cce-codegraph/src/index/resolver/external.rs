@@ -5,8 +5,7 @@
 //! external packages, or unknown).
 
 use super::RelationResolver;
-use crate::index::EntityIndexOps;
-use crate::index::core::RelationIndex;
+use crate::index::build_view::BuildEntityView;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 
@@ -56,10 +55,10 @@ impl RelationResolver {
     }
 
     /// Resolve a symbol reference to a real entity ID if the entity index already contains it.
-    pub(crate) fn resolve_symbol_to_entity_id(
+    pub(crate) fn resolve_symbol_to_entity_id<E: BuildEntityView>(
         &self,
         symbol_ref: &SymbolRef,
-        entity_index: &RelationIndex,
+        entity_index: &E,
     ) -> Option<EntityId> {
         let target_name = symbol_ref.metadata.name_str();
         let target_file = symbol_ref.metadata.location.file_path.as_ref();
@@ -102,12 +101,12 @@ impl RelationResolver {
     /// go through the shared affinity arbitration (caller-directory
     /// preference, then non-test preference) and resolution is abandoned on
     /// a remaining tie instead of picking an arbitrary first entry.
-    pub(crate) fn resolve_entity_by_name(
+    pub(crate) fn resolve_entity_by_name<E: BuildEntityView>(
         &self,
         name: &str,
         prefer_file: Option<&str>,
         caller_file: Option<&str>,
-        entity_index: &RelationIndex,
+        entity_index: &E,
     ) -> Option<EntityId> {
         let ids = entity_index.get_function_ids_by_name(name);
         if ids.is_empty() {

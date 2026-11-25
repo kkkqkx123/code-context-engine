@@ -760,52 +760,6 @@ impl RelationIndex {
             .insert(entity_id, file_path.to_string());
     }
 
-    /// Release per-file build indexes immediately after that file's canonical
-    /// rows are streamed. Symbol registration for later files does not need
-    /// earlier reverse/query maps, so they never accumulate.
-    pub fn release_file_build_indexes(&self, file_path: &str, entity_ids: &[EntityId]) {
-        {
-            let reverse = self.entity_to_symbol_key.read();
-            let mut forward = self.symbol_key_to_entity.write();
-            for id in entity_ids {
-                if let Some(key) = reverse.get(id) {
-                    forward.remove(key);
-                }
-            }
-        }
-        self.file_symbol_keys.write().remove(file_path);
-        self.file_entities_by_start.write().remove(file_path);
-    }
-
-    /// Replace the build graph with empty containers so its allocations are
-    /// actually dropped before publication. Only used after the canonical
-    /// artifact is complete and the runtime snapshot is store-backed.
-    pub fn drop_build_graph(&mut self) {
-        self.function_index = Arc::new(DashMap::new());
-        self.name_index.clear();
-        self.entity_file_index = Arc::new(DashMap::new());
-        self.resolved_relation_index = Arc::new(DashMap::new());
-        self.reverse_callee_index = Arc::new(DashMap::new());
-        self.file_relation_index = Arc::new(DashMap::new());
-        self.file_callers_by_callee = Arc::new(DashMap::new());
-        *self.file_records.write() = HashMap::new();
-        *self.symbol_key_to_entity.write() = HashMap::new();
-        *self.entity_to_symbol_key.write() = HashMap::new();
-        *self.stable_id_to_entity.write() = HashMap::new();
-        *self.entity_id_remaps.write() = HashMap::new();
-        *self.file_symbol_keys.write() = HashMap::new();
-        *self.file_entities_by_start.write() = HashMap::new();
-    }
-
-    /// Release build-only resolution indexes once the canonical artifact has
-    /// been written. Published snapshots are store-backed and never read these
-    /// maps again.
-    pub fn release_resolution_indexes(&self) {
-        self.name_index.clear();
-        self.entity_to_symbol_key.write().clear();
-        self.entity_id_remaps.write().clear();
-    }
-
     /// Release indexes and payload fields that are only needed while
     /// canonical entity rows are produced. Cross-file resolution still has
     /// the name, kind, modifiers, span and type hints it needs, but the
