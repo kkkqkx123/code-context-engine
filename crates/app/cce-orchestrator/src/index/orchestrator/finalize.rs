@@ -16,6 +16,20 @@ use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
 use crate::index_state::{ModuleType, ModuleUpdateState};
 
+/// Rebuild the resolvable type context for one file without retaining it
+/// across files. Cross-file return types stay in the propagator; only the
+/// current file's scoped bindings are installed while it is processed.
+fn install_type_context(
+    file: &cce_types::ParsedFile,
+    symbols: &cce_codegraph::symbol_table::ProjectSymbolTable,
+) {
+    let module_path = cce_codegraph::index::file_module_path(file, &symbols.root_path);
+    let package_name = cce_codegraph::index::project_package_name(&symbols.root_path);
+    let type_index = cce_codegraph::index::build_file_type_index(file, &module_path, &package_name);
+    let type_ctx = cce_codegraph::index::infer_file_type_context(file, &type_index);
+    symbols.set_type_inference_context(&file.path, type_ctx);
+}
+
 impl IndexOrchestrator {
     /// Finalize index after batch processing completes.
     ///
@@ -92,6 +106,16 @@ impl IndexOrchestrator {
             OrchestratorError::index("relation_build_spool", "relation spool is unavailable")
         })?;
         let relation_build_started = Instant::now();
+        let rss_trace = std::env::var_os("CCE_RELATION_RSS_TRACE").is_some();
+        let trace_rss = |stage: &str| {
+            if rss_trace {
+                eprintln!(
+                    "[relation-rss] stage={stage} rss_kb={}",
+                    cce_utils::rss_kb().unwrap_or(0)
+                );
+            }
+        };
+        trace_rss("relation_build_start");
 
         // Inject synthetic config file nodes (e.g. Cargo.toml, package.json)
         // so the relation graph contains `config_file -> dependency` edges and
@@ -175,7 +199,7 @@ impl IndexOrchestrator {
             cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
         symbol_builder.with_metrics(self.relation_metrics());
         let project_symbols = spool.project_symbols();
-        let mut session = symbol_builder.begin_build();
+        let mut session = symbol_builder.begin_streaming_build();
         let symbols_started = Instant::now();
         spool
             .for_each(|parsed| session.add_file(parsed, project_symbols))
@@ -185,7 +209,9 @@ impl IndexOrchestrator {
                     format!("Failed to build symbols from spool: {error}"),
                 )
             })?;
+        trace_rss("symbol_add_files_done");
         let symbol_timings = session.finish(project_symbols);
+        trace_rss("symbol_finish_done");
         record_pass(symbols_started.elapsed(), total_bytes);
         let symbols_ms = symbols_started.elapsed().as_millis() as u64;
         ctx.stages.symbol_modules_ms += symbol_timings.modules_ms;
@@ -197,7 +223,12 @@ impl IndexOrchestrator {
 
         let propagation_started = Instant::now();
         spool
-            .for_each(|parsed| project_symbols.propagate_cross_file_variables_for_file(parsed))
+            .for_each(|parsed| {
+                install_type_context(parsed, project_symbols);
+                project_symbols.insert_cross_file_for_file(parsed);
+                project_symbols.propagate_cross_file_variables_for_file(parsed);
+                project_symbols.forget_type_inference_context(&parsed.path);
+            })
             .map_err(|error| {
                 OrchestratorError::index(
                     "relation_build_spool",
@@ -206,6 +237,10 @@ impl IndexOrchestrator {
             })?;
         ctx.stages.symbol_cross_file_ms += propagation_started.elapsed().as_millis() as u64;
         record_pass(propagation_started.elapsed(), total_bytes);
+        project_symbols
+            .cross_file_propagator()
+            .drop_invalidation_indexes();
+        trace_rss("symbol_propagation_done");
 
         let artifact_options = cce_types::SnapshotArtifactOptions::default()
             .with_shard_items(self.relation_config.shard.max_shard_items);
@@ -247,8 +282,10 @@ impl IndexOrchestrator {
                     )
                 })?;
             builder.index().release_entity_payloads(entity_ids);
+            builder.index().release_file_build_indexes(path, entity_ids);
         }
         record_pass(t0.elapsed(), total_bytes);
+        trace_rss("entity_registration_done");
         builder.index().release_entity_build_indexes();
         if let Some(parser) = &self.cached_build_config {
             Self::inject_governance_edges(&builder, parser);
@@ -257,6 +294,7 @@ impl IndexOrchestrator {
         let mut stream_failure = None;
         let resolved_files = spool
             .for_each(|parsed| {
+                install_type_context(parsed, project_symbols);
                 builder.resolve_file_relations(parsed, project_symbols);
                 if plugin_enabled {
                     builder.inject_plugin_relations(parsed, project_symbols);
@@ -268,6 +306,7 @@ impl IndexOrchestrator {
                         parsed.path
                     ));
                 }
+                project_symbols.forget_type_inference_context(&parsed.path);
             })
             .map_err(|error| {
                 OrchestratorError::index(
@@ -282,6 +321,7 @@ impl IndexOrchestrator {
             ));
         }
         record_pass(t1.elapsed(), total_bytes);
+        trace_rss("relation_resolution_done");
 
         let (symbol_entries, symbol_bytes) = project_symbols.capacity_counts();
         ctx.stages.symbol_table_entries = symbol_entries;
@@ -312,6 +352,7 @@ impl IndexOrchestrator {
                 format!("Failed to stream derived relations: {error}"),
             )
         })?;
+        trace_rss("derived_relations_done");
         builder.record_streamed_build_with_count(
             relation_build_started.elapsed(),
             registered_files,
@@ -324,11 +365,17 @@ impl IndexOrchestrator {
 
         match streaming.finish() {
             Ok(artifact) => {
+                trace_rss("artifact_finish_done");
+                let relation_estimated_bytes = builder.index().capacity_counts().2;
+                if self.relation_publisher.is_some() {
+                    builder.index_mut().drop_build_graph();
+                }
+                trace_rss("resolution_indexes_released");
                 let counts = artifact.counts();
                 ctx.stages.relation_snapshot_entries =
                     (counts.files + counts.entities + counts.relations + counts.dependencies)
                         as u64;
-                ctx.stages.relation_snapshot_estimated_bytes = builder.index().capacity_counts().2;
+                ctx.stages.relation_snapshot_estimated_bytes = relation_estimated_bytes;
                 ctx.stages.canonical_write_batches = artifact.write_batches();
                 ctx.stages.canonical_write_buffer_peak_bytes = artifact.buffer_peak_bytes();
                 if let Ok(plan) =
@@ -350,6 +397,7 @@ impl IndexOrchestrator {
                             .await
                         {
                             Ok(publication) => {
+                                trace_rss("publish_done");
                                 ctx.published_relation_epoch = Some(publication.relation_epoch);
                                 // Retain the shared product for read-only queries; the
                                 // round-local builder is retired here (dropped) and

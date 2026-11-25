@@ -33,6 +33,48 @@ pub struct SymbolBuildTimings {
     pub cross_file_ms: u64,
 }
 
+/// Build the type-member index for one file using the same inputs as module
+/// registration, so contexts rebuilt during relation resolution match the
+/// contexts used for cross-file propagation.
+pub fn build_file_type_index(
+    file: &ParsedFile,
+    module_path: &str,
+    package_name: &str,
+) -> crate::symbol_table::TypeMemberIndex {
+    let mut type_index = crate::symbol_table::TypeMemberIndex::new();
+    crate::policy::type_member::build_type_index_for_file(
+        &file.entities,
+        module_path,
+        &file.path,
+        package_name,
+        file.language,
+        &mut type_index,
+    );
+    type_index
+}
+
+/// Infer the per-file context consumed by the relation resolver.
+pub fn infer_file_type_context(
+    file: &ParsedFile,
+    type_index: &crate::symbol_table::TypeMemberIndex,
+) -> crate::type_inference::TypeInferenceContext {
+    let inference_ctx = InferenceContext::new().with_type_index(type_index);
+    TypeInferenceEngine::infer_types_two_pass(file, &inference_ctx)
+}
+
+/// Module path used by the bulk symbol build for a parsed file.
+pub fn file_module_path(file: &ParsedFile, project_root: &Path) -> String {
+    determine_module_path(Path::new(&file.path), project_root, file.language).unwrap_or_default()
+}
+
+/// Package name used by the bulk symbol build.
+pub fn project_package_name(project_root: &Path) -> String {
+    project_root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "default".to_string())
+}
+
 /// One streaming symbol-table build. Files are fed in spool order and
 /// released after registration; only the resulting symbol indexes are kept.
 pub struct SymbolBuildSession<'a> {
@@ -43,6 +85,7 @@ pub struct SymbolBuildSession<'a> {
     flat_symbols: Vec<(String, EntityId, String, String)>,
     modules_elapsed: Duration,
     flat_elapsed: Duration,
+    stream_contexts: bool,
     file_count: usize,
 }
 
@@ -51,6 +94,7 @@ impl<'a> SymbolBuildSession<'a> {
         owner: &'a SymbolTableBuilder,
         project_root: PathBuf,
         metrics: Option<Arc<RelationMetrics>>,
+        stream_contexts: bool,
     ) -> Self {
         Self {
             owner,
@@ -60,15 +104,13 @@ impl<'a> SymbolBuildSession<'a> {
             flat_symbols: Vec::new(),
             modules_elapsed: Duration::ZERO,
             flat_elapsed: Duration::ZERO,
+            stream_contexts,
             file_count: 0,
         }
     }
 
     fn package_name(&self) -> String {
-        self.project_root
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "default".to_string())
+        project_package_name(&self.project_root)
     }
 
     /// Register one decoded file and drop it when the call returns.
@@ -89,9 +131,7 @@ impl<'a> SymbolBuildSession<'a> {
             .as_ref()
             .expect("package created on first file");
 
-        let module_path =
-            determine_module_path(Path::new(&file.path), &self.project_root, file.language)
-                .unwrap_or_default();
+        let module_path = file_module_path(file, &self.project_root);
 
         let mut module_table = ModuleSymbolTable::new(
             module_path.clone(),
@@ -127,29 +167,18 @@ impl<'a> SymbolBuildSession<'a> {
         let local_table = LocalSymbolTable::from_parsed_file(file);
         module_table.set_local_table(local_table);
 
-        {
-            let mut type_index = crate::symbol_table::TypeMemberIndex::new();
-            crate::policy::type_member::build_type_index_for_file(
-                &file.entities,
-                &module_path,
-                &file.path,
-                &package_name,
-                file.language,
-                &mut type_index,
-            );
-            module_table.set_type_index(type_index);
-        }
-
-        {
-            let inference_ctx = InferenceContext::new().with_type_index(module_table.type_index());
-            let type_ctx = TypeInferenceEngine::infer_types_two_pass(file, &inference_ctx);
-            project_symbols.set_type_inference_context(&file.path, type_ctx);
-        }
+        let type_index = build_file_type_index(file, &module_path, &package_name);
+        let type_ctx = infer_file_type_context(file, &type_index);
+        module_table.set_type_index(type_index);
+        project_symbols.set_type_inference_context(&file.path, type_ctx);
 
         if package.add_module(module_table) {
             self.owner.record_module_path_conflict();
         }
         project_symbols.insert_cross_file_for_file(file);
+        if self.stream_contexts {
+            project_symbols.forget_type_inference_context(&file.path);
+        }
 
         let flat_started = Instant::now();
         for entity in &file.entities {
@@ -469,7 +498,14 @@ impl SymbolTableBuilder {
     /// Start a streaming build. Callers feed files with `add_file`, finish
     /// with `finish`, then propagate cross-file variables per file.
     pub fn begin_build(&self) -> SymbolBuildSession<'_> {
-        SymbolBuildSession::new(self, self.project_root.clone(), self.metrics.clone())
+        SymbolBuildSession::new(self, self.project_root.clone(), self.metrics.clone(), false)
+    }
+
+    /// Stream type contexts through the cross-file propagator instead of
+    /// retaining one context per file. Used by full builds that replay the
+    /// parsed spool a second time to rebuild a context per processed file.
+    pub fn begin_streaming_build(&self) -> SymbolBuildSession<'_> {
+        SymbolBuildSession::new(self, self.project_root.clone(), self.metrics.clone(), true)
     }
 
     /// Populate an existing project symbol table in one bulk pass.
@@ -564,25 +600,13 @@ impl SymbolTableBuilder {
         self.wire_reexports(file, &mut module_table);
 
         // Build type-member index for incremental update
-        {
-            let module_path_clone = module_table.module_path.clone();
-            let mut type_index = crate::symbol_table::TypeMemberIndex::new();
-            crate::policy::type_member::build_type_index_for_file(
-                &file.entities,
-                &module_path_clone,
-                &file.path,
-                &package_name,
-                file.language,
-                &mut type_index,
-            );
-            module_table.set_type_index(type_index);
-        }
+        let type_index = build_file_type_index(file, &module_table.module_path, &package_name);
+        let type_ctx = infer_file_type_context(file, &type_index);
+        module_table.set_type_index(type_index);
 
         // Build lightweight type inference context for incremental update
         // using two-pass inference.
         {
-            let inference_ctx = InferenceContext::new().with_type_index(module_table.type_index());
-            let type_ctx = TypeInferenceEngine::infer_types_two_pass(file, &inference_ctx);
             project.set_type_inference_context(&file.path, type_ctx);
             // Cross-file incremental update: refresh propagator for this file
             // and propagate its variables (e.g., `x = foo()` where `foo` is in

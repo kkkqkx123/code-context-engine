@@ -267,6 +267,68 @@ fn resolve_this_call_against_foreign_file(with_local_get: bool) -> cce_types::Re
         .expect("this.get must produce a relation")
 }
 
+#[test]
+fn streamed_symbol_build_keeps_cross_file_resolution_equivalent() {
+    let (engine_file, router_file) = go_engine_project();
+    let files = [&engine_file, &router_file];
+    let root = PathBuf::from(".");
+    let expected = SymbolTableBuilder::new(root.clone()).build(&files);
+
+    let builder = SymbolTableBuilder::new(root.clone());
+    let streamed = cce_codegraph_symbol_table(&builder, &files, &root);
+    for file in files {
+        let module_path = crate::index::file_module_path(file, &root);
+        let package_name = crate::index::project_package_name(&root);
+        let type_index = crate::index::build_file_type_index(file, &module_path, &package_name);
+        let type_ctx = crate::index::infer_file_type_context(file, &type_index);
+        streamed.set_type_inference_context(&file.path, type_ctx);
+        streamed.insert_cross_file_for_file(file);
+        streamed.propagate_cross_file_variables_for_file(file);
+        streamed.forget_type_inference_context(&file.path);
+    }
+
+    for file in files {
+        let module_path = crate::index::file_module_path(file, &root);
+        let package_name = crate::index::project_package_name(&root);
+        let type_index = crate::index::build_file_type_index(file, &module_path, &package_name);
+        let type_ctx = crate::index::infer_file_type_context(file, &type_index);
+        streamed.set_type_inference_context(&file.path, type_ctx);
+    }
+
+    let index_builder = crate::index::builder::IndexBuilder::new();
+    for file in files {
+        index_builder.register_file_entities(file);
+    }
+    let index = index_builder.build();
+    let resolver = RelationResolver::new();
+    let expected_relation = resolver
+        .resolve_batch(&engine_file.raw_relations, &engine_file, &expected, &index)
+        .into_iter()
+        .next()
+        .expect("embedded call must produce a relation");
+    let streamed_relation = resolver
+        .resolve_batch(&engine_file.raw_relations, &engine_file, &streamed, &index)
+        .into_iter()
+        .next()
+        .expect("streamed symbol build must produce a relation");
+    assert_eq!(expected_relation.callee_id, streamed_relation.callee_id);
+    assert_eq!(expected_relation.is_external, streamed_relation.is_external);
+}
+
+fn cce_codegraph_symbol_table(
+    builder: &SymbolTableBuilder,
+    files: &[&cce_types::ParsedFile],
+    root: &PathBuf,
+) -> crate::symbol_table::ProjectSymbolTable {
+    let project = crate::symbol_table::ProjectSymbolTable::new(root.clone());
+    let mut session = builder.begin_streaming_build();
+    for file in files {
+        session.add_file(file, &project);
+    }
+    session.finish(&project);
+    project
+}
+
 mod alias;
 mod constructor;
 mod dispatch;

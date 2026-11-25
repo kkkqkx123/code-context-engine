@@ -54,7 +54,10 @@ pub mod view;
 mod test_support;
 
 // Re-export main types
-pub use builder::IndexBuilder;
+pub use builder::{
+    IndexBuilder, build_file_type_index, file_module_path, infer_file_type_context,
+    project_package_name,
+};
 pub use compact::CompactRelationIndex;
 pub use core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex, SymbolKey};
 pub use delta::RelationDeltaOps;

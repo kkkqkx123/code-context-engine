@@ -382,6 +382,14 @@ impl ProjectSymbolTable {
         self.cross_file_propagator.remove_file(&normalized);
     }
 
+    /// Drop the resident context after its return types have been copied into
+    /// the cross-file propagator. Unlike `remove_type_inference_context`, this
+    /// keeps the propagator entry used by later files.
+    pub fn forget_type_inference_context(&self, file_path: &str) {
+        self.type_inference_contexts
+            .remove(&normalize_project_path(file_path));
+    }
+
     // === Cross-File Type Propagation ===
 
     /// Rebuild the cross-file return-type cache from all currently stored

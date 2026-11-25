@@ -407,6 +407,18 @@ impl CrossFilePropagator {
         self.file_field_index.get(&normalized).map(|v| v.clone())
     }
 
+    /// Drop per-file invalidation indexes after a bulk build. The global
+    /// return/parameter/field caches and name indexes used by resolution stay
+    /// intact; only incremental invalidation state is removed.
+    pub fn drop_invalidation_indexes(&self) {
+        self.file_return_index.clear();
+        self.id_to_name.clear();
+        self.file_param_index.clear();
+        self.param_id_to_name.clear();
+        self.file_field_index.clear();
+        self.field_id_to_name.clear();
+    }
+
     /// Clear all caches.
     pub fn clear(&self) {
         self.return_type_cache.clear();

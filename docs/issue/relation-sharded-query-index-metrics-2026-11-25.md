@@ -65,3 +65,13 @@
 同一批代码上 `cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features`、
 `cargo test --workspace --lib`、`cargo build -p cce-cli -p cce-server` 全部通过。
 关系阶段仍高于 500 MiB 目标；50,000 文件档尚未复测。
+
+## 类型上下文流式化后的最终 medium 复测（devs）
+
+| 档位 | 批次结束 RSS KiB | 关系结束 RSS KiB | 关系阶段增量 KiB | 峰值 RSS KiB |
+| ---: | ---: | ---: | ---: | ---: |
+| medium | 373,164 | 869,608 | 496,444 | 869,672 |
+
+关系阶段增量约 484.6 MiB，低于 500 MiB 门槛；峰值相比基线 1,173,636 KiB 下降约 25.9%。
+`relation_query_matrix` medium：caller_out 冷 p50/p95/p99 = 119/146/156 ms，both_2 冷 p50/p95/p99 = 119/168/173 ms，两档热查询 p95 均为 0 ms，错误数均为 0。
+50,000 文件档未复测，峰值下降 50% 的门槛尚未达成。
