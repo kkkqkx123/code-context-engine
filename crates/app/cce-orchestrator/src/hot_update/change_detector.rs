@@ -269,10 +269,10 @@ impl ChangeDetector {
         // counts when an unhashable file appears in the same scan.
         let mut saw_unhashable = false;
         for entry in &entries {
-            if let Some(rules) = &self.exclude_rules {
-                if rules.should_exclude(entry) {
-                    continue;
-                }
+            if let Some(rules) = &self.exclude_rules
+                && rules.should_exclude(entry)
+            {
+                continue;
             }
             disk_count += 1;
             current_paths.insert(entry.relative_path.clone());

@@ -559,20 +559,20 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
             let render_groups = self.compute_render_groups(&parse_result.parsed_file);
             let export_view = Self::export_summary_view(parse_result.file_summary.as_ref());
             let mut staged_result = None;
-            if let Some(processing_result) = &render_groups {
-                if !processing_result.groups.is_empty() {
-                    let source = &*parse_result.parsed_file.source;
-                    staged_result = Some(
-                        self.stage_file_update_direct(
-                            &parse_result.file_path,
-                            processing_result,
-                            source,
-                            export_view.as_ref(),
-                            &mut staging,
-                        )
-                        .await,
-                    );
-                }
+            if let Some(processing_result) = &render_groups
+                && !processing_result.groups.is_empty()
+            {
+                let source = &*parse_result.parsed_file.source;
+                staged_result = Some(
+                    self.stage_file_update_direct(
+                        &parse_result.file_path,
+                        processing_result,
+                        source,
+                        export_view.as_ref(),
+                        &mut staging,
+                    )
+                    .await,
+                );
             }
 
             let stage_outcome = match staged_result {

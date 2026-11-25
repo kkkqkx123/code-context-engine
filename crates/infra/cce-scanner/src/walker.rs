@@ -630,13 +630,11 @@ impl<'a> DirectoryWalker<'a> {
             }
         }
 
-        if is_directory {
-            if let Some(d) = decision {
-                self.filter_cache
-                    .lock()
-                    .expect("scanner filter cache poisoned")
-                    .insert(path.to_path_buf(), d);
-            }
+        if is_directory && let Some(d) = decision {
+            self.filter_cache
+                .lock()
+                .expect("scanner filter cache poisoned")
+                .insert(path.to_path_buf(), d);
         }
         decision
     }
@@ -802,10 +800,10 @@ impl<'a> DirectoryWalker<'a> {
     where
         F: FnMut(FileEntry) -> Result<()>,
     {
-        if let Some(include) = self.plugin_filter_decision(path, true, 0) {
-            if !include {
-                return Ok(());
-            }
+        if let Some(include) = self.plugin_filter_decision(path, true, 0)
+            && !include
+        {
+            return Ok(());
         }
         if self
             .pattern_matcher
@@ -1105,32 +1103,32 @@ impl<'a> DirectoryWalker<'a> {
         }
 
         // Check if file exceeds maximum size limit
-        if let Some(max_size) = self.opts.max_file_size {
-            if file_size > max_size {
-                tracing::warn!(
+        if let Some(max_size) = self.opts.max_file_size
+            && file_size > max_size
+        {
+            tracing::warn!(
+                path = %path.display(),
+                file_size,
+                max_size,
+                "Skipping oversized file without content hash"
+            );
+            let modified = metadata.modified().map_err(|e| {
+                warn!(
                     path = %path.display(),
-                    file_size,
-                    max_size,
-                    "Skipping oversized file without content hash"
+                    error = %e,
+                    "Failed to get modification time for oversized file"
                 );
-                let modified = metadata.modified().map_err(|e| {
-                    warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "Failed to get modification time for oversized file"
-                    );
-                    e
-                })?;
+                e
+            })?;
 
-                return Ok(FileEntry {
-                    path: path.to_path_buf(),
-                    relative_path: PathBuf::from(cce_types::path::relativize(self.root_path, path)),
-                    size: file_size,
-                    modified: modified.into(),
-                    content_hash: None,
-                    language_info: None,
-                });
-            }
+            return Ok(FileEntry {
+                path: path.to_path_buf(),
+                relative_path: PathBuf::from(cce_types::path::relativize(self.root_path, path)),
+                size: file_size,
+                modified: modified.into(),
+                content_hash: None,
+                language_info: None,
+            });
         }
 
         self.file_processor

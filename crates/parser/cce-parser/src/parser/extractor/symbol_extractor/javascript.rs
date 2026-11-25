@@ -258,25 +258,24 @@ impl SymbolExtractor for JavaScriptExtractor {
         for call_node in find_descendants_by_kind(&root_node, "call_expression") {
             if let Some(callee) = call_node.child_by_field_name("function") {
                 // Check if callee is "import" (kind is "import", not identifier)
-                if callee.kind() == "import" {
-                    if let Some(args) = call_node.child_by_field_name("arguments") {
-                        // Find string argument in arguments node
-                        if let Some(arg) = find_children_by_kind(&args, "string").into_iter().next()
-                        {
-                            let specifier = Self::extract_string_value(&arg, source);
-                            let span = node_to_span(&call_node);
-                            imports.push(StandardizedImport {
-                                kind: ImportKind::DynamicImport,
-                                source: specifier.clone(),
-                                target: ImportTarget::default(),
-                                alias: None,
-                                is_wildcard: false,
-                                is_default: false,
-                                is_system_header: false,
-                                is_relative: is_relative_js(&specifier),
-                                span: Some(span),
-                            });
-                        }
+                if callee.kind() == "import"
+                    && let Some(args) = call_node.child_by_field_name("arguments")
+                {
+                    // Find string argument in arguments node
+                    if let Some(arg) = find_children_by_kind(&args, "string").into_iter().next() {
+                        let specifier = Self::extract_string_value(&arg, source);
+                        let span = node_to_span(&call_node);
+                        imports.push(StandardizedImport {
+                            kind: ImportKind::DynamicImport,
+                            source: specifier.clone(),
+                            target: ImportTarget::default(),
+                            alias: None,
+                            is_wildcard: false,
+                            is_default: false,
+                            is_system_header: false,
+                            is_relative: is_relative_js(&specifier),
+                            span: Some(span),
+                        });
                     }
                 }
             }
@@ -284,103 +283,96 @@ impl SymbolExtractor for JavaScriptExtractor {
 
         // CommonJS require: require('module'), require("module")
         for call_node in find_descendants_by_kind(&root_node, "call_expression") {
-            if let Some(callee) = call_node.child_by_field_name("function") {
-                if node_text(&callee, source) == "require" {
-                    if let Some(args) = call_node.child_by_field_name("arguments") {
-                        // Find string argument in arguments node
-                        if let Some(arg) = find_children_by_kind(&args, "string").into_iter().next()
-                        {
-                            let specifier = Self::extract_string_value(&arg, source);
-                            let span = node_to_span(&call_node);
+            if let Some(callee) = call_node.child_by_field_name("function")
+                && node_text(&callee, source) == "require"
+                && let Some(args) = call_node.child_by_field_name("arguments")
+            {
+                // Find string argument in arguments node
+                if let Some(arg) = find_children_by_kind(&args, "string").into_iter().next() {
+                    let specifier = Self::extract_string_value(&arg, source);
+                    let span = node_to_span(&call_node);
 
-                            // Check if this is a destructured require
-                            // const { x, y } = require('module')
-                            let mut imported_names = Vec::new();
+                    // Check if this is a destructured require
+                    // const { x, y } = require('module')
+                    let mut imported_names = Vec::new();
 
-                            // Look for parent assignment to check for destructuring
-                            let mut parent = call_node.parent();
-                            while let Some(p) = parent {
-                                if p.kind() == "variable_declarator" {
-                                    if let Some(name_field) = p.child_by_field_name("name") {
-                                        if name_field.kind() == "object_pattern" {
-                                            // Destructured require: const { x, y } = require('module')
-                                            // Iterate through all children of object_pattern
-                                            let mut cursor = name_field.walk();
-                                            for child in name_field.children(&mut cursor) {
-                                                let child_kind = child.kind();
-                                                if child_kind
-                                                    == "shorthand_property_identifier_pattern"
-                                                {
-                                                    // { x } - shorthand property
-                                                    let name = node_text(&child, source);
-                                                    if !name.is_empty() {
-                                                        imported_names.push(name.to_string());
-                                                    }
-                                                } else if child_kind == "property_identifier" {
-                                                    // Property identifier in object pattern
-                                                    let name = node_text(&child, source);
-                                                    if !name.is_empty() {
-                                                        imported_names.push(name.to_string());
-                                                    }
-                                                } else if child_kind == "pair_pattern" {
-                                                    // { original: alias }
-                                                    if let Some(key) =
-                                                        child.child_by_field_name("key")
-                                                    {
-                                                        let key_name = node_text(&key, source);
-                                                        if !key_name.is_empty() {
-                                                            imported_names
-                                                                .push(key_name.to_string());
-                                                        }
-                                                    }
-                                                }
+                    // Look for parent assignment to check for destructuring
+                    let mut parent = call_node.parent();
+                    while let Some(p) = parent {
+                        if p.kind() == "variable_declarator" {
+                            if let Some(name_field) = p.child_by_field_name("name") {
+                                if name_field.kind() == "object_pattern" {
+                                    // Destructured require: const { x, y } = require('module')
+                                    // Iterate through all children of object_pattern
+                                    let mut cursor = name_field.walk();
+                                    for child in name_field.children(&mut cursor) {
+                                        let child_kind = child.kind();
+                                        if child_kind == "shorthand_property_identifier_pattern" {
+                                            // { x } - shorthand property
+                                            let name = node_text(&child, source);
+                                            if !name.is_empty() {
+                                                imported_names.push(name.to_string());
                                             }
-                                        } else {
-                                            // Simple require: const x = require('module')
-                                            let local_name = node_text(&name_field, source);
-                                            if !local_name.is_empty() {
-                                                imports.push(StandardizedImport {
-                                                    kind: ImportKind::CommonJSRequire,
-                                                    source: specifier.clone(),
-                                                    target: ImportTarget {
-                                                        local_name: local_name.to_string(),
-                                                        original_name: None,
-                                                        kind: TargetKind::Module,
-                                                    },
-                                                    alias: None,
-                                                    is_wildcard: false,
-                                                    is_default: false,
-                                                    is_system_header: false,
-                                                    is_relative: is_relative_js(&specifier),
-                                                    span: Some(span),
-                                                });
+                                        } else if child_kind == "property_identifier" {
+                                            // Property identifier in object pattern
+                                            let name = node_text(&child, source);
+                                            if !name.is_empty() {
+                                                imported_names.push(name.to_string());
+                                            }
+                                        } else if child_kind == "pair_pattern" {
+                                            // { original: alias }
+                                            if let Some(key) = child.child_by_field_name("key") {
+                                                let key_name = node_text(&key, source);
+                                                if !key_name.is_empty() {
+                                                    imported_names.push(key_name.to_string());
+                                                }
                                             }
                                         }
                                     }
-                                    break;
+                                } else {
+                                    // Simple require: const x = require('module')
+                                    let local_name = node_text(&name_field, source);
+                                    if !local_name.is_empty() {
+                                        imports.push(StandardizedImport {
+                                            kind: ImportKind::CommonJSRequire,
+                                            source: specifier.clone(),
+                                            target: ImportTarget {
+                                                local_name: local_name.to_string(),
+                                                original_name: None,
+                                                kind: TargetKind::Module,
+                                            },
+                                            alias: None,
+                                            is_wildcard: false,
+                                            is_default: false,
+                                            is_system_header: false,
+                                            is_relative: is_relative_js(&specifier),
+                                            span: Some(span),
+                                        });
+                                    }
                                 }
-                                parent = p.parent();
                             }
-
-                            // Add destructured imports
-                            for name in imported_names {
-                                imports.push(StandardizedImport {
-                                    kind: ImportKind::CommonJSRequire,
-                                    source: specifier.clone(),
-                                    target: ImportTarget {
-                                        local_name: name.clone(),
-                                        original_name: None,
-                                        kind: TargetKind::Other,
-                                    },
-                                    alias: None,
-                                    is_wildcard: false,
-                                    is_default: false,
-                                    is_system_header: false,
-                                    is_relative: is_relative_js(&specifier),
-                                    span: Some(span),
-                                });
-                            }
+                            break;
                         }
+                        parent = p.parent();
+                    }
+
+                    // Add destructured imports
+                    for name in imported_names {
+                        imports.push(StandardizedImport {
+                            kind: ImportKind::CommonJSRequire,
+                            source: specifier.clone(),
+                            target: ImportTarget {
+                                local_name: name.clone(),
+                                original_name: None,
+                                kind: TargetKind::Other,
+                            },
+                            alias: None,
+                            is_wildcard: false,
+                            is_default: false,
+                            is_system_header: false,
+                            is_relative: is_relative_js(&specifier),
+                            span: Some(span),
+                        });
                     }
                 }
             }
@@ -463,68 +455,68 @@ impl SymbolExtractor for JavaScriptExtractor {
             }
 
             // Check for wildcard re-export (export * from 'mod')
-            if let Some(_wildcard) = find_child_by_kind(&export_node, "*") {
-                if let Some(specifier) = Self::extract_module_specifier(&export_node, source) {
-                    let export = StandardizedExport {
-                        kind: ExportKind::Wildcard,
-                        target: ExportTarget {
-                            name: "*".to_string(),
-                            original_name: None,
-                            kind: TargetKind::Module,
-                            source_module: Some(specifier),
-                        },
-                        is_reexport: true,
-                        span: Some(span),
-                    };
-                    exports.push(export);
-                }
+            if let Some(_wildcard) = find_child_by_kind(&export_node, "*")
+                && let Some(specifier) = Self::extract_module_specifier(&export_node, source)
+            {
+                let export = StandardizedExport {
+                    kind: ExportKind::Wildcard,
+                    target: ExportTarget {
+                        name: "*".to_string(),
+                        original_name: None,
+                        kind: TargetKind::Module,
+                        source_module: Some(specifier),
+                    },
+                    is_reexport: true,
+                    span: Some(span),
+                };
+                exports.push(export);
             }
 
             // Check for direct exports: export const/let/var/class/function
-            if export_node.child_by_field_name("declaration").is_some() {
-                if let Some(decl) = export_node.child_by_field_name("declaration") {
-                    let export_name = match decl.kind() {
-                        "lexical_declaration" | "variable_declaration" => {
-                            // export const x = 1 or export let y = 2
-                            // Find variable_declarator child
-                            let mut name = String::new();
-                            for declarator in find_children_by_kind(&decl, "variable_declarator") {
-                                if let Some(name_node) = declarator.child_by_field_name("name") {
-                                    name = node_text(&name_node, source);
-                                    break;
-                                }
+            if export_node.child_by_field_name("declaration").is_some()
+                && let Some(decl) = export_node.child_by_field_name("declaration")
+            {
+                let export_name = match decl.kind() {
+                    "lexical_declaration" | "variable_declaration" => {
+                        // export const x = 1 or export let y = 2
+                        // Find variable_declarator child
+                        let mut name = String::new();
+                        for declarator in find_children_by_kind(&decl, "variable_declarator") {
+                            if let Some(name_node) = declarator.child_by_field_name("name") {
+                                name = node_text(&name_node, source);
+                                break;
                             }
-                            name
                         }
-                        "function_declaration" => decl
-                            .child_by_field_name("name")
-                            .map(|n| node_text(&n, source))
-                            .unwrap_or_default(),
-                        "class_declaration" => decl
-                            .child_by_field_name("name")
-                            .map(|n| node_text(&n, source))
-                            .unwrap_or_default(),
-                        _ => String::new(),
-                    };
-
-                    if !export_name.is_empty() {
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: export_name.clone(),
-                                original_name: None,
-                                kind: match decl.kind() {
-                                    "function_declaration" => TargetKind::Function,
-                                    "class_declaration" => TargetKind::Class,
-                                    _ => TargetKind::Variable,
-                                },
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(span),
-                        };
-                        exports.push(export);
+                        name
                     }
+                    "function_declaration" => decl
+                        .child_by_field_name("name")
+                        .map(|n| node_text(&n, source))
+                        .unwrap_or_default(),
+                    "class_declaration" => decl
+                        .child_by_field_name("name")
+                        .map(|n| node_text(&n, source))
+                        .unwrap_or_default(),
+                    _ => String::new(),
+                };
+
+                if !export_name.is_empty() {
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: export_name.clone(),
+                            original_name: None,
+                            kind: match decl.kind() {
+                                "function_declaration" => TargetKind::Function,
+                                "class_declaration" => TargetKind::Class,
+                                _ => TargetKind::Variable,
+                            },
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(span),
+                    };
+                    exports.push(export);
                 }
             }
         }
@@ -534,45 +526,44 @@ impl SymbolExtractor for JavaScriptExtractor {
         for assignment_node in find_descendants_by_kind(&root_node, "assignment_expression") {
             if let Some(left) = assignment_node.child_by_field_name("left") {
                 // Check for module.exports = x
-                if left.kind() == "member_expression" {
-                    if let Some(object) = left.child_by_field_name("object") {
-                        if let Some(property) = left.child_by_field_name("property") {
-                            let obj_text = node_text(&object, source);
-                            let prop_text = node_text(&property, source);
-                            let span = node_to_span(&assignment_node);
+                if left.kind() == "member_expression"
+                    && let Some(object) = left.child_by_field_name("object")
+                    && let Some(property) = left.child_by_field_name("property")
+                {
+                    let obj_text = node_text(&object, source);
+                    let prop_text = node_text(&property, source);
+                    let span = node_to_span(&assignment_node);
 
-                            if obj_text == "module" && prop_text == "exports" {
-                                // module.exports = x
-                                // We can't easily extract the exported name, so use a placeholder
-                                let export = StandardizedExport {
-                                    kind: ExportKind::CommonJSExport,
-                                    target: ExportTarget {
-                                        name: "module.exports".to_string(),
-                                        original_name: None,
-                                        kind: TargetKind::Other,
-                                        source_module: None,
-                                    },
-                                    is_reexport: false,
-                                    span: Some(span),
-                                };
-                                exports.push(export);
-                            } else if obj_text == "exports" {
-                                // exports.x = y
-                                let export_name = prop_text;
-                                let export = StandardizedExport {
-                                    kind: ExportKind::CommonJSExport,
-                                    target: ExportTarget {
-                                        name: export_name.clone(),
-                                        original_name: None,
-                                        kind: TargetKind::Other,
-                                        source_module: None,
-                                    },
-                                    is_reexport: false,
-                                    span: Some(span),
-                                };
-                                exports.push(export);
-                            }
-                        }
+                    if obj_text == "module" && prop_text == "exports" {
+                        // module.exports = x
+                        // We can't easily extract the exported name, so use a placeholder
+                        let export = StandardizedExport {
+                            kind: ExportKind::CommonJSExport,
+                            target: ExportTarget {
+                                name: "module.exports".to_string(),
+                                original_name: None,
+                                kind: TargetKind::Other,
+                                source_module: None,
+                            },
+                            is_reexport: false,
+                            span: Some(span),
+                        };
+                        exports.push(export);
+                    } else if obj_text == "exports" {
+                        // exports.x = y
+                        let export_name = prop_text;
+                        let export = StandardizedExport {
+                            kind: ExportKind::CommonJSExport,
+                            target: ExportTarget {
+                                name: export_name.clone(),
+                                original_name: None,
+                                kind: TargetKind::Other,
+                                source_module: None,
+                            },
+                            is_reexport: false,
+                            span: Some(span),
+                        };
+                        exports.push(export);
                     }
                 }
             }

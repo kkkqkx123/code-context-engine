@@ -130,10 +130,11 @@ pub mod shared {
             return false;
         }
         let mut chars = s.chars();
-        if let Some(first) = chars.next() {
-            if !first.is_alphabetic() && first != '_' {
-                return false;
-            }
+        if let Some(first) = chars.next()
+            && !first.is_alphabetic()
+            && first != '_'
+        {
+            return false;
         }
         chars.all(|c| c.is_alphanumeric() || c == '_')
     }

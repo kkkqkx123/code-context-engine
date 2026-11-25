@@ -392,20 +392,20 @@ impl ProjectSymbolTable {
                 for module in pkg.all_modules() {
                     if let Some(meta) = module.get_export(symbol_name) {
                         // Check if this module belongs to the namespace
-                        if let Some(ns) = module.namespace_path.namespace_prefix() {
-                            if ns == namespace {
-                                return Some(self.stable_symbol_ref(meta));
-                            }
+                        if let Some(ns) = module.namespace_path.namespace_prefix()
+                            && ns == namespace
+                        {
+                            return Some(self.stable_symbol_ref(meta));
                         }
                     }
                 }
             }
             // If we have entity_id but no module found, try global fallback
             for pkg in self.sorted_packages() {
-                if pkg.package_name == package {
-                    if let Some(meta) = pkg.get_public_export(symbol_name) {
-                        return Some(self.stable_symbol_ref(&meta));
-                    }
+                if pkg.package_name == package
+                    && let Some(meta) = pkg.get_public_export(symbol_name)
+                {
+                    return Some(self.stable_symbol_ref(&meta));
                 }
             }
             // As last resort, construct via global_index lookup
@@ -800,13 +800,12 @@ impl ProjectSymbolTable {
         {
             use cce_types::NamespacePath;
             let ns_path = NamespacePath::parse(&qualified_name);
-            if let Some(ns_prefix) = ns_path.namespace_prefix() {
-                if let Some(pkg_name) = module_path.split("::").next() {
-                    if !pkg_name.is_empty() {
-                        let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
-                        self.namespace_index.insert(ns_key, entity_id);
-                    }
-                }
+            if let Some(ns_prefix) = ns_path.namespace_prefix()
+                && let Some(pkg_name) = module_path.split("::").next()
+                && !pkg_name.is_empty()
+            {
+                let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
+                self.namespace_index.insert(ns_key, entity_id);
             }
         }
         // Update global index for this specific symbol (maintaining cache consistency)
@@ -990,10 +989,10 @@ impl ProjectSymbolTable {
         for module_idx in &module_indexes {
             global.complete_placeholders_from(module_idx);
         }
-        if total_dups > 0 {
-            if let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone()) {
-                metrics.type_member_duplicate_total.increment_by(total_dups);
-            }
+        if total_dups > 0
+            && let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone())
+        {
+            metrics.type_member_duplicate_total.increment_by(total_dups);
         }
         self.clear_cache();
     }
@@ -1041,10 +1040,10 @@ impl ProjectSymbolTable {
                 0
             }
         };
-        if dup_count > 0 {
-            if let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone()) {
-                metrics.type_member_duplicate_total.increment_by(dup_count);
-            }
+        if dup_count > 0
+            && let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone())
+        {
+            metrics.type_member_duplicate_total.increment_by(dup_count);
         }
         let mut set = HashSet::new();
         for k in new_index.type_keys() {

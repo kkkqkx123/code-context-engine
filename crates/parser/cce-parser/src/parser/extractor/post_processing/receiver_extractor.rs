@@ -43,10 +43,10 @@ pub fn extract_receiver_type(entity: &mut Entity) {
     if entity.metadata.contains_key("receiver_type") {
         return;
     }
-    if let Some(rt) = extract_from_signature(&entity.signature) {
-        if !rt.is_empty() {
-            entity.set_metadata("receiver_type", rt);
-        }
+    if let Some(rt) = extract_from_signature(&entity.signature)
+        && !rt.is_empty()
+    {
+        entity.set_metadata("receiver_type", rt);
     }
 }
 

@@ -64,12 +64,10 @@ impl Glob {
             .tokens
             .iter()
             .any(|t| matches!(t, Token::Literal(s) if s.contains('/')))
+            && let Some(file_name) = path.file_name().and_then(|f| f.to_str())
+            && match_tokens(&self.tokens, file_name, 0, 0)
         {
-            if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
-                if match_tokens(&self.tokens, file_name, 0, 0) {
-                    return true;
-                }
-            }
+            return true;
         }
 
         false

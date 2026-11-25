@@ -186,28 +186,28 @@ pub fn lua_table_to_entity_group(
     if let Some(s) = get_string(table, "group_id") {
         group.group_id = compact_str::CompactString::from(s);
     }
-    if let Some(s) = get_string(table, "group_type") {
-        if let Ok(gt) = serde_json::from_value::<GroupType>(serde_json::Value::String(s)) {
-            group.group_type = gt;
-        }
+    if let Some(s) = get_string(table, "group_type")
+        && let Ok(gt) = serde_json::from_value::<GroupType>(serde_json::Value::String(s))
+    {
+        group.group_type = gt;
     }
     if let Some(s) = get_string(table, "name") {
         group.name = compact_str::CompactString::from(s);
     }
-    if let Some(s) = get_string(table, "kind") {
-        if let Some(kind) = entity_kind_from_string(&s) {
-            group.kind = kind;
-        }
+    if let Some(s) = get_string(table, "kind")
+        && let Some(kind) = entity_kind_from_string(&s)
+    {
+        group.kind = kind;
     }
-    if let Some(s) = get_string(table, "language") {
-        if let Ok(lang) = serde_json::from_value::<Language>(serde_json::Value::String(s)) {
-            group.language = lang;
-        }
+    if let Some(s) = get_string(table, "language")
+        && let Ok(lang) = serde_json::from_value::<Language>(serde_json::Value::String(s))
+    {
+        group.language = lang;
     }
-    if let Some(s) = get_string(table, "pattern_info") {
-        if let Ok(pi) = serde_json::from_str(&s) {
-            group.pattern_info = pi;
-        }
+    if let Some(s) = get_string(table, "pattern_info")
+        && let Ok(pi) = serde_json::from_str(&s)
+    {
+        group.pattern_info = pi;
     }
     group.metadata = get_string_map(table, "metadata");
     if let Some(s) = get_string(table, "parent_group_id") {
@@ -227,11 +227,11 @@ pub fn lua_table_to_entity_group(
         let mut member_ids = Vec::new();
         for pair in members_table.pairs::<Value, Value>() {
             let (_, value) = pair?;
-            if let Value::Table(member) = value {
-                if let Ok(Some(ge)) = lua_table_to_grouped_entity(&member, None) {
-                    member_ids.push(ge.id);
-                    members.push(ge);
-                }
+            if let Value::Table(member) = value
+                && let Ok(Some(ge)) = lua_table_to_grouped_entity(&member, None)
+            {
+                member_ids.push(ge.id);
+                members.push(ge);
             }
         }
         group.members = members.into();
@@ -256,10 +256,10 @@ pub fn lua_table_to_grouped_entity(
     if let Some(s) = get_string(table, "name") {
         entity.name = s;
     }
-    if let Some(s) = get_string(table, "kind") {
-        if let Some(kind) = entity_kind_from_string(&s) {
-            entity.kind = kind;
-        }
+    if let Some(s) = get_string(table, "kind")
+        && let Some(kind) = entity_kind_from_string(&s)
+    {
+        entity.kind = kind;
     }
     if let Some(s) = get_string(table, "signature") {
         entity.signature = s;
@@ -280,10 +280,10 @@ pub fn lua_table_to_grouped_entity(
     // Round-trip the stdlib category: a plugin that rewrites a group must
     // not silently drop the external-definition category, otherwise the
     // StdlibTemplate routing loses its input on the next pass.
-    if let Some(s) = get_string(table, "stdlib_category") {
-        if let Some(cat) = parse_stdlib_category_str(&s) {
-            entity.stdlib_category = Some(cat);
-        }
+    if let Some(s) = get_string(table, "stdlib_category")
+        && let Some(cat) = parse_stdlib_category_str(&s)
+    {
+        entity.stdlib_category = Some(cat);
     }
     Ok(Some(entity))
 }

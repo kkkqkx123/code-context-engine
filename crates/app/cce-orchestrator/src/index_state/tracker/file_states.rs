@@ -185,10 +185,10 @@ impl UpdateStateTracker {
 
         for (path, state) in states.iter() {
             for (module, record) in &state.module_states {
-                if let ModuleUpdateState::Retrying { next_attempt } = record.state {
-                    if next_attempt <= now {
-                        retries.push((path.clone(), *module, next_attempt));
-                    }
+                if let ModuleUpdateState::Retrying { next_attempt } = record.state
+                    && next_attempt <= now
+                {
+                    retries.push((path.clone(), *module, next_attempt));
                 }
             }
         }

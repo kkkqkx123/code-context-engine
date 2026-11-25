@@ -82,10 +82,10 @@ pub(super) fn find_entity_span(
     entity_id: EntityId,
 ) -> Option<(usize, usize)> {
     for group in &processing_result.groups {
-        if let Some(span) = group.entity_spans.get(&entity_id) {
-            if span.end_byte > span.start_byte {
-                return Some((span.start_byte, span.end_byte));
-            }
+        if let Some(span) = group.entity_spans.get(&entity_id)
+            && span.end_byte > span.start_byte
+        {
+            return Some((span.start_byte, span.end_byte));
         }
     }
     None
@@ -280,9 +280,7 @@ pub(super) fn confirmed_body_start(
     span_start: usize,
     span_end: usize,
 ) -> Option<usize> {
-    let Some(window) = source.get(span_start..span_end) else {
-        return None;
-    };
+    let window = source.get(span_start..span_end)?;
     let mut offsets: Vec<usize> = Vec::new();
     let mut lines: Vec<&str> = Vec::new();
     let mut cursor = span_start;
@@ -413,10 +411,7 @@ fn is_trivia_line(trimmed_start: &str) -> bool {
 /// detection conservative instead of wrong.
 fn strip_same_line_comments(line: &str) -> std::borrow::Cow<'_, str> {
     let mut current = std::borrow::Cow::Borrowed(line);
-    loop {
-        let Some(open) = current.find("/*") else {
-            break;
-        };
+    while let Some(open) = current.find("/*") {
         let Some(rel_close) = current[open + 2..].find("*/") else {
             break;
         };
@@ -496,12 +491,13 @@ fn brace_body_start(
         // same-line start is only taken when the brace maps 1:1 back
         // onto the source line; otherwise the next line stays the
         // conservative body start.
-        if !after.is_empty() && !line.contains("/*") {
-            if let Some(raw_at) = line.find('{') {
-                let cut = line.find("//").unwrap_or(line.len());
-                if raw_at < cut {
-                    return Some(offsets[pos] + raw_at + 1);
-                }
+        if !after.is_empty()
+            && !line.contains("/*")
+            && let Some(raw_at) = line.find('{')
+        {
+            let cut = line.find("//").unwrap_or(line.len());
+            if raw_at < cut {
+                return Some(offsets[pos] + raw_at + 1);
             }
         }
         return Some(offsets.get(pos + 1).copied().unwrap_or(span_end));

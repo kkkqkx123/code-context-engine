@@ -138,14 +138,12 @@ fn presented_token(request: &Request) -> Option<String> {
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
+        && let Some((scheme, token)) = value.split_once(' ')
+        && scheme.eq_ignore_ascii_case("bearer")
     {
-        if let Some((scheme, token)) = value.split_once(' ')
-            && scheme.eq_ignore_ascii_case("bearer")
-        {
-            let token = token.trim();
-            if !token.is_empty() {
-                return Some(token.to_string());
-            }
+        let token = token.trim();
+        if !token.is_empty() {
+            return Some(token.to_string());
         }
     }
     request

@@ -657,19 +657,19 @@ fn main() {
         // Generate RelationCapture records
         let mut captures = Vec::new();
         for relation in &parsed.raw_relations {
-            if let Some(caller_scoped_name) = scoped_names.get(&relation.src) {
-                if let Some(entity) = parsed.get_entity(relation.src) {
-                    let capture = RelationCapture::new(
-                        "test.rs".to_string(),
-                        caller_scoped_name.clone(),
-                        entity.kind,
-                        relation.dst_name.clone(),
-                        relation.relation_type,
-                        relation.span,
-                        1,
-                    );
-                    captures.push(capture);
-                }
+            if let Some(caller_scoped_name) = scoped_names.get(&relation.src)
+                && let Some(entity) = parsed.get_entity(relation.src)
+            {
+                let capture = RelationCapture::new(
+                    "test.rs".to_string(),
+                    caller_scoped_name.clone(),
+                    entity.kind,
+                    relation.dst_name.clone(),
+                    relation.relation_type,
+                    relation.span,
+                    1,
+                );
+                captures.push(capture);
             }
         }
 

@@ -100,30 +100,30 @@ pub(crate) fn merge_top_level_line_comments(comments: Vec<Comment>) -> Vec<Comme
     for comment in comments {
         let marker = doc_line_marker(&comment);
 
-        if let Some(marker) = marker {
-            if let Some(last) = merged.last_mut() {
-                let last_marker = doc_line_marker(last);
+        if let Some(marker) = marker
+            && let Some(last) = merged.last_mut()
+        {
+            let last_marker = doc_line_marker(last);
 
-                let consecutive = comment.span.start_position.row == last.span.end_position.row
-                    || comment.span.start_position.row == last.span.end_position.row + 1;
+            let consecutive = comment.span.start_position.row == last.span.end_position.row
+                || comment.span.start_position.row == last.span.end_position.row + 1;
 
-                if last_marker == Some(marker) && consecutive {
-                    let is_whitespace_only = comment.text.trim().is_empty();
+            if last_marker == Some(marker) && consecutive {
+                let is_whitespace_only = comment.text.trim().is_empty();
 
-                    if is_whitespace_only {
-                        if !last.text.ends_with("\n\n") {
-                            last.text.push('\n');
-                        }
-                    } else {
-                        if !last.text.ends_with('\n') {
-                            last.text.push('\n');
-                        }
-                        last.text.push_str(&comment.text);
+                if is_whitespace_only {
+                    if !last.text.ends_with("\n\n") {
+                        last.text.push('\n');
                     }
-                    last.span.end_byte = comment.span.end_byte;
-                    last.span.end_position = comment.span.end_position;
-                    continue;
+                } else {
+                    if !last.text.ends_with('\n') {
+                        last.text.push('\n');
+                    }
+                    last.text.push_str(&comment.text);
                 }
+                last.span.end_byte = comment.span.end_byte;
+                last.span.end_position = comment.span.end_position;
+                continue;
             }
         }
 
@@ -142,13 +142,13 @@ pub(crate) fn dedup_same_row_comments(comments: Vec<Comment>) -> Vec<Comment> {
     let mut deduped: Vec<Comment> = Vec::with_capacity(comments.len());
 
     for comment in comments {
-        if let Some(last) = deduped.last_mut() {
-            if last.span.start_position.row == comment.span.start_position.row {
-                if should_replace_comment(last, &comment) {
-                    *last = comment;
-                }
-                continue;
+        if let Some(last) = deduped.last_mut()
+            && last.span.start_position.row == comment.span.start_position.row
+        {
+            if should_replace_comment(last, &comment) {
+                *last = comment;
             }
+            continue;
         }
 
         deduped.push(comment);

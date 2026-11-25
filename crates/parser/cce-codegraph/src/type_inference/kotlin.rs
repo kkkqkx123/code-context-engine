@@ -384,34 +384,30 @@ fn narrow_kotlin_discriminated_union(
         return vec![];
     };
     let mut results = Vec::new();
-    if let Some(existing) = ctx.get_variable_type(&var_name) {
-        if let Some(shape) = existing
+    if let Some(existing) = ctx.get_variable_type(&var_name)
+        && let Some(shape) = existing
             .shape
             .clone()
             .or_else(|| parse_type_shape(&existing.type_name, Language::Kotlin))
+        && let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+    {
+        if covers_declared_members(&shape, &narrowed)
+            || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
         {
-            if let Some(narrowed) =
-                narrow_discriminated_union(&shape, &field_name, &value, type_index)
-            {
-                if covers_declared_members(&shape, &narrowed)
-                    || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
-                {
-                    return results;
-                }
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-                return results;
-            }
+            return results;
         }
+        let type_name = type_shape_to_string(&narrowed);
+        results.push(NarrowingResult {
+            variable_name: var_name.clone(),
+            narrowed_type: TypeBinding {
+                type_name: type_name.clone(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
+        return results;
     }
     results
 }
@@ -640,25 +636,24 @@ fn narrow_kotlin_when_arms(
         let arm = arm.trim();
         if let Some(stripped) = arm.strip_prefix("is ") {
             let type_name = stripped.split_whitespace().next().unwrap_or("").trim();
-            if !type_name.is_empty() && !type_name.contains('!') {
-                if let Some(s) = subject {
-                    if is_valid_ident(s)
-                        && !results
-                            .iter()
-                            .any(|r| r.narrowed_type.type_name == type_name && r.variable_name == s)
-                    {
-                        results.push(NarrowingResult {
-                            variable_name: s.to_string(),
-                            narrowed_type: TypeBinding {
-                                type_name: type_name.to_string(),
-                                type_entity_id: None,
-                                span: Span::default(),
-                                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                                shape: parse_type_shape(type_name, Language::Kotlin),
-                            },
-                        });
-                    }
-                }
+            if !type_name.is_empty()
+                && !type_name.contains('!')
+                && let Some(s) = subject
+                && is_valid_ident(s)
+                && !results
+                    .iter()
+                    .any(|r| r.narrowed_type.type_name == type_name && r.variable_name == s)
+            {
+                results.push(NarrowingResult {
+                    variable_name: s.to_string(),
+                    narrowed_type: TypeBinding {
+                        type_name: type_name.to_string(),
+                        type_entity_id: None,
+                        span: Span::default(),
+                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                        shape: parse_type_shape(type_name, Language::Kotlin),
+                    },
+                });
             }
         }
     }

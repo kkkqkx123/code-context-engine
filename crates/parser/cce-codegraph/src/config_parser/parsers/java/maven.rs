@@ -47,12 +47,10 @@ pub(crate) fn parse_pom_xml(
             }
             Ok(Event::Empty(_e)) => {}
             Ok(Event::Text(e)) => {
-                if in_dependency {
-                    if let Ok(text) = e.unescape() {
-                        let text = text.to_string();
-                        if let Some("artifactid") = current_element.as_deref() {
-                            current_artifact_id = Some(text);
-                        }
+                if in_dependency && let Ok(text) = e.unescape() {
+                    let text = text.to_string();
+                    if let Some("artifactid") = current_element.as_deref() {
+                        current_artifact_id = Some(text);
                     }
                 }
             }

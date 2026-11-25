@@ -17,11 +17,11 @@ impl ClassMethodProcessor {
         if ctx.max_depth == 0 {
             // Mark all child type definitions as processed to avoid creating standalone groups
             for &child_id in &parent_entity.children {
-                if let Some(child_entity) = ctx.all_entities.iter().find(|e| e.id == child_id) {
-                    if child_entity.kind.is_type_definition() {
-                        // SAFETY: We only insert into the HashSet, no concurrent access
-                        ctx.processed_ids.insert(child_id);
-                    }
+                if let Some(child_entity) = ctx.all_entities.iter().find(|e| e.id == child_id)
+                    && child_entity.kind.is_type_definition()
+                {
+                    // SAFETY: We only insert into the HashSet, no concurrent access
+                    ctx.processed_ids.insert(child_id);
                 }
             }
             return Vec::new();

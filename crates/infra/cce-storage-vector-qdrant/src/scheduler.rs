@@ -519,10 +519,10 @@ impl ConfigUpgradeScheduler {
         let mut count = 0;
 
         for service in services.values() {
-            if let Some(upgrade) = service.get_current_upgrade("").await {
-                if upgrade.status == UpgradeStatus::InProgress {
-                    count += 1;
-                }
+            if let Some(upgrade) = service.get_current_upgrade("").await
+                && upgrade.status == UpgradeStatus::InProgress
+            {
+                count += 1;
             }
         }
 

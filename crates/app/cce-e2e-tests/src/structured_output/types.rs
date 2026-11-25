@@ -222,18 +222,18 @@ pub fn visibility_of(entity: &Entity, language: &str) -> String {
             return visibility_display(&vis);
         }
     }
-    if let Some(signal) = entity.metadata.get("visibility") {
-        if let Some(vis) = policy_signal_to_visibility(&signal.to_lowercase(), lang) {
-            return visibility_display(&vis);
-        }
+    if let Some(signal) = entity.metadata.get("visibility")
+        && let Some(vis) = policy_signal_to_visibility(&signal.to_lowercase(), lang)
+    {
+        return visibility_display(&vis);
     }
-    if matches!(lang, "python" | "py") {
-        if let Some(flag) = entity.metadata.get("is_exported_by_all") {
-            if flag == "true" {
-                return "public".to_string();
-            } else if flag == "false" {
-                return "private".to_string();
-            }
+    if matches!(lang, "python" | "py")
+        && let Some(flag) = entity.metadata.get("is_exported_by_all")
+    {
+        if flag == "true" {
+            return "public".to_string();
+        } else if flag == "false" {
+            return "private".to_string();
         }
     }
     let name_vis = match lang {

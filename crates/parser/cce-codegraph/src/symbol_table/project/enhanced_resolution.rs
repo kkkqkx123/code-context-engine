@@ -79,19 +79,19 @@ impl ProjectSymbolTable {
         // binding before local scope so the call lands on the real
         // definition; shadowing a require alias with a same-name local is
         // pathological and stays unsupported.
-        if !name.contains(':') && !name.contains('.') {
-            if let Some(symbol) =
+        if !name.contains(':')
+            && !name.contains('.')
+            && let Some(symbol) =
                 self.resolve_relative_import_binding(name, context, from_scope.as_ref())
-            {
-                return Some(symbol);
-            }
+        {
+            return Some(symbol);
         }
 
         // Level 0: Local scope chain resolution (inner-to-outer, handles shadowing)
-        if !context.scope_chain.is_empty() {
-            if let Some(symbol) = self.resolve_via_local_scope(name, context) {
-                return Some(symbol);
-            }
+        if !context.scope_chain.is_empty()
+            && let Some(symbol) = self.resolve_via_local_scope(name, context)
+        {
+            return Some(symbol);
         }
 
         // Alias precedence: a bare name bound by the caller module's import
@@ -100,11 +100,11 @@ impl ProjectSymbolTable {
         // the Level 1 qualified/simple search so an unrelated export of the
         // same name cannot hijack the alias. Qualified names (containing `::`
         // or `.`) are never import local names and skip this step.
-        if !name.contains(':') && !name.contains('.') {
-            if let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
-            {
-                return Some(symbol);
-            }
+        if !name.contains(':')
+            && !name.contains('.')
+            && let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
+        {
+            return Some(symbol);
         }
 
         // Level 1: Direct/qualified name lookup (cache contextualized per caller
@@ -135,10 +135,10 @@ impl ProjectSymbolTable {
         ) {
             return Some(symbol);
         }
-        if !qualified {
-            if let Some(symbol) = self.resolve_via_type_member(name, context, from_scope.as_ref()) {
-                return Some(symbol);
-            }
+        if !qualified
+            && let Some(symbol) = self.resolve_via_type_member(name, context, from_scope.as_ref())
+        {
+            return Some(symbol);
         }
 
         // Level 2: Import resolution via module tables
@@ -228,23 +228,24 @@ impl ProjectSymbolTable {
         // Relative-require precedence, mirroring `resolve_enhanced_inner`:
         // a bare name bound by a relative import forwards to the target
         // module's export before local scope is consulted.
-        if !name.contains(':') && !name.contains('.') {
-            if let Some(symbol) =
+        if !name.contains(':')
+            && !name.contains('.')
+            && let Some(symbol) =
                 self.resolve_relative_import_binding(name, context, from_scope.as_ref())
-            {
-                return Some(symbol);
-            }
+        {
+            return Some(symbol);
         }
-        if !context.scope_chain.is_empty() {
-            if let Some(symbol) = self.resolve_via_local_scope(name, context) {
-                return Some(symbol);
-            }
+        if !context.scope_chain.is_empty()
+            && let Some(symbol) = self.resolve_via_local_scope(name, context)
+        {
+            return Some(symbol);
         }
-        if cross_file_guess_allowed && !name.contains(':') && !name.contains('.') {
-            if let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
-            {
-                return Some(symbol);
-            }
+        if cross_file_guess_allowed
+            && !name.contains(':')
+            && !name.contains('.')
+            && let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
+        {
+            return Some(symbol);
         }
         let qualified = name.contains('.') || name.contains("::");
         if qualified {
@@ -269,10 +270,10 @@ impl ProjectSymbolTable {
         ) {
             return Some(symbol);
         }
-        if !qualified {
-            if let Some(symbol) = self.resolve_via_type_member(name, context, from_scope.as_ref()) {
-                return Some(symbol);
-            }
+        if !qualified
+            && let Some(symbol) = self.resolve_via_type_member(name, context, from_scope.as_ref())
+        {
+            return Some(symbol);
         }
         if cross_file_guess_allowed {
             if let Some(symbol) = self.resolve_via_module_import(name, context, from_scope.as_ref())
@@ -316,19 +317,19 @@ impl ProjectSymbolTable {
                 .unwrap_or(symbol.symbol_id);
             SymbolRef::new(global, symbol.metadata)
         };
-        if let Some(package) = self.get_package_for_file(&context.file_path) {
-            if let Some(module) = package.get_module(&context.file_path) {
-                return module
-                    .resolve_local_scope(name, &context.scope_chain)
-                    .map(translate);
-            }
+        if let Some(package) = self.get_package_for_file(&context.file_path)
+            && let Some(module) = package.get_module(&context.file_path)
+        {
+            return module
+                .resolve_local_scope(name, &context.scope_chain)
+                .map(translate);
         }
         // Fallback to deterministic scan when file->package mapping is stale.
         for package in self.sorted_packages() {
-            if let Some(module) = package.get_module(&context.file_path) {
-                if let Some(symbol) = module.resolve_local_scope(name, &context.scope_chain) {
-                    return Some(translate(symbol));
-                }
+            if let Some(module) = package.get_module(&context.file_path)
+                && let Some(symbol) = module.resolve_local_scope(name, &context.scope_chain)
+            {
+                return Some(translate(symbol));
             }
         }
         None
@@ -366,20 +367,17 @@ impl ProjectSymbolTable {
         context: &ResolutionContext,
         from_scope: Option<&ScopeContext>,
     ) -> Option<SymbolRef> {
-        if let Some(package) = self.get_package_for_file(&context.file_path) {
-            if let Some(module) = package.get_module(&context.file_path) {
-                if let Some(symbol) =
-                    self.resolve_import_binding(&module, &package, name, from_scope)
-                {
-                    return Some(symbol);
-                }
-                if let Some(symbol) =
-                    self.resolve_wildcard_binding(&module, &package, name, from_scope)
-                {
-                    return Some(symbol);
-                }
-                return None;
+        if let Some(package) = self.get_package_for_file(&context.file_path)
+            && let Some(module) = package.get_module(&context.file_path)
+        {
+            if let Some(symbol) = self.resolve_import_binding(&module, &package, name, from_scope) {
+                return Some(symbol);
             }
+            if let Some(symbol) = self.resolve_wildcard_binding(&module, &package, name, from_scope)
+            {
+                return Some(symbol);
+            }
+            return None;
         }
         // Fallback to deterministic scan when file->package mapping is stale.
         for package in self.sorted_packages() {
@@ -556,30 +554,30 @@ impl ProjectSymbolTable {
         context: &ResolutionContext,
         from_scope: Option<&ScopeContext>,
     ) -> Option<SymbolRef> {
-        if let Some(package) = self.get_package_for_file(&context.file_path) {
-            if let Some(module) = package.get_module(&context.file_path) {
-                if let Some(binding) = module.get_reexport(name) {
-                    if let Some(symbol) = binding.resolved_symbol {
-                        return Some(symbol);
-                    }
-                    let symbol = self.resolve_reexport_target(&binding, &package, 1, from_scope)?;
-                    module.resolve_reexport(name, symbol.clone());
+        if let Some(package) = self.get_package_for_file(&context.file_path)
+            && let Some(module) = package.get_module(&context.file_path)
+        {
+            if let Some(binding) = module.get_reexport(name) {
+                if let Some(symbol) = binding.resolved_symbol {
                     return Some(symbol);
                 }
-                return None;
+                let symbol = self.resolve_reexport_target(&binding, &package, 1, from_scope)?;
+                module.resolve_reexport(name, symbol.clone());
+                return Some(symbol);
             }
+            return None;
         }
         // Fallback to deterministic scan when file->package mapping is stale.
         for package in self.sorted_packages() {
-            if let Some(module) = package.get_module(&context.file_path) {
-                if let Some(binding) = module.get_reexport(name) {
-                    if let Some(symbol) = binding.resolved_symbol {
-                        return Some(symbol);
-                    }
-                    let symbol = self.resolve_reexport_target(&binding, &package, 1, from_scope)?;
-                    module.resolve_reexport(name, symbol.clone());
+            if let Some(module) = package.get_module(&context.file_path)
+                && let Some(binding) = module.get_reexport(name)
+            {
+                if let Some(symbol) = binding.resolved_symbol {
                     return Some(symbol);
                 }
+                let symbol = self.resolve_reexport_target(&binding, &package, 1, from_scope)?;
+                module.resolve_reexport(name, symbol.clone());
+                return Some(symbol);
             }
         }
         None
@@ -615,10 +613,10 @@ impl ProjectSymbolTable {
         let target = package.resolve_module_path(module_path, None)?;
         // Return a previously-resolved symbol immediately; cached results
         // do not consume additional hop budget.
-        if let Some(cached) = target.get_reexport(&binding.original_name) {
-            if let Some(symbol) = cached.resolved_symbol {
-                return Some(symbol);
-            }
+        if let Some(cached) = target.get_reexport(&binding.original_name)
+            && let Some(symbol) = cached.resolved_symbol
+        {
+            return Some(symbol);
         }
         // Enforce the hop cap: once the budget is exhausted, do not attempt
         // further local lookups or chain-following.

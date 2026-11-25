@@ -37,14 +37,14 @@ impl ExportSpool {
         let directory = project_root
             .join(".cce")
             .join(format!("export-spool-{project_id}"));
-        if directory.exists() {
-            if let Err(error) = fs::remove_dir_all(&directory) {
-                tracing::warn!(
-                    path = %directory.display(),
-                    %error,
-                    "Failed to remove orphaned export spool"
-                );
-            }
+        if directory.exists()
+            && let Err(error) = fs::remove_dir_all(&directory)
+        {
+            tracing::warn!(
+                path = %directory.display(),
+                %error,
+                "Failed to remove orphaned export spool"
+            );
         }
         fs::create_dir_all(&directory).map_err(|error| {
             OrchestratorError::index(

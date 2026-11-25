@@ -143,10 +143,10 @@ impl ScopedTypeContext {
     /// Returns the concrete type if `param` is bound within `outer_type`.
     /// Falls back to the global `get_type_param` if no ownership record exists.
     pub fn get_type_param_for_owner(&self, outer_type: &str, param: &str) -> Option<&str> {
-        if let Some(owners) = self.generic_param_ownership.get(outer_type) {
-            if let Some(v) = owners.get(param) {
-                return Some(v.as_str());
-            }
+        if let Some(owners) = self.generic_param_ownership.get(outer_type)
+            && let Some(v) = owners.get(param)
+        {
+            return Some(v.as_str());
         }
         self.get_type_param(param)
     }
@@ -516,10 +516,10 @@ impl ScopedTypeContext {
                 BranchPolarity::Then => &frame.narrowed,
                 BranchPolarity::Else => &frame.narrowed_else,
             };
-            if let Some(list) = map.get(name) {
-                if let Some(binding) = list.iter().max_by_key(|b| origin_priority(b.origin)) {
-                    return Some(binding);
-                }
+            if let Some(list) = map.get(name)
+                && let Some(binding) = list.iter().max_by_key(|b| origin_priority(b.origin))
+            {
+                return Some(binding);
             }
         }
         None
@@ -565,15 +565,13 @@ impl ScopedTypeContext {
             let has_binding = frame.bindings.contains_key(name);
             let has_narrowed = frame.narrowed.contains_key(name);
 
-            if has_narrowed {
-                if let Some(narrowed_list) = frame.narrowed.get(name) {
-                    if let Some(narrowed) = narrowed_list
-                        .iter()
-                        .max_by_key(|b| origin_priority(b.origin))
-                    {
-                        return Some(narrowed);
-                    }
-                }
+            if has_narrowed
+                && let Some(narrowed_list) = frame.narrowed.get(name)
+                && let Some(narrowed) = narrowed_list
+                    .iter()
+                    .max_by_key(|b| origin_priority(b.origin))
+            {
+                return Some(narrowed);
             }
 
             if has_binding {

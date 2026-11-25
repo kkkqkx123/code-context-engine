@@ -145,16 +145,17 @@ impl OverlapManager {
         let search_start = floor_char_boundary(text, target_byte);
         let search_end = floor_char_boundary(text, (target_byte + 100).min(text.len()));
 
-        if search_start < search_end && search_end <= text.len() {
-            if let Some(pos) = self.find_sentence_boundary(&text[search_start..search_end]) {
-                let start = floor_char_boundary(text, search_start + pos);
-                if start < text.len() {
-                    return OverlapInfo {
-                        text: text[start..].to_string(),
-                        start_byte: start,
-                        end_byte: text.len(),
-                    };
-                }
+        if search_start < search_end
+            && search_end <= text.len()
+            && let Some(pos) = self.find_sentence_boundary(&text[search_start..search_end])
+        {
+            let start = floor_char_boundary(text, search_start + pos);
+            if start < text.len() {
+                return OverlapInfo {
+                    text: text[start..].to_string(),
+                    start_byte: start,
+                    end_byte: text.len(),
+                };
             }
         }
 

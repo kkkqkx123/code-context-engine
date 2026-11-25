@@ -79,10 +79,9 @@ fn parse_gemfile_lock(
             && !trimmed.starts_with('#')
             && line.starts_with("    ")
             && trimmed.contains('(')
+            && let Some(name) = parse_gem_spec_line(trimmed)
         {
-            if let Some(name) = parse_gem_spec_line(trimmed) {
-                dependencies.insert(UntypedDependency::new(name, "external"));
-            }
+            dependencies.insert(UntypedDependency::new(name, "external"));
         }
     }
 
@@ -106,10 +105,10 @@ fn parse_gemfile_fallback(
             continue;
         }
 
-        if line.starts_with("gem ") {
-            if let Some(name) = parse_gem_declaration(line) {
-                dependencies.insert(UntypedDependency::new(name, "external"));
-            }
+        if line.starts_with("gem ")
+            && let Some(name) = parse_gem_declaration(line)
+        {
+            dependencies.insert(UntypedDependency::new(name, "external"));
         }
     }
 

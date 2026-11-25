@@ -95,18 +95,18 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
             return vis;
         }
     }
-    if let Some(signal) = entity.metadata.get("visibility") {
-        if let Some(vis) = visibility_from_signal(&signal.to_lowercase(), language) {
-            return vis;
-        }
+    if let Some(signal) = entity.metadata.get("visibility")
+        && let Some(vis) = visibility_from_signal(&signal.to_lowercase(), language)
+    {
+        return vis;
     }
-    if *language == Language::Python {
-        if let Some(flag) = entity.metadata.get("is_exported_by_all") {
-            if flag == "true" {
-                return Visibility::Public;
-            } else if flag == "false" {
-                return Visibility::Private;
-            }
+    if *language == Language::Python
+        && let Some(flag) = entity.metadata.get("is_exported_by_all")
+    {
+        if flag == "true" {
+            return Visibility::Public;
+        } else if flag == "false" {
+            return Visibility::Private;
         }
     }
     if let Some(vis) = visibility_from_name(&entity.name, language) {
@@ -236,10 +236,9 @@ pub fn extract_imports_with_registry(
     if standardized_imports.is_empty()
         && registry.is_some()
         && !matches!(language, Language::Custom(_))
+        && let Some(builtin) = create_extractor(*language)
     {
-        if let Some(builtin) = create_extractor(*language) {
-            standardized_imports = builtin.extract_imports(tree, source);
-        }
+        standardized_imports = builtin.extract_imports(tree, source);
     }
     let mut std_table = StandardizedImportTable::new("");
     for import in standardized_imports {
@@ -275,10 +274,12 @@ pub fn extract_reexports_with_registry(
         return Vec::new();
     };
     let mut exports = extractor.extract_exports(tree, source);
-    if exports.is_empty() && registry.is_some() && !matches!(language, Language::Custom(_)) {
-        if let Some(builtin) = create_extractor(*language) {
-            exports = builtin.extract_exports(tree, source);
-        }
+    if exports.is_empty()
+        && registry.is_some()
+        && !matches!(language, Language::Custom(_))
+        && let Some(builtin) = create_extractor(*language)
+    {
+        exports = builtin.extract_exports(tree, source);
     }
     exports
         .into_iter()

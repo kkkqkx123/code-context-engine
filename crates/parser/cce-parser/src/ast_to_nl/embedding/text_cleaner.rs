@@ -93,10 +93,10 @@ impl EmbeddingTextCleaner {
     /// stay within the configured ratio of total tokens.
     pub fn clean_with_boundaries(&self, text: &str, entity_end_lines: &[usize]) -> String {
         let cleaned = self.clean(text);
-        if let Some(max_ratio) = self.max_docstring_ratio {
-            if !entity_end_lines.is_empty() {
-                return self.trim_docstring(&cleaned, max_ratio, entity_end_lines);
-            }
+        if let Some(max_ratio) = self.max_docstring_ratio
+            && !entity_end_lines.is_empty()
+        {
+            return self.trim_docstring(&cleaned, max_ratio, entity_end_lines);
         }
         cleaned
     }

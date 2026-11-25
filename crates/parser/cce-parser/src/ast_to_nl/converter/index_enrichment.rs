@@ -79,12 +79,12 @@ impl ResolvedCallsIndex {
         use cce_types::entity::meta_keys;
         let mut map = std::collections::HashMap::new();
         for group in &processing_result.groups {
-            if let Some(header) = group.header.as_ref() {
-                if let Some(raw) = header.metadata.get(meta_keys::RESOLVED_CALLS) {
-                    let set = parse_call_set(raw);
-                    if !set.is_empty() {
-                        map.insert(header.id, set);
-                    }
+            if let Some(header) = group.header.as_ref()
+                && let Some(raw) = header.metadata.get(meta_keys::RESOLVED_CALLS)
+            {
+                let set = parse_call_set(raw);
+                if !set.is_empty() {
+                    map.insert(header.id, set);
                 }
             }
             for member in &group.members {
@@ -132,10 +132,10 @@ impl<'a> IndexTextEnricher<'a> {
         // identity, anchor, propositions.
         let propositions =
             proposition::render_propositions(conversion.entity_id, processing_result, source);
-        if !propositions.head.is_empty() {
-            if let Some(text) = conversion.embedding_text.as_mut() {
-                *text = insert_after_first_line(text, &propositions.head.join("\n"));
-            }
+        if !propositions.head.is_empty()
+            && let Some(text) = conversion.embedding_text.as_mut()
+        {
+            *text = insert_after_first_line(text, &propositions.head.join("\n"));
         }
 
         if let Some(anchor) = topic_anchor(conversion.entity_id, processing_result) {
@@ -361,10 +361,10 @@ impl<'a> IndexTextEnricher<'a> {
                 if fact.content_line_count == 0 {
                     continue;
                 }
-                if let Some(body) = body_start {
-                    if fact.end_byte <= body {
-                        continue;
-                    }
+                if let Some(body) = body_start
+                    && fact.end_byte <= body
+                {
+                    continue;
                 }
                 let start = body_start.map_or(fact.start_byte, |body| fact.start_byte.max(body));
                 let text = extract_clean_source(source, start, fact.end_byte);
@@ -394,10 +394,10 @@ impl<'a> IndexTextEnricher<'a> {
                 if is_docstring_statement(&fact.text) {
                     continue;
                 }
-                if let Some(body) = body_start {
-                    if fact.end_byte <= body {
-                        continue;
-                    }
+                if let Some(body) = body_start
+                    && fact.end_byte <= body
+                {
+                    continue;
                 }
                 let start = body_start.map_or(fact.start_byte, |body| fact.start_byte.max(body));
                 let is_inside_cf = cf_ranges
@@ -444,10 +444,10 @@ impl<'a> IndexTextEnricher<'a> {
         let mut merged: Vec<(usize, usize, String)> = Vec::new();
         let mut last_end: Option<usize> = None;
         for (start, end, text) in &all_fragments {
-            if let Some(prev_end) = last_end {
-                if *start <= prev_end {
-                    continue;
-                }
+            if let Some(prev_end) = last_end
+                && *start <= prev_end
+            {
+                continue;
             }
             merged.push((*start, *end, text.clone()));
             last_end = Some(*end);
@@ -456,36 +456,34 @@ impl<'a> IndexTextEnricher<'a> {
         // Gap and tail filling restores the full body for keyword search;
         // the embedding path skips it so implementation detail cannot
         // outnumber the intent skeleton kept above.
-        if fill_gaps {
-            if let Some((span_start, span_end)) = entity_span {
-                let mut gap_texts: Vec<(usize, String)> = Vec::new();
-                for window in merged.windows(2) {
-                    let gap_start = window[0].1;
-                    let gap_end = window[1].0;
-                    if gap_end > gap_start {
-                        let gap = extract_clean_source(source, gap_start, gap_end);
-                        if is_meaningful_code(&gap) {
-                            gap_texts.push((gap_start, gap));
-                        }
+        if fill_gaps && let Some((span_start, span_end)) = entity_span {
+            let mut gap_texts: Vec<(usize, String)> = Vec::new();
+            for window in merged.windows(2) {
+                let gap_start = window[0].1;
+                let gap_end = window[1].0;
+                if gap_end > gap_start {
+                    let gap = extract_clean_source(source, gap_start, gap_end);
+                    if is_meaningful_code(&gap) {
+                        gap_texts.push((gap_start, gap));
                     }
                 }
-                if let Some((_, last_end_byte, _)) = merged.last() {
-                    if span_end > *last_end_byte {
-                        let tail = extract_clean_source(source, *last_end_byte, span_end);
-                        let tail = strip_trailing_closers(&tail);
-                        if is_meaningful_code(&tail) {
-                            gap_texts.push((*last_end_byte, tail));
-                        }
-                    }
+            }
+            if let Some((_, last_end_byte, _)) = merged.last()
+                && span_end > *last_end_byte
+            {
+                let tail = extract_clean_source(source, *last_end_byte, span_end);
+                let tail = strip_trailing_closers(&tail);
+                if is_meaningful_code(&tail) {
+                    gap_texts.push((*last_end_byte, tail));
                 }
-                let _ = span_start;
-                for (gap_start, gap) in gap_texts {
-                    let pos = merged
-                        .iter()
-                        .position(|(s, _, _)| *s > gap_start)
-                        .unwrap_or(merged.len());
-                    merged.insert(pos, (gap_start, gap_start, gap));
-                }
+            }
+            let _ = span_start;
+            for (gap_start, gap) in gap_texts {
+                let pos = merged
+                    .iter()
+                    .position(|(s, _, _)| *s > gap_start)
+                    .unwrap_or(merged.len());
+                merged.insert(pos, (gap_start, gap_start, gap));
             }
         }
 

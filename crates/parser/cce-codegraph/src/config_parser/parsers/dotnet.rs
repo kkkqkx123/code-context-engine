@@ -115,10 +115,10 @@ fn parse_csproj(path: &Path) -> Result<HashSet<UntypedDependency>, ConfigParseEr
                         let attr_name = std::str::from_utf8(attr.key.as_ref())
                             .unwrap_or("")
                             .to_lowercase();
-                        if attr_name == "include" {
-                            if let Ok(value) = attr.unescape_value() {
-                                current_package = Some(value.to_string());
-                            }
+                        if attr_name == "include"
+                            && let Ok(value) = attr.unescape_value()
+                        {
+                            current_package = Some(value.to_string());
                         }
                     }
                 }
@@ -128,10 +128,10 @@ fn parse_csproj(path: &Path) -> Result<HashSet<UntypedDependency>, ConfigParseEr
                     .unwrap_or("")
                     .to_lowercase();
 
-                if name == "packagereference" {
-                    if let Some(pkg_name) = current_package.take() {
-                        dependencies.insert(UntypedDependency::new(pkg_name, "external"));
-                    }
+                if name == "packagereference"
+                    && let Some(pkg_name) = current_package.take()
+                {
+                    dependencies.insert(UntypedDependency::new(pkg_name, "external"));
                 }
             }
             Ok(Event::Empty(e)) => {
@@ -144,11 +144,11 @@ fn parse_csproj(path: &Path) -> Result<HashSet<UntypedDependency>, ConfigParseEr
                         let attr_name = std::str::from_utf8(attr.key.as_ref())
                             .unwrap_or("")
                             .to_lowercase();
-                        if attr_name == "include" {
-                            if let Ok(value) = attr.unescape_value() {
-                                dependencies
-                                    .insert(UntypedDependency::new(value.to_string(), "external"));
-                            }
+                        if attr_name == "include"
+                            && let Ok(value) = attr.unescape_value()
+                        {
+                            dependencies
+                                .insert(UntypedDependency::new(value.to_string(), "external"));
                         }
                     }
                 }

@@ -27,49 +27,44 @@ impl BuildConfigParser {
         let mut dependencies = HashSet::new();
 
         // Parse [tool.flit.metadata]
-        if let Some(tool) = parsed.get("tool") {
-            if let Some(flit) = tool.get("flit") {
-                if let Some(metadata) = flit.get("metadata").and_then(|v| v.as_table()) {
-                    // Parse requires
-                    if let Some(requires) = metadata.get("requires").and_then(|v| v.as_array()) {
-                        for req_value in requires {
-                            if let Some(req_str) = req_value.as_str() {
-                                if let Some(name) = parse_python_requirement(req_str) {
-                                    dependencies.insert(UntypedDependency::new(name, "external"));
-                                }
+        if let Some(tool) = parsed.get("tool")
+            && let Some(flit) = tool.get("flit")
+            && let Some(metadata) = flit.get("metadata").and_then(|v| v.as_table())
+        {
+            // Parse requires
+            if let Some(requires) = metadata.get("requires").and_then(|v| v.as_array()) {
+                for req_value in requires {
+                    if let Some(req_str) = req_value.as_str()
+                        && let Some(name) = parse_python_requirement(req_str)
+                    {
+                        dependencies.insert(UntypedDependency::new(name, "external"));
+                    }
+                }
+            }
+
+            // Parse requires-extra
+            if let Some(requires_extra) = metadata.get("requires-extra").and_then(|v| v.as_table())
+            {
+                for (_extra_name, extra_reqs) in requires_extra {
+                    if let Some(req_array) = extra_reqs.as_array() {
+                        for req_value in req_array {
+                            if let Some(req_str) = req_value.as_str()
+                                && let Some(name) = parse_python_requirement(req_str)
+                            {
+                                dependencies.insert(UntypedDependency::new(name, "external"));
                             }
                         }
                     }
+                }
+            }
 
-                    // Parse requires-extra
-                    if let Some(requires_extra) =
-                        metadata.get("requires-extra").and_then(|v| v.as_table())
+            // Parse requires-dev
+            if let Some(requires_dev) = metadata.get("requires-dev").and_then(|v| v.as_array()) {
+                for req_value in requires_dev {
+                    if let Some(req_str) = req_value.as_str()
+                        && let Some(name) = parse_python_requirement(req_str)
                     {
-                        for (_extra_name, extra_reqs) in requires_extra {
-                            if let Some(req_array) = extra_reqs.as_array() {
-                                for req_value in req_array {
-                                    if let Some(req_str) = req_value.as_str() {
-                                        if let Some(name) = parse_python_requirement(req_str) {
-                                            dependencies
-                                                .insert(UntypedDependency::new(name, "external"));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Parse requires-dev
-                    if let Some(requires_dev) =
-                        metadata.get("requires-dev").and_then(|v| v.as_array())
-                    {
-                        for req_value in requires_dev {
-                            if let Some(req_str) = req_value.as_str() {
-                                if let Some(name) = parse_python_requirement(req_str) {
-                                    dependencies.insert(UntypedDependency::new(name, "dev"));
-                                }
-                            }
-                        }
+                        dependencies.insert(UntypedDependency::new(name, "dev"));
                     }
                 }
             }

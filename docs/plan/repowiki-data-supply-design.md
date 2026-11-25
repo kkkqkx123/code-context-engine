@@ -1,5 +1,7 @@
 # RepoWiki 数据供给设计（code-context-engine 作为上游）
 
+> 术语与入口约定：WCP 导出以 `cce wiki context` / `cce wiki diff` 为唯一公开入口，HTTP 端点仅为其内部传输；MCP 的只读画像已由 `wiki_read` 更名为 `read_only` 并作为默认画像。三者的职责边界与术语统一见 `docs/plan/wiki-surface-consolidation-design.md`。
+
 ## 背景
 
 RepoWiki 类工具的核心流水线为：目录扫描 → 构建导入依赖图 → PageRank 计算文件权重 → LLM 多轮分析生成结构化 Wiki → 增量缓存 → 导出 Markdown/HTML。其通用底层范式把工作拆成两半：**确定性的静态分析**（文件遍历、AST、依赖图、重要度排序，不需要 LLM）与**叙述性的 LLM 生成**（总览、模块文档、架构图、阅读指南），中间以缓存和溯源校验衔接。
@@ -63,7 +65,7 @@ RepoWiki 类工具的核心流水线为：目录扫描 → 构建导入依赖图
 
 ### 形态
 
-导出为一个自包含目录（或单个归档），以 JSON/JSONL 为主、可选 SQLite 只读副本；提供 HTTP 导出端点与 CLI 子命令两种触发方式。全部条目带稳定 ID 与源码定位（文件路径 + 行范围），排序确定（按 ID 或路径字典序），保证同快照重复导出字节级可复现。
+导出为一个自包含目录（或单个归档），以 JSON/JSONL 为主、可选 SQLite 只读副本。CLI 子命令 `cce wiki context` 是唯一公开入口，HTTP 导出端点仅作为 CLI 的内部传输通道（CLI 是纯 HTTP 客户端，经该端点访问远端或本地 server）。全部条目带稳定 ID 与源码定位（文件路径 + 行范围），排序确定（按 ID 或路径字典序），保证同快照重复导出字节级可复现。
 
 ### 包内容
 
@@ -118,7 +120,7 @@ RepoWiki 类工具的核心流水线为：目录扫描 → 构建导入依赖图
 
 ### 工具面治理
 
-- **只读 profile**：`wiki-read` 白名单排除全部写操作（`index_project`、`incremental_index`），生成期无法触发索引变更。
+- **只读 profile**：`read_only` 画像排除全部写操作（`index_project`、`incremental_index`），生成期无法触发索引变更。
 - 所有工具显式带 `project_id`（与现有约定一致）；`read_file`/`file_outline` 路径限于项目根内。
 - 每次调用返回体有上限（行数/条数截断并附 `truncated` 标记，沿用现有 truncated 语义）。
 
@@ -160,14 +162,14 @@ RepoWiki 类工具的核心流水线为：目录扫描 → 构建导入依赖图
 
 ## 安全与治理
 
-- 通道 B 全只读、带路径防护；通道 A 为本地导出，不引入外呼。
+- 通道 B 全只读、带路径防护；通道 A 经 HTTP 端点由 CLI 调用，导出过程不触发外部 LLM 调用，不引入外呼。
 - 项目隔离：所有数据与工具按 `project_id` 作用域隔离，沿用现有项目注册表模型。
 - 体量控制：WCP 分片 + 工具返回体上限 + 预算协议，防止超大仓库拖垮生成过程。
 
 ## 落地演进建议
 
 1. **先导出、后工具**：先实现 WCP 导出（HTTP 端点 + CLI），把 files/dep_graph/metrics/reading_path 打通——这一步就能支撑「无 LLM 的结构化 Wiki 页面」，也覆盖 repowiki 的主要静态分析需求。
-2. **补工具缺口**：新增 `read_file`、`file_outline`、`entity_detail`，并为 `wiki-read` profile 补图只读工具；同步开放预算元数据。
+2. **补工具缺口**：新增 `read_file`、`file_outline`、`entity_detail`，并为 `read_only` 画像补图只读工具；同步开放预算元数据。
 3. **增量联动**：打通 hash 变化 → 页面级失效通知（事件或导出 diff 清单），供下游级联再生成。
 4. **可选增强**：WCP 内提供确定性 Mermaid 图骨架（文件级/模块级），进一步压缩下游工具步数。
 

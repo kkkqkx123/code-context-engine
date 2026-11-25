@@ -683,15 +683,15 @@ impl Validate for ProjectStorageConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        if let Some(ref qdrant) = self.qdrant {
-            if let Err(e) = qdrant.validate_structured() {
-                errors.push(e);
-            }
+        if let Some(ref qdrant) = self.qdrant
+            && let Err(e) = qdrant.validate_structured()
+        {
+            errors.push(e);
         }
-        if let Some(ref bm25) = self.bm25 {
-            if let Err(e) = bm25.validate_structured() {
-                errors.push(e);
-            }
+        if let Some(ref bm25) = self.bm25
+            && let Err(e) = bm25.validate_structured()
+        {
+            errors.push(e);
         }
 
         if errors.is_empty() {
@@ -706,15 +706,15 @@ impl Validate for ProjectQdrantConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        if let Some(ref hnsw) = self.hnsw {
-            if let Err(e) = hnsw.validate_structured() {
-                errors.push(e);
-            }
+        if let Some(ref hnsw) = self.hnsw
+            && let Err(e) = hnsw.validate_structured()
+        {
+            errors.push(e);
         }
-        if let Some(ref quant) = self.quantization {
-            if let Err(e) = quant.validate_structured() {
-                errors.push(e);
-            }
+        if let Some(ref quant) = self.quantization
+            && let Err(e) = quant.validate_structured()
+        {
+            errors.push(e);
         }
 
         if errors.is_empty() {
@@ -734,32 +734,32 @@ impl Validate for HnswConfigOverride {
 impl Validate for ProjectAppConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
-        if let Some(ref storage) = self.storage {
-            if let Err(error) = storage.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref storage) = self.storage
+            && let Err(error) = storage.validate_structured()
+        {
+            errors.push(error);
         }
         if let Some(ref orchestrator) = self.orchestrator {
-            if let Some(ref batch) = orchestrator.batch {
-                if let Err(error) = batch.validate_structured() {
-                    errors.push(error);
-                }
+            if let Some(ref batch) = orchestrator.batch
+                && let Err(error) = batch.validate_structured()
+            {
+                errors.push(error);
             }
-            if let Some(ref hot_update) = orchestrator.hot_update {
-                if let Err(error) = hot_update.validate_structured() {
-                    errors.push(error);
-                }
-            }
-        }
-        if let Some(ref relation) = self.relation {
-            if let Err(error) = relation.validate_structured() {
+            if let Some(ref hot_update) = orchestrator.hot_update
+                && let Err(error) = hot_update.validate_structured()
+            {
                 errors.push(error);
             }
         }
-        if let Some(ref ast_to_nl) = self.ast_to_nl {
-            if let Err(error) = ast_to_nl.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref relation) = self.relation
+            && let Err(error) = relation.validate_structured()
+        {
+            errors.push(error);
+        }
+        if let Some(ref ast_to_nl) = self.ast_to_nl
+            && let Err(error) = ast_to_nl.validate_structured()
+        {
+            errors.push(error);
         }
         if errors.is_empty() {
             Ok(())
@@ -875,15 +875,15 @@ impl Validate for ProjectHotUpdatePatch {
         if let Some(value) = self.storage_batch_size {
             require_positive("storage_batch_size", value, &mut errors);
         }
-        if let Some(ref debounce) = self.debounce {
-            if let Err(error) = debounce.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref debounce) = self.debounce
+            && let Err(error) = debounce.validate_structured()
+        {
+            errors.push(error);
         }
-        if let Some(ref file_watch) = self.file_watch {
-            if let Err(error) = file_watch.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref file_watch) = self.file_watch
+            && let Err(error) = file_watch.validate_structured()
+        {
+            errors.push(error);
         }
         if errors.is_empty() {
             Ok(())
@@ -1076,25 +1076,25 @@ impl Validate for ProjectTextCleanerPatch {
 impl Validate for ProjectAstToNlPatch {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
-        if let Some(ref bm25) = self.bm25 {
-            if let Err(error) = bm25.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref bm25) = self.bm25
+            && let Err(error) = bm25.validate_structured()
+        {
+            errors.push(error);
         }
-        if let Some(ref embedding) = self.embedding {
-            if let Err(error) = embedding.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref embedding) = self.embedding
+            && let Err(error) = embedding.validate_structured()
+        {
+            errors.push(error);
         }
-        if let Some(ref chunking) = self.chunking {
-            if let Err(error) = chunking.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(ref chunking) = self.chunking
+            && let Err(error) = chunking.validate_structured()
+        {
+            errors.push(error);
         }
-        if let Some(Some(ref chunking)) = self.document_chunking {
-            if let Err(error) = chunking.validate_structured() {
-                errors.push(error);
-            }
+        if let Some(Some(ref chunking)) = self.document_chunking
+            && let Err(error) = chunking.validate_structured()
+        {
+            errors.push(error);
         }
         if errors.is_empty() {
             Ok(())

@@ -65,7 +65,10 @@ fn main() {
             let markers = build_markers(&excerpt, "fn_");
             marker_ns += started.elapsed().as_nanos();
             markers_total += markers.len();
-            std::hint::black_box(markers);
+            let span = markers
+                .first()
+                .map_or(0, |m| (m.end - m.start) + m.line as usize);
+            std::hint::black_box((markers, span));
         }
     }
 

@@ -638,10 +638,10 @@ impl CodePlugin for LuaPlugin {
                 let (_, value) = pair.map_err(|e| {
                     PluginError::ScriptError(format!("chunk result iteration error: {e}"))
                 })?;
-                if let mlua::Value::Table(chunk_table) = value {
-                    if let Ok(chunk) = lua_table_to_chunked_result(&chunk_table) {
-                        out.push(chunk);
-                    }
+                if let mlua::Value::Table(chunk_table) = value
+                    && let Ok(chunk) = lua_table_to_chunked_result(&chunk_table)
+                {
+                    out.push(chunk);
                 }
             }
             if out.is_empty() {

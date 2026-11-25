@@ -291,17 +291,17 @@ pub async fn handle_ws_logs(ws: WebSocketUpgrade) -> impl IntoResponse {
         };
         // Send recent history first
         for ev in recent(None, None, None) {
-            if let Ok(text) = serde_json::to_string(&ev) {
-                if socket.send(Message::Text(text.into())).await.is_err() {
-                    return;
-                }
+            if let Ok(text) = serde_json::to_string(&ev)
+                && socket.send(Message::Text(text.into())).await.is_err()
+            {
+                return;
             }
         }
         while let Ok(ev) = rx.recv().await {
-            if let Ok(text) = serde_json::to_string(&ev) {
-                if socket.send(Message::Text(text.into())).await.is_err() {
-                    break;
-                }
+            if let Ok(text) = serde_json::to_string(&ev)
+                && socket.send(Message::Text(text.into())).await.is_err()
+            {
+                break;
             }
         }
     })

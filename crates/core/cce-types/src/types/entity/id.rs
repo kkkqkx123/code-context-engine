@@ -61,10 +61,10 @@ impl EntityId {
         }
 
         // Try to parse "entity:123" format
-        if let Some(num_str) = s.strip_prefix("entity:") {
-            if let Ok(num) = u64::from_str(num_str) {
-                return Ok(EntityId(num));
-            }
+        if let Some(num_str) = s.strip_prefix("entity:")
+            && let Ok(num) = u64::from_str(num_str)
+        {
+            return Ok(EntityId(num));
         }
 
         Err(format!("Invalid entity ID format: {}", s))

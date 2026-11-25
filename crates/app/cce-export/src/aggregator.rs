@@ -691,10 +691,10 @@ impl FileAggregator {
     /// Prevents Silent Failure of empty entity names.
     fn extract_name_from_chunk(chunk: &ChunkedResult) -> String {
         // First choice: bm25_title (primary source)
-        if let Some(name) = &chunk.bm25_title {
-            if !name.is_empty() {
-                return name.clone();
-            }
+        if let Some(name) = &chunk.bm25_title
+            && !name.is_empty()
+        {
+            return name.clone();
         }
 
         // Second choice: entity kind from metadata

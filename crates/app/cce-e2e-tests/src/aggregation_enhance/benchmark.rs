@@ -410,42 +410,42 @@ fn evaluate_fused(
     };
     let mut rel: HashMap<usize, f64> = HashMap::new();
     for (i, entry) in fused.iter().enumerate() {
-        if let Some(entity) = fused_entity(entry) {
-            if let Some(&hops) = related.get(&entity) {
-                let value = ctx.params.relation.max_boost as f64 / (hops as f64).sqrt();
-                if value > 0.0 {
-                    rel.insert(i, value);
-                }
+        if let Some(entity) = fused_entity(entry)
+            && let Some(&hops) = related.get(&entity)
+        {
+            let value = ctx.params.relation.max_boost as f64 / (hops as f64).sqrt();
+            if value > 0.0 {
+                rel.insert(i, value);
             }
         }
     }
 
     let mut sum: HashMap<usize, f64> = HashMap::new();
-    if let Some(files) = ctx.file_vectors {
-        if !query_vector.is_empty() {
-            let min_score = ctx.params.summary.min_score as f64;
-            let mut file_scores: Vec<(&str, f64)> = files
-                .files
-                .iter()
-                .zip(files.vectors.iter())
-                .map(|(file, vec)| {
-                    (
-                        file.as_str(),
-                        crate::bench_data::cosine_similarity(&vec.to_vec(), query_vector),
-                    )
-                })
-                .filter(|(_, s)| *s >= min_score)
-                .collect();
-            file_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
-            file_scores.truncate(ctx.params.summary.top_k);
-            let matched: HashMap<&str, f64> = file_scores.into_iter().collect();
-            for (i, entry) in fused.iter().enumerate() {
-                if let Some(&score) = matched.get(entry.coverage.file_path.as_str()) {
-                    let norm = ((score - min_score) / (1.0 - min_score)).clamp(0.0, 1.0);
-                    let value = ctx.params.agg.cap_for("summary") as f64 * norm;
-                    if value > 0.0 {
-                        sum.insert(i, value);
-                    }
+    if let Some(files) = ctx.file_vectors
+        && !query_vector.is_empty()
+    {
+        let min_score = ctx.params.summary.min_score as f64;
+        let mut file_scores: Vec<(&str, f64)> = files
+            .files
+            .iter()
+            .zip(files.vectors.iter())
+            .map(|(file, vec)| {
+                (
+                    file.as_str(),
+                    crate::bench_data::cosine_similarity(&vec.to_vec(), query_vector),
+                )
+            })
+            .filter(|(_, s)| *s >= min_score)
+            .collect();
+        file_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
+        file_scores.truncate(ctx.params.summary.top_k);
+        let matched: HashMap<&str, f64> = file_scores.into_iter().collect();
+        for (i, entry) in fused.iter().enumerate() {
+            if let Some(&score) = matched.get(entry.coverage.file_path.as_str()) {
+                let norm = ((score - min_score) / (1.0 - min_score)).clamp(0.0, 1.0);
+                let value = ctx.params.agg.cap_for("summary") as f64 * norm;
+                if value > 0.0 {
+                    sum.insert(i, value);
                 }
             }
         }
@@ -510,10 +510,10 @@ fn evaluate_fused(
 }
 
 fn fused_entity(entry: &crate::retrieval_method::fusion::FusedEntry) -> Option<i64> {
-    if let Some(rest) = entry.key.strip_prefix("e:") {
-        if let Ok(id) = rest.parse::<i64>() {
-            return Some(id);
-        }
+    if let Some(rest) = entry.key.strip_prefix("e:")
+        && let Ok(id) = rest.parse::<i64>()
+    {
+        return Some(id);
     }
     primary_entity(&entry.chunk)
 }
@@ -532,17 +532,17 @@ fn record_method(
     let mut related = Vec::new();
     for (pos, &chunk) in ranked_chunks.iter().take(max_cutoff).enumerate() {
         let relevance = scan.advance(chunk);
-        if pos < DEFAULT_TOP_K {
-            if let Some(level) = relevance.highest_level() {
-                let loc = format!(
-                    "{}:{}-{}",
-                    chunk.file_path, chunk.start_line, chunk.end_line
-                );
-                match level {
-                    RelevanceLevel::Strong => strong.push((pos + 1, loc, level)),
-                    RelevanceLevel::Related => related.push((pos + 1, loc, level)),
-                    _ => {}
-                }
+        if pos < DEFAULT_TOP_K
+            && let Some(level) = relevance.highest_level()
+        {
+            let loc = format!(
+                "{}:{}-{}",
+                chunk.file_path, chunk.start_line, chunk.end_line
+            );
+            match level {
+                RelevanceLevel::Strong => strong.push((pos + 1, loc, level)),
+                RelevanceLevel::Related => related.push((pos + 1, loc, level)),
+                _ => {}
             }
         }
     }

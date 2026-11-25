@@ -45,78 +45,71 @@ pub fn build_type_index(
     }
 
     for entity in entities {
-        if let Some(parent_id) = entity.parent {
-            if let Some(parent) = by_id.get(&parent_id) {
-                if is_js_type_kind(parent.kind) {
-                    if is_js_type_kind(entity.kind) {
-                        continue;
-                    }
-                    let key = match id_to_key.get(&parent_id) {
-                        Some(k) => k.clone(),
-                        None => {
-                            let simple = simple_name(&parent.name).to_string();
-                            let qualified = if module_path.is_empty() {
-                                simple.clone()
-                            } else {
-                                format!("{}.{}", module_path, simple)
-                            };
-                            TypeKey::new(qualified, simple, file_path.to_string())
-                        }
-                    };
-                    // skip types
-                    let is_ctor =
-                        entity.name == "constructor" || entity.kind == EntityKind::Constructor;
-                    let is_field = matches!(
-                        entity.kind,
-                        EntityKind::Field | EntityKind::Property | EntityKind::Variable
-                    );
-                    let kind = if is_ctor {
-                        EntityKind::Constructor
-                    } else if is_field {
-                        EntityKind::Field
-                    } else {
-                        entity.kind
-                    };
-                    let mut vis = crate::policy::detect_entity_visibility(entity, &language);
-                    // check for # prefix
-                    if entity.name.starts_with('#') && vis != crate::symbol::Visibility::Private {
-                        vis = crate::symbol::Visibility::Private;
-                    }
-                    let is_static = entity
-                        .modifiers
-                        .iter()
-                        .any(|m| m.eq_ignore_ascii_case("static"));
-                    let member = MemberEntry {
-                        entity_id: entity.id,
-                        name: entity.name.clone(),
-                        kind,
-                        visibility: vis,
-                        is_static,
-                        is_associated: is_static,
-                        span: entity.span,
-                        file_path: file_path.to_string(),
-                        module_path: if module_path.is_empty() {
-                            None
-                        } else {
-                            Some(module_path.to_string())
-                        },
-                        package: package.to_string(),
-                    };
-                    if type_index.get_type_by_key(&key).is_none() {
-                        let parent_vis = crate::policy::detect_entity_visibility(parent, &language);
-                        let entry = TypeEntry::new(
-                            parent.id,
-                            key.clone(),
-                            parent.kind,
-                            language,
-                            parent_vis,
-                        );
-                        type_index.insert_type(key.clone(), entry);
-                        id_to_key.insert(parent.id, key.clone());
-                    }
-                    let _ = type_index.insert_member(&key, member);
-                }
+        if let Some(parent_id) = entity.parent
+            && let Some(parent) = by_id.get(&parent_id)
+            && is_js_type_kind(parent.kind)
+        {
+            if is_js_type_kind(entity.kind) {
+                continue;
             }
+            let key = match id_to_key.get(&parent_id) {
+                Some(k) => k.clone(),
+                None => {
+                    let simple = simple_name(&parent.name).to_string();
+                    let qualified = if module_path.is_empty() {
+                        simple.clone()
+                    } else {
+                        format!("{}.{}", module_path, simple)
+                    };
+                    TypeKey::new(qualified, simple, file_path.to_string())
+                }
+            };
+            // skip types
+            let is_ctor = entity.name == "constructor" || entity.kind == EntityKind::Constructor;
+            let is_field = matches!(
+                entity.kind,
+                EntityKind::Field | EntityKind::Property | EntityKind::Variable
+            );
+            let kind = if is_ctor {
+                EntityKind::Constructor
+            } else if is_field {
+                EntityKind::Field
+            } else {
+                entity.kind
+            };
+            let mut vis = crate::policy::detect_entity_visibility(entity, &language);
+            // check for # prefix
+            if entity.name.starts_with('#') && vis != crate::symbol::Visibility::Private {
+                vis = crate::symbol::Visibility::Private;
+            }
+            let is_static = entity
+                .modifiers
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case("static"));
+            let member = MemberEntry {
+                entity_id: entity.id,
+                name: entity.name.clone(),
+                kind,
+                visibility: vis,
+                is_static,
+                is_associated: is_static,
+                span: entity.span,
+                file_path: file_path.to_string(),
+                module_path: if module_path.is_empty() {
+                    None
+                } else {
+                    Some(module_path.to_string())
+                },
+                package: package.to_string(),
+            };
+            if type_index.get_type_by_key(&key).is_none() {
+                let parent_vis = crate::policy::detect_entity_visibility(parent, &language);
+                let entry =
+                    TypeEntry::new(parent.id, key.clone(), parent.kind, language, parent_vis);
+                type_index.insert_type(key.clone(), entry);
+                id_to_key.insert(parent.id, key.clone());
+            }
+            let _ = type_index.insert_member(&key, member);
         }
     }
 }

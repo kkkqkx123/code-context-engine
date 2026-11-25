@@ -80,71 +80,71 @@ impl SymbolExtractor for RubyExtractor {
         // These are method calls in Ruby: require 'file', require_relative 'file', load 'file'
         for call_node in find_children_by_kind(&root_node, "call") {
             // Check for require
-            if Self::is_call_to(&call_node, source, "require") {
-                if let Some(path) = Self::extract_call_argument(&call_node, source) {
-                    let is_stdlib = Self::is_stdlib(&path);
-                    let import = StandardizedImport {
-                        kind: ImportKind::ModuleImport,
-                        source: path.clone(),
-                        target: ImportTarget {
-                            local_name: path,
-                            original_name: None,
-                            kind: TargetKind::Module,
-                        },
-                        alias: None,
-                        is_wildcard: false,
-                        is_default: false,
-                        is_system_header: is_stdlib,
-                        is_relative: false,
-                        span: Some(node_to_span(&call_node)),
-                    };
-                    imports.push(import);
-                }
+            if Self::is_call_to(&call_node, source, "require")
+                && let Some(path) = Self::extract_call_argument(&call_node, source)
+            {
+                let is_stdlib = Self::is_stdlib(&path);
+                let import = StandardizedImport {
+                    kind: ImportKind::ModuleImport,
+                    source: path.clone(),
+                    target: ImportTarget {
+                        local_name: path,
+                        original_name: None,
+                        kind: TargetKind::Module,
+                    },
+                    alias: None,
+                    is_wildcard: false,
+                    is_default: false,
+                    is_system_header: is_stdlib,
+                    is_relative: false,
+                    span: Some(node_to_span(&call_node)),
+                };
+                imports.push(import);
             }
 
             // Check for require_relative
-            if Self::is_call_to(&call_node, source, "require_relative") {
-                if let Some(path) = Self::extract_call_argument(&call_node, source) {
-                    let import = StandardizedImport {
-                        kind: ImportKind::ModuleImport,
-                        source: path.clone(),
-                        target: ImportTarget {
-                            local_name: path,
-                            original_name: None,
-                            kind: TargetKind::Module,
-                        },
-                        alias: None,
-                        is_wildcard: false,
-                        is_default: false,
-                        is_system_header: false,
-                        is_relative: true,
-                        span: Some(node_to_span(&call_node)),
-                    };
-                    imports.push(import);
-                }
+            if Self::is_call_to(&call_node, source, "require_relative")
+                && let Some(path) = Self::extract_call_argument(&call_node, source)
+            {
+                let import = StandardizedImport {
+                    kind: ImportKind::ModuleImport,
+                    source: path.clone(),
+                    target: ImportTarget {
+                        local_name: path,
+                        original_name: None,
+                        kind: TargetKind::Module,
+                    },
+                    alias: None,
+                    is_wildcard: false,
+                    is_default: false,
+                    is_system_header: false,
+                    is_relative: true,
+                    span: Some(node_to_span(&call_node)),
+                };
+                imports.push(import);
             }
 
             // Check for load
-            if Self::is_call_to(&call_node, source, "load") {
-                if let Some(path) = Self::extract_call_argument(&call_node, source) {
-                    let is_relative = Self::is_relative_require(&path);
-                    let import = StandardizedImport {
-                        kind: ImportKind::ModuleImport,
-                        source: path.clone(),
-                        target: ImportTarget {
-                            local_name: path,
-                            original_name: None,
-                            kind: TargetKind::Module,
-                        },
-                        alias: None,
-                        is_wildcard: false,
-                        is_default: false,
-                        is_system_header: false,
-                        is_relative,
-                        span: Some(node_to_span(&call_node)),
-                    };
-                    imports.push(import);
-                }
+            if Self::is_call_to(&call_node, source, "load")
+                && let Some(path) = Self::extract_call_argument(&call_node, source)
+            {
+                let is_relative = Self::is_relative_require(&path);
+                let import = StandardizedImport {
+                    kind: ImportKind::ModuleImport,
+                    source: path.clone(),
+                    target: ImportTarget {
+                        local_name: path,
+                        original_name: None,
+                        kind: TargetKind::Module,
+                    },
+                    alias: None,
+                    is_wildcard: false,
+                    is_default: false,
+                    is_system_header: false,
+                    is_relative,
+                    span: Some(node_to_span(&call_node)),
+                };
+                imports.push(import);
             }
 
             // Check for autoload
@@ -157,27 +157,27 @@ impl SymbolExtractor for RubyExtractor {
                         .filter(|c| c.kind() == "string")
                         .collect();
 
-                    if !args.is_empty() {
-                        if let Some(path) = Self::extract_string_path(&args[0], source) {
-                            let is_relative = Self::is_relative_require(&path);
-                            let span = node_to_span(&call_node);
-                            let import = StandardizedImport {
-                                kind: ImportKind::ModuleImport,
-                                source: path.clone(),
-                                target: ImportTarget {
-                                    local_name: path,
-                                    original_name: None,
-                                    kind: TargetKind::Module,
-                                },
-                                alias: None,
-                                is_wildcard: false,
-                                is_default: false,
-                                is_system_header: false,
-                                is_relative,
-                                span: Some(span),
-                            };
-                            imports.push(import);
-                        }
+                    if !args.is_empty()
+                        && let Some(path) = Self::extract_string_path(&args[0], source)
+                    {
+                        let is_relative = Self::is_relative_require(&path);
+                        let span = node_to_span(&call_node);
+                        let import = StandardizedImport {
+                            kind: ImportKind::ModuleImport,
+                            source: path.clone(),
+                            target: ImportTarget {
+                                local_name: path,
+                                original_name: None,
+                                kind: TargetKind::Module,
+                            },
+                            alias: None,
+                            is_wildcard: false,
+                            is_default: false,
+                            is_system_header: false,
+                            is_relative,
+                            span: Some(span),
+                        };
+                        imports.push(import);
                     }
                 }
             }

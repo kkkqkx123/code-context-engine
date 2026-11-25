@@ -566,21 +566,20 @@ impl RelationResolver {
         if external_type
             .as_ref()
             .is_some_and(|t| matches!(t, ExternalCallType::Unknown { .. }))
+            && let Some(metrics) = &self.metrics
         {
-            if let Some(metrics) = &self.metrics {
-                // Placeholder callees (`<closure>` / `<func_literal>`) are
-                // anonymous syntax, not resolution failures: count them
-                // under their own reason instead of `SymbolNotFound`.
-                let is_literal_callee = raw_data.dst_name.len() > 2
-                    && raw_data.dst_name.starts_with('<')
-                    && raw_data.dst_name.ends_with('>');
-                let reason = if is_literal_callee {
-                    "closure_literal"
-                } else {
-                    cce_types::relation::UnresolvedReason::SymbolNotFound.as_str()
-                };
-                metrics.record_unresolved(reason);
-            }
+            // Placeholder callees (`<closure>` / `<func_literal>`) are
+            // anonymous syntax, not resolution failures: count them
+            // under their own reason instead of `SymbolNotFound`.
+            let is_literal_callee = raw_data.dst_name.len() > 2
+                && raw_data.dst_name.starts_with('<')
+                && raw_data.dst_name.ends_with('>');
+            let reason = if is_literal_callee {
+                "closure_literal"
+            } else {
+                cce_types::relation::UnresolvedReason::SymbolNotFound.as_str()
+            };
+            metrics.record_unresolved(reason);
         }
 
         // For internally-resolved edges, the canonical callee name is the
@@ -617,10 +616,10 @@ impl RelationResolver {
         // classification ran before the retry, so refresh the canonical
         // name and drop the Unknown marker the edge no longer deserves.
         if effective_callee_id.is_some() && callee_id.is_none() {
-            if let Some(id) = effective_callee_id {
-                if let Some(entity) = entity_index.get_function_by_entity_id(id) {
-                    callee_name = entity.name.clone();
-                }
+            if let Some(id) = effective_callee_id
+                && let Some(entity) = entity_index.get_function_by_entity_id(id)
+            {
+                callee_name = entity.name.clone();
             }
             external_type = None;
         }
@@ -634,46 +633,40 @@ impl RelationResolver {
                 .owner_of(callee_id)
                 .map(|key| key.qualified.clone());
 
-            if let Some(ref owner) = owner_type {
-                if let Some(overload) = symbol_table.get_overload_set(owner, &callee_name) {
-                    if overload.candidates.len() > 1 {
-                        let in_set = overload.candidates.iter().any(|c| c.entity_id == callee_id);
-                        if !in_set {
-                            let arg_types =
-                                self.extract_argument_types(raw_data, parsed, symbol_table);
-                            let arg_refs: Vec<Option<&TypeShape>> =
-                                arg_types.iter().map(|opt| opt.as_ref()).collect();
-                            let expected_return =
-                                self.infer_expected_return_type(raw_data, parsed, symbol_table);
-                            if let Some((entity_id, signature)) = overload
-                                .resolve_with_score_signature(
-                                    &arg_refs,
-                                    expected_return.as_deref(),
-                                    parsed.language,
-                                )
-                            {
-                                effective_callee_id = Some(entity_id);
-                                overload_signature = Some(signature);
-                            } else if let Some(best) =
-                                overload.resolve_with_inferred_generics(&arg_refs, parsed.language)
-                            {
-                                effective_callee_id = Some(best.entity_id);
-                                overload_signature = Some(
-                                    crate::type_inference::overload::format_overload_signature(
-                                        &callee_name,
-                                        best,
-                                    ),
-                                );
-                            } else if let Some(best) = overload.resolve(&[]) {
-                                effective_callee_id = Some(best.entity_id);
-                                overload_signature = Some(
-                                    crate::type_inference::overload::format_overload_signature(
-                                        &callee_name,
-                                        best,
-                                    ),
-                                );
-                            }
-                        }
+            if let Some(ref owner) = owner_type
+                && let Some(overload) = symbol_table.get_overload_set(owner, &callee_name)
+                && overload.candidates.len() > 1
+            {
+                let in_set = overload.candidates.iter().any(|c| c.entity_id == callee_id);
+                if !in_set {
+                    let arg_types = self.extract_argument_types(raw_data, parsed, symbol_table);
+                    let arg_refs: Vec<Option<&TypeShape>> =
+                        arg_types.iter().map(|opt| opt.as_ref()).collect();
+                    let expected_return =
+                        self.infer_expected_return_type(raw_data, parsed, symbol_table);
+                    if let Some((entity_id, signature)) = overload.resolve_with_score_signature(
+                        &arg_refs,
+                        expected_return.as_deref(),
+                        parsed.language,
+                    ) {
+                        effective_callee_id = Some(entity_id);
+                        overload_signature = Some(signature);
+                    } else if let Some(best) =
+                        overload.resolve_with_inferred_generics(&arg_refs, parsed.language)
+                    {
+                        effective_callee_id = Some(best.entity_id);
+                        overload_signature =
+                            Some(crate::type_inference::overload::format_overload_signature(
+                                &callee_name,
+                                best,
+                            ));
+                    } else if let Some(best) = overload.resolve(&[]) {
+                        effective_callee_id = Some(best.entity_id);
+                        overload_signature =
+                            Some(crate::type_inference::overload::format_overload_signature(
+                                &callee_name,
+                                best,
+                            ));
                     }
                 }
             }
@@ -1437,50 +1430,46 @@ impl RelationResolver {
         for entity in &parsed.entities {
             if entity.name == receiver_name
                 && entity.kind == cce_types::entity::EntityKind::Variable
-            {
-                if let Some(target) = entity
+                && let Some(target) = entity
                     .metadata
                     .get("call_target")
                     .or_else(|| entity.metadata.get("constructor_type"))
-                {
-                    let chain = crate::type_inference::cross_file::parse_call_chain(target);
-                    if chain.len() > 1 && chain.len() <= MAX_CHAIN_DEPTH {
-                        let mut visited = HashSet::new();
-                        let mut current_type: Option<String> = None;
-                        let mut cycle = false;
-                        for step in &chain {
-                            if !visited.insert(step.method_name.clone()) {
-                                cycle = true;
-                                break;
-                            }
-                            if let Some(binding) =
-                                symbol_table.get_cross_file_return_type_by_name(&step.method_name)
-                            {
-                                current_type = Some(binding.type_name.clone());
-                            } else if current_type.is_none() {
-                                break;
-                            }
+            {
+                let chain = crate::type_inference::cross_file::parse_call_chain(target);
+                if chain.len() > 1 && chain.len() <= MAX_CHAIN_DEPTH {
+                    let mut visited = HashSet::new();
+                    let mut current_type: Option<String> = None;
+                    let mut cycle = false;
+                    for step in &chain {
+                        if !visited.insert(step.method_name.clone()) {
+                            cycle = true;
+                            break;
                         }
-                        if !cycle {
-                            if let Some(ct) = current_type {
-                                return Some(ct);
-                            }
+                        if let Some(binding) =
+                            symbol_table.get_cross_file_return_type_by_name(&step.method_name)
+                        {
+                            current_type = Some(binding.type_name.clone());
+                        } else if current_type.is_none() {
+                            break;
                         }
                     }
-                    // Stored targets may carry an argument list (`foo(a)`);
-                    // receiver lookup uses the stripped callee name.
-                    let stripped = crate::type_inference::cross_file::split_call_target(target).0;
-                    let simple = stripped
-                        .rsplit(['.', ':', '/'])
-                        .next()
-                        .unwrap_or(&stripped)
-                        .trim();
-                    if simple.is_empty() {
-                        continue;
+                    if !cycle && let Some(ct) = current_type {
+                        return Some(ct);
                     }
-                    if let Some(binding) = symbol_table.get_cross_file_return_type_by_name(simple) {
-                        return Some(binding.type_name.clone());
-                    }
+                }
+                // Stored targets may carry an argument list (`foo(a)`);
+                // receiver lookup uses the stripped callee name.
+                let stripped = crate::type_inference::cross_file::split_call_target(target).0;
+                let simple = stripped
+                    .rsplit(['.', ':', '/'])
+                    .next()
+                    .unwrap_or(&stripped)
+                    .trim();
+                if simple.is_empty() {
+                    continue;
+                }
+                if let Some(binding) = symbol_table.get_cross_file_return_type_by_name(simple) {
+                    return Some(binding.type_name.clone());
                 }
             }
         }
@@ -1540,17 +1529,17 @@ impl RelationResolver {
                 && entity.span.end_byte >= call_span.end_byte
                 && entity.span.start_byte != entity.span.end_byte
             {
-                if let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path) {
-                    if let Some(binding) = ctx.get_variable_type(&entity.name) {
-                        if !binding.type_name.is_empty() && binding.type_name != "unknown" {
-                            return Some(binding.type_name.clone());
-                        }
-                    }
+                if let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path)
+                    && let Some(binding) = ctx.get_variable_type(&entity.name)
+                    && !binding.type_name.is_empty()
+                    && binding.type_name != "unknown"
+                {
+                    return Some(binding.type_name.clone());
                 }
-                if let Some(rt) = &entity.return_type {
-                    if !rt.is_empty() {
-                        return Some(rt.clone());
-                    }
+                if let Some(rt) = &entity.return_type
+                    && !rt.is_empty()
+                {
+                    return Some(rt.clone());
                 }
             }
         }
@@ -1573,14 +1562,12 @@ impl RelationResolver {
                         .rsplit(['.', ':', '/'])
                         .next()
                         .unwrap_or(&raw_data.dst_name)
+                    && let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path)
+                    && let Some(binding) = ctx.get_variable_type(&entity.name)
+                    && !binding.type_name.is_empty()
+                    && binding.type_name != "unknown"
                 {
-                    if let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path) {
-                        if let Some(binding) = ctx.get_variable_type(&entity.name) {
-                            if !binding.type_name.is_empty() && binding.type_name != "unknown" {
-                                return Some(binding.type_name.clone());
-                            }
-                        }
-                    }
+                    return Some(binding.type_name.clone());
                 }
             }
         }
@@ -1944,19 +1931,19 @@ impl RelationResolver {
             return None;
         }
         let receiver_name = raw_data.dst_name.split('.').next()?;
-        if let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path) {
-            if let Some(type_binding) = ctx.get_variable_type(receiver_name) {
-                return Some(type_binding.type_name.clone());
-            }
+        if let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path)
+            && let Some(type_binding) = ctx.get_variable_type(receiver_name)
+        {
+            return Some(type_binding.type_name.clone());
         }
         if let Some(type_binding) = symbol_table.get_cross_file_return_type_by_name(receiver_name) {
             return Some(type_binding.type_name.clone());
         }
         for entity in &parsed.entities {
-            if entity.name == receiver_name {
-                if let Some(rt) = &entity.return_type {
-                    return Some(rt.clone());
-                }
+            if entity.name == receiver_name
+                && let Some(rt) = &entity.return_type
+            {
+                return Some(rt.clone());
             }
         }
         self.lookup_inferred_receiver_type(receiver_name, &parsed.path, symbol_table, parsed)

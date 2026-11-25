@@ -19,13 +19,13 @@ pub(crate) fn extend_or_push_trailing(
     }
     let remaining = &text[current_start..end];
 
-    if remaining.trim().is_empty() {
-        if let Some(last) = boundaries.last_mut() {
-            if last.end_byte < end {
-                last.end_byte = end;
-            }
-            return;
+    if remaining.trim().is_empty()
+        && let Some(last) = boundaries.last_mut()
+    {
+        if last.end_byte < end {
+            last.end_byte = end;
         }
+        return;
     }
 
     let remaining_tokens = cost(remaining, path);

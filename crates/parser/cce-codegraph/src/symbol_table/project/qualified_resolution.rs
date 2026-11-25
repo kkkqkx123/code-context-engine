@@ -75,14 +75,14 @@ impl ProjectSymbolTable {
             qualified_name.to_string(),
         );
         // LRU cache requires &mut for get (to update access order), so use try_lock
-        if let Some(mut cache) = self.resolution_cache.try_lock() {
-            if let Some(result) = cache.get(&cache_key) {
-                // Cache hit: record metric if available
-                if let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone()) {
-                    metrics.resolution_cache_hit_total.increment();
-                }
-                return result.clone();
+        if let Some(mut cache) = self.resolution_cache.try_lock()
+            && let Some(result) = cache.get(&cache_key)
+        {
+            // Cache hit: record metric if available
+            if let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone()) {
+                metrics.resolution_cache_hit_total.increment();
             }
+            return result.clone();
         }
 
         // Multi-segment qualified misses are cached separately so repeat
@@ -216,10 +216,10 @@ impl ProjectSymbolTable {
 
         // exact global-index match first ({file}::{name} and
         // {package}::{name} keys were never queried before).
-        if let Some(_symbol_id) = self.global_index.get(&joined).map(|id| *id) {
-            if let Some(metadata) = self.metadata_for_global_key(&joined, from_scope) {
-                return Some(self.stable_symbol_ref(&metadata));
-            }
+        if let Some(_symbol_id) = self.global_index.get(&joined).map(|id| *id)
+            && let Some(metadata) = self.metadata_for_global_key(&joined, from_scope)
+        {
+            return Some(self.stable_symbol_ref(&metadata));
         }
 
         // Namespace-level index match: try "package::namespace::symbol" pattern
@@ -303,15 +303,13 @@ impl ProjectSymbolTable {
 
             // Prefer the caller's own file first (same semantics as
             // `resolve_simple_name`).
-            if let Some(caller_file) = caller_file {
-                if let Some(entry) = candidates
+            if let Some(caller_file) = caller_file
+                && let Some(entry) = candidates
                     .iter()
                     .find(|e| e.file_path().is_some_and(|p| p == caller_file))
-                {
-                    if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
-                        return Some(symbol);
-                    }
-                }
+                && let Some(symbol) = self.symbol_from_entry(entry, name, from_scope)
+            {
+                return Some(symbol);
             }
 
             // A self-rooted receiver (`this.get`, `self.foo`, or a bare name
@@ -357,10 +355,10 @@ impl ProjectSymbolTable {
                         package_id.eq_ignore_ascii_case(prefix)
                     }
                 };
-                if path_matches {
-                    if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
-                        return Some(symbol);
-                    }
+                if path_matches
+                    && let Some(symbol) = self.symbol_from_entry(entry, name, from_scope)
+                {
+                    return Some(symbol);
                 }
             }
         }
@@ -421,15 +419,13 @@ impl ProjectSymbolTable {
         if let Some(entries) = self.simple_name_index.get(name) {
             let candidates: Vec<SimpleNameEntry> = entries.clone().to_vec();
 
-            if let Some(caller_file) = caller_file {
-                if let Some(entry) = candidates
+            if let Some(caller_file) = caller_file
+                && let Some(entry) = candidates
                     .iter()
                     .find(|e| e.file_path().is_some_and(|p| p == caller_file))
-                {
-                    if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
-                        return Some(symbol);
-                    }
-                }
+                && let Some(symbol) = self.symbol_from_entry(entry, name, from_scope)
+            {
+                return Some(symbol);
             }
 
             // Self-receiver abstention (mirrors the prefix fallback below):
@@ -573,36 +569,33 @@ impl ProjectSymbolTable {
                         }
                     }
                 }
-                if receiver_matches.len() == 1 {
-                    if let Some(symbol) =
+                if receiver_matches.len() == 1
+                    && let Some(symbol) =
                         self.symbol_from_entry(&receiver_matches[0], name, from_scope)
-                    {
-                        return Some(symbol);
-                    }
+                {
+                    return Some(symbol);
                 }
                 if !receiver_matches.is_empty() {
-                    if receiver_matches.len() > 1 {
-                        if let Some(best) =
+                    if receiver_matches.len() > 1
+                        && let Some(best) =
                             self.pick_best_overload(&receiver_matches, name, ctx, from_scope)
-                        {
-                            return Some(best);
-                        }
+                    {
+                        return Some(best);
                     }
                     if let Some(count) = ctx.arg_count {
                         let mut arity_matches: Vec<SimpleNameEntry> = Vec::new();
                         for entry in &receiver_matches {
-                            if let Some(arity) = self.candidate_arity(entry, name) {
-                                if arity == count {
-                                    arity_matches.push(entry.clone());
-                                }
+                            if let Some(arity) = self.candidate_arity(entry, name)
+                                && arity == count
+                            {
+                                arity_matches.push(entry.clone());
                             }
                         }
-                        if arity_matches.len() == 1 {
-                            if let Some(symbol) =
+                        if arity_matches.len() == 1
+                            && let Some(symbol) =
                                 self.symbol_from_entry(&arity_matches[0], name, from_scope)
-                            {
-                                return Some(symbol);
-                            }
+                        {
+                            return Some(symbol);
                         }
                     }
                 }
@@ -611,43 +604,41 @@ impl ProjectSymbolTable {
             if let Some(count) = ctx.arg_count {
                 let mut arity_matches: Vec<SimpleNameEntry> = Vec::new();
                 for entry in candidates {
-                    if let Some(arity) = self.candidate_arity(entry, name) {
-                        if arity == count {
-                            arity_matches.push(entry.clone());
-                        }
+                    if let Some(arity) = self.candidate_arity(entry, name)
+                        && arity == count
+                    {
+                        arity_matches.push(entry.clone());
                     }
                 }
-                if arity_matches.len() == 1 {
-                    if let Some(symbol) =
+                if arity_matches.len() == 1
+                    && let Some(symbol) =
                         self.symbol_from_entry(&arity_matches[0], name, from_scope)
-                    {
-                        return Some(symbol);
-                    }
+                {
+                    return Some(symbol);
                 }
-                if !arity_matches.is_empty() {
-                    if let Some(best) =
+                if !arity_matches.is_empty()
+                    && let Some(best) =
                         self.pick_best_overload(&arity_matches, name, ctx, from_scope)
-                    {
-                        return Some(best);
-                    }
+                {
+                    return Some(best);
                 }
                 // Also try overload resolution across all candidates when arity matches are not unique
                 if let Some(best) = self.pick_best_overload(candidates, name, ctx, from_scope) {
                     return Some(best);
                 }
-            } else if ctx.arg_types.is_some() {
-                if let Some(best) = self.pick_best_overload(candidates, name, ctx, from_scope) {
-                    return Some(best);
-                }
+            } else if ctx.arg_types.is_some()
+                && let Some(best) = self.pick_best_overload(candidates, name, ctx, from_scope)
+            {
+                return Some(best);
             }
-            if ctx.receiver_type.is_none() {
-                if let Some(entity_id) = self.pick_best_overload_for_bare_name(name, ctx) {
-                    for entry in candidates {
-                        if entry.entity_id() == entity_id {
-                            if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
-                                return Some(symbol);
-                            }
-                        }
+            if ctx.receiver_type.is_none()
+                && let Some(entity_id) = self.pick_best_overload_for_bare_name(name, ctx)
+            {
+                for entry in candidates {
+                    if entry.entity_id() == entity_id
+                        && let Some(symbol) = self.symbol_from_entry(entry, name, from_scope)
+                    {
+                        return Some(symbol);
                     }
                 }
             }
@@ -667,12 +658,11 @@ impl ProjectSymbolTable {
 
             if let Some(ref pkg_id) = caller_package {
                 for entry in candidates {
-                    if let SimpleNameEntry::PackageExport { package_id, .. } = entry {
-                        if package_id == pkg_id {
-                            if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
-                                return Some(symbol);
-                            }
-                        }
+                    if let SimpleNameEntry::PackageExport { package_id, .. } = entry
+                        && package_id == pkg_id
+                        && let Some(symbol) = self.symbol_from_entry(entry, name, from_scope)
+                    {
+                        return Some(symbol);
                     }
                 }
             }
@@ -727,12 +717,11 @@ impl ProjectSymbolTable {
             .read()
             .ok()
             .and_then(|idx| idx.owner_of(eid).map(|k| k.qualified.clone()))
+            && let Some(overload) = self.get_overload_set(&owner, name)
         {
-            if let Some(overload) = self.get_overload_set(&owner, name) {
-                for cand in &overload.candidates {
-                    if cand.entity_id == eid {
-                        return Some(cand.parameter_types.len());
-                    }
+            for cand in &overload.candidates {
+                if cand.entity_id == eid {
+                    return Some(cand.parameter_types.len());
                 }
             }
         }
@@ -771,27 +760,26 @@ impl ProjectSymbolTable {
                 .read()
                 .ok()
                 .and_then(|idx| idx.owner_of(eid).map(|k| k.qualified.clone()));
-            if let Some(owner) = owner_opt {
-                if let Some(overload) = self.get_overload_set(&owner, name) {
-                    // Only consider overloads where this candidate is actually a member
-                    if !overload.candidates.iter().any(|c| c.entity_id == eid) {
-                        continue;
-                    }
-                    let candidate_best = if effective_arg_types.is_empty() {
-                        overload.resolve(&[])
-                    } else {
-                        overload.resolve_with_args(&effective_arg_types, &HashMap::new())
-                    };
-                    if let Some(best_cand) = candidate_best {
-                        if best_cand.entity_id == eid {
-                            if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
-                                let score = best_cand.specificity;
-                                match &best {
-                                    Some((_, best_score)) if *best_score >= score => {}
-                                    _ => best = Some((symbol, score)),
-                                }
-                            }
-                        }
+            if let Some(owner) = owner_opt
+                && let Some(overload) = self.get_overload_set(&owner, name)
+            {
+                // Only consider overloads where this candidate is actually a member
+                if !overload.candidates.iter().any(|c| c.entity_id == eid) {
+                    continue;
+                }
+                let candidate_best = if effective_arg_types.is_empty() {
+                    overload.resolve(&[])
+                } else {
+                    overload.resolve_with_args(&effective_arg_types, &HashMap::new())
+                };
+                if let Some(best_cand) = candidate_best
+                    && best_cand.entity_id == eid
+                    && let Some(symbol) = self.symbol_from_entry(entry, name, from_scope)
+                {
+                    let score = best_cand.specificity;
+                    match &best {
+                        Some((_, best_score)) if *best_score >= score => {}
+                        _ => best = Some((symbol, score)),
                     }
                 }
             }
@@ -911,10 +899,10 @@ impl ProjectSymbolTable {
 
     /// Module path of the module table that owns `file_path`, if any.
     fn module_path_for_file(&self, file_path: &str) -> String {
-        if let Some(package) = self.get_package_for_file(file_path) {
-            if let Some(module) = package.get_module(file_path) {
-                return module.module_path.clone();
-            }
+        if let Some(package) = self.get_package_for_file(file_path)
+            && let Some(module) = package.get_module(file_path)
+        {
+            return module.module_path.clone();
         }
         for package in self.sorted_packages() {
             if let Some(module) = package.get_module(file_path) {
@@ -930,10 +918,10 @@ impl ProjectSymbolTable {
     /// resolution. `None` when the caller file is not indexed (unknown
     /// caller scope), in which case resolution stays permissive.
     pub(crate) fn caller_scope(&self, file_path: &str) -> Option<ScopeContext> {
-        if let Some(package) = self.get_package_for_file(file_path) {
-            if let Some(module) = package.get_module(file_path) {
-                return Some(module.scope_context());
-            }
+        if let Some(package) = self.get_package_for_file(file_path)
+            && let Some(module) = package.get_module(file_path)
+        {
+            return Some(module.scope_context());
         }
         for package in self.sorted_packages() {
             if let Some(module) = package.get_module(file_path) {
@@ -948,18 +936,18 @@ impl ProjectSymbolTable {
     /// Checks visibility based on the requesting package
     pub fn resolve_cross_package(&self, name: &str, from_package: &str) -> Option<SymbolRef> {
         // 1. Check this package first
-        if let Some(package) = self.get_package(from_package) {
-            if let Some(metadata) = package.get_export(name) {
-                return Some(self.stable_symbol_ref(&metadata));
-            }
+        if let Some(package) = self.get_package(from_package)
+            && let Some(metadata) = package.get_export(name)
+        {
+            return Some(self.stable_symbol_ref(&metadata));
         }
 
         // 2. Check other packages (public exports only, deterministic order)
         for package in self.sorted_packages() {
-            if package.package_id != from_package {
-                if let Some(metadata) = package.get_public_export(name) {
-                    return Some(self.stable_symbol_ref(&metadata));
-                }
+            if package.package_id != from_package
+                && let Some(metadata) = package.get_public_export(name)
+            {
+                return Some(self.stable_symbol_ref(&metadata));
             }
         }
 

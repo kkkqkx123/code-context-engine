@@ -96,7 +96,7 @@ impl RecoveryManager {
         // 3. Determine recovery starting point
         let start_batch = checkpoint.current_batch_index;
         let total_batches = checkpoint.total_files as u32 / checkpoint.batch_size
-            + if checkpoint.total_files as u32 % checkpoint.batch_size != 0 {
+            + if !(checkpoint.total_files as u32).is_multiple_of(checkpoint.batch_size) {
                 1
             } else {
                 0

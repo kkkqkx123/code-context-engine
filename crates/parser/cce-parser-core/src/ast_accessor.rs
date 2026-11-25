@@ -162,12 +162,12 @@ pub fn build_callee_name(node: Node, source: &[u8]) -> Option<String> {
             if let Some(func) = node.child_by_field_name("function") {
                 return build_callee_name(func, source);
             }
-            if let Some(obj) = node.child_by_field_name("object") {
-                if let Some(field) = node.child_by_field_name("field") {
-                    let obj_name = build_callee_name(obj, source)?;
-                    let field_name = field.utf8_text(source).ok()?;
-                    return Some(format!("{}.{}", obj_name, field_name));
-                }
+            if let Some(obj) = node.child_by_field_name("object")
+                && let Some(field) = node.child_by_field_name("field")
+            {
+                let obj_name = build_callee_name(obj, source)?;
+                let field_name = field.utf8_text(source).ok()?;
+                return Some(format!("{}.{}", obj_name, field_name));
             }
             None
         }
@@ -190,30 +190,30 @@ pub fn count_arguments(node: Node) -> Option<usize> {
 
 /// Extract type annotation deterministically via AST fields.
 pub fn extract_type_annotation(node: Node, source: &[u8]) -> Option<String> {
-    if let Some(type_node) = node.child_by_field_name("type") {
-        if let Ok(text) = type_node.utf8_text(source) {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+    if let Some(type_node) = node.child_by_field_name("type")
+        && let Ok(text) = type_node.utf8_text(source)
+    {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
-    if let Some(return_type) = node.child_by_field_name("return_type") {
-        if let Ok(text) = return_type.utf8_text(source) {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+    if let Some(return_type) = node.child_by_field_name("return_type")
+        && let Ok(text) = return_type.utf8_text(source)
+    {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
     // Fallback for parameter nodes where type is stored as `type` field with
     // colon separator, but we prefer structured access
-    if let Some(ty) = node.child_by_field_name("type_annotation") {
-        if let Ok(text) = ty.utf8_text(source) {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+    if let Some(ty) = node.child_by_field_name("type_annotation")
+        && let Ok(text) = ty.utf8_text(source)
+    {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
     None
@@ -291,11 +291,11 @@ mod tests {
         while let Some(node) = stack.pop() {
             if node.kind() == "call_expression" {
                 // Find the one with dot
-                if let Some(func) = node.child_by_field_name("function") {
-                    if func.kind() == "field_expression" {
-                        call = Some(node);
-                        break;
-                    }
+                if let Some(func) = node.child_by_field_name("function")
+                    && func.kind() == "field_expression"
+                {
+                    call = Some(node);
+                    break;
                 }
             }
             let mut c = node.walk();
@@ -355,13 +355,12 @@ mod tests {
         let mut stack = vec![root];
         let mut call = None;
         while let Some(node) = stack.pop() {
-            if node.kind() == "call_expression" {
-                if let Some(func) = node.child_by_field_name("function") {
-                    if func.utf8_text(code.as_bytes()).unwrap_or("") == "bar" {
-                        call = Some(node);
-                        break;
-                    }
-                }
+            if node.kind() == "call_expression"
+                && let Some(func) = node.child_by_field_name("function")
+                && func.utf8_text(code.as_bytes()).unwrap_or("") == "bar"
+            {
+                call = Some(node);
+                break;
             }
             let mut c = node.walk();
             for child in {
@@ -412,14 +411,15 @@ mod tests {
             if child.kind() == "parameters" {
                 let mut pc = child.walk();
                 for param in child.children(&mut pc) {
-                    if param.is_named() && param.kind().contains("parameter") {
-                        if let Some((name, ty)) = extract_parameter(param, code.as_bytes()) {
-                            if name == "x" {
-                                assert_eq!(ty.as_deref(), Some("i32"));
-                            }
-                            if name == "y" {
-                                assert!(ty.unwrap().contains("Option"));
-                            }
+                    if param.is_named()
+                        && param.kind().contains("parameter")
+                        && let Some((name, ty)) = extract_parameter(param, code.as_bytes())
+                    {
+                        if name == "x" {
+                            assert_eq!(ty.as_deref(), Some("i32"));
+                        }
+                        if name == "y" {
+                            assert!(ty.unwrap().contains("Option"));
                         }
                     }
                 }
@@ -443,11 +443,11 @@ mod tests {
         while let Some(node) = stack.pop() {
             if node.kind() == "identifier" && node.utf8_text(code.as_bytes()).unwrap() == "x" {
                 // The parent should be a parameter-like node
-                if let Some(parent) = node.parent() {
-                    if parent.kind().contains("parameter") {
-                        param_node = Some(parent);
-                        break;
-                    }
+                if let Some(parent) = node.parent()
+                    && parent.kind().contains("parameter")
+                {
+                    param_node = Some(parent);
+                    break;
                 }
             }
             let mut c = node.walk();
@@ -551,16 +551,16 @@ mod tests {
             if child.kind() == "formal_parameters" || child.kind() == "parameters" {
                 let mut pc = child.walk();
                 for param in child.children(&mut pc) {
-                    if param.is_named() && param.kind().contains("parameter") {
-                        if let Some((name, ty)) = extract_parameter(param, code.as_bytes()) {
-                            if name == "x" || name == "y" {
-                                let ty_text = ty.expect("type annotation present");
-                                assert!(
-                                    ty_text.contains("number"),
-                                    "expected parameter type to contain 'number', got: {ty_text}"
-                                );
-                            }
-                        }
+                    if param.is_named()
+                        && param.kind().contains("parameter")
+                        && let Some((name, ty)) = extract_parameter(param, code.as_bytes())
+                        && (name == "x" || name == "y")
+                    {
+                        let ty_text = ty.expect("type annotation present");
+                        assert!(
+                            ty_text.contains("number"),
+                            "expected parameter type to contain 'number', got: {ty_text}"
+                        );
                     }
                 }
             }
@@ -579,15 +579,13 @@ mod tests {
         let mut stack = vec![root];
         let mut call = None;
         while let Some(node) = stack.pop() {
-            if node.kind() == "call_expression" {
-                if let Some(func) = node.child_by_field_name("function") {
-                    if func.kind() == "identifier"
-                        && func.utf8_text(code.as_bytes()).unwrap_or("") == "foo"
-                    {
-                        call = Some(node);
-                        break;
-                    }
-                }
+            if node.kind() == "call_expression"
+                && let Some(func) = node.child_by_field_name("function")
+                && func.kind() == "identifier"
+                && func.utf8_text(code.as_bytes()).unwrap_or("") == "foo"
+            {
+                call = Some(node);
+                break;
             }
             let mut c = node.walk();
             for child in {

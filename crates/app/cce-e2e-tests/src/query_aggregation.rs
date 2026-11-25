@@ -132,12 +132,12 @@ pub async fn run_aggregation_benchmark(
         let combined = combined_judgment(first, second);
 
         let first_metrics = evaluate(
-            &top_items(&first_result.items, config.top_k),
+            top_items(&first_result.items, config.top_k),
             &combined,
             config.top_k,
         );
         let second_metrics = evaluate(
-            &top_items(&second_result.items, config.top_k),
+            top_items(&second_result.items, config.top_k),
             &combined,
             config.top_k,
         );
@@ -161,7 +161,7 @@ pub async fn run_aggregation_benchmark(
                     .with_context(|| format!("aggregated query '{}'", combined.id))?;
                 let wall_ms = call_start.elapsed().as_millis() as u64;
                 let metrics = evaluate(
-                    &top_items(&result.items, config.top_k),
+                    top_items(&result.items, config.top_k),
                     &combined,
                     config.top_k,
                 );
@@ -236,14 +236,14 @@ fn build_scenarios(judgments: &[RelevanceJudgment]) -> Vec<Scenario> {
         let second = judgments
             .iter()
             .position(|judgment| judgment.query_type == *right);
-        if let (Some(first), Some(second)) = (first, second) {
-            if first != second {
-                scenarios.push(Scenario {
-                    category: format!("mixed:{left}+{right}"),
-                    first,
-                    second,
-                });
-            }
+        if let (Some(first), Some(second)) = (first, second)
+            && first != second
+        {
+            scenarios.push(Scenario {
+                category: format!("mixed:{left}+{right}"),
+                first,
+                second,
+            });
         }
     }
     scenarios

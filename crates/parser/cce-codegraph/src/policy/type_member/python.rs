@@ -40,79 +40,69 @@ pub fn build_type_index(
     }
 
     for entity in entities {
-        if let Some(parent_id) = entity.parent {
-            if let Some(parent) = by_id.get(&parent_id) {
-                if is_python_type_kind(parent.kind) {
-                    let key = id_to_key.get(&parent_id).cloned().unwrap_or_else(|| {
-                        let simple = simple_name(&parent.name).to_string();
-                        let qualified = if module_path.is_empty() {
-                            simple.clone()
-                        } else {
-                            format!("{}.{}", module_path.replace("::", "."), simple)
-                        };
-                        TypeKey::new(qualified, simple, file_path.to_string())
-                    });
-                    let is_ctor = entity.name == "__init__";
-                    let kind = if is_ctor {
-                        EntityKind::Constructor
-                    } else if entity.kind == EntityKind::Method
-                        || entity.kind == EntityKind::Function
-                    {
-                        EntityKind::Method
-                    } else {
-                        entity.kind
-                    };
-                    let vis = crate::policy::detect_entity_visibility(entity, &Language::Python);
-                    let modifiers_lower: Vec<String> = entity
-                        .modifiers
-                        .iter()
-                        .map(|m| m.to_ascii_lowercase())
-                        .collect();
-                    let meta_has = |k: &str| {
-                        entity.metadata.contains_key(k) || modifiers_lower.iter().any(|m| m == k)
-                    };
-                    let is_static = meta_has("staticmethod");
-                    let is_associated = meta_has("classmethod");
-                    let is_property = meta_has("property");
-                    let final_kind = if is_property {
-                        EntityKind::Property
-                    } else {
-                        kind
-                    };
-                    let module_path_opt = if module_path.is_empty() {
-                        None
-                    } else {
-                        Some(module_path.replace("::", "."))
-                    };
-                    let member = MemberEntry {
-                        entity_id: entity.id,
-                        name: entity.name.clone(),
-                        kind: final_kind,
-                        visibility: vis,
-                        is_static,
-                        is_associated,
-                        span: entity.span,
-                        file_path: file_path.to_string(),
-                        module_path: module_path_opt,
-                        package: package.to_string(),
-                    };
-                    // ensure type exists
-                    if type_index.get_type_by_key(&key).is_none() {
-                        let vis_parent =
-                            crate::policy::detect_entity_visibility(parent, &Language::Python);
-                        let entry = TypeEntry::new(
-                            parent.id,
-                            key.clone(),
-                            parent.kind,
-                            language,
-                            vis_parent,
-                        );
-                        type_index.insert_type(key.clone(), entry);
-                        id_to_key.insert(parent.id, key.clone());
-                    }
-                    let _ = type_index.insert_member(&key, member);
-                }
+        if let Some(parent_id) = entity.parent
+            && let Some(parent) = by_id.get(&parent_id)
+            && is_python_type_kind(parent.kind)
+        {
+            let key = id_to_key.get(&parent_id).cloned().unwrap_or_else(|| {
+                let simple = simple_name(&parent.name).to_string();
+                let qualified = if module_path.is_empty() {
+                    simple.clone()
+                } else {
+                    format!("{}.{}", module_path.replace("::", "."), simple)
+                };
+                TypeKey::new(qualified, simple, file_path.to_string())
+            });
+            let is_ctor = entity.name == "__init__";
+            let kind = if is_ctor {
+                EntityKind::Constructor
+            } else if entity.kind == EntityKind::Method || entity.kind == EntityKind::Function {
+                EntityKind::Method
+            } else {
+                entity.kind
+            };
+            let vis = crate::policy::detect_entity_visibility(entity, &Language::Python);
+            let modifiers_lower: Vec<String> = entity
+                .modifiers
+                .iter()
+                .map(|m| m.to_ascii_lowercase())
+                .collect();
+            let meta_has =
+                |k: &str| entity.metadata.contains_key(k) || modifiers_lower.iter().any(|m| m == k);
+            let is_static = meta_has("staticmethod");
+            let is_associated = meta_has("classmethod");
+            let is_property = meta_has("property");
+            let final_kind = if is_property {
+                EntityKind::Property
+            } else {
+                kind
+            };
+            let module_path_opt = if module_path.is_empty() {
+                None
+            } else {
+                Some(module_path.replace("::", "."))
+            };
+            let member = MemberEntry {
+                entity_id: entity.id,
+                name: entity.name.clone(),
+                kind: final_kind,
+                visibility: vis,
+                is_static,
+                is_associated,
+                span: entity.span,
+                file_path: file_path.to_string(),
+                module_path: module_path_opt,
+                package: package.to_string(),
+            };
+            // ensure type exists
+            if type_index.get_type_by_key(&key).is_none() {
+                let vis_parent = crate::policy::detect_entity_visibility(parent, &Language::Python);
+                let entry =
+                    TypeEntry::new(parent.id, key.clone(), parent.kind, language, vis_parent);
+                type_index.insert_type(key.clone(), entry);
+                id_to_key.insert(parent.id, key.clone());
             }
+            let _ = type_index.insert_member(&key, member);
         }
     }
 }

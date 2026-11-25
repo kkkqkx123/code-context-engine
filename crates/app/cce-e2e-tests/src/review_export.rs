@@ -112,29 +112,29 @@ pub async fn export_fixture(
                 // tree-sitter snapshot that produced the NL chunks.
                 let parsed_for_structured = result.parsed_file.clone();
 
-                if let Some(processing_result) = result.processing_result {
-                    if !processing_result.groups.is_empty() {
-                        let converter = file_processor.converter();
-                        let source = &*result.parsed_file.source;
-                        let request = ConversionRequest {
-                            force_mode: Some(OutputMode::Embedding),
-                        };
-                        let conversions = converter
-                            .convert_entity_groups(
-                                &processing_result.groups,
-                                &file_path,
-                                Some(&request),
-                                Some(&processing_result),
-                                Some(source),
-                            )
-                            .groups;
-                        match direct_exporter
-                            .export_groups(&conversions, &file_path)
-                            .await
-                        {
-                            Ok(_) => indexed_files += 1,
-                            Err(e) => eprintln!("  Export error: {}", e),
-                        }
+                if let Some(processing_result) = result.processing_result
+                    && !processing_result.groups.is_empty()
+                {
+                    let converter = file_processor.converter();
+                    let source = &*result.parsed_file.source;
+                    let request = ConversionRequest {
+                        force_mode: Some(OutputMode::Embedding),
+                    };
+                    let conversions = converter
+                        .convert_entity_groups(
+                            &processing_result.groups,
+                            &file_path,
+                            Some(&request),
+                            Some(&processing_result),
+                            Some(source),
+                        )
+                        .groups;
+                    match direct_exporter
+                        .export_groups(&conversions, &file_path)
+                        .await
+                    {
+                        Ok(_) => indexed_files += 1,
+                        Err(e) => eprintln!("  Export error: {}", e),
                     }
                 }
                 if !result.chunks.is_empty() {
@@ -153,13 +153,12 @@ pub async fn export_fixture(
         if let Ok(result) = file_processor
             .process_file_complete(entry, OutputMode::Bm25)
             .await
+            && !result.chunks.is_empty()
         {
-            if !result.chunks.is_empty() {
-                bm25_by_file
-                    .entry(relative_path)
-                    .or_default()
-                    .extend(result.chunks);
-            }
+            bm25_by_file
+                .entry(relative_path)
+                .or_default()
+                .extend(result.chunks);
         }
     }
 

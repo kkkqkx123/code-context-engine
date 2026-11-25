@@ -96,13 +96,13 @@ impl MetricsAggregationConfig {
             ));
         }
         for (name, metric_override) in &self.metric_overrides {
-            if let Some(interval) = metric_override.interval_secs {
-                if interval == 0 {
-                    return Err(ConfigValidationError::invalid_field(
-                        format!("metrics.aggregation.metric_overrides.{name}.interval_secs"),
-                        "must be greater than 0",
-                    ));
-                }
+            if let Some(interval) = metric_override.interval_secs
+                && interval == 0
+            {
+                return Err(ConfigValidationError::invalid_field(
+                    format!("metrics.aggregation.metric_overrides.{name}.interval_secs"),
+                    "must be greater than 0",
+                ));
             }
         }
         Ok(())

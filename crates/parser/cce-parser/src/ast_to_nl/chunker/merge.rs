@@ -49,14 +49,14 @@ fn merge_source_coverage(
 
     let mut merged: Vec<Span> = Vec::with_capacity(ranges.len());
     for span in ranges {
-        if let Some(last) = merged.last_mut() {
-            if span.start_byte <= last.end_byte.saturating_add(1) {
-                if span.end_byte > last.end_byte {
-                    last.end_byte = span.end_byte;
-                    last.end_position = span.end_position;
-                }
-                continue;
+        if let Some(last) = merged.last_mut()
+            && span.start_byte <= last.end_byte.saturating_add(1)
+        {
+            if span.end_byte > last.end_byte {
+                last.end_byte = span.end_byte;
+                last.end_position = span.end_position;
             }
+            continue;
         }
         merged.push(span);
     }
@@ -395,12 +395,12 @@ pub(crate) fn merge_small_chunks_cross_group(
     for (idx, chunk) in stack.iter_mut().enumerate() {
         chunk.chunk_index = idx;
         chunk.total_chunks = total;
-        if merged_ids.contains(&chunk.chunk_id) {
-            if let Some(code) = chunk.metadata.as_code_mut() {
-                code.is_fragment = false;
-                code.fragment_index = None;
-                code.total_fragments = None;
-            }
+        if merged_ids.contains(&chunk.chunk_id)
+            && let Some(code) = chunk.metadata.as_code_mut()
+        {
+            code.is_fragment = false;
+            code.fragment_index = None;
+            code.total_fragments = None;
         }
     }
 

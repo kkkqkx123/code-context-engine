@@ -32,20 +32,18 @@ impl LanguageTypeInferer for GoTypeInferer {
                 EntityKind::Function | EntityKind::Method => {
                     extract_function_types(entity, ctx);
 
-                    if entity.kind == EntityKind::Method {
-                        if let Some(receiver_type) = entity.metadata.get("receiver_type") {
-                            if let Some(receiver_var) = extract_receiver_var_name(&entity.signature)
-                            {
-                                let binding = TypeBinding {
-                                    type_name: receiver_type.clone(),
-                                    type_entity_id: None,
-                                    span: entity.span,
-                                    origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                                    shape: parse_type_shape(receiver_type, Language::Go),
-                                };
-                                ctx.add_variable_type(receiver_var, binding);
-                            }
-                        }
+                    if entity.kind == EntityKind::Method
+                        && let Some(receiver_type) = entity.metadata.get("receiver_type")
+                        && let Some(receiver_var) = extract_receiver_var_name(&entity.signature)
+                    {
+                        let binding = TypeBinding {
+                            type_name: receiver_type.clone(),
+                            type_entity_id: None,
+                            span: entity.span,
+                            origin: Some(super::types::InferenceOrigin::TypeAnnotation),
+                            shape: parse_type_shape(receiver_type, Language::Go),
+                        };
+                        ctx.add_variable_type(receiver_var, binding);
                     }
                 }
                 EntityKind::Variable => {

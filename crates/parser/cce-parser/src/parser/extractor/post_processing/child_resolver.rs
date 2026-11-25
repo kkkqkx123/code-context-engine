@@ -16,10 +16,10 @@ pub fn fill_children(entities: &mut [Entity]) {
     }
 
     for i in 0..entities.len() {
-        if let Some(parent_id) = entities[i].parent {
-            if let Some(&parent_idx) = id_to_index.get(&parent_id) {
-                entities[parent_idx].add_child(entities[i].id);
-            }
+        if let Some(parent_id) = entities[i].parent
+            && let Some(&parent_idx) = id_to_index.get(&parent_id)
+        {
+            entities[parent_idx].add_child(entities[i].id);
         }
     }
 }

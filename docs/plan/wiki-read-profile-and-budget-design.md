@@ -1,4 +1,6 @@
-# Wiki 只读 Profile 与有限步预算协议设计
+# 只读 Profile 与有限步预算协议设计
+
+> 术语更新：本文中的 `wiki-read` / `wiki_read` 画像现更名为 `read_only`，且为默认画像；WCP 导出已收敛到 CLI 唯一入口。最新职责边界见 `docs/plan/wiki-surface-consolidation-design.md`。下文配置示例中的画像名按此对应理解，其余设计决策不变。
 
 ## 背景与动机
 
@@ -74,18 +76,18 @@ tools/call(_meta.wiki_run)
 
 ### Profile 解析规则
 
-配置新增 `[mcp] profile`，取值 `full`（默认）与 `wiki_read`。解析为「有效白名单」的规则：
+配置新增 `[mcp] profile`，取值 `read_only`（默认）与 `full`。解析为「有效白名单」的规则：
 
 | profile | `enabled_tools` | 有效工具集 |
 |---|---|---|
-| `full` | `None` | 全部（保持现状，向后兼容） |
-| `full` | `Some(list)` | 仅 list（现状行为） |
-| `wiki_read` | `None` | 全部 Read 工具 |
-| `wiki_read` | `Some(list)` | list 与 Read 集合的**交集**（更严格者胜） |
+| `read_only` | `None` | 全部 Read 工具 |
+| `read_only` | `Some(list)` | list 与 Read 集合的**交集**（更严格者胜） |
+| `full` | `None` | 全部 |
+| `full` | `Some(list)` | 仅 list |
 
 交点语义保证 `enabled_tools` 仍可在只读面上进一步收窄（例如只给 `read_file` + `file_search`），但永远无法越过只读边界去放开写工具。
 
-默认取 `full` 是刻意的：不改变现有部署行为；只有显式配置 `wiki_read` 才启用只读约束。
+默认取 `read_only` 是刻意的：只读 + 预算是安全默认；只有显式配置 `full` 才放宽到全部工具。
 
 ### 执行点：调用期拒绝 + 工具列表过滤
 
@@ -169,10 +171,10 @@ tools/call(_meta.wiki_run)
 
 在 `[mcp]` 下新增（均可选，带安全默认）：
 
-- `profile`：`full` | `wiki_read`，默认 `full`。
+- `profile`：`read_only` | `full`，默认 `read_only`。
 - `[mcp.budget]`：`enabled`（默认 `true`）、`max_calls_per_run`（200）、`max_calls_per_page`（20）、`max_return_items`（500）、`max_read_file_lines`（2000）、`max_active_runs`（如 256）、`cache_enabled`（true）、`cache_ttl_secs`（900）。
 
-约束：`profile = wiki_read` 时 `budget.enabled` 被强制为 `true`，不可关闭——只读画像的意义即在于此。
+约束：`profile = read_only` 时 `budget.enabled` 被强制为 `true`，不可关闭——只读画像的意义即在于此。
 
 ---
 
@@ -210,7 +212,7 @@ tools/call(_meta.wiki_run)
 5. **失败不扣正式步数但计尝试**：容忍瞬时错误，同时防止以失败刷调用。
 6. **缓存按 `(run, tool, args, epoch)` 键控**：跨 run 隔离预算，索引换代自动失效。
 7. **服务端只执行数值上限，不感知阶段语义**：保持职责单一与确定性，阶段划分归下游。
-8. **`wiki_read` 下强制开启预算**：只读画像必须同时具备步数上限才有意义。
+8. **`read_only` 下强制开启预算**：只读画像必须同时具备步数上限才有意义。
 
 ## 实施顺序与验收
 
@@ -225,13 +227,13 @@ tools/call(_meta.wiki_run)
 
 验收标准：
 
-- `profile=wiki_read` 下调用 `index_project`/`incremental_index` 返回禁用错误；`full` 下不受影响。
-- `profile=wiki_read` 且 `enabled_tools=Some(["read_file"])` 时，仅 `read_file` 可用（交集语义）。
+- `profile=read_only` 下调用 `index_project`/`incremental_index` 返回禁用错误；`full` 下不受影响。
+- `profile=read_only` 且 `enabled_tools=Some(["read_file"])` 时，仅 `read_file` 可用（交集语义）。
 - 能力表键集合与 `list_all()` 完全一致（单测）。
 - 超过 `max_calls_per_run` 返回 `budget_exhausted` 且 `remaining=0`、`fallback=wcp_only`。
 - 相同参数重复调用命中缓存，`cached=true` 且不扣步。
 - 每个成功响应带 `_budget` 元数据。
-- `wiki_read` 下即使配置 `budget.enabled=false` 仍强制启用预算。
+- `read_only` 下即使配置 `budget.enabled=false` 仍强制启用预算。
 - 工具执行失败不扣正式步数，但 `attempts` 超限后拒绝。
 
 ## 影响面

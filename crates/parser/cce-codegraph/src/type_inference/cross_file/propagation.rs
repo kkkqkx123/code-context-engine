@@ -120,10 +120,10 @@ pub fn propagate_variable_types(
                 ) {
                     continue;
                 }
-                if let Some(existing) = ctx.get_variable_type(&entity.name) {
-                    if super::super::types::origin_is_authoritative(existing.origin) {
-                        continue;
-                    }
+                if let Some(existing) = ctx.get_variable_type(&entity.name)
+                    && super::super::types::origin_is_authoritative(existing.origin)
+                {
+                    continue;
                 }
 
                 // Try to find a call target that could provide a return type.
@@ -225,28 +225,26 @@ pub fn propagate_variable_types(
                         if cycle_detected {
                             continue;
                         }
-                        if fully_resolved {
-                            if let Some(binding) = current_binding {
-                                let propagated = TypeBinding {
-                                    type_name: binding.type_name.clone(),
-                                    type_entity_id: binding.type_entity_id,
-                                    span: entity.span,
-                                    origin: Some(propagated_chain_origin(file, &chain)),
-                                    shape: binding.shape.clone(),
-                                };
-                                let should_insert =
-                                    ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                                        !candidate_downgrades_existing(
-                                            Some(existing),
-                                            propagated.shape.as_ref(),
-                                        ) && binding_supersedes(propagated.origin, existing.origin)
-                                    });
-                                if should_insert {
-                                    ctx.add_variable_type(entity.name.clone(), propagated);
-                                    changed = true;
-                                }
-                                continue;
+                        if fully_resolved && let Some(binding) = current_binding {
+                            let propagated = TypeBinding {
+                                type_name: binding.type_name.clone(),
+                                type_entity_id: binding.type_entity_id,
+                                span: entity.span,
+                                origin: Some(propagated_chain_origin(file, &chain)),
+                                shape: binding.shape.clone(),
+                            };
+                            let should_insert =
+                                ctx.get_variable_type(&entity.name).is_none_or(|existing| {
+                                    !candidate_downgrades_existing(
+                                        Some(existing),
+                                        propagated.shape.as_ref(),
+                                    ) && binding_supersedes(propagated.origin, existing.origin)
+                                });
+                            if should_insert {
+                                ctx.add_variable_type(entity.name.clone(), propagated);
+                                changed = true;
                             }
+                            continue;
                         }
                         // Fallback to simple target if chain resolution failed
                         super::super::call_utils::simple_callee_name(&stripped_name()).to_string()

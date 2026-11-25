@@ -485,10 +485,8 @@ impl HotUpdateOperationRuntime {
         // The change detector only re-hashes files whose size/mtime
         // differ from the cache, so the fallback stays cheap in practice.
         let needs_full_rescan = self.pending_watch_changes.needs_full_rescan();
-        if needs_full_rescan {
-            if let Some(ref metrics) = self.metrics {
-                metrics.record_full_rescan_fallback();
-            }
+        if needs_full_rescan && let Some(ref metrics) = self.metrics {
+            metrics.record_full_rescan_fallback();
         }
         let pending_paths = self.pending_watch_changes.take().await;
 
@@ -522,14 +520,14 @@ impl HotUpdateOperationRuntime {
             // empty operation, clone the active generation and publish a
             // pointless new epoch. Marking it completed also lets the TTL
             // cleanup retire it later.
-            if let Some(ref cm) = self.checkpoint_manager {
-                if let Err(error) = cm.mark_operation_completed(&ctx.operation_id).await {
-                    tracing::warn!(
-                        operation_id = %ctx.operation_id,
-                        error = %error,
-                        "Failed to mark no-change checkpoint completed"
-                    );
-                }
+            if let Some(ref cm) = self.checkpoint_manager
+                && let Err(error) = cm.mark_operation_completed(&ctx.operation_id).await
+            {
+                tracing::warn!(
+                    operation_id = %ctx.operation_id,
+                    error = %error,
+                    "Failed to mark no-change checkpoint completed"
+                );
             }
             return Ok(OperationResult {
                 operation_id: ctx.operation_id.clone(),
@@ -640,14 +638,13 @@ impl HotUpdateOperationRuntime {
                         Ok(result) => {
                             // Mark module success for files without failures
                             for file_path in &all_file_paths {
-                                if let Some(modules) = file_module_status.get_mut(file_path) {
-                                    if let Some(status) = modules.get_mut(&processor_name) {
-                                        let has_failure = result.failed_modules.iter().any(|f| {
-                                            f.file_path == *file_path
-                                                && f.module_name == processor_name
-                                        });
-                                        *status = !has_failure;
-                                    }
+                                if let Some(modules) = file_module_status.get_mut(file_path)
+                                    && let Some(status) = modules.get_mut(&processor_name)
+                                {
+                                    let has_failure = result.failed_modules.iter().any(|f| {
+                                        f.file_path == *file_path && f.module_name == processor_name
+                                    });
+                                    *status = !has_failure;
                                 }
                             }
 
@@ -671,10 +668,10 @@ impl HotUpdateOperationRuntime {
                                     retry_count: 0,
                                     next_retry_time: None,
                                 });
-                                if let Some(modules) = file_module_status.get_mut(file_path) {
-                                    if let Some(status) = modules.get_mut(&processor_name) {
-                                        *status = false;
-                                    }
+                                if let Some(modules) = file_module_status.get_mut(file_path)
+                                    && let Some(status) = modules.get_mut(&processor_name)
+                                {
+                                    *status = false;
                                 }
                             }
                             tracing::error!(
@@ -688,10 +685,10 @@ impl HotUpdateOperationRuntime {
                 } else {
                     // Mark disabled processor as skipped for diagnostic consistency
                     for file_path in &all_file_paths {
-                        if let Some(modules) = file_module_status.get_mut(file_path) {
-                            if let Some(status) = modules.get_mut(&processor_name) {
-                                *status = true;
-                            }
+                        if let Some(modules) = file_module_status.get_mut(file_path)
+                            && let Some(status) = modules.get_mut(&processor_name)
+                        {
+                            *status = true;
                         }
                     }
                 }
@@ -703,17 +700,16 @@ impl HotUpdateOperationRuntime {
         // envelopes carried no `file_summary`; this pass re-persists them so a
         // crash between summary generation and operation completion lets a
         // resumed run reuse the summaries instead of regenerating them.
-        if let Some(ref cm) = self.checkpoint_manager {
-            if let Err(error) = self
+        if let Some(ref cm) = self.checkpoint_manager
+            && let Err(error) = self
                 .persist_summaries_to_checkpoints(ctx, &batch_result, cm)
                 .await
-            {
-                tracing::warn!(
-                    operation_id = %ctx.operation_id,
-                    error = %error,
-                    "Failed to persist summaries into checkpoints"
-                );
-            }
+        {
+            tracing::warn!(
+                operation_id = %ctx.operation_id,
+                error = %error,
+                "Failed to persist summaries into checkpoints"
+            );
         }
 
         if !processor_failed && all_failures.is_empty() {
@@ -791,17 +787,16 @@ impl HotUpdateOperationRuntime {
             // checkpoint stays resumable (InProgress) on purpose: failed
             // modules are retried by the next scan, which reuses the stored
             // parsed envelopes instead of re-reading the sources.
-            if let Some(ref coordinator) = self.operation_coordinator {
-                if let Err(error) = coordinator
+            if let Some(ref coordinator) = self.operation_coordinator
+                && let Err(error) = coordinator
                     .clear_active_by_operation(&ctx.operation_id)
                     .await
-                {
-                    tracing::warn!(
-                        operation_id = %ctx.operation_id,
-                        error = %error,
-                        "Failed to clear active flag after hot-update failure"
-                    );
-                }
+            {
+                tracing::warn!(
+                    operation_id = %ctx.operation_id,
+                    error = %error,
+                    "Failed to clear active flag after hot-update failure"
+                );
             }
         }
 

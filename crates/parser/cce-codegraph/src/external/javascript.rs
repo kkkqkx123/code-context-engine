@@ -99,22 +99,22 @@ impl JavaScriptModuleHandler {
         // 2. Parse entry files
         let entry_candidates = Self::entry_candidates(package_path, pkg_info.as_ref());
         for entry in entry_candidates {
-            if entry.exists() {
-                if let Ok(content) = std::fs::read_to_string(&entry) {
-                    let exports = Self::extract_exports_from_source(&content);
-                    self.entry_exports
-                        .insert(entry.to_string_lossy().to_string(), exports.clone());
-                    for exported in exports {
-                        if !info.exports.iter().any(|e| e.name == exported) {
-                            info.exports
-                                .push(ExportedSymbol::new(exported, EntityKind::Function));
-                        }
+            if entry.exists()
+                && let Ok(content) = std::fs::read_to_string(&entry)
+            {
+                let exports = Self::extract_exports_from_source(&content);
+                self.entry_exports
+                    .insert(entry.to_string_lossy().to_string(), exports.clone());
+                for exported in exports {
+                    if !info.exports.iter().any(|e| e.name == exported) {
+                        info.exports
+                            .push(ExportedSymbol::new(exported, EntityKind::Function));
                     }
-                    // Collect re-exported dependencies for module_dependencies depth
-                    for dep in Self::extract_import_sources(&content) {
-                        if !info.dependencies.contains(&dep) {
-                            info.dependencies.push(dep);
-                        }
+                }
+                // Collect re-exported dependencies for module_dependencies depth
+                for dep in Self::extract_import_sources(&content) {
+                    if !info.dependencies.contains(&dep) {
+                        info.dependencies.push(dep);
                     }
                 }
             }
@@ -286,10 +286,10 @@ impl JavaScriptModuleHandler {
                 .get(1)
                 .or_else(|| caps.get(2))
                 .map(|m| m.as_str().to_string());
-            if let Some(s) = source {
-                if !sources.contains(&s) {
-                    sources.push(s);
-                }
+            if let Some(s) = source
+                && !sources.contains(&s)
+            {
+                sources.push(s);
             }
         }
         sources
@@ -317,20 +317,20 @@ impl JavaScriptModuleHandler {
 
     fn extract_dependencies_from_package_json(package_path: &Path) -> Vec<String> {
         let package_json_path = package_path.join("package.json");
-        if let Ok(content) = std::fs::read_to_string(&package_json_path) {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
-                let mut deps = Vec::new();
-                for field in ["dependencies", "peerDependencies", "devDependencies"] {
-                    if let Some(obj) = value.get(field).and_then(|v| v.as_object()) {
-                        for key in obj.keys() {
-                            if !deps.contains(key) {
-                                deps.push(key.clone());
-                            }
+        if let Ok(content) = std::fs::read_to_string(&package_json_path)
+            && let Ok(value) = serde_json::from_str::<serde_json::Value>(&content)
+        {
+            let mut deps = Vec::new();
+            for field in ["dependencies", "peerDependencies", "devDependencies"] {
+                if let Some(obj) = value.get(field).and_then(|v| v.as_object()) {
+                    for key in obj.keys() {
+                        if !deps.contains(key) {
+                            deps.push(key.clone());
                         }
                     }
                 }
-                return deps;
             }
+            return deps;
         }
         Vec::new()
     }
@@ -379,12 +379,11 @@ fn collect_js_files(dir: &Path) -> Vec<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if matches!(ext, "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs") {
-                        files.push(path);
-                    }
-                }
+            if path.is_file()
+                && let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && matches!(ext, "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs")
+            {
+                files.push(path);
             }
         }
     }

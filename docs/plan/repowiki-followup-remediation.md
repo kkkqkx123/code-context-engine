@@ -6,7 +6,7 @@
 
 两项问题已单独立项、作为未来方案，不在本轮范围：
 
-- `wiki-read` 只读 profile → `docs/plan/wiki-read-profile-and-budget-design.md`
+- `read_only` 只读 profile → `docs/plan/wiki-read-profile-and-budget-design.md`（画像已更名、设为默认，术语约定见 `docs/plan/wiki-surface-consolidation-design.md`）
 - 有限步预算协议 → 同上
 
 本轮遵循 `AGENTS.md`：无向后兼容包袱、文档用简体中文、避免 `unwrap`/`unsafe`、最小化动态分发、优先长期可维护性。

@@ -207,14 +207,12 @@ impl SmallFragmentMerger {
             // Import-only groups are dropped before chunking (they have no
             // retrieval value), so absorbing a non-import entity into an
             // import batch would silently remove its content from retrieval.
-            if let Some(prev) = current_batch.last() {
-                if Self::is_import_like_group(prev) != Self::is_import_like_group(group)
-                    && !current_batch.is_empty()
-                {
-                    if let Some(merged) = self.flush_batch(&mut current_batch) {
-                        merged_groups.push(merged);
-                    }
-                }
+            if let Some(prev) = current_batch.last()
+                && Self::is_import_like_group(prev) != Self::is_import_like_group(group)
+                && !current_batch.is_empty()
+                && let Some(merged) = self.flush_batch(&mut current_batch)
+            {
+                merged_groups.push(merged);
             }
 
             // Fragments of different kinds must not merge. A merged group is
@@ -231,10 +229,9 @@ impl SmallFragmentMerger {
                 if !both_import_like
                     && Self::header_kind(prev) != Self::header_kind(group)
                     && !current_batch.is_empty()
+                    && let Some(merged) = self.flush_batch(&mut current_batch)
                 {
-                    if let Some(merged) = self.flush_batch(&mut current_batch) {
-                        merged_groups.push(merged);
-                    }
+                    merged_groups.push(merged);
                 }
             }
 
@@ -244,10 +241,10 @@ impl SmallFragmentMerger {
 
                 if gap > self.proximity_bytes {
                     // Gap exceeds proximity threshold: flush current batch
-                    if !current_batch.is_empty() {
-                        if let Some(merged) = self.flush_batch(&mut current_batch) {
-                            merged_groups.push(merged);
-                        }
+                    if !current_batch.is_empty()
+                        && let Some(merged) = self.flush_batch(&mut current_batch)
+                    {
+                        merged_groups.push(merged);
                     }
                 } else if gap > 0 {
                     // Small gap within proximity: check for non-standalone barrier
@@ -258,10 +255,10 @@ impl SmallFragmentMerger {
                     });
                     if has_non_standalone_between {
                         // Non-standalone group blocks the merge: flush
-                        if !current_batch.is_empty() {
-                            if let Some(merged) = self.flush_batch(&mut current_batch) {
-                                merged_groups.push(merged);
-                            }
+                        if !current_batch.is_empty()
+                            && let Some(merged) = self.flush_batch(&mut current_batch)
+                        {
+                            merged_groups.push(merged);
                         }
                     }
                 }
@@ -270,23 +267,21 @@ impl SmallFragmentMerger {
                 // be merged even when adjacent. E.g., a top-level function and imports
                 // nested inside a test module may be adjacent in source but belong to
                 // different logical containers.
-                if let Some(prev) = current_batch.last() {
-                    if prev.parent_group_id != group.parent_group_id && !current_batch.is_empty() {
-                        if let Some(merged) = self.flush_batch(&mut current_batch) {
-                            merged_groups.push(merged);
-                        }
-                    }
+                if let Some(prev) = current_batch.last()
+                    && prev.parent_group_id != group.parent_group_id
+                    && !current_batch.is_empty()
+                    && let Some(merged) = self.flush_batch(&mut current_batch)
+                {
+                    merged_groups.push(merged);
                 }
 
                 // Check test boundary via the centralized rule.
-                if let Some(prev) = current_batch.last() {
-                    if !cce_types::test_info::TestInfo::can_merge(&prev.test_info, &group.test_info)
-                        && !current_batch.is_empty()
-                    {
-                        if let Some(merged) = self.flush_batch(&mut current_batch) {
-                            merged_groups.push(merged);
-                        }
-                    }
+                if let Some(prev) = current_batch.last()
+                    && !cce_types::test_info::TestInfo::can_merge(&prev.test_info, &group.test_info)
+                    && !current_batch.is_empty()
+                    && let Some(merged) = self.flush_batch(&mut current_batch)
+                {
+                    merged_groups.push(merged);
                 }
 
                 // Bound merged span lines: chaining every fragment within
@@ -306,10 +301,10 @@ impl SmallFragmentMerger {
                         .map(|g| g.span.end_position.row)
                         .unwrap_or(start_row)
                         .max(group.span.end_position.row);
-                    if end_row.saturating_sub(start_row) > self.max_span_lines {
-                        if let Some(merged) = self.flush_batch(&mut current_batch) {
-                            merged_groups.push(merged);
-                        }
+                    if end_row.saturating_sub(start_row) > self.max_span_lines
+                        && let Some(merged) = self.flush_batch(&mut current_batch)
+                    {
+                        merged_groups.push(merged);
                     }
                 }
             }
@@ -319,10 +314,10 @@ impl SmallFragmentMerger {
             // target (e.g. eight JSON helpers in one chunk leave the target
             // at one eighth of the text). Flush after three fragments so a
             // merged unit stays searchable while still rescuing tiny shards.
-            if current_batch.len() >= 3 {
-                if let Some(merged) = self.flush_batch(&mut current_batch) {
-                    merged_groups.push(merged);
-                }
+            if current_batch.len() >= 3
+                && let Some(merged) = self.flush_batch(&mut current_batch)
+            {
+                merged_groups.push(merged);
             }
 
             current_batch.push(group);
@@ -330,10 +325,10 @@ impl SmallFragmentMerger {
         }
 
         // Flush last batch
-        if !current_batch.is_empty() {
-            if let Some(merged) = self.create_merged_group(current_batch) {
-                merged_groups.push(merged);
-            }
+        if !current_batch.is_empty()
+            && let Some(merged) = self.create_merged_group(current_batch)
+        {
+            merged_groups.push(merged);
         }
 
         merged_groups
@@ -363,12 +358,11 @@ impl SmallFragmentMerger {
         // `Render writes ...`). Merging it with siblings dilutes the target
         // to a fraction of the chunk text and lets neighbours outrank it.
         // Only undocumented fragments are eligible for rescue merging.
-        if let Some(header) = group.header.as_ref() {
-            if let Some(doc) = header.doc_comment.as_deref() {
-                if doc.trim().len() >= 20 {
-                    return false;
-                }
-            }
+        if let Some(header) = group.header.as_ref()
+            && let Some(doc) = header.doc_comment.as_deref()
+            && doc.trim().len() >= 20
+        {
+            return false;
         }
         true
     }

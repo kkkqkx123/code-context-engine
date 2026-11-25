@@ -80,26 +80,70 @@ pub fn build_type_index(
     // build map simple -> keys for receiver resolution
     // second pass methods with receiver
     for entity in entities {
-        if entity.kind.is_function_like() {
-            if let Some(receiver) = extract_receiver_type(entity) {
-                if receiver.is_empty() {
-                    continue;
-                }
-                // find type entry with simple == receiver
-                let candidates = type_index.get_type_by_simple(&receiver);
-                let key = if let Some(entry) =
-                    candidates.into_iter().find(|e| e.key.simple == receiver)
-                {
-                    entry.key.clone()
+        if entity.kind.is_function_like()
+            && let Some(receiver) = extract_receiver_type(entity)
+        {
+            if receiver.is_empty() {
+                continue;
+            }
+            // find type entry with simple == receiver
+            let candidates = type_index.get_type_by_simple(&receiver);
+            let key = if let Some(entry) = candidates.into_iter().find(|e| e.key.simple == receiver)
+            {
+                entry.key.clone()
+            } else {
+                // placeholder type for receiver not defined in this file but may be in same package
+                let qualified = if package.is_empty() {
+                    receiver.clone()
                 } else {
-                    // placeholder type for receiver not defined in this file but may be in same package
-                    let qualified = if package.is_empty() {
-                        receiver.clone()
-                    } else {
-                        format!("{}.{}", package, receiver)
-                    };
-                    TypeKey::new(qualified, receiver.clone(), file_path.to_string())
+                    format!("{}.{}", package, receiver)
                 };
+                TypeKey::new(qualified, receiver.clone(), file_path.to_string())
+            };
+            let vis = crate::policy::detect_entity_visibility(entity, &Language::Go);
+            let member = MemberEntry {
+                entity_id: entity.id,
+                name: entity.name.clone(),
+                kind: EntityKind::Method,
+                visibility: vis,
+                is_static: false,
+                is_associated: false,
+                span: entity.span,
+                file_path: file_path.to_string(),
+                module_path: if module_path.is_empty() {
+                    None
+                } else {
+                    Some(module_path.to_string())
+                },
+                package: package.to_string(),
+            };
+            if type_index.get_type_by_key(&key).is_none() {
+                let placeholder = type_index.upsert_type_placeholder(key.clone(), language);
+                let _ = placeholder;
+            }
+            let _ = type_index.insert_member(&key, member);
+        }
+        // interface methods are already parented? But Go interface methods are inside interface body and have parent?
+        // If parent linking established, handle via parent fallback as well
+        if let Some(parent_id) = entity.parent {
+            let by_id: HashMap<EntityId, &Entity> = entities.iter().map(|e| (e.id, e)).collect();
+            if let Some(parent) = by_id.get(&parent_id)
+                && parent.kind == EntityKind::Interface
+            {
+                // member already handled via receiver? For interface, method elems are children of interface
+                let simple = parent.name.clone();
+                let qualified = if package.is_empty() {
+                    simple.clone()
+                } else {
+                    format!("{}.{}", package, simple)
+                };
+                let key = TypeKey::new(qualified, simple, file_path.to_string());
+                if type_index.get_type_by_key(&key).is_none() {
+                    let parent_vis = crate::policy::detect_entity_visibility(parent, &Language::Go);
+                    let entry =
+                        TypeEntry::new(parent.id, key.clone(), parent.kind, language, parent_vis);
+                    type_index.insert_type(key.clone(), entry);
+                }
                 let vis = crate::policy::detect_entity_visibility(entity, &Language::Go);
                 let member = MemberEntry {
                     entity_id: entity.id,
@@ -110,61 +154,10 @@ pub fn build_type_index(
                     is_associated: false,
                     span: entity.span,
                     file_path: file_path.to_string(),
-                    module_path: if module_path.is_empty() {
-                        None
-                    } else {
-                        Some(module_path.to_string())
-                    },
+                    module_path: None,
                     package: package.to_string(),
                 };
-                if type_index.get_type_by_key(&key).is_none() {
-                    let placeholder = type_index.upsert_type_placeholder(key.clone(), language);
-                    let _ = placeholder;
-                }
                 let _ = type_index.insert_member(&key, member);
-            }
-        }
-        // interface methods are already parented? But Go interface methods are inside interface body and have parent?
-        // If parent linking established, handle via parent fallback as well
-        if let Some(parent_id) = entity.parent {
-            let by_id: HashMap<EntityId, &Entity> = entities.iter().map(|e| (e.id, e)).collect();
-            if let Some(parent) = by_id.get(&parent_id) {
-                if parent.kind == EntityKind::Interface {
-                    // member already handled via receiver? For interface, method elems are children of interface
-                    let simple = parent.name.clone();
-                    let qualified = if package.is_empty() {
-                        simple.clone()
-                    } else {
-                        format!("{}.{}", package, simple)
-                    };
-                    let key = TypeKey::new(qualified, simple, file_path.to_string());
-                    if type_index.get_type_by_key(&key).is_none() {
-                        let parent_vis =
-                            crate::policy::detect_entity_visibility(parent, &Language::Go);
-                        let entry = TypeEntry::new(
-                            parent.id,
-                            key.clone(),
-                            parent.kind,
-                            language,
-                            parent_vis,
-                        );
-                        type_index.insert_type(key.clone(), entry);
-                    }
-                    let vis = crate::policy::detect_entity_visibility(entity, &Language::Go);
-                    let member = MemberEntry {
-                        entity_id: entity.id,
-                        name: entity.name.clone(),
-                        kind: EntityKind::Method,
-                        visibility: vis,
-                        is_static: false,
-                        is_associated: false,
-                        span: entity.span,
-                        file_path: file_path.to_string(),
-                        module_path: None,
-                        package: package.to_string(),
-                    };
-                    let _ = type_index.insert_member(&key, member);
-                }
             }
         }
     }

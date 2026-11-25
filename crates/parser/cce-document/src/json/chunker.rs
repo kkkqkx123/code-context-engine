@@ -252,10 +252,10 @@ impl JsonChunker {
         let mut tokens = Vec::new();
 
         // Add header key if exists
-        if let Some(ref header) = group.header {
-            if let Some(ref key) = header.key_name {
-                tokens.extend(Self::normalize_and_split_key(key));
-            }
+        if let Some(ref header) = group.header
+            && let Some(ref key) = header.key_name
+        {
+            tokens.extend(Self::normalize_and_split_key(key));
         }
 
         // Add member keys
@@ -319,10 +319,10 @@ impl JsonChunker {
         if !first.path_prefix.is_empty() {
             return Some(first.path_prefix.clone());
         }
-        if let Some(ref header) = first.header {
-            if let Some(ref key) = header.key_name {
-                return Some(key.clone());
-            }
+        if let Some(ref header) = first.header
+            && let Some(ref key) = header.key_name
+        {
+            return Some(key.clone());
         }
         std::path::Path::new(file_path)
             .file_stem()

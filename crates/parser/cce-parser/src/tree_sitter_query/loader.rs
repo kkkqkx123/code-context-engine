@@ -205,10 +205,10 @@ impl QueryLoader {
             if let Some(scheme) = crate::tree_sitter_init::plugin_query_scheme(*index, query_type) {
                 return Ok(scheme);
             }
-            if let Some(target) = crate::tree_sitter_init::remap_target(*index) {
-                if let Some(scheme) = Self::builtin_scheme(target, query_type) {
-                    return Ok(scheme);
-                }
+            if let Some(target) = crate::tree_sitter_init::remap_target(*index)
+                && let Some(scheme) = Self::builtin_scheme(target, query_type)
+            {
+                return Ok(scheme);
             }
             return Err(TreeSitterQueryError::InvalidQuery(format!(
                 "No query scheme for custom language {} (query type {query_type})",

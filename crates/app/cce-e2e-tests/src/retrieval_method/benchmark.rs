@@ -761,17 +761,17 @@ fn record_method(
     let mut related = Vec::new();
     for (pos, &chunk) in ranked_chunks.iter().take(max_cutoff).enumerate() {
         let relevance = scan.advance(chunk);
-        if pos < DEFAULT_TOP_K {
-            if let Some(level) = relevance.highest_level() {
-                let loc = format!(
-                    "{}:{}-{}",
-                    chunk.file_path, chunk.start_line, chunk.end_line
-                );
-                match level {
-                    RelevanceLevel::Strong => strong.push((pos + 1, loc, level)),
-                    RelevanceLevel::Related => related.push((pos + 1, loc, level)),
-                    _ => {}
-                }
+        if pos < DEFAULT_TOP_K
+            && let Some(level) = relevance.highest_level()
+        {
+            let loc = format!(
+                "{}:{}-{}",
+                chunk.file_path, chunk.start_line, chunk.end_line
+            );
+            match level {
+                RelevanceLevel::Strong => strong.push((pos + 1, loc, level)),
+                RelevanceLevel::Related => related.push((pos + 1, loc, level)),
+                _ => {}
             }
         }
     }

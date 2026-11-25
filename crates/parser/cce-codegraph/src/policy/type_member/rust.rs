@@ -50,56 +50,48 @@ pub fn build_type_index(
     // Second pass: handle impl members
     // Need to find impl blocks
     for entity in entities {
-        if entity.kind.is_function_like() {
-            if let Some(parent_id) = entity.parent {
-                if let Some(parent) = by_id.get(&parent_id) {
-                    if parent.kind.is_impl_block() {
-                        let impl_for = parent
-                            .metadata
-                            .get("impl_for_type")
-                            .cloned()
-                            .unwrap_or_else(|| parent.name.clone());
-                        let simple = simple_name(&impl_for).to_string();
-                        let stripped = strip_generics(&simple).to_string();
-                        // Try to find existing type entry with same simple name in this module
-                        // Search types with simple == stripped
-                        let qualified = build_qualified(module_path, &stripped);
-                        let key = TypeKey::new(
-                            qualified.clone(),
-                            stripped.clone(),
-                            file_path.to_string(),
-                        );
-                        // Ensure placeholder or real entry exists
-                        if type_index.get_type_by_key(&key).is_none() {
-                            // check if there is a real type elsewhere with same simple but different qualified?
-                            // fallback to simple search: find any type with simple == stripped
-                            // Prefer non-placeholder (real) types over placeholders
-                            let candidates: Vec<_> = type_index
-                                .get_type_by_simple(&stripped)
-                                .into_iter()
-                                .filter(|e| e.key.simple == stripped)
-                                .collect();
-                            let found_key = candidates
-                                .iter()
-                                .find(|e| !e.is_placeholder)
-                                .or(candidates.first())
-                                .map(|e| e.key.clone());
-                            if let Some(existing) = found_key {
-                                insert_rust_member(
-                                    entity, &existing, file_path, package, type_index,
-                                );
-                            } else {
-                                // placeholder
-                                let ph = type_index.upsert_type_placeholder(key.clone(), language);
-                                // if placeholder was just created, keep it; otherwise reuse
-                                let _ = ph;
-                                insert_rust_member(entity, &key, file_path, package, type_index);
-                            }
-                        } else {
-                            insert_rust_member(entity, &key, file_path, package, type_index);
-                        }
-                    }
+        if entity.kind.is_function_like()
+            && let Some(parent_id) = entity.parent
+            && let Some(parent) = by_id.get(&parent_id)
+            && parent.kind.is_impl_block()
+        {
+            let impl_for = parent
+                .metadata
+                .get("impl_for_type")
+                .cloned()
+                .unwrap_or_else(|| parent.name.clone());
+            let simple = simple_name(&impl_for).to_string();
+            let stripped = strip_generics(&simple).to_string();
+            // Try to find existing type entry with same simple name in this module
+            // Search types with simple == stripped
+            let qualified = build_qualified(module_path, &stripped);
+            let key = TypeKey::new(qualified.clone(), stripped.clone(), file_path.to_string());
+            // Ensure placeholder or real entry exists
+            if type_index.get_type_by_key(&key).is_none() {
+                // check if there is a real type elsewhere with same simple but different qualified?
+                // fallback to simple search: find any type with simple == stripped
+                // Prefer non-placeholder (real) types over placeholders
+                let candidates: Vec<_> = type_index
+                    .get_type_by_simple(&stripped)
+                    .into_iter()
+                    .filter(|e| e.key.simple == stripped)
+                    .collect();
+                let found_key = candidates
+                    .iter()
+                    .find(|e| !e.is_placeholder)
+                    .or(candidates.first())
+                    .map(|e| e.key.clone());
+                if let Some(existing) = found_key {
+                    insert_rust_member(entity, &existing, file_path, package, type_index);
+                } else {
+                    // placeholder
+                    let ph = type_index.upsert_type_placeholder(key.clone(), language);
+                    // if placeholder was just created, keep it; otherwise reuse
+                    let _ = ph;
+                    insert_rust_member(entity, &key, file_path, package, type_index);
                 }
+            } else {
+                insert_rust_member(entity, &key, file_path, package, type_index);
             }
         }
     }

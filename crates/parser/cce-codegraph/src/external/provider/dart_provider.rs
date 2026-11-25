@@ -63,20 +63,20 @@ fn discover_dart_tool(package_name: &str, project_root: &Path) -> Option<Package
 fn discover_pub_cache(package_name: &str) -> Option<PackageDiscovery> {
     let home = dirs::home_dir()?;
     let pub_cache = home.join(".pub-cache").join("hosted").join("pub.dev");
-    if pub_cache.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&pub_cache) {
-            for e in entries.flatten() {
-                let n = e.file_name().to_string_lossy().to_string();
-                if n == package_name || n.starts_with(&format!("{package_name}-")) {
-                    let version = n
-                        .strip_prefix(&format!("{package_name}-"))
-                        .map(|v| v.to_string());
-                    return Some(PackageDiscovery {
-                        package_name: package_name.to_string(),
-                        path: e.path(),
-                        version,
-                    });
-                }
+    if pub_cache.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&pub_cache)
+    {
+        for e in entries.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if n == package_name || n.starts_with(&format!("{package_name}-")) {
+                let version = n
+                    .strip_prefix(&format!("{package_name}-"))
+                    .map(|v| v.to_string());
+                return Some(PackageDiscovery {
+                    package_name: package_name.to_string(),
+                    path: e.path(),
+                    version,
+                });
             }
         }
     }

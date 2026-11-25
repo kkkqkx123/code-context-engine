@@ -206,18 +206,18 @@ fn check_string_syntax(source: &str) -> Vec<Diagnostic> {
                 let is_triple = rest.starts_with("\"\"\"") || rest.starts_with("'''");
 
                 if in_string {
-                    if let Some((_, _, quote, was_triple)) = string_start {
-                        if ch == quote {
-                            if was_triple {
-                                // Check for closing triple quote
-                                if rest.starts_with(&format!("{}{}{}", ch, ch, ch)) {
-                                    in_string = false;
-                                    string_start = None;
-                                }
-                            } else {
+                    if let Some((_, _, quote, was_triple)) = string_start
+                        && ch == quote
+                    {
+                        if was_triple {
+                            // Check for closing triple quote
+                            if rest.starts_with(&format!("{}{}{}", ch, ch, ch)) {
                                 in_string = false;
                                 string_start = None;
                             }
+                        } else {
+                            in_string = false;
+                            string_start = None;
                         }
                     }
                 } else {

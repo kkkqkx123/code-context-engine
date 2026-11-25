@@ -695,15 +695,15 @@ fn test_stage9_injects_resolved_calls_for_internal_callee() {
     for group in &result.groups {
         let entities = group.header.iter().chain(group.members.iter());
         for entity in entities {
-            if let Some(paths) = entity.metadata.get(meta_keys::CALL_PATHS) {
-                if paths.split(',').map(str::trim).any(|n| n == "helper") {
-                    found_paths = true;
-                }
+            if let Some(paths) = entity.metadata.get(meta_keys::CALL_PATHS)
+                && paths.split(',').map(str::trim).any(|n| n == "helper")
+            {
+                found_paths = true;
             }
-            if let Some(resolved) = entity.metadata.get(meta_keys::RESOLVED_CALLS) {
-                if resolved.split(',').map(str::trim).any(|n| n == "helper") {
-                    found_resolved = true;
-                }
+            if let Some(resolved) = entity.metadata.get(meta_keys::RESOLVED_CALLS)
+                && resolved.split(',').map(str::trim).any(|n| n == "helper")
+            {
+                found_resolved = true;
             }
         }
     }
@@ -745,10 +745,10 @@ fn test_shared_resolution_feeds_stage9() {
     for group in &result.groups {
         let entities = group.header.iter().chain(group.members.iter());
         for entity in entities {
-            if let Some(resolved) = entity.metadata.get(meta_keys::RESOLVED_CALLS) {
-                if resolved.split(',').map(str::trim).any(|n| n == "helper") {
-                    found_resolved = true;
-                }
+            if let Some(resolved) = entity.metadata.get(meta_keys::RESOLVED_CALLS)
+                && resolved.split(',').map(str::trim).any(|n| n == "helper")
+            {
+                found_resolved = true;
             }
         }
     }

@@ -152,10 +152,11 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
 
     // Apply doc_comment propagations after collecting
     for entity in entities.iter_mut() {
-        if let Some(doc) = doc_propagations.remove(&entity.id) {
-            if entity.doc_comment.is_none() && !doc.is_empty() {
-                entity.doc_comment = Some(doc);
-            }
+        if let Some(doc) = doc_propagations.remove(&entity.id)
+            && entity.doc_comment.is_none()
+            && !doc.is_empty()
+        {
+            entity.doc_comment = Some(doc);
         }
     }
 

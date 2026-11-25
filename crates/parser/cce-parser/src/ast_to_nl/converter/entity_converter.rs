@@ -97,10 +97,10 @@ pub(crate) fn qualify_group_function_heads_with_stem(
     text: &str,
 ) -> String {
     let mut out = text.to_string();
-    if let Some(ref header) = group.header {
-        if header.kind == EntityKind::Function {
-            out = qualify_function_text_with_stem(&header.name, module, &out);
-        }
+    if let Some(ref header) = group.header
+        && header.kind == EntityKind::Function
+    {
+        out = qualify_function_text_with_stem(&header.name, module, &out);
     }
     for member in &group.members {
         if member.kind == EntityKind::Function {

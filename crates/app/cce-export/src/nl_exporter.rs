@@ -199,17 +199,16 @@ impl NlDocumentExporter {
         // Inject relation annotations sourced from the (SQLite-backed)
         // relation index so `enable_relation_enhancement` takes effect on the
         // direct export path as well.
-        if self.config.enable_relation_enhancement {
-            if let Some(ref enhancer) = *self
+        if self.config.enable_relation_enhancement
+            && let Some(ref enhancer) = *self
                 .relation_enhancer
                 .read()
                 .expect("Relation enhancer lock poisoned")
-            {
-                for doc in &mut exports {
-                    let related = enhancer.related_for_entity(&doc.name, file_path);
-                    if !related.is_empty() {
-                        doc.related_entities = related;
-                    }
+        {
+            for doc in &mut exports {
+                let related = enhancer.related_for_entity(&doc.name, file_path);
+                if !related.is_empty() {
+                    doc.related_entities = related;
                 }
             }
         }

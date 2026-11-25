@@ -68,28 +68,31 @@ pub fn filter_nl_noise(text: &str, profile: NoiseProfile) -> String {
         // carries the `foo` signal, `namespace A;` carries `A`, and
         // `return { a }` carries `a`.
         let mut owned: Option<String> = None;
-        if profile.strip_js_wrapper {
-            if let Some(rest) = strip_js_export_prefix(line) {
-                owned = Some(rest);
-            }
+        if profile.strip_js_wrapper
+            && let Some(rest) = strip_js_export_prefix(line)
+        {
+            owned = Some(rest);
         }
-        if profile.strip_php_markers && owned.is_none() {
-            if let Some(name) = strip_php_namespace(line) {
-                owned = Some(name);
-            }
+        if profile.strip_php_markers
+            && owned.is_none()
+            && let Some(name) = strip_php_namespace(line)
+        {
+            owned = Some(name);
         }
-        if profile.weaken_lua_return && owned.is_none() {
-            if let Some(inner) = strip_lua_table(line) {
-                owned = Some(inner);
-            }
+        if profile.weaken_lua_return
+            && owned.is_none()
+            && let Some(inner) = strip_lua_table(line)
+        {
+            owned = Some(inner);
         }
-        if profile.strip_c_guards && owned.is_none() {
-            if let Some(rest) = strip_c_extern_prefix(line) {
-                if rest.trim().is_empty() {
-                    continue;
-                }
-                owned = Some(rest);
+        if profile.strip_c_guards
+            && owned.is_none()
+            && let Some(rest) = strip_c_extern_prefix(line)
+        {
+            if rest.trim().is_empty() {
+                continue;
             }
+            owned = Some(rest);
         }
         if let Some(replacement) = owned {
             if replacement.trim().is_empty() {
@@ -342,12 +345,12 @@ fn is_ruby_noise_line(line: &str) -> bool {
 
 fn is_lua_noise_line(line: &str) -> bool {
     let t = line.trim().trim_end_matches(';').trim();
-    if t.starts_with("local ") {
-        if let Some(eq_pos) = t.find('=') {
-            let rhs = t[eq_pos + 1..].trim();
-            if rhs == "{}" {
-                return true;
-            }
+    if t.starts_with("local ")
+        && let Some(eq_pos) = t.find('=')
+    {
+        let rhs = t[eq_pos + 1..].trim();
+        if rhs == "{}" {
+            return true;
         }
     }
     if let Some(rest) = t.strip_prefix("return ") {

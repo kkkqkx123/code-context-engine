@@ -155,32 +155,32 @@ impl GroovyExtractor {
         source: &str,
         imports: &mut Vec<StandardizedImport>,
     ) {
-        if node.kind() == "groovy_import" {
-            if let Some((path, alias)) = Self::extract_import_path(node, source) {
-                let mut cursor = node.walk();
-                let children: Vec<_> = node.children(&mut cursor).collect();
-                let is_wildcard = children.iter().any(|c| c.kind() == "wildcard_import");
+        if node.kind() == "groovy_import"
+            && let Some((path, alias)) = Self::extract_import_path(node, source)
+        {
+            let mut cursor = node.walk();
+            let children: Vec<_> = node.children(&mut cursor).collect();
+            let is_wildcard = children.iter().any(|c| c.kind() == "wildcard_import");
 
-                if is_wildcard {
-                    imports.push(Self::create_import(
-                        ImportKind::NamespaceImport,
-                        &path,
-                        None,
-                        None,
-                        true,
-                        node,
-                    ));
-                } else {
-                    let target_name = path.split('.').next_back();
-                    imports.push(Self::create_import(
-                        ImportKind::SymbolImport,
-                        &path,
-                        target_name,
-                        alias.as_deref(),
-                        false,
-                        node,
-                    ));
-                }
+            if is_wildcard {
+                imports.push(Self::create_import(
+                    ImportKind::NamespaceImport,
+                    &path,
+                    None,
+                    None,
+                    true,
+                    node,
+                ));
+            } else {
+                let target_name = path.split('.').next_back();
+                imports.push(Self::create_import(
+                    ImportKind::SymbolImport,
+                    &path,
+                    target_name,
+                    alias.as_deref(),
+                    false,
+                    node,
+                ));
             }
         }
 

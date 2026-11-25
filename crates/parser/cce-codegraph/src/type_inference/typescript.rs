@@ -292,29 +292,28 @@ fn narrow_typescript_discriminated_union(
                 .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript))
         })
         .or_else(|| declared_shape_here(ctx, params, &var_name));
-    if let Some(shape) = shape_opt {
-        if let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+    if let Some(shape) = shape_opt
+        && let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+    {
+        // Identity narrowings prove nothing; drop them instead of
+        // rendering a row equal to the declared type.
+        if covers_declared_members(&shape, &narrowed)
+            || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
         {
-            // Identity narrowings prove nothing; drop them instead of
-            // rendering a row equal to the declared type.
-            if covers_declared_members(&shape, &narrowed)
-                || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
-            {
-                return results;
-            }
-            let type_name = type_shape_to_string(&narrowed);
-            results.push(NarrowingResult {
-                variable_name: var_name.clone(),
-                narrowed_type: TypeBinding {
-                    type_name: type_name.clone(),
-                    type_entity_id: None,
-                    span: Span::default(),
-                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                    shape: Some(narrowed),
-                },
-            });
             return results;
         }
+        let type_name = type_shape_to_string(&narrowed);
+        results.push(NarrowingResult {
+            variable_name: var_name.clone(),
+            narrowed_type: TypeBinding {
+                type_name: type_name.clone(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
+        return results;
     }
     results
 }
@@ -377,17 +376,16 @@ fn narrow_typescript_switch(
                             })
                         })
                         .or_else(|| declared_shape_here(ctx, params, var_name));
-                    if let Some(shape) = shape_opt {
-                        if let Some(narrowed) =
+                    if let Some(shape) = shape_opt
+                        && let Some(narrowed) =
                             narrow_discriminated_union(&shape, field_name, &literal, type_index)
+                    {
+                        if covers_declared_members(&shape, &narrowed)
+                            || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
                         {
-                            if covers_declared_members(&shape, &narrowed)
-                                || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
-                            {
-                                continue;
-                            }
-                            results.push(narrowing_result(var_name.clone(), narrowed));
+                            continue;
                         }
+                        results.push(narrowing_result(var_name.clone(), narrowed));
                     }
                 }
             }
@@ -443,16 +441,16 @@ fn parse_typescript_strict_equality_pattern(text: &str) -> Option<(String, Strin
         if let Some(pos) = cleaned.find(op) {
             let left = cleaned[..pos].trim();
             let right = cleaned[pos + op.len()..].trim();
-            if left.contains('.') {
-                if let Some(dot_pos) = left.rfind('.') {
-                    let var_name = left[..dot_pos].trim().to_string();
-                    let field_name = left[dot_pos + 1..].trim().to_string();
-                    if !is_valid_ident(&var_name) || !is_valid_ident(&field_name) {
-                        continue;
-                    }
-                    if let Some(value) = parse_string_literal(right) {
-                        return Some((var_name, field_name, value));
-                    }
+            if left.contains('.')
+                && let Some(dot_pos) = left.rfind('.')
+            {
+                let var_name = left[..dot_pos].trim().to_string();
+                let field_name = left[dot_pos + 1..].trim().to_string();
+                if !is_valid_ident(&var_name) || !is_valid_ident(&field_name) {
+                    continue;
+                }
+                if let Some(value) = parse_string_literal(right) {
+                    return Some((var_name, field_name, value));
                 }
             }
         }
@@ -470,41 +468,41 @@ fn narrow_typescript_truthiness(
         // Parameter annotations win over variable bindings (which may
         // leak across sibling scopes); declared_shape encodes that order.
         let shape_opt = declared_shape_here(ctx, params, &var_name);
-        if let Some(shape) = shape_opt {
-            if let Some(narrowed) = narrow_truthiness(&shape, true, Language::TypeScript) {
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-                return results;
-            }
+        if let Some(shape) = shape_opt
+            && let Some(narrowed) = narrow_truthiness(&shape, true, Language::TypeScript)
+        {
+            let type_name = type_shape_to_string(&narrowed);
+            results.push(NarrowingResult {
+                variable_name: var_name.clone(),
+                narrowed_type: TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(narrowed),
+                },
+            });
+            return results;
         }
         // Unknown type: stay conservative and emit nothing rather than a
         // placeholder pseudo-type.
     } else if let Some(var_name) = parse_typescript_negated_truthiness_pattern(text) {
         let shape_opt = declared_shape_here(ctx, params, &var_name);
-        if let Some(shape) = shape_opt {
-            if let Some(narrowed) = narrow_truthiness(&shape, false, Language::TypeScript) {
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-                return results;
-            }
+        if let Some(shape) = shape_opt
+            && let Some(narrowed) = narrow_truthiness(&shape, false, Language::TypeScript)
+        {
+            let type_name = type_shape_to_string(&narrowed);
+            results.push(NarrowingResult {
+                variable_name: var_name.clone(),
+                narrowed_type: TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(narrowed),
+                },
+            });
+            return results;
         }
         // Unknown type: stay conservative and emit nothing rather than a
         // placeholder pseudo-type.
@@ -583,12 +581,11 @@ fn narrow_typescript_equality_loose(
         });
     }
     // `x != null`: bind the declared union minus null.
-    if let Some((var_name, _)) = parse_typescript_loose_inequality_null_pattern(text) {
-        if let Some(declared) = declared_shape_here(ctx, params, &var_name) {
-            if let Some(narrowed) = subtract_union_members(&declared, &["null".to_string()]) {
-                results.push(narrowing_result(var_name, narrowed));
-            }
-        }
+    if let Some((var_name, _)) = parse_typescript_loose_inequality_null_pattern(text)
+        && let Some(declared) = declared_shape_here(ctx, params, &var_name)
+        && let Some(narrowed) = subtract_union_members(&declared, &["null".to_string()])
+    {
+        results.push(narrowing_result(var_name, narrowed));
     }
     if let Some((var_name, value)) = parse_typescript_strict_equality_undefined_pattern(text) {
         results.push(NarrowingResult {
@@ -662,20 +659,20 @@ fn parse_typescript_loose_inequality_null_pattern(text: &str) -> Option<(String,
             if left.contains('.') {
                 // Safe-call receivers narrow their base; other dotted
                 // expressions stay conservative.
-                if right == "null" {
-                    if let Some(receiver) = typescript_null_asserted_receiver(left) {
-                        return Some((receiver.to_string(), "null".to_string()));
-                    }
+                if right == "null"
+                    && let Some(receiver) = typescript_null_asserted_receiver(left)
+                {
+                    return Some((receiver.to_string(), "null".to_string()));
                 }
                 continue;
             }
             if is_valid_ident(left) && right == "null" {
                 return Some((left.to_string(), "null".to_string()));
             }
-            if right == "null" {
-                if let Some(receiver) = typescript_null_asserted_receiver(left) {
-                    return Some((receiver.to_string(), "null".to_string()));
-                }
+            if right == "null"
+                && let Some(receiver) = typescript_null_asserted_receiver(left)
+            {
+                return Some((receiver.to_string(), "null".to_string()));
             }
         }
     }
@@ -737,20 +734,18 @@ fn parse_typeof_negated_pattern(text: &str) -> Option<(String, String)> {
         .strip_prefix("typeof")
         .map(str::trim)
         .filter(|v| is_valid_ident(v))
+        && let Some(lit) = parse_string_literal(right.trim())
     {
-        if let Some(lit) = parse_string_literal(right.trim()) {
-            return Some((var.to_string(), lit));
-        }
+        return Some((var.to_string(), lit));
     }
     if let Some(var) = right
         .trim()
         .strip_prefix("typeof")
         .map(str::trim)
         .filter(|v| is_valid_ident(v))
+        && let Some(lit) = parse_string_literal(left.trim())
     {
-        if let Some(lit) = parse_string_literal(left.trim()) {
-            return Some((var.to_string(), lit));
-        }
+        return Some((var.to_string(), lit));
     }
     None
 }

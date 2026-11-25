@@ -1,5 +1,7 @@
-//! Wiki Context Package (WCP) export service shared by the HTTP and CLI
-//! surfaces.
+//! Wiki Context Package (WCP) export service served through the HTTP surface.
+//!
+//! The CLI is a thin HTTP client and does not link this service in-process;
+//! any remote caller reaches it over the same HTTP surface.
 //!
 //! The service assembles the deterministic static-analysis half of RepoWiki
 //! generation from one relation snapshot plus the published metadata

@@ -305,14 +305,14 @@ pub async fn handle_delete_entity(
     let mut vectors_deleted = 0usize;
     {
         let vector = state.engine.vector();
-        if let Some(ref file_path) = entity_file_path {
-            if let Some(ref gid) = group_id {
-                let result = vector
-                    .delete_by_file_path_scoped(file_path, gid, None)
-                    .await;
-                if let Ok(deleted) = result {
-                    vectors_deleted = deleted;
-                }
+        if let Some(ref file_path) = entity_file_path
+            && let Some(ref gid) = group_id
+        {
+            let result = vector
+                .delete_by_file_path_scoped(file_path, gid, None)
+                .await;
+            if let Ok(deleted) = result {
+                vectors_deleted = deleted;
             }
         }
     }

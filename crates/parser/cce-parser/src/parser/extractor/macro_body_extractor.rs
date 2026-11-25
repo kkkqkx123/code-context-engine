@@ -80,31 +80,30 @@ impl MacroBodyExtractor {
 
                 // Find the token_tree child with field "right" (the macro body)
                 for i in 0..child.child_count() {
-                    if let Some(grandchild) = child.child(i as u32) {
-                        if grandchild.kind() == "token_tree"
-                            && child.field_name_for_child(i as u32) == Some("right")
-                        {
-                            // Extract the macro body text
-                            let body_text = extract_text_without_comments(
-                                tree,
-                                source,
-                                grandchild.start_byte(),
-                                grandchild.end_byte(),
-                            );
-                            if body_text.trim().is_empty() {
-                                continue;
-                            }
-
-                            let fact = BehaviorFact::new(
-                                BehaviorFactKind::MacroBody,
-                                body_text,
-                                grandchild.start_byte(),
-                                grandchild.end_byte(),
-                            );
-
-                            behavior.push_fact(entity_id, fact);
-                            break;
+                    if let Some(grandchild) = child.child(i as u32)
+                        && grandchild.kind() == "token_tree"
+                        && child.field_name_for_child(i as u32) == Some("right")
+                    {
+                        // Extract the macro body text
+                        let body_text = extract_text_without_comments(
+                            tree,
+                            source,
+                            grandchild.start_byte(),
+                            grandchild.end_byte(),
+                        );
+                        if body_text.trim().is_empty() {
+                            continue;
                         }
+
+                        let fact = BehaviorFact::new(
+                            BehaviorFactKind::MacroBody,
+                            body_text,
+                            grandchild.start_byte(),
+                            grandchild.end_byte(),
+                        );
+
+                        behavior.push_fact(entity_id, fact);
+                        break;
                     }
                 }
             }
@@ -125,14 +124,14 @@ fn find_macro_name(macro_node: tree_sitter::Node, source: &str) -> Option<String
     for child in macro_node.children(&mut cursor) {
         if child.kind() == "identifier" {
             for i in 0..macro_node.child_count() {
-                if let Some(sibling) = macro_node.child(i as u32) {
-                    if sibling == child && macro_node.field_name_for_child(i as u32) == Some("name")
-                    {
-                        let start = child.start_byte();
-                        let end = child.end_byte();
-                        if start < source.len() && end <= source.len() {
-                            return Some(source[start..end].to_string());
-                        }
+                if let Some(sibling) = macro_node.child(i as u32)
+                    && sibling == child
+                    && macro_node.field_name_for_child(i as u32) == Some("name")
+                {
+                    let start = child.start_byte();
+                    let end = child.end_byte();
+                    if start < source.len() && end <= source.len() {
+                        return Some(source[start..end].to_string());
                     }
                 }
             }

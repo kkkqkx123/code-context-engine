@@ -31,19 +31,19 @@ impl GroupTemplate for StdlibTemplate {
         // Output a concise, searchable description that preserves the identifier
         // and category without verbose "entity X from the standard library" phrasing.
         let mut desc = format!("{} {}", category, group.name);
-        if let Some(ref header) = group.header {
-            if let Some(ref doc) = header.doc_comment {
-                // Clean doc text (strip fenced code blocks, markdown noise) the
-                // same way regular templates do, so raw examples don't leak into
-                // the embedding path.
-                let profile = NoiseProfile::for_language(group.language);
-                let cleaned = Self::clean_doc_text(doc);
-                let cleaned = crate::ast_to_nl::common::filter_nl_noise(&cleaned, profile);
-                let cleaned = cleaned.trim();
-                if !cleaned.is_empty() {
-                    desc.push_str(". ");
-                    desc.push_str(cleaned);
-                }
+        if let Some(ref header) = group.header
+            && let Some(ref doc) = header.doc_comment
+        {
+            // Clean doc text (strip fenced code blocks, markdown noise) the
+            // same way regular templates do, so raw examples don't leak into
+            // the embedding path.
+            let profile = NoiseProfile::for_language(group.language);
+            let cleaned = Self::clean_doc_text(doc);
+            let cleaned = crate::ast_to_nl::common::filter_nl_noise(&cleaned, profile);
+            let cleaned = cleaned.trim();
+            if !cleaned.is_empty() {
+                desc.push_str(". ");
+                desc.push_str(cleaned);
             }
         }
         vec![desc]

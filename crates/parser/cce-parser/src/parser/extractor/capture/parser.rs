@@ -469,15 +469,15 @@ pub fn extract_parameter_defaults(
         if utils::capture_name_contains(&capture.name, capture::SUBSTRING_SELF_PARAM) {
             continue;
         }
-        if let Some(suffix) = capture.name.split('.').next_back() {
-            if suffix == "params" {
-                return parse_parameters_text(&capture.text, language)
-                    .into_iter()
-                    .filter_map(|(name, _, default)| {
-                        default.map(|d| (name, d)).filter(|(_, d)| !d.is_empty())
-                    })
-                    .collect();
-            }
+        if let Some(suffix) = capture.name.split('.').next_back()
+            && suffix == "params"
+        {
+            return parse_parameters_text(&capture.text, language)
+                .into_iter()
+                .filter_map(|(name, _, default)| {
+                    default.map(|d| (name, d)).filter(|(_, d)| !d.is_empty())
+                })
+                .collect();
         }
     }
     Vec::new()
@@ -726,29 +726,29 @@ fn parse_single_param(
                 return (before_eq.to_string(), None, default_value);
             }
             let mut parts: Vec<&str> = before_eq.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Some(last) = parts.pop() {
-                    let name = last
-                        .trim_start_matches("this.")
-                        .trim_start_matches("super.")
-                        .trim_end_matches(['?', '*'])
-                        .to_string();
-                    let typ = parts
-                        .join(" ")
-                        .replace("required ", "")
-                        .replace("covariant ", "")
-                        .replace("final ", "")
-                        .replace("var ", "")
-                        .trim()
-                        .to_string();
-                    if name.is_empty() {
-                        return (before_eq.to_string(), None, default_value);
-                    }
-                    if typ.is_empty() {
-                        return (name, None, default_value);
-                    }
-                    return (name, Some(typ), default_value);
+            if parts.len() >= 2
+                && let Some(last) = parts.pop()
+            {
+                let name = last
+                    .trim_start_matches("this.")
+                    .trim_start_matches("super.")
+                    .trim_end_matches(['?', '*'])
+                    .to_string();
+                let typ = parts
+                    .join(" ")
+                    .replace("required ", "")
+                    .replace("covariant ", "")
+                    .replace("final ", "")
+                    .replace("var ", "")
+                    .trim()
+                    .to_string();
+                if name.is_empty() {
+                    return (before_eq.to_string(), None, default_value);
                 }
+                if typ.is_empty() {
+                    return (name, None, default_value);
+                }
+                return (name, Some(typ), default_value);
             }
             let name = before_eq
                 .trim_start_matches("this.")

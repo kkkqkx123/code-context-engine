@@ -124,15 +124,16 @@ mod rotate_retention {
         files.sort_by_key(|f| f.2);
 
         // max_files
-        if let Some(max) = config.max_files {
-            if max > 0 && files.len() > max {
-                let to_remove = files.len() - max;
-                for (path, _, _) in files.iter().take(to_remove) {
-                    let _ = fs::remove_file(path);
-                }
-                // rebuild list
-                files = files.into_iter().skip(to_remove).collect();
+        if let Some(max) = config.max_files
+            && max > 0
+            && files.len() > max
+        {
+            let to_remove = files.len() - max;
+            for (path, _, _) in files.iter().take(to_remove) {
+                let _ = fs::remove_file(path);
             }
+            // rebuild list
+            files = files.into_iter().skip(to_remove).collect();
         }
 
         // max_total_size_mb
@@ -369,30 +370,29 @@ impl RotatingFile {
         }
 
         // size check
-        if let Some(max) = self.max_bytes {
-            if inner.size >= max {
-                // rotate current file to unique name
-                if let Some(f) = inner.file.take() {
-                    drop(f);
-                }
-                if inner.path.exists() {
-                    let ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis();
-                    let rotated =
-                        std::path::PathBuf::from(format!("{}.{}", inner.path.display(), ts));
-                    let _ = std::fs::rename(&inner.path, &rotated);
-                }
-                inner.path = self.dir.join(format!("{}.{}", self.prefix, today));
-                inner.size = 0;
-                let f = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&inner.path)?;
-                inner.file = Some(f);
-                self.cleanup();
+        if let Some(max) = self.max_bytes
+            && inner.size >= max
+        {
+            // rotate current file to unique name
+            if let Some(f) = inner.file.take() {
+                drop(f);
             }
+            if inner.path.exists() {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let rotated = std::path::PathBuf::from(format!("{}.{}", inner.path.display(), ts));
+                let _ = std::fs::rename(&inner.path, &rotated);
+            }
+            inner.path = self.dir.join(format!("{}.{}", self.prefix, today));
+            inner.size = 0;
+            let f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&inner.path)?;
+            inner.file = Some(f);
+            self.cleanup();
         }
         Ok(())
     }
@@ -429,14 +429,15 @@ impl RotatingFile {
         files.sort_by_key(|f| f.2);
 
         // max_files
-        if let Some(max) = self.max_files {
-            if max > 0 && files.len() > max {
-                let to_remove = files.len() - max;
-                for (path, _, _) in files.iter().take(to_remove) {
-                    let _ = fs::remove_file(path);
-                }
-                files = files.into_iter().skip(to_remove).collect();
+        if let Some(max) = self.max_files
+            && max > 0
+            && files.len() > max
+        {
+            let to_remove = files.len() - max;
+            for (path, _, _) in files.iter().take(to_remove) {
+                let _ = fs::remove_file(path);
             }
+            files = files.into_iter().skip(to_remove).collect();
         }
 
         // max_total_bytes

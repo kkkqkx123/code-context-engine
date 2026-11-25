@@ -189,10 +189,10 @@ pub fn lua_table_to_plugin_entity(table: &Table) -> Result<PluginEntity, mlua::E
     if let Some(children_table) = table.get::<Option<Table>>("children")? {
         for pair in children_table.pairs::<Value, Value>() {
             let (_, value) = pair?;
-            if let Value::Table(child) = value {
-                if let Ok(entity) = lua_table_to_plugin_entity(&child) {
-                    children.push(entity);
-                }
+            if let Value::Table(child) = value
+                && let Ok(entity) = lua_table_to_plugin_entity(&child)
+            {
+                children.push(entity);
             }
         }
     }
@@ -217,10 +217,10 @@ pub fn lua_table_to_plugin_document(table: &Table) -> Result<PluginDocument, mlu
     if let Some(entities_table) = table.get::<Option<Table>>("entities")? {
         for pair in entities_table.pairs::<Value, Value>() {
             let (_, value) = pair?;
-            if let Value::Table(entity) = value {
-                if let Ok(e) = lua_table_to_plugin_entity(&entity) {
-                    entities.push(e);
-                }
+            if let Value::Table(entity) = value
+                && let Ok(e) = lua_table_to_plugin_entity(&entity)
+            {
+                entities.push(e);
             }
         }
     }
@@ -332,10 +332,10 @@ pub fn lua_table_to_rerank_result(table: &Table) -> Result<RerankResult, mlua::E
 pub fn lua_table_to_plugin_symbols(table: &Table) -> Result<Vec<PluginSymbol>, mlua::Error> {
     let mut out = Vec::new();
     for pair in table.pairs::<Value, Value>() {
-        if let Ok((_, Value::Table(t))) = pair {
-            if let Ok(symbol) = lua_table_to_plugin_symbol(&t) {
-                out.push(symbol);
-            }
+        if let Ok((_, Value::Table(t))) = pair
+            && let Ok(symbol) = lua_table_to_plugin_symbol(&t)
+        {
+            out.push(symbol);
         }
     }
     Ok(out)
@@ -368,10 +368,10 @@ pub fn lua_table_to_plugin_symbol(table: &Table) -> Result<PluginSymbol, mlua::E
 pub fn lua_table_to_plugin_relations(table: &Table) -> Result<Vec<PluginRelation>, mlua::Error> {
     let mut out = Vec::new();
     for pair in table.pairs::<Value, Value>() {
-        if let Ok((_, Value::Table(t))) = pair {
-            if let Ok(relation) = lua_table_to_plugin_relation(&t) {
-                out.push(relation);
-            }
+        if let Ok((_, Value::Table(t))) = pair
+            && let Ok(relation) = lua_table_to_plugin_relation(&t)
+        {
+            out.push(relation);
         }
     }
     Ok(out)

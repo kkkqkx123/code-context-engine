@@ -67,10 +67,10 @@ impl OperationState {
 
     /// Calculate files per second throughput
     pub fn throughput_files_per_sec(&self) -> Option<f64> {
-        if let Some(elapsed) = self.elapsed_secs() {
-            if elapsed > 0.0 {
-                return Some(self.processed_files as f64 / elapsed);
-            }
+        if let Some(elapsed) = self.elapsed_secs()
+            && elapsed > 0.0
+        {
+            return Some(self.processed_files as f64 / elapsed);
         }
         None
     }

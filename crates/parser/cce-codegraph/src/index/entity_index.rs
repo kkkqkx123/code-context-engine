@@ -150,22 +150,22 @@ impl EntityIndexOps for RelationIndex {
         // Threshold: files with < 2k entities or low QPS still fall back to
         // O(n) scan without loss; the ordered index is always kept up-to-date
         // regardless, so it is used when present.
-        if let Some(vec) = self.file_entities_by_start.read().get(file_path) {
-            if !vec.is_empty() {
-                // Upper bound: first entry with start > end_line (O(log n)).
-                let upper = vec.partition_point(|(row, _)| *row as usize <= end_line);
-                let mut result = Vec::new();
-                for (_, entity_id) in &vec[..upper] {
-                    if let Some(entity_ref) = self.function_index.get(entity_id) {
-                        let entity_start = entity_ref.span.start_position.row;
-                        let entity_end = entity_ref.span.end_position.row;
-                        if entity_start <= end_line && entity_end >= start_line {
-                            result.push(*entity_id);
-                        }
+        if let Some(vec) = self.file_entities_by_start.read().get(file_path)
+            && !vec.is_empty()
+        {
+            // Upper bound: first entry with start > end_line (O(log n)).
+            let upper = vec.partition_point(|(row, _)| *row as usize <= end_line);
+            let mut result = Vec::new();
+            for (_, entity_id) in &vec[..upper] {
+                if let Some(entity_ref) = self.function_index.get(entity_id) {
+                    let entity_start = entity_ref.span.start_position.row;
+                    let entity_end = entity_ref.span.end_position.row;
+                    if entity_start <= end_line && entity_end >= start_line {
+                        result.push(*entity_id);
                     }
                 }
-                return result;
             }
+            return result;
         }
         // Fallback: O(n) scan for files without an ordered index entry
         // (e.g. entities added via `add_function` without a file path).

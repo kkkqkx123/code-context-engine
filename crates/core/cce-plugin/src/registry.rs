@@ -244,19 +244,17 @@ impl PluginRegistry {
             .filter(|e| admit(e))
             .filter(|e| !e.plugin.is_disabled())
             .filter(|e| {
-                if let Some(path) = file_path {
-                    if let Some(patterns) = &e.file_patterns {
-                        if !patterns.is_empty()
-                            && !e.compiled_patterns.iter().any(|p| p.matches(path))
-                        {
-                            return false;
-                        }
-                    }
+                if let Some(path) = file_path
+                    && let Some(patterns) = &e.file_patterns
+                    && !patterns.is_empty()
+                    && !e.compiled_patterns.iter().any(|p| p.matches(path))
+                {
+                    return false;
                 }
-                if let Some(langs) = &e.languages {
-                    if !Self::matches_language(language, langs) {
-                        return false;
-                    }
+                if let Some(langs) = &e.languages
+                    && !Self::matches_language(language, langs)
+                {
+                    return false;
                 }
                 true
             })

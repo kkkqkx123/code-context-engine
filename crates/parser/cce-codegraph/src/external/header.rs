@@ -305,12 +305,11 @@ fn collect_headers(dir: &Path) -> Vec<std::path::PathBuf> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if ext == "h" || ext == "hpp" {
-                        headers.push(path);
-                    }
-                }
+            if path.is_file()
+                && let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && (ext == "h" || ext == "hpp")
+            {
+                headers.push(path);
             }
         }
     }

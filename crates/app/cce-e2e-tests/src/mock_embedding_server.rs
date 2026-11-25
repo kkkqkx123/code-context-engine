@@ -123,15 +123,15 @@ fn parse_headers(buf: &[u8]) -> Option<(usize, usize)> {
 
 /// Build the HTTP response for an embeddings request.
 fn build_response(body: &[u8]) -> Vec<u8> {
-    if is_embeddings_request(body) {
-        if let Ok(json) = embed_response(body) {
-            return format!(
+    if is_embeddings_request(body)
+        && let Ok(json) = embed_response(body)
+    {
+        return format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 json.len(),
                 json
             )
             .into_bytes();
-        }
     }
     b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
 }

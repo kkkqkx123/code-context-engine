@@ -201,12 +201,12 @@ impl ProjectRegistry {
             let mut inner = self.inner.write().await;
             // Guard against stale overwrite: a concurrent update may have
             // cached a newer version while this load was reading the database.
-            if let Some(cached) = inner.get(&project_id) {
-                if cached.version >= entry.version {
-                    self.metrics.record_cache_size(inner.len());
-                    self.release_key_lock(project_id, &key_lock).await;
-                    return Ok(cached.clone());
-                }
+            if let Some(cached) = inner.get(&project_id)
+                && cached.version >= entry.version
+            {
+                self.metrics.record_cache_size(inner.len());
+                self.release_key_lock(project_id, &key_lock).await;
+                return Ok(cached.clone());
             }
             inner.insert(project_id, entry.clone());
             self.metrics.record_cache_size(inner.len());

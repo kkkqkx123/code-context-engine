@@ -103,18 +103,18 @@ impl FilePluginSource {
             .with_content_digest(content_digest)
             .with_file_patterns(entry.file_patterns.clone().unwrap_or_default())
             .with_languages(entry.languages.clone().unwrap_or_default());
-        if let Some(capabilities) = &entry.capabilities {
-            if !capabilities.is_empty() {
-                bundle = bundle.with_capabilities(capabilities.clone());
-            }
+        if let Some(capabilities) = &entry.capabilities
+            && !capabilities.is_empty()
+        {
+            bundle = bundle.with_capabilities(capabilities.clone());
         }
         if let Some(priority) = entry.priority {
             bundle = bundle.with_priority(priority);
         }
-        if let Some(priorities) = &entry.capability_priorities {
-            if !priorities.is_empty() {
-                bundle = bundle.with_capability_priorities(priorities.clone());
-            }
+        if let Some(priorities) = &entry.capability_priorities
+            && !priorities.is_empty()
+        {
+            bundle = bundle.with_capability_priorities(priorities.clone());
         }
 
         if let Some(m) = &self.metrics {

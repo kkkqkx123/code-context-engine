@@ -46,10 +46,11 @@ pub fn create_span_from_capture(capture: &Capture) -> Span {
 ///
 /// The extracted substring, or empty string if positions are invalid
 pub fn extract_text_from_source(source: &str, start: usize, end: usize) -> String {
-    if end <= source.len() && start < end {
-        if let Some(s) = source.get(start..end) {
-            return s.to_string();
-        }
+    if end <= source.len()
+        && start < end
+        && let Some(s) = source.get(start..end)
+    {
+        return s.to_string();
     }
     String::new()
 }
@@ -127,18 +128,18 @@ pub fn extract_text_without_comments(
 
         for (comment_start, comment_end) in comment_ranges {
             let segment_end = comment_start.min(end);
-            if cursor < segment_end {
-                if let Some(segment) = source.get(cursor..segment_end) {
-                    cleaned.push_str(segment);
-                }
+            if cursor < segment_end
+                && let Some(segment) = source.get(cursor..segment_end)
+            {
+                cleaned.push_str(segment);
             }
             cursor = cursor.max(comment_end.min(end));
         }
 
-        if cursor < end {
-            if let Some(tail) = source.get(cursor..end) {
-                cleaned.push_str(tail);
-            }
+        if cursor < end
+            && let Some(tail) = source.get(cursor..end)
+        {
+            cleaned.push_str(tail);
         }
 
         normalize_whitespace(&cleaned)

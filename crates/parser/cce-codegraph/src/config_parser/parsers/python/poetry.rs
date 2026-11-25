@@ -26,40 +26,38 @@ impl BuildConfigParser {
         let mut dependencies = HashSet::new();
 
         // Parse [tool.poetry.dependencies]
-        if let Some(tool) = parsed.get("tool") {
-            if let Some(poetry) = tool.get("poetry") {
-                // Parse main dependencies
-                if let Some(deps) = poetry.get("dependencies").and_then(|v| v.as_table()) {
-                    for name in deps.keys() {
-                        if name != "python" {
-                            dependencies.insert(UntypedDependency::new(name, "external"));
-                        }
+        if let Some(tool) = parsed.get("tool")
+            && let Some(poetry) = tool.get("poetry")
+        {
+            // Parse main dependencies
+            if let Some(deps) = poetry.get("dependencies").and_then(|v| v.as_table()) {
+                for name in deps.keys() {
+                    if name != "python" {
+                        dependencies.insert(UntypedDependency::new(name, "external"));
                     }
                 }
+            }
 
-                // Parse [tool.poetry.dev-dependencies]
-                if let Some(deps) = poetry.get("dev-dependencies").and_then(|v| v.as_table()) {
-                    for name in deps.keys() {
-                        dependencies.insert(UntypedDependency::new(name, "dev"));
-                    }
+            // Parse [tool.poetry.dev-dependencies]
+            if let Some(deps) = poetry.get("dev-dependencies").and_then(|v| v.as_table()) {
+                for name in deps.keys() {
+                    dependencies.insert(UntypedDependency::new(name, "dev"));
                 }
+            }
 
-                // Parse group dependencies (Poetry 1.2+)
-                if let Some(group) = poetry.get("group") {
-                    if let Some(group_table) = group.as_table() {
-                        for (group_name, group_config) in group_table {
-                            let is_dev = group_name == "dev";
-                            if let Some(deps) =
-                                group_config.get("dependencies").and_then(|v| v.as_table())
-                            {
-                                for name in deps.keys() {
-                                    if is_dev {
-                                        dependencies.insert(UntypedDependency::new(name, "dev"));
-                                    } else {
-                                        dependencies
-                                            .insert(UntypedDependency::new(name, "external"));
-                                    }
-                                }
+            // Parse group dependencies (Poetry 1.2+)
+            if let Some(group) = poetry.get("group")
+                && let Some(group_table) = group.as_table()
+            {
+                for (group_name, group_config) in group_table {
+                    let is_dev = group_name == "dev";
+                    if let Some(deps) = group_config.get("dependencies").and_then(|v| v.as_table())
+                    {
+                        for name in deps.keys() {
+                            if is_dev {
+                                dependencies.insert(UntypedDependency::new(name, "dev"));
+                            } else {
+                                dependencies.insert(UntypedDependency::new(name, "external"));
                             }
                         }
                     }

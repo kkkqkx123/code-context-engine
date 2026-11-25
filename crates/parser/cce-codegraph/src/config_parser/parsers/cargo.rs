@@ -84,10 +84,10 @@ impl LanguageParser for CargoParser {
 }
 
 fn is_local_cargo_dep(val: &toml::Value) -> bool {
-    if let Some(table) = val.as_table() {
-        if table.contains_key("path") {
-            return true;
-        }
+    if let Some(table) = val.as_table()
+        && table.contains_key("path")
+    {
+        return true;
     }
     false
 }

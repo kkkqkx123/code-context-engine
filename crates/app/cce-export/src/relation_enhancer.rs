@@ -64,21 +64,19 @@ impl RelationEnhancer {
             Some(e) => e,
             None => return true,
         };
-        if let Some(ref include) = self.config.include_classifications {
-            if !include
+        if let Some(ref include) = self.config.include_classifications
+            && !include
                 .iter()
                 .any(|c| discriminant(c) == discriminant(some_ext))
-            {
-                return false;
-            }
+        {
+            return false;
         }
-        if let Some(ref exclude) = self.config.exclude_classifications {
-            if exclude
+        if let Some(ref exclude) = self.config.exclude_classifications
+            && exclude
                 .iter()
                 .any(|c| discriminant(c) == discriminant(some_ext))
-            {
-                return false;
-            }
+        {
+            return false;
         }
         true
     }
@@ -151,10 +149,10 @@ impl RelationEnhancer {
         let name_variants = Self::generate_name_variants(entity_name);
 
         for name in &name_variants {
-            if let Some(relations) = self.query_relations_for_name(name, file_path) {
-                if !relations.is_empty() {
-                    return Some(relations);
-                }
+            if let Some(relations) = self.query_relations_for_name(name, file_path)
+                && !relations.is_empty()
+            {
+                return Some(relations);
             }
         }
 

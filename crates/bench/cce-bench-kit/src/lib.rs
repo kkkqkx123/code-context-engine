@@ -249,6 +249,7 @@ pub fn open_report_at_with_header(path: &Path, header: &str) -> fs::File {
     }
     let mut file = match fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(path)

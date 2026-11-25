@@ -194,31 +194,31 @@ impl EntityExtractor {
                 // is blank but real siblings exist, the entity is re-homed
                 // onto the first real name instead of the wildcard.
                 let mut pattern_siblings = Vec::new();
-                if let Some(main) = capture_module::parser::find_main_capture(mat) {
-                    if main.name.ends_with(".loop") || main.name.ends_with(".case") {
-                        let mut real_names: Vec<&Capture> = mat
-                            .captures
-                            .iter()
-                            .filter(|c| crate::tree_sitter_query::capture::is_name_capture(&c.name))
-                            .filter(|c| {
-                                let name = c.text.trim();
-                                !name.is_empty() && name != "_"
-                            })
-                            .collect();
-                        if real_names.is_empty() {
-                            continue;
-                        }
-                        let first = real_names.remove(0);
-                        entity.name = utils::truncate_entity_name(first.text.trim().to_string());
-                        entity.span = utils::create_span_from_capture(first);
-                        for cap in real_names {
-                            let sibling_name = cap.text.trim();
-                            let mut sibling = entity.clone();
-                            sibling.id = context.next_entity_id();
-                            sibling.name = utils::truncate_entity_name(sibling_name.to_string());
-                            sibling.span = utils::create_span_from_capture(cap);
-                            pattern_siblings.push(sibling);
-                        }
+                if let Some(main) = capture_module::parser::find_main_capture(mat)
+                    && (main.name.ends_with(".loop") || main.name.ends_with(".case"))
+                {
+                    let mut real_names: Vec<&Capture> = mat
+                        .captures
+                        .iter()
+                        .filter(|c| crate::tree_sitter_query::capture::is_name_capture(&c.name))
+                        .filter(|c| {
+                            let name = c.text.trim();
+                            !name.is_empty() && name != "_"
+                        })
+                        .collect();
+                    if real_names.is_empty() {
+                        continue;
+                    }
+                    let first = real_names.remove(0);
+                    entity.name = utils::truncate_entity_name(first.text.trim().to_string());
+                    entity.span = utils::create_span_from_capture(first);
+                    for cap in real_names {
+                        let sibling_name = cap.text.trim();
+                        let mut sibling = entity.clone();
+                        sibling.id = context.next_entity_id();
+                        sibling.name = utils::truncate_entity_name(sibling_name.to_string());
+                        sibling.span = utils::create_span_from_capture(cap);
+                        pattern_siblings.push(sibling);
                     }
                 }
 
@@ -599,16 +599,15 @@ impl EntityExtractor {
         // via `@....multiple.value`). The inference engine resolves
         // identifiers against parameters and known bindings; bare type
         // names bind directly.
-        if !entity.metadata.contains_key("source_type") {
-            if let Some(source) = mat
+        if !entity.metadata.contains_key("source_type")
+            && let Some(source) = mat
                 .captures
                 .iter()
                 .find(|c| c.name.ends_with(".source") || c.name.ends_with(".multiple.value"))
-            {
-                let text = source.text.trim();
-                if !text.is_empty() {
-                    entity.set_metadata("source_type", text.to_string());
-                }
+        {
+            let text = source.text.trim();
+            if !text.is_empty() {
+                entity.set_metadata("source_type", text.to_string());
             }
         }
 
@@ -616,10 +615,10 @@ impl EntityExtractor {
         entity.signature = capture_module::parser::extract_signature(mat, source);
         entity.parameters = capture_module::parser::extract_parameters(mat, language);
         let param_defaults = capture_module::parser::extract_parameter_defaults(mat, language);
-        if !param_defaults.is_empty() {
-            if let Ok(encoded) = serde_json::to_string(&param_defaults) {
-                entity.set_metadata(cce_types::entity::meta_keys::PARAM_DEFAULTS, encoded);
-            }
+        if !param_defaults.is_empty()
+            && let Ok(encoded) = serde_json::to_string(&param_defaults)
+        {
+            entity.set_metadata(cce_types::entity::meta_keys::PARAM_DEFAULTS, encoded);
         }
         entity.return_type = capture_module::parser::extract_return_type(mat);
 
@@ -644,16 +643,16 @@ impl EntityExtractor {
         // (`entity.method.receiver`); the composed signature joins only the
         // `.signature.` roles and omits it. Record the receiver type here so
         // type-member indexing can bind methods to their struct/interface.
-        if language == &Language::Go && entity.kind == EntityKind::Method {
-            if let Some(recv) = mat
+        if language == &Language::Go
+            && entity.kind == EntityKind::Method
+            && let Some(recv) = mat
                 .captures
                 .iter()
                 .find(|c| c.name == "entity.method.receiver")
-            {
-                let raw = utils::extract_text_from_source(source, recv.start_byte, recv.end_byte);
-                if let Some(rt) = post_processing::receiver_from_capture(raw.trim()) {
-                    entity.set_metadata("receiver_type", rt);
-                }
+        {
+            let raw = utils::extract_text_from_source(source, recv.start_byte, recv.end_byte);
+            if let Some(rt) = post_processing::receiver_from_capture(raw.trim()) {
+                entity.set_metadata("receiver_type", rt);
             }
         }
 
@@ -839,23 +838,24 @@ fn collect_descriptor_sites<'tree>(
     descriptor_vars: &mut Vec<String>,
     declarators: &mut Vec<(String, tree_sitter::Node<'tree>)>,
 ) {
-    if node.kind() == "call_expression" && call_defines_property(*node, source) {
-        if let Some(args) = node.child_by_field_name("arguments") {
-            let mut cursor = args.walk();
-            let mut last_name: Option<String> = None;
-            for child in args.children(&mut cursor) {
-                if child.is_named() {
-                    last_name = None;
-                    if child.kind() == "identifier" {
-                        last_name = child.utf8_text(source).ok().map(str::to_string);
-                    }
+    if node.kind() == "call_expression"
+        && call_defines_property(*node, source)
+        && let Some(args) = node.child_by_field_name("arguments")
+    {
+        let mut cursor = args.walk();
+        let mut last_name: Option<String> = None;
+        for child in args.children(&mut cursor) {
+            if child.is_named() {
+                last_name = None;
+                if child.kind() == "identifier" {
+                    last_name = child.utf8_text(source).ok().map(str::to_string);
                 }
             }
-            if let Some(name) = last_name {
-                if !descriptor_vars.contains(&name) {
-                    descriptor_vars.push(name);
-                }
-            }
+        }
+        if let Some(name) = last_name
+            && !descriptor_vars.contains(&name)
+        {
+            descriptor_vars.push(name);
         }
     }
     if node.kind() == "variable_declarator"

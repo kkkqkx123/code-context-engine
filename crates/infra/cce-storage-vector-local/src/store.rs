@@ -490,10 +490,10 @@ impl VectorStorage for LocalVectorStore {
         if let Some(ef) = query.hnsw_ef {
             sim_query = sim_query.with_knn(fetch_limit, Some(ef as usize));
         }
-        if let Some(ref filter) = query.filter {
-            if let Some(sim_filter) = Self::simvec_filter(filter) {
-                sim_query = sim_query.with_filter(sim_filter);
-            }
+        if let Some(ref filter) = query.filter
+            && let Some(sim_filter) = Self::simvec_filter(filter)
+        {
+            sim_query = sim_query.with_filter(sim_filter);
         }
         let engine = Arc::clone(&self.engine);
         let collection = self.collection.clone();
@@ -514,15 +514,15 @@ impl VectorStorage for LocalVectorStore {
                     continue;
                 }
             };
-            if let Some(ref filter) = query.filter {
-                if !payload_matches_filter(&payload, filter) {
-                    continue;
-                }
+            if let Some(ref filter) = query.filter
+                && !payload_matches_filter(&payload, filter)
+            {
+                continue;
             }
-            if let Some(threshold) = query.score_threshold {
-                if item.score < threshold {
-                    continue;
-                }
+            if let Some(threshold) = query.score_threshold
+                && item.score < threshold
+            {
+                continue;
             }
             let id = if !payload.source_id.is_empty() {
                 payload.source_id.clone()

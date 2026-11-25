@@ -74,10 +74,10 @@ impl ExtractionContext {
     pub fn current_caller(&self, entities: &[Entity]) -> Option<EntityId> {
         // Search from top to bottom for a function-like entity
         for &entity_id in self.entity_stack.iter().rev() {
-            if let Some(entity) = entities.iter().find(|e| e.id == entity_id) {
-                if entity.kind.is_function_like() {
-                    return Some(entity_id);
-                }
+            if let Some(entity) = entities.iter().find(|e| e.id == entity_id)
+                && entity.kind.is_function_like()
+            {
+                return Some(entity_id);
             }
         }
         None
@@ -90,10 +90,10 @@ impl ExtractionContext {
     pub fn current_type_definition(&self, entities: &[Entity]) -> Option<EntityId> {
         // Search from top to bottom for a type definition entity
         for &entity_id in self.entity_stack.iter().rev() {
-            if let Some(entity) = entities.iter().find(|e| e.id == entity_id) {
-                if entity.kind.is_type_definition() {
-                    return Some(entity_id);
-                }
+            if let Some(entity) = entities.iter().find(|e| e.id == entity_id)
+                && entity.kind.is_type_definition()
+            {
+                return Some(entity_id);
             }
         }
         None

@@ -28,10 +28,12 @@
 
 `[mcp] profile` 取值：
 
-- `full`（默认）：暴露全部工具，行为与历史一致。
-- `wiki_read`：只读画像，仅暴露只读工具，`index_project` 与 `incremental_index` 被排除，且**强制开启**调用预算。
+- `read_only`（默认）：只读画像，仅暴露只读工具，`index_project` 与 `incremental_index` 被排除，且**强制开启**调用预算。
+- `full`：暴露全部工具，需显式配置，用于需要索引写入的完整能力场景。
 
-`enabled_tools` 保留原有语义，作为 profile 之上的可选收窄：最终可见工具 = profile 允许集 ∩ `enabled_tools`。即使在 `wiki_read` 下用 `enabled_tools` 显式列出写工具，也无法越过只读边界。工具能力由 `crates/app/cce-mcp/src/profile.rs` 的能力表声明，并有单测锁定能力表键集合与路由一致。
+`enabled_tools` 保留原有语义，作为 profile 之上的可选收窄：最终可见工具 = profile 允许集 ∩ `enabled_tools`。即使在 `read_only` 下用 `enabled_tools` 显式列出写工具，也无法越过只读边界。工具能力由 `crates/app/cce-mcp/src/profile.rs` 的能力表声明，并有单测锁定能力表键集合与路由一致。
+
+WCP 导出不属于 MCP 工具面：它通过 `cce wiki context` / `cce wiki diff` 提供，MCP 只读工具仅用于生成过程中的有限步回查。
 
 ## 有限步预算
 
@@ -56,3 +58,4 @@
 - 预算计数核心：`crates/app/cce-server-shared/src/services/budget.rs`
 - 传输入口：`crates/app/cce-mcp/src/server.rs`
 - 设计方案：`docs/plan/wiki-read-profile-and-budget-design.md`
+- 入口收敛与术语约定：`docs/plan/wiki-surface-consolidation-design.md`

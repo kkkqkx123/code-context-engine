@@ -337,24 +337,20 @@ impl IndexBuilder {
                     let exports =
                         crate::helpers::extract_exports_from_entities(entities, &language);
                     for export in &exports {
-                        if !module_table.has_export(&export.function_name) {
-                            if let Some(entity) =
+                        if !module_table.has_export(&export.function_name)
+                            && let Some(entity) =
                                 entities.iter().find(|e| e.id == export.function_id)
-                            {
-                                let location = SymbolLocation::new(
-                                    file_path.to_string(),
-                                    entity.span,
-                                    language,
-                                );
-                                let metadata =
-                                    SymbolMetadata::new(entity.name.clone(), entity.kind, location);
-                                let visibility = symbol_builder.detect_visibility(entity, language);
-                                module_table.add_export(
-                                    export.function_name.clone(),
-                                    metadata,
-                                    visibility,
-                                );
-                            }
+                        {
+                            let location =
+                                SymbolLocation::new(file_path.to_string(), entity.span, language);
+                            let metadata =
+                                SymbolMetadata::new(entity.name.clone(), entity.kind, location);
+                            let visibility = symbol_builder.detect_visibility(entity, language);
+                            module_table.add_export(
+                                export.function_name.clone(),
+                                metadata,
+                                visibility,
+                            );
                         }
                     }
                     (
@@ -408,10 +404,10 @@ impl IndexBuilder {
                 // Process all files in this package sequentially (they share package state)
                 for (file_path, module_table, exports, entities, language) in entries {
                     let delta = package.add_module_incremental(module_table);
-                    if delta.path_collision {
-                        if let Some(metrics) = &self.metrics {
-                            metrics.module_path_conflicts.increment();
-                        }
+                    if delta.path_collision
+                        && let Some(metrics) = &self.metrics
+                    {
+                        metrics.module_path_conflicts.increment();
                     }
                     project_symbols.apply_package_delta(Arc::clone(&package), &delta);
 
@@ -420,10 +416,10 @@ impl IndexBuilder {
                         self.index
                             .add_import_table(normalized.clone(), import_table);
                     }
-                    if let Some(export_list) = existing.exports_of(&file_path) {
-                        if !export_list.is_empty() {
-                            self.index.add_exports(normalized.clone(), export_list);
-                        }
+                    if let Some(export_list) = existing.exports_of(&file_path)
+                        && !export_list.is_empty()
+                    {
+                        self.index.add_exports(normalized.clone(), export_list);
                     }
 
                     for entity in &entities {
@@ -517,19 +513,15 @@ impl IndexBuilder {
 
                 let exports = crate::helpers::extract_exports_from_entities(entities, &language);
                 for export in &exports {
-                    if !module_table.has_export(&export.function_name) {
-                        if let Some(entity) = entities.iter().find(|e| e.id == export.function_id) {
-                            let location =
-                                SymbolLocation::new(file_path.clone(), entity.span, language);
-                            let metadata =
-                                SymbolMetadata::new(entity.name.clone(), entity.kind, location);
-                            let visibility = symbol_builder.detect_visibility(entity, language);
-                            module_table.add_export(
-                                export.function_name.clone(),
-                                metadata,
-                                visibility,
-                            );
-                        }
+                    if !module_table.has_export(&export.function_name)
+                        && let Some(entity) = entities.iter().find(|e| e.id == export.function_id)
+                    {
+                        let location =
+                            SymbolLocation::new(file_path.clone(), entity.span, language);
+                        let metadata =
+                            SymbolMetadata::new(entity.name.clone(), entity.kind, location);
+                        let visibility = symbol_builder.detect_visibility(entity, language);
+                        module_table.add_export(export.function_name.clone(), metadata, visibility);
                     }
                 }
 
@@ -544,10 +536,10 @@ impl IndexBuilder {
                     ))
                 };
                 let delta = package.add_module_incremental(module_table);
-                if delta.path_collision {
-                    if let Some(metrics) = &self.metrics {
-                        metrics.module_path_conflicts.increment();
-                    }
+                if delta.path_collision
+                    && let Some(metrics) = &self.metrics
+                {
+                    metrics.module_path_conflicts.increment();
                 }
                 project_symbols.apply_package_delta(package, &delta);
 
@@ -556,10 +548,10 @@ impl IndexBuilder {
                     self.index
                         .add_import_table(normalized.clone(), import_table);
                 }
-                if let Some(export_list) = existing.exports_of(file_path) {
-                    if !export_list.is_empty() {
-                        self.index.add_exports(normalized.clone(), export_list);
-                    }
+                if let Some(export_list) = existing.exports_of(file_path)
+                    && !export_list.is_empty()
+                {
+                    self.index.add_exports(normalized.clone(), export_list);
                 }
 
                 for entity in entities {

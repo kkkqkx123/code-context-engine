@@ -32,18 +32,18 @@ impl GroupTemplate for StdlibTemplate {
         // Concise output: category + name only, avoiding verbose "standard library"
         // phrasing that dilutes BM25 keyword density.
         let mut result = format!("{} {}", category, group.name);
-        if let Some(ref header) = group.header {
-            if let Some(ref doc) = header.doc_comment {
-                // Language-gated doc filtering mirrors the embedding path and
-                // the regular BM25 template: generic empty markers always drop,
-                // per-language boilerplate drops only for its language.
-                let profile = NoiseProfile::for_language(group.language);
-                let cleaned = Self::clean_doc_text(doc);
-                let filtered = filter_nl_noise(&cleaned, profile);
-                if !filtered.trim().is_empty() {
-                    result.push(' ');
-                    result.push_str(filtered.trim());
-                }
+        if let Some(ref header) = group.header
+            && let Some(ref doc) = header.doc_comment
+        {
+            // Language-gated doc filtering mirrors the embedding path and
+            // the regular BM25 template: generic empty markers always drop,
+            // per-language boilerplate drops only for its language.
+            let profile = NoiseProfile::for_language(group.language);
+            let cleaned = Self::clean_doc_text(doc);
+            let filtered = filter_nl_noise(&cleaned, profile);
+            if !filtered.trim().is_empty() {
+                result.push(' ');
+                result.push_str(filtered.trim());
             }
         }
         result

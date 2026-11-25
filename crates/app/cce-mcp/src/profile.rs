@@ -13,9 +13,9 @@ use cce_config::modules::McpProfile;
 /// Whether a tool mutates the index or only reads project state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolCapability {
-    /// Read-only query; eligible for the wiki-read profile and the budget.
+    /// Read-only query; eligible for the read-only profile and the budget.
     Read,
-    /// Changes index or project state; excluded from wiki-read and budget.
+    /// Changes index or project state; excluded from the read-only profile and budget.
     Write,
 }
 
@@ -80,8 +80,8 @@ pub fn is_cacheable(tool: &str) -> bool {
 ///
 /// - `full` + `None` -> every tool (backward compatible).
 /// - `full` + `Some(list)` -> exactly `list`.
-/// - `wiki_read` + `None` -> every read-capable tool.
-/// - `wiki_read` + `Some(list)` -> intersection of `list` and read tools; the
+/// - `read_only` + `None` -> every read-capable tool.
+/// - `read_only` + `Some(list)` -> intersection of `list` and read tools; the
 ///   stricter side always wins, so a write tool can never be widened in.
 pub fn resolve_allowed_tools(
     profile: McpProfile,
@@ -92,7 +92,7 @@ pub fn resolve_allowed_tools(
             .iter()
             .map(|(name, _)| (*name).to_string())
             .collect(),
-        McpProfile::WikiRead => TOOL_CAPABILITIES
+        McpProfile::ReadOnly => TOOL_CAPABILITIES
             .iter()
             .filter(|(_, capability)| *capability == ToolCapability::Read)
             .map(|(name, _)| (*name).to_string())
@@ -145,8 +145,8 @@ mod tests {
     }
 
     #[test]
-    fn wiki_read_excludes_write_tools() {
-        let set = resolve_allowed_tools(McpProfile::WikiRead, None);
+    fn read_only_excludes_write_tools() {
+        let set = resolve_allowed_tools(McpProfile::ReadOnly, None);
         assert_eq!(set.len(), TOOL_CAPABILITIES.len() - 2);
         assert!(!is_allowed(&set, "index_project"));
         assert!(!is_allowed(&set, "incremental_index"));
@@ -154,9 +154,9 @@ mod tests {
     }
 
     #[test]
-    fn wiki_read_intersects_explicit_list() {
+    fn read_only_intersects_explicit_list() {
         let explicit = vec!["read_file".to_string(), "index_project".to_string()];
-        let set = resolve_allowed_tools(McpProfile::WikiRead, Some(&explicit));
+        let set = resolve_allowed_tools(McpProfile::ReadOnly, Some(&explicit));
         assert_eq!(set.len(), 1);
         assert!(is_allowed(&set, "read_file"));
         assert!(!is_allowed(&set, "index_project"));

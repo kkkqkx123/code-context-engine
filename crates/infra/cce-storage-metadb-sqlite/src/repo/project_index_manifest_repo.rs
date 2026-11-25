@@ -472,10 +472,11 @@ impl ProjectIndexManifestRepository {
 
         for key in ["active_epoch", "epoch"] {
             let value = ProjectRepository::meta_get_int_optional(conn, project_id, key)?;
-            if let Some(value) = value {
-                if value > 0 && !plan.protected_data_epochs.contains(&value) {
-                    plan.protected_data_epochs.push(value);
-                }
+            if let Some(value) = value
+                && value > 0
+                && !plan.protected_data_epochs.contains(&value)
+            {
+                plan.protected_data_epochs.push(value);
             }
         }
 

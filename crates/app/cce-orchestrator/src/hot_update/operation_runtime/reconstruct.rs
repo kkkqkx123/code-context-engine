@@ -126,14 +126,13 @@ impl HotUpdateOperationRuntime {
                         // Entity groups are not persisted: the export
                         // processor derives them from the parsed file at
                         // render time.
-                        if let Some(bytes) = checkpoint.summary_data.as_deref() {
-                            if let Some(summary_payload) =
+                        if let Some(bytes) = checkpoint.summary_data.as_deref()
+                            && let Some(summary_payload) =
                                 crate::operation::checkpoint::decode_summary_checkpoint(bytes)
-                            {
-                                parse_result.file_summary = Some(summary_payload.file_summary);
-                                parse_result.stored_summary_fingerprint =
-                                    summary_payload.summary_config_fingerprint;
-                            }
+                        {
+                            parse_result.file_summary = Some(summary_payload.file_summary);
+                            parse_result.stored_summary_fingerprint =
+                                summary_payload.summary_config_fingerprint;
                         }
                         parse_result.stored_render_fingerprint = checkpoint.render_fingerprint;
                         parse_result.stored_content_hash = checkpoint.content_hash.clone();

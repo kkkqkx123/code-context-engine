@@ -90,10 +90,10 @@ impl TypeScriptExtractor {
             }
         }
 
-        if let Some(namespace_import) = find_child_by_kind(clause, "namespace_import") {
-            if let Some(name) = find_child_by_kind(&namespace_import, "identifier") {
-                names.push(node_text(&name, source));
-            }
+        if let Some(namespace_import) = find_child_by_kind(clause, "namespace_import")
+            && let Some(name) = find_child_by_kind(&namespace_import, "identifier")
+        {
+            names.push(node_text(&name, source));
         }
 
         names
@@ -112,19 +112,19 @@ impl SymbolExtractor for TypeScriptExtractor {
             };
             let is_type_import = Self::has_direct_type_keyword(&import_node, source);
 
-            if is_type_import {
-                if let Some(specifier) = Self::extract_module_specifier(&import_node, source) {
-                    let type_import_names = Self::local_names_from_import_clause(&clause, source);
-                    let span = node_to_span(&import_node);
+            if is_type_import
+                && let Some(specifier) = Self::extract_module_specifier(&import_node, source)
+            {
+                let type_import_names = Self::local_names_from_import_clause(&clause, source);
+                let span = node_to_span(&import_node);
 
-                    // Match the exact statement so another import from the same module is not changed.
-                    for import in &mut imports {
-                        if import.source == specifier
-                            && import.span == Some(span)
-                            && type_import_names.contains(&import.target.local_name)
-                        {
-                            import.target.kind = TargetKind::Type;
-                        }
+                // Match the exact statement so another import from the same module is not changed.
+                for import in &mut imports {
+                    if import.source == specifier
+                        && import.span == Some(span)
+                        && type_import_names.contains(&import.target.local_name)
+                    {
+                        import.target.kind = TargetKind::Type;
                     }
                 }
             }
@@ -166,76 +166,74 @@ impl SymbolExtractor for TypeScriptExtractor {
             let is_type_export = Self::has_direct_type_keyword(&export_node, source);
 
             // Handle export type { T } or export type { T as U } from 'mod'
-            if is_type_export {
-                if let Some(specifier) = Self::extract_module_specifier(&export_node, source) {
-                    let span = node_to_span(&export_node);
-                    // Match the exact statement so another re-export from the same module is not changed.
-                    let mut updated = false;
-                    for export in &mut exports {
-                        if export
-                            .target
-                            .source_module
-                            .as_ref()
-                            .is_some_and(|s| s == &specifier)
-                            && export.span == Some(span)
-                        {
-                            export.target.kind = TargetKind::Type;
-                            updated = true;
-                        }
+            if is_type_export
+                && let Some(specifier) = Self::extract_module_specifier(&export_node, source)
+            {
+                let span = node_to_span(&export_node);
+                // Match the exact statement so another re-export from the same module is not changed.
+                let mut updated = false;
+                for export in &mut exports {
+                    if export
+                        .target
+                        .source_module
+                        .as_ref()
+                        .is_some_and(|s| s == &specifier)
+                        && export.span == Some(span)
+                    {
+                        export.target.kind = TargetKind::Type;
+                        updated = true;
                     }
+                }
 
-                    if !updated {
-                        // Handle export type { T } or export type { T as U } from 'mod'
-                        if let Some(clause) = find_child_by_kind(&export_node, "export_clause") {
-                            if let Some(named_exports) =
-                                find_child_by_kind(&clause, "named_exports")
+                if !updated {
+                    // Handle export type { T } or export type { T as U } from 'mod'
+                    if let Some(clause) = find_child_by_kind(&export_node, "export_clause") {
+                        if let Some(named_exports) = find_child_by_kind(&clause, "named_exports") {
+                            for export_specifier in
+                                find_children_by_kind(&named_exports, "export_specifier")
                             {
-                                for export_specifier in
-                                    find_children_by_kind(&named_exports, "export_specifier")
-                                {
-                                    let name = export_specifier
-                                        .child_by_field_name("name")
-                                        .map(|n| node_text(&n, source))
-                                        .unwrap_or_default();
+                                let name = export_specifier
+                                    .child_by_field_name("name")
+                                    .map(|n| node_text(&n, source))
+                                    .unwrap_or_default();
 
-                                    let alias = export_specifier
-                                        .child_by_field_name("alias")
-                                        .map(|n| node_text(&n, source))
-                                        .unwrap_or_default();
+                                let alias = export_specifier
+                                    .child_by_field_name("alias")
+                                    .map(|n| node_text(&n, source))
+                                    .unwrap_or_default();
 
-                                    if !name.is_empty() {
-                                        exports.push(StandardizedExport {
-                                            kind: ExportKind::Reexport,
-                                            target: ExportTarget {
-                                                name: alias.clone(),
-                                                original_name: if alias != name {
-                                                    Some(name)
-                                                } else {
-                                                    None
-                                                },
-                                                kind: TargetKind::Type,
-                                                source_module: Some(specifier.clone()),
+                                if !name.is_empty() {
+                                    exports.push(StandardizedExport {
+                                        kind: ExportKind::Reexport,
+                                        target: ExportTarget {
+                                            name: alias.clone(),
+                                            original_name: if alias != name {
+                                                Some(name)
+                                            } else {
+                                                None
                                             },
-                                            is_reexport: true,
-                                            span: Some(span),
-                                        });
-                                    }
+                                            kind: TargetKind::Type,
+                                            source_module: Some(specifier.clone()),
+                                        },
+                                        is_reexport: true,
+                                        span: Some(span),
+                                    });
                                 }
                             }
+                        }
 
-                            if find_child_by_kind(&clause, "*").is_some() {
-                                exports.push(StandardizedExport {
-                                    kind: ExportKind::Wildcard,
-                                    target: ExportTarget {
-                                        name: "*".to_string(),
-                                        original_name: None,
-                                        kind: TargetKind::Type,
-                                        source_module: Some(specifier.clone()),
-                                    },
-                                    is_reexport: true,
-                                    span: Some(span),
-                                });
-                            }
+                        if find_child_by_kind(&clause, "*").is_some() {
+                            exports.push(StandardizedExport {
+                                kind: ExportKind::Wildcard,
+                                target: ExportTarget {
+                                    name: "*".to_string(),
+                                    original_name: None,
+                                    kind: TargetKind::Type,
+                                    source_module: Some(specifier.clone()),
+                                },
+                                is_reexport: true,
+                                span: Some(span),
+                            });
                         }
                     }
                 }
@@ -245,27 +243,24 @@ impl SymbolExtractor for TypeScriptExtractor {
             if let (Some(specifier), Some(clause)) = (
                 Self::extract_module_specifier(&export_node, source),
                 find_child_by_kind(&export_node, "export_clause"),
-            ) {
-                if let Some(named_exports) = find_child_by_kind(&clause, "named_exports") {
-                    let span = node_to_span(&export_node);
-                    for export_specifier in
-                        find_children_by_kind(&named_exports, "export_specifier")
-                    {
-                        if !Self::has_direct_type_keyword(&export_specifier, source) {
-                            continue;
-                        }
-                        let exported_name = export_specifier
-                            .child_by_field_name("alias")
-                            .or_else(|| export_specifier.child_by_field_name("name"))
-                            .map(|node| node_text(&node, source))
-                            .unwrap_or_default();
-                        for export in &mut exports {
-                            if export.target.source_module.as_deref() == Some(specifier.as_str())
-                                && export.span == Some(span)
-                                && export.target.name == exported_name
-                            {
-                                export.target.kind = TargetKind::Type;
-                            }
+            ) && let Some(named_exports) = find_child_by_kind(&clause, "named_exports")
+            {
+                let span = node_to_span(&export_node);
+                for export_specifier in find_children_by_kind(&named_exports, "export_specifier") {
+                    if !Self::has_direct_type_keyword(&export_specifier, source) {
+                        continue;
+                    }
+                    let exported_name = export_specifier
+                        .child_by_field_name("alias")
+                        .or_else(|| export_specifier.child_by_field_name("name"))
+                        .map(|node| node_text(&node, source))
+                        .unwrap_or_default();
+                    for export in &mut exports {
+                        if export.target.source_module.as_deref() == Some(specifier.as_str())
+                            && export.span == Some(span)
+                            && export.target.name == exported_name
+                        {
+                            export.target.kind = TargetKind::Type;
                         }
                     }
                 }

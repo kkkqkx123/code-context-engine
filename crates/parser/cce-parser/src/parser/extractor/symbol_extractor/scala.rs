@@ -234,22 +234,22 @@ impl ScalaExtractor {
         // Check for class definition
         if node.kind() == "class_definition" {
             // Only export if it's public
-            if Self::is_public_declaration(node, source) {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = node_text(&name_node, source);
-                    if !name.is_empty() {
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name,
-                                original_name: None,
-                                kind: TargetKind::Class,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(node)),
-                        });
-                    }
+            if Self::is_public_declaration(node, source)
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                let name = node_text(&name_node, source);
+                if !name.is_empty() {
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name,
+                            original_name: None,
+                            kind: TargetKind::Class,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(node)),
+                    });
                 }
             }
         }
@@ -257,22 +257,22 @@ impl ScalaExtractor {
         // Check for trait definition
         if node.kind() == "trait_definition" {
             // Only export if it's public
-            if Self::is_public_declaration(node, source) {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = node_text(&name_node, source);
-                    if !name.is_empty() {
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name,
-                                original_name: None,
-                                kind: TargetKind::Interface,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(node)),
-                        });
-                    }
+            if Self::is_public_declaration(node, source)
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                let name = node_text(&name_node, source);
+                if !name.is_empty() {
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name,
+                            original_name: None,
+                            kind: TargetKind::Interface,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(node)),
+                    });
                 }
             }
         }
@@ -280,22 +280,22 @@ impl ScalaExtractor {
         // Check for object definition
         if node.kind() == "object_definition" {
             // Only export if it's public
-            if Self::is_public_declaration(node, source) {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = node_text(&name_node, source);
-                    if !name.is_empty() {
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name,
-                                original_name: None,
-                                kind: TargetKind::Module,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(node)),
-                        });
-                    }
+            if Self::is_public_declaration(node, source)
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                let name = node_text(&name_node, source);
+                if !name.is_empty() {
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name,
+                            original_name: None,
+                            kind: TargetKind::Module,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(node)),
+                    });
                 }
             }
         }

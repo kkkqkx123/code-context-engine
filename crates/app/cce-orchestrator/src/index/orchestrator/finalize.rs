@@ -54,12 +54,12 @@ impl IndexOrchestrator {
         &self,
         snapshot: &Arc<cce_codegraph::index::LayeredSnapshotIndex>,
     ) {
-        if let Some(ref exporter) = self.nl_exporter {
-            if exporter.config().enable_relation_enhancement {
-                let enhancer_config = cce_export::RelationEnhancerConfig::default();
-                tracing::info!("Sharing published relation snapshot with NL document export");
-                exporter.set_relation_enhancement(Arc::clone(snapshot), enhancer_config);
-            }
+        if let Some(ref exporter) = self.nl_exporter
+            && exporter.config().enable_relation_enhancement
+        {
+            let enhancer_config = cce_export::RelationEnhancerConfig::default();
+            tracing::info!("Sharing published relation snapshot with NL document export");
+            exporter.set_relation_enhancement(Arc::clone(snapshot), enhancer_config);
         }
     }
 

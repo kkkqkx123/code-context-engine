@@ -42,10 +42,10 @@ impl GenericChunker<XmlGroup, XmlNode> for XmlChunker {
         if !group.path_prefix.is_empty() {
             return Some(group.path_prefix.clone());
         }
-        if let Some(ref header) = group.header {
-            if let Some(ref tag) = header.tag {
-                return Some(tag.clone());
-            }
+        if let Some(ref header) = group.header
+            && let Some(ref tag) = header.tag
+        {
+            return Some(tag.clone());
         }
         std::path::Path::new(file_path)
             .file_stem()

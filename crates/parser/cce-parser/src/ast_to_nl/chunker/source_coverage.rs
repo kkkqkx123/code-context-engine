@@ -119,14 +119,14 @@ pub fn source_coverage_from_spans(
     spans.sort_by_key(|span| (span.start_byte, span.end_byte));
     let mut ranges: Vec<cce_types::Span> = Vec::new();
     for span in spans {
-        if let Some(last) = ranges.last_mut() {
-            if span.start_byte <= last.end_byte.saturating_add(1) {
-                if span.end_byte > last.end_byte {
-                    last.end_byte = span.end_byte;
-                    last.end_position = span.end_position;
-                }
-                continue;
+        if let Some(last) = ranges.last_mut()
+            && span.start_byte <= last.end_byte.saturating_add(1)
+        {
+            if span.end_byte > last.end_byte {
+                last.end_byte = span.end_byte;
+                last.end_position = span.end_position;
             }
+            continue;
         }
         ranges.push(span);
     }

@@ -185,85 +185,83 @@ impl IndexOrchestrator {
         let mut start_batch = start_batch;
         let claimed = start_batch;
         let mut rework_reason: Option<String> = None;
-        if start_batch > 0 {
-            if let Some(cm) = self.checkpoint_manager.as_ref() {
-                'completed_batches: for batch_idx in 0..start_batch {
-                    let checkpoint_files = cm
-                        .get_batch_files(operation_id, batch_idx as u32)
-                        .await
-                        .map_err(|error| {
-                            OrchestratorError::index(
-                                "checkpoint_recovery",
-                                format!("Failed to load file checkpoints: {error}"),
-                            )
-                        })?;
-                    let checkpoints: HashMap<_, _> = checkpoint_files
-                        .into_iter()
-                        .map(|record| (record.file_path.clone(), record))
-                        .collect();
-                    let batch = file_indexer
-                        .get_batch(batch_idx)
-                        .map_err(|error| OrchestratorError::index("checkpoint_recovery", error))?;
+        if start_batch > 0
+            && let Some(cm) = self.checkpoint_manager.as_ref()
+        {
+            'completed_batches: for batch_idx in 0..start_batch {
+                let checkpoint_files = cm
+                    .get_batch_files(operation_id, batch_idx as u32)
+                    .await
+                    .map_err(|error| {
+                        OrchestratorError::index(
+                            "checkpoint_recovery",
+                            format!("Failed to load file checkpoints: {error}"),
+                        )
+                    })?;
+                let checkpoints: HashMap<_, _> = checkpoint_files
+                    .into_iter()
+                    .map(|record| (record.file_path.clone(), record))
+                    .collect();
+                let batch = file_indexer
+                    .get_batch(batch_idx)
+                    .map_err(|error| OrchestratorError::index("checkpoint_recovery", error))?;
 
-                    for entry in batch {
-                        let is_code = is_relation_code_file(entry);
+                for entry in batch {
+                    let is_code = is_relation_code_file(entry);
 
-                        let path = entry.path.to_string_lossy();
-                        let Some(record) = checkpoints.get(path.as_ref()) else {
+                    let path = entry.path.to_string_lossy();
+                    let Some(record) = checkpoints.get(path.as_ref()) else {
+                        rework_reason = Some(format!(
+                            "missing file checkpoint for {path} in batch {batch_idx}"
+                        ));
+                        start_batch = batch_idx;
+                        break 'completed_batches;
+                    };
+                    if record.content_hash != entry.content_hash {
+                        rework_reason = Some(format!(
+                            "content hash drift for {path} in batch {batch_idx}"
+                        ));
+                        start_batch = batch_idx;
+                        break 'completed_batches;
+                    }
+
+                    // Only recover parsed data for code files when relation building is needed
+                    if options.build_relations && is_code {
+                        let Some(parsed_data) = record.parsed_data.as_deref() else {
                             rework_reason = Some(format!(
-                                "missing file checkpoint for {path} in batch {batch_idx}"
+                                "missing parsed data for {path} in batch {batch_idx}"
                             ));
                             start_batch = batch_idx;
                             break 'completed_batches;
                         };
-                        if record.content_hash != entry.content_hash {
-                            rework_reason = Some(format!(
-                                "content hash drift for {path} in batch {batch_idx}"
-                            ));
-                            start_batch = batch_idx;
-                            break 'completed_batches;
-                        }
-
-                        // Only recover parsed data for code files when relation building is needed
-                        if options.build_relations && is_code {
-                            let Some(parsed_data) = record.parsed_data.as_deref() else {
-                                rework_reason = Some(format!(
-                                    "missing parsed data for {path} in batch {batch_idx}"
-                                ));
-                                start_batch = batch_idx;
-                                break 'completed_batches;
-                            };
-                            match crate::operation::checkpoint::decode_parsed_checkpoint(
-                                parsed_data,
-                            ) {
-                                Some(payload) => {
-                                    if !payload.is_compatible() {
-                                        tracing::warn!(file = %path, "Incompatible parsed checkpoint version, re-parsing");
-                                        rework_reason = Some(format!(
-                                            "incompatible parsed checkpoint for {path} in batch {batch_idx}"
-                                        ));
-                                        start_batch = batch_idx;
-                                        break 'completed_batches;
-                                    }
-                                    if matches!(payload, ParsedCheckpointPayload::Deleted) {
-                                        // Full-index checkpoints never write
-                                        // tombstones; treat one as drift and
-                                        // re-process the batch.
-                                        rework_reason = Some(format!(
-                                            "unexpected tombstone for {path} in batch {batch_idx}"
-                                        ));
-                                        start_batch = batch_idx;
-                                        break 'completed_batches;
-                                    }
-                                }
-                                None => {
-                                    tracing::warn!(file = %path, "Invalid parsed checkpoint");
+                        match crate::operation::checkpoint::decode_parsed_checkpoint(parsed_data) {
+                            Some(payload) => {
+                                if !payload.is_compatible() {
+                                    tracing::warn!(file = %path, "Incompatible parsed checkpoint version, re-parsing");
                                     rework_reason = Some(format!(
-                                        "undecodable parsed checkpoint for {path} in batch {batch_idx}"
+                                        "incompatible parsed checkpoint for {path} in batch {batch_idx}"
                                     ));
                                     start_batch = batch_idx;
                                     break 'completed_batches;
                                 }
+                                if matches!(payload, ParsedCheckpointPayload::Deleted) {
+                                    // Full-index checkpoints never write
+                                    // tombstones; treat one as drift and
+                                    // re-process the batch.
+                                    rework_reason = Some(format!(
+                                        "unexpected tombstone for {path} in batch {batch_idx}"
+                                    ));
+                                    start_batch = batch_idx;
+                                    break 'completed_batches;
+                                }
+                            }
+                            None => {
+                                tracing::warn!(file = %path, "Invalid parsed checkpoint");
+                                rework_reason = Some(format!(
+                                    "undecodable parsed checkpoint for {path} in batch {batch_idx}"
+                                ));
+                                start_batch = batch_idx;
+                                break 'completed_batches;
                             }
                         }
                     }
@@ -448,12 +446,12 @@ impl IndexOrchestrator {
                 // final export of recovered files stays consistent with the
                 // freshly processed batches. Summaries live in the record's
                 // own column, written by the summary phase.
-                if let Some(bytes) = record.summary_data.as_deref() {
-                    if let Some(summary_payload) = decode_summary_checkpoint(bytes) {
-                        ctx.export_summaries_by_file
-                            .entry(path_str.clone())
-                            .or_insert_with(|| summary_payload.file_summary);
-                    }
+                if let Some(bytes) = record.summary_data.as_deref()
+                    && let Some(summary_payload) = decode_summary_checkpoint(bytes)
+                {
+                    ctx.export_summaries_by_file
+                        .entry(path_str.clone())
+                        .or_insert_with(|| summary_payload.file_summary);
                 }
                 let mut processor = self.file_processor.clone();
                 let content_route = cce_types::ContentRoute::detect_from_path(&path_str);

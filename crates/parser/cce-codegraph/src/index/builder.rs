@@ -251,11 +251,11 @@ impl IndexBuilder {
             tracing::debug!("auto_detect_external_symbols enabled, checking for external packages");
         }
 
-        if let Some(cache_dir) = &self.config.policy.external_symbols_cache_dir {
-            if self.load_from_cache(cache_dir, symbol_table) {
-                tracing::info!("loaded external symbols from cache: {:?}", cache_dir);
-                return 0;
-            }
+        if let Some(cache_dir) = &self.config.policy.external_symbols_cache_dir
+            && self.load_from_cache(cache_dir, symbol_table)
+        {
+            tracing::info!("loaded external symbols from cache: {:?}", cache_dir);
+            return 0;
         }
 
         let deps = match self.config.package_data.external_dependencies.as_ref() {
@@ -297,15 +297,13 @@ impl IndexBuilder {
             return false;
         }
         // Expiry check: treat cache older than 7 days as stale
-        if let Ok(metadata) = std::fs::metadata(&cache_file) {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(elapsed) = modified.elapsed() {
-                    if elapsed.as_secs() > 7 * 24 * 3600 {
-                        tracing::debug!("external symbols cache expired at {:?}", cache_file);
-                        return false;
-                    }
-                }
-            }
+        if let Ok(metadata) = std::fs::metadata(&cache_file)
+            && let Ok(modified) = metadata.modified()
+            && let Ok(elapsed) = modified.elapsed()
+            && elapsed.as_secs() > 7 * 24 * 3600
+        {
+            tracing::debug!("external symbols cache expired at {:?}", cache_file);
+            return false;
         }
         tracing::debug!("checking external symbols cache at {:?}", cache_file);
         let content = match std::fs::read_to_string(&cache_file) {

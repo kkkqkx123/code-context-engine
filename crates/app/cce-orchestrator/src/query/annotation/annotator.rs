@@ -267,10 +267,10 @@ impl RelationAnnotator {
         seen_entities: &mut std::collections::HashSet<EntityId>,
         seen_hashes: &mut std::collections::HashSet<u64>,
     ) -> bool {
-        if let Some(id) = unit.entity_id {
-            if !seen_entities.insert(id) {
-                return false;
-            }
+        if let Some(id) = unit.entity_id
+            && !seen_entities.insert(id)
+        {
+            return false;
         }
         if config.dedup_strategy == DedupStrategy::ByContentHash
             && !seen_hashes.insert(unit.content_hash())
@@ -364,10 +364,10 @@ impl RelationAnnotator {
                 {
                     continue;
                 }
-                if let Some(id) = unit.entity_id {
-                    if !seen_entities.insert(id) {
-                        continue;
-                    }
+                if let Some(id) = unit.entity_id
+                    && !seen_entities.insert(id)
+                {
+                    continue;
                 }
                 out.push(unit);
             }

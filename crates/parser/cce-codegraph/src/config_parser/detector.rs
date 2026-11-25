@@ -134,13 +134,14 @@ impl BuildConfigParser {
             let candidate = root.join(pattern);
             if candidate.join("Cargo.toml").exists() {
                 results.push(candidate);
-            } else if candidate.exists() && candidate.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&candidate) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let path = entry.path();
-                        if path.is_dir() && path.join("Cargo.toml").exists() {
-                            results.push(path);
-                        }
+            } else if candidate.exists()
+                && candidate.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&candidate)
+            {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_dir() && path.join("Cargo.toml").exists() {
+                        results.push(path);
                     }
                 }
             }
@@ -200,26 +201,26 @@ impl BuildConfigParser {
     }
 
     fn expand_js_pattern(root: &Path, pattern: &str) -> Vec<std::path::PathBuf> {
-        if pattern.contains('*') {
-            if let Some((prefix, suffix)) = pattern.split_once('*') {
-                let base = root.join(prefix.trim_end_matches('/'));
-                let mut results = Vec::new();
-                if let Ok(entries) = std::fs::read_dir(&base) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let path = entry.path();
-                        if path.is_dir()
-                            && path.join("package.json").exists()
-                            && (suffix.is_empty()
-                                || path
-                                    .to_string_lossy()
-                                    .ends_with(suffix.trim_start_matches('/')))
-                        {
-                            results.push(path);
-                        }
+        if pattern.contains('*')
+            && let Some((prefix, suffix)) = pattern.split_once('*')
+        {
+            let base = root.join(prefix.trim_end_matches('/'));
+            let mut results = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&base) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_dir()
+                        && path.join("package.json").exists()
+                        && (suffix.is_empty()
+                            || path
+                                .to_string_lossy()
+                                .ends_with(suffix.trim_start_matches('/')))
+                    {
+                        results.push(path);
                     }
                 }
-                return results;
             }
+            return results;
         }
         let candidate = root.join(pattern);
         if candidate.join("package.json").exists() {

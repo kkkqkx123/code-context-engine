@@ -48,13 +48,12 @@ pub trait SymbolExtractor: Send + Sync {
 
         // Resolve relative imports if context is available
         for import in &mut imports {
-            if import.is_relative {
-                if let Some(resolved) =
+            if import.is_relative
+                && let Some(resolved) =
                     context.resolve_relative_import(&import.source, self.language())
-                {
-                    import.source = resolved;
-                    import.is_relative = false;
-                }
+            {
+                import.source = resolved;
+                import.is_relative = false;
             }
         }
 

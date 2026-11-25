@@ -247,10 +247,10 @@ fn narrow_python_isinstance(
         if type_shape_to_string(&declared) == type_name {
             return None;
         }
-        if let Some(narrowed_shape) = parse_type_shape(&type_name, Language::Python) {
-            if covers_declared_members(&declared, &narrowed_shape) {
-                return None;
-            }
+        if let Some(narrowed_shape) = parse_type_shape(&type_name, Language::Python)
+            && covers_declared_members(&declared, &narrowed_shape)
+        {
+            return None;
         }
     }
 
@@ -319,35 +319,31 @@ fn narrow_python_discriminated_union(
         return vec![];
     };
     let mut results = Vec::new();
-    if let Some(existing) = ctx.get_variable_type(&var_name) {
-        if let Some(shape) = existing
+    if let Some(existing) = ctx.get_variable_type(&var_name)
+        && let Some(shape) = existing
             .shape
             .clone()
             .or_else(|| parse_type_shape(&existing.type_name, Language::Python))
+        && let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+    {
+        // A narrowing covering the declared members proves nothing;
+        // emitting it would render an identity row.
+        if covers_declared_members(&shape, &narrowed)
+            || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
         {
-            if let Some(narrowed) =
-                narrow_discriminated_union(&shape, &field_name, &value, type_index)
-            {
-                // A narrowing covering the declared members proves nothing;
-                // emitting it would render an identity row.
-                if covers_declared_members(&shape, &narrowed)
-                    || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
-                {
-                    return results;
-                }
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-            }
+            return results;
         }
+        let type_name = type_shape_to_string(&narrowed);
+        results.push(NarrowingResult {
+            variable_name: var_name.clone(),
+            narrowed_type: TypeBinding {
+                type_name: type_name.clone(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
     }
     results
 }
@@ -388,41 +384,41 @@ fn narrow_python_truthiness(
         // Parameter annotations win over variable bindings (which may
         // leak across sibling scopes); declared_shape encodes that order.
         let shape_opt = declared_shape(ctx, params, Language::Python, &var_name);
-        if let Some(shape) = shape_opt {
-            if let Some(narrowed) = narrow_truthiness(&shape, true, Language::Python) {
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-                return results;
-            }
+        if let Some(shape) = shape_opt
+            && let Some(narrowed) = narrow_truthiness(&shape, true, Language::Python)
+        {
+            let type_name = type_shape_to_string(&narrowed);
+            results.push(NarrowingResult {
+                variable_name: var_name.clone(),
+                narrowed_type: TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(narrowed),
+                },
+            });
+            return results;
         }
         // Unknown type: stay conservative and emit nothing rather than a
         // placeholder pseudo-type.
     } else if let Some(var_name) = parse_python_negated_truthiness_pattern(text) {
         let shape_opt = declared_shape(ctx, params, Language::Python, &var_name);
-        if let Some(shape) = shape_opt {
-            if let Some(narrowed) = narrow_truthiness(&shape, false, Language::Python) {
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-                return results;
-            }
+        if let Some(shape) = shape_opt
+            && let Some(narrowed) = narrow_truthiness(&shape, false, Language::Python)
+        {
+            let type_name = type_shape_to_string(&narrowed);
+            results.push(NarrowingResult {
+                variable_name: var_name.clone(),
+                narrowed_type: TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(narrowed),
+                },
+            });
+            return results;
         }
         // Unknown type: stay conservative and emit nothing rather than a
         // placeholder pseudo-type.

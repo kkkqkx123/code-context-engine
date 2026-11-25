@@ -56,10 +56,10 @@ impl BashExtractor {
             }
             match child.kind() {
                 "word" | "string" | "raw_string" | "concatenation" | "number" => {
-                    if let Some(path) = Self::argument_text(&child, source) {
-                        if !path.is_empty() {
-                            return Some(path);
-                        }
+                    if let Some(path) = Self::argument_text(&child, source)
+                        && !path.is_empty()
+                    {
+                        return Some(path);
                     }
                 }
                 _ => {}

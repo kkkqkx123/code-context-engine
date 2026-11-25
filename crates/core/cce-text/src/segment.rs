@@ -95,10 +95,10 @@ pub fn english_plural_variant(word: &str) -> Option<String> {
     // matches -> match). Only the -es comes off; the sibilant stays.
     for ending in ["sses", "shes", "ches", "xes", "zes"] {
         if word.ends_with(ending) {
-            if let Some(stem) = word.strip_suffix("es") {
-                if !stem.is_empty() {
-                    return Some(stem.to_string());
-                }
+            if let Some(stem) = word.strip_suffix("es")
+                && !stem.is_empty()
+            {
+                return Some(stem.to_string());
             }
             return None;
         }
@@ -138,17 +138,17 @@ pub fn expand_with_plural_variants(tokens: Vec<MixedToken>) -> Vec<MixedToken> {
         pos_texts.push(token.text.clone());
         let source = token;
         out.push(source.clone());
-        if let Some(text) = variant {
-            if !pos_texts.contains(&text) {
-                pos_texts.push(text.clone());
-                out.push(MixedToken {
-                    text,
-                    offset_from: source.offset_from,
-                    offset_to: source.offset_to,
-                    position: source.position,
-                    position_length: 0,
-                });
-            }
+        if let Some(text) = variant
+            && !pos_texts.contains(&text)
+        {
+            pos_texts.push(text.clone());
+            out.push(MixedToken {
+                text,
+                offset_from: source.offset_from,
+                offset_to: source.offset_to,
+                position: source.position,
+                position_length: 0,
+            });
         }
     }
     out

@@ -60,10 +60,10 @@ pub(crate) fn render_propositions(
             if fact.content_line_count == 0 {
                 continue;
             }
-            if let Some(body) = body_start {
-                if fact.end_byte <= body {
-                    continue;
-                }
+            if let Some(body) = body_start
+                && fact.end_byte <= body
+            {
+                continue;
             }
             candidates += 1;
             // A fact straddling the body start mixes declaration prefix
@@ -93,10 +93,10 @@ pub(crate) fn render_propositions(
             if is_docstring_statement(&fact.text) {
                 continue;
             }
-            if let Some(body) = body_start {
-                if fact.end_byte <= body {
-                    continue;
-                }
+            if let Some(body) = body_start
+                && fact.end_byte <= body
+            {
+                continue;
             }
             candidates += 1;
             // Same straddling hygiene as control flow above: the stored
@@ -145,10 +145,10 @@ pub(crate) fn render_propositions(
     let mut merged: Vec<(usize, usize, String)> = Vec::new();
     let mut last_end: Option<usize> = None;
     for (start, end, text) in tail {
-        if let Some(prev_end) = last_end {
-            if start <= prev_end {
-                continue;
-            }
+        if let Some(prev_end) = last_end
+            && start <= prev_end
+        {
+            continue;
         }
         last_end = Some(end);
         merged.push((start, end, text));

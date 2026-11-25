@@ -332,12 +332,12 @@ fn choose_entity_kind(
     chunk_type: &str,
 ) -> String {
     let stored_ids: Vec<i64> = serde_json::from_str(&chunk.entity_ids).unwrap_or_default();
-    if let [only] = hit_entity_ids {
-        if let Some(index) = stored_ids.iter().position(|&id| id as u64 == only.0) {
-            let kinds: Vec<String> = serde_json::from_str(&chunk.entity_kinds).unwrap_or_default();
-            if let Some(kind) = kinds.get(index).filter(|kind| !kind.is_empty()) {
-                return kind.clone();
-            }
+    if let [only] = hit_entity_ids
+        && let Some(index) = stored_ids.iter().position(|&id| id as u64 == only.0)
+    {
+        let kinds: Vec<String> = serde_json::from_str(&chunk.entity_kinds).unwrap_or_default();
+        if let Some(kind) = kinds.get(index).filter(|kind| !kind.is_empty()) {
+            return kind.clone();
         }
     }
     chunk_type.to_string()
@@ -360,12 +360,11 @@ fn choose_entity_name(
     hit_entity_ids: &[cce_types::EntityId],
 ) -> String {
     let stored_ids: Vec<i64> = serde_json::from_str(stored_ids).unwrap_or_default();
-    if let [only] = hit_entity_ids {
-        if let Some(index) = stored_ids.iter().position(|&id| id as u64 == only.0) {
-            if let Some(name) = names.get(index).filter(|name| !name.is_empty()) {
-                return name.clone();
-            }
-        }
+    if let [only] = hit_entity_ids
+        && let Some(index) = stored_ids.iter().position(|&id| id as u64 == only.0)
+        && let Some(name) = names.get(index).filter(|name| !name.is_empty())
+    {
+        return name.clone();
     }
     let first_bare = names
         .iter()

@@ -61,20 +61,21 @@ pub fn recent(level: Option<&str>, module: Option<&str>, query: Option<&str>) ->
     };
     buf.iter()
         .filter(|e| {
-            if let Some(l) = level {
-                if e.level.to_lowercase() < l.to_lowercase() {
-                    return false;
-                }
+            if let Some(l) = level
+                && e.level.to_lowercase() < l.to_lowercase()
+            {
+                return false;
             }
-            if let Some(m) = module {
-                if !e.target.contains(m) {
-                    return false;
-                }
+            if let Some(m) = module
+                && !e.target.contains(m)
+            {
+                return false;
             }
-            if let Some(q) = query {
-                if !e.message.contains(q) && !e.target.contains(q) {
-                    return false;
-                }
+            if let Some(q) = query
+                && !e.message.contains(q)
+                && !e.target.contains(q)
+            {
+                return false;
             }
             true
         })

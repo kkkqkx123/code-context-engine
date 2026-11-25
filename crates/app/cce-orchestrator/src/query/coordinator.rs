@@ -989,8 +989,8 @@ impl QueryCoordinator {
 
             // Relation expansion runs once on the merged hits so budget,
             // shared dedup and single wrapping observe the final Top-N.
-            if let Some(resolver) = planned_options.neighbour_resolver.as_ref() {
-                if planned_options.global_config.annotation.expansion_enabled {
+            if let Some(resolver) = planned_options.neighbour_resolver.as_ref()
+                && planned_options.global_config.annotation.expansion_enabled {
                     crate::query::expansion::annotate_hits_with_resolver(
                         resolver,
                         &mut merged,
@@ -998,7 +998,6 @@ impl QueryCoordinator {
                     )
                     .await;
                 }
-            }
 
             let total = merged.len();
             let cacheable = failed_sub_queries.is_empty();

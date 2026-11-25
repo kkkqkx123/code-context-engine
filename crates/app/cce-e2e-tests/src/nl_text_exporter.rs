@@ -217,14 +217,14 @@ impl NlTextDocumentExporter {
         let mut output = String::new();
         output.push_str(&format!("{}\n", display_path.display()));
 
-        if let Some(summary) = summary {
-            if let Some(file_doc) = summary.file_doc_comment.as_deref() {
-                let cleaned = clean_comment_content(file_doc);
-                if !cleaned.trim().is_empty() {
-                    output.push_str("doc:\n");
-                    output.push_str(&cleaned);
-                    output.push('\n');
-                }
+        if let Some(summary) = summary
+            && let Some(file_doc) = summary.file_doc_comment.as_deref()
+        {
+            let cleaned = clean_comment_content(file_doc);
+            if !cleaned.trim().is_empty() {
+                output.push_str("doc:\n");
+                output.push_str(&cleaned);
+                output.push('\n');
             }
         }
 
@@ -259,10 +259,10 @@ impl NlTextDocumentExporter {
             if let Some(fi) = &section.fragment_info {
                 output.push_str(&format!("  {}\n", fi));
             }
-            if let Some(sr) = &section.split_reason {
-                if sr != "not_split" {
-                    output.push_str(&format!("  split_reason: {}\n", sr));
-                }
+            if let Some(sr) = &section.split_reason
+                && sr != "not_split"
+            {
+                output.push_str(&format!("  split_reason: {}\n", sr));
             }
             if !section.related_groups.is_empty() {
                 let rel_str: Vec<String> = section

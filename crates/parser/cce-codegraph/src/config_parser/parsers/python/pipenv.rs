@@ -42,19 +42,19 @@ impl BuildConfigParser {
             }
 
             // Parse package lines
-            if in_packages_section || in_dev_packages_section {
-                if let Some(eq_pos) = line.find('=') {
-                    let name = line[..eq_pos]
-                        .trim()
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .to_string();
+            if (in_packages_section || in_dev_packages_section)
+                && let Some(eq_pos) = line.find('=')
+            {
+                let name = line[..eq_pos]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
 
-                    if in_dev_packages_section {
-                        dependencies.insert(UntypedDependency::new(name, "dev"));
-                    } else {
-                        dependencies.insert(UntypedDependency::new(name, "external"));
-                    }
+                if in_dev_packages_section {
+                    dependencies.insert(UntypedDependency::new(name, "dev"));
+                } else {
+                    dependencies.insert(UntypedDependency::new(name, "external"));
                 }
             }
         }

@@ -23,10 +23,10 @@ impl AppConfig {
         let mut merged = self.clone();
 
         // --- Embedder: single-field override ---
-        if let Some(ref project_embedder) = project.embedder {
-            if let Some(ref model) = project_embedder.model {
-                merged.embedder.default_model = model.clone();
-            }
+        if let Some(ref project_embedder) = project.embedder
+            && let Some(ref model) = project_embedder.model
+        {
+            merged.embedder.default_model = model.clone();
         }
 
         // --- LLM: field-by-field override ---

@@ -186,9 +186,11 @@ fn test_resolve_dependencies_auto_enable() {
 #[test]
 fn test_resolve_dependencies_unlimits_local_default_rate_limit() {
     let mut config = AppConfig::default();
-    let mut provider = crate::modules::ProviderConfig::default();
-    provider.provider_type = cce_types::llm::ProviderType::Local;
-    provider.rate_limit = 600;
+    let provider = crate::modules::ProviderConfig {
+        provider_type: cce_types::llm::ProviderType::Local,
+        rate_limit: 600,
+        ..crate::modules::ProviderConfig::default()
+    };
     config.llm.providers.insert("local".to_string(), provider);
 
     config.resolve_dependencies();

@@ -393,12 +393,12 @@ impl RelationIndex {
             }
             if max_id + 1 > counter {
                 self.ensure_counter_at_least(max_id + 1);
-                if let Ok(guard) = self.diagnostics.metrics_sink.read() {
-                    if let Some(metrics) = guard.as_ref() {
-                        metrics
-                            .relation_max_entity_id_scan_fallback_total
-                            .increment();
-                    }
+                if let Ok(guard) = self.diagnostics.metrics_sink.read()
+                    && let Some(metrics) = guard.as_ref()
+                {
+                    metrics
+                        .relation_max_entity_id_scan_fallback_total
+                        .increment();
                 }
                 tracing::warn!(
                     scanned_max = max_id,
@@ -418,12 +418,12 @@ impl RelationIndex {
             }
         }
         self.ensure_counter_at_least(max_id + 1);
-        if let Ok(guard) = self.diagnostics.metrics_sink.read() {
-            if let Some(metrics) = guard.as_ref() {
-                metrics
-                    .relation_max_entity_id_scan_fallback_total
-                    .increment();
-            }
+        if let Ok(guard) = self.diagnostics.metrics_sink.read()
+            && let Some(metrics) = guard.as_ref()
+        {
+            metrics
+                .relation_max_entity_id_scan_fallback_total
+                .increment();
         }
         max_id
     }
@@ -536,18 +536,17 @@ impl RelationIndex {
                 .load(Ordering::Relaxed),
             Ordering::Relaxed,
         );
-        if let Ok(guard) = self.diagnostics.symbol_key_conflict_samples.lock() {
-            if let Ok(mut target) = diagnostics.symbol_key_conflict_samples.lock() {
-                target.extend(guard.iter().cloned());
-            }
+        if let Ok(guard) = self.diagnostics.symbol_key_conflict_samples.lock()
+            && let Ok(mut target) = diagnostics.symbol_key_conflict_samples.lock()
+        {
+            target.extend(guard.iter().cloned());
         }
         // Propagate metrics sink so detached observers emit to the same registry.
-        if let Ok(guard) = self.diagnostics.metrics_sink.read() {
-            if let Some(metrics) = guard.as_ref() {
-                if let Ok(mut target) = diagnostics.metrics_sink.write() {
-                    *target = Some(Arc::clone(metrics));
-                }
-            }
+        if let Ok(guard) = self.diagnostics.metrics_sink.read()
+            && let Some(metrics) = guard.as_ref()
+            && let Ok(mut target) = diagnostics.metrics_sink.write()
+        {
+            *target = Some(Arc::clone(metrics));
         }
 
         Self {
@@ -642,18 +641,17 @@ impl RelationIndex {
                 .swap(0, Ordering::Relaxed),
             Ordering::Relaxed,
         );
-        if let Ok(mut guard) = self.diagnostics.symbol_key_conflict_samples.lock() {
-            if let Ok(mut target) = diagnostics.symbol_key_conflict_samples.lock() {
-                target.extend(guard.drain(..));
-            }
+        if let Ok(mut guard) = self.diagnostics.symbol_key_conflict_samples.lock()
+            && let Ok(mut target) = diagnostics.symbol_key_conflict_samples.lock()
+        {
+            target.extend(guard.drain(..));
         }
         // Propagate metrics sink so snapshot observers emit to the same registry.
-        if let Ok(guard) = self.diagnostics.metrics_sink.read() {
-            if let Some(metrics) = guard.as_ref() {
-                if let Ok(mut target) = diagnostics.metrics_sink.write() {
-                    *target = Some(Arc::clone(metrics));
-                }
-            }
+        if let Ok(guard) = self.diagnostics.metrics_sink.read()
+            && let Some(metrics) = guard.as_ref()
+            && let Ok(mut target) = diagnostics.metrics_sink.write()
+        {
+            *target = Some(Arc::clone(metrics));
         }
 
         Self {
@@ -721,13 +719,12 @@ impl RelationIndex {
     pub(super) fn insert_function(&self, entity_id: EntityId, entity: Entity) {
         if let Some(existing) = self.function_index.get(&entity_id)
             && existing.value().name != entity.name
+            && let Some(mut bucket) = self.name_index.get_mut(&existing.value().name)
         {
-            if let Some(mut bucket) = self.name_index.get_mut(&existing.value().name) {
-                bucket.retain(|id| *id != entity_id);
-                if bucket.is_empty() {
-                    drop(bucket);
-                    self.name_index.remove(&existing.value().name);
-                }
+            bucket.retain(|id| *id != entity_id);
+            if bucket.is_empty() {
+                drop(bucket);
+                self.name_index.remove(&existing.value().name);
             }
         }
         let name = entity.name.clone();
@@ -905,13 +902,13 @@ impl RelationIndex {
     /// Remove `caller` from the reverse callee index for `callee_id`,
     /// dropping the entry when the list becomes empty.
     pub(super) fn untrack_reverse_caller(&self, callee_id: EntityId, caller: EntityId) {
-        if let Some(mut entry) = self.reverse_callee_index.get_mut(&callee_id) {
-            if let Ok(pos) = entry.binary_search(&caller) {
-                entry.remove(pos);
-                if entry.is_empty() {
-                    drop(entry);
-                    self.reverse_callee_index.remove(&callee_id);
-                }
+        if let Some(mut entry) = self.reverse_callee_index.get_mut(&callee_id)
+            && let Ok(pos) = entry.binary_search(&caller)
+        {
+            entry.remove(pos);
+            if entry.is_empty() {
+                drop(entry);
+                self.reverse_callee_index.remove(&callee_id);
             }
         }
     }

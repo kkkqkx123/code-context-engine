@@ -283,13 +283,12 @@ struct InflightGuard {
 
 impl Drop for InflightGuard {
     fn drop(&mut self) {
-        if let Ok(mut map) = self.map.lock() {
-            if map
+        if let Ok(mut map) = self.map.lock()
+            && map
                 .get(&self.key)
                 .is_some_and(|slot| Arc::ptr_eq(slot, &self.slot))
-            {
-                map.remove(&self.key);
-            }
+        {
+            map.remove(&self.key);
         }
     }
 }
@@ -434,10 +433,10 @@ impl QueryCache {
         // never published: a transient sub-query failure must not become the
         // answer to every identical request for the whole TTL. The guard also
         // removes the slot when an outer timeout cancels this future.
-        if let Ok(value) = &result {
-            if value.cacheable {
-                self.result_cache.insert(key.clone(), value.clone()).await;
-            }
+        if let Ok(value) = &result
+            && value.cacheable
+        {
+            self.result_cache.insert(key.clone(), value.clone()).await;
         }
 
         result

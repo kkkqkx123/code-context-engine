@@ -31,10 +31,10 @@ impl ErrorStrategy {
         match self {
             Self::FailOnIoError | Self::Default => Err(error),
             Self::SkipOnMissingFile => {
-                if let ConfigParseError::Io { ref source, .. } = error {
-                    if source.kind() == std::io::ErrorKind::NotFound {
-                        return Ok(());
-                    }
+                if let ConfigParseError::Io { ref source, .. } = error
+                    && source.kind() == std::io::ErrorKind::NotFound
+                {
+                    return Ok(());
                 }
                 Err(error)
             }

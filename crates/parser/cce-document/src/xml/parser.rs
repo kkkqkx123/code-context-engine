@@ -88,10 +88,10 @@ impl XmlParser {
                     nodes.push(element_node);
 
                     // Update parent's children
-                    if let Some(parent_id) = id_stack.last() {
-                        if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                            parent.add_child(node_id.clone());
-                        }
+                    if let Some(parent_id) = id_stack.last()
+                        && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                    {
+                        parent.add_child(node_id.clone());
                     }
 
                     path_stack.push(tag_name);
@@ -133,10 +133,10 @@ impl XmlParser {
                     nodes.push(element_node);
 
                     // Update parent's children
-                    if let Some(parent_id) = id_stack.last() {
-                        if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                            parent.add_child(node_id);
-                        }
+                    if let Some(parent_id) = id_stack.last()
+                        && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                    {
+                        parent.add_child(node_id);
                     }
 
                     current_line += 1;
@@ -172,10 +172,10 @@ impl XmlParser {
                         nodes.push(text_node);
 
                         // Update parent's children
-                        if let Some(parent_id) = id_stack.last() {
-                            if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                                parent.add_child(node_id);
-                            }
+                        if let Some(parent_id) = id_stack.last()
+                            && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                        {
+                            parent.add_child(node_id);
                         }
                     }
                     current_line += 1;
@@ -203,10 +203,10 @@ impl XmlParser {
                     nodes.push(comment_node);
 
                     // Update parent's children
-                    if let Some(parent_id) = id_stack.last() {
-                        if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                            parent.add_child(node_id);
-                        }
+                    if let Some(parent_id) = id_stack.last()
+                        && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                    {
+                        parent.add_child(node_id);
                     }
 
                     current_line += 1;
@@ -234,10 +234,10 @@ impl XmlParser {
                     nodes.push(cdata_node);
 
                     // Update parent's children
-                    if let Some(parent_id) = id_stack.last() {
-                        if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                            parent.add_child(node_id);
-                        }
+                    if let Some(parent_id) = id_stack.last()
+                        && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                    {
+                        parent.add_child(node_id);
                     }
 
                     current_line += 1;
@@ -266,10 +266,10 @@ impl XmlParser {
                     nodes.push(pi_node);
 
                     // Update parent's children
-                    if let Some(parent_id) = id_stack.last() {
-                        if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                            parent.add_child(node_id);
-                        }
+                    if let Some(parent_id) = id_stack.last()
+                        && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                    {
+                        parent.add_child(node_id);
                     }
 
                     current_line += 1;
@@ -288,10 +288,10 @@ impl XmlParser {
                     nodes.push(decl_node);
 
                     // Update parent's children
-                    if let Some(parent_id) = id_stack.last() {
-                        if let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id) {
-                            parent.add_child(node_id);
-                        }
+                    if let Some(parent_id) = id_stack.last()
+                        && let Some(parent) = nodes.iter_mut().find(|n| n.id == *parent_id)
+                    {
+                        parent.add_child(node_id);
                     }
 
                     current_line += 1;

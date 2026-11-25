@@ -227,17 +227,15 @@ fn embedding_scores(
         .embedding
         .query_vectors
         .get(query_start..query_start + dim)?;
-    Some(
-        chunks
-            .iter()
-            .enumerate()
-            .map(|(chunk_index, _)| {
-                let start = chunk_index * dim;
-                let chunk_vector = bench.embedding.vectors.get(start..start + dim)?;
-                Some(cosine_similarity(chunk_vector, query_vector))
-            })
-            .collect::<Option<Vec<f64>>>()?,
-    )
+    chunks
+        .iter()
+        .enumerate()
+        .map(|(chunk_index, _)| {
+            let start = chunk_index * dim;
+            let chunk_vector = bench.embedding.vectors.get(start..start + dim)?;
+            Some(cosine_similarity(chunk_vector, query_vector))
+        })
+        .collect::<Option<Vec<f64>>>()
 }
 
 fn bm25_scores_for_cross_queries(bench: &BenchmarkData) -> BTreeMap<String, Vec<f64>> {

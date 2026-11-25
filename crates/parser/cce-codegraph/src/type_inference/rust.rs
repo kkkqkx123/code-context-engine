@@ -111,27 +111,27 @@ impl LanguageTypeInferer for RustTypeInferer {
                     ctx.set_param_arity(entity.id, entity_param_arity(entity, ctx.language()));
 
                     // Rust-specific: infer method receiver type from parent impl block
-                    if let Some(parent_id) = entity.parent {
-                        if let Some(self_type) = impl_self_types.get(&parent_id) {
-                            let (base, is_mut, is_ref) = strip_references(self_type);
-                            let shape = if is_ref {
-                                Some(TypeShape::Reference {
-                                    inner: Box::new(TypeShape::Named(base.clone())),
-                                    mutable: is_mut,
-                                })
-                            } else {
-                                parse_type_shape(self_type, ctx.language())
-                            };
-                            let type_name = rust_binding_name(self_type, &shape);
-                            let binding = TypeBinding {
-                                type_name,
-                                type_entity_id: None,
-                                span: entity.span,
-                                origin: Some(InferenceOrigin::TypeAnnotation),
-                                shape,
-                            };
-                            ctx.add_variable_type("Self".to_string(), binding);
-                        }
+                    if let Some(parent_id) = entity.parent
+                        && let Some(self_type) = impl_self_types.get(&parent_id)
+                    {
+                        let (base, is_mut, is_ref) = strip_references(self_type);
+                        let shape = if is_ref {
+                            Some(TypeShape::Reference {
+                                inner: Box::new(TypeShape::Named(base.clone())),
+                                mutable: is_mut,
+                            })
+                        } else {
+                            parse_type_shape(self_type, ctx.language())
+                        };
+                        let type_name = rust_binding_name(self_type, &shape);
+                        let binding = TypeBinding {
+                            type_name,
+                            type_entity_id: None,
+                            span: entity.span,
+                            origin: Some(InferenceOrigin::TypeAnnotation),
+                            shape,
+                        };
+                        ctx.add_variable_type("Self".to_string(), binding);
                     }
                 }
                 EntityKind::Variable => {

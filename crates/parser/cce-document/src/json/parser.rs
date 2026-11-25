@@ -159,10 +159,10 @@ impl JsonParser {
                         {
                             // Container already has correct parent set during its creation
                             // Just ensure the parent knows about this child
-                            if let Some(parent) = ctx.nodes.iter_mut().find(|n| n.id == node_id) {
-                                if !parent.children.contains(&container_id) {
-                                    parent.add_child(container_id);
-                                }
+                            if let Some(parent) = ctx.nodes.iter_mut().find(|n| n.id == node_id)
+                                && !parent.children.contains(&container_id)
+                            {
+                                parent.add_child(container_id);
                             }
                         }
 
@@ -242,12 +242,10 @@ impl JsonParser {
                                 n.path == child_path && n.parent_id.as_deref() == Some(&node_id)
                             })
                             .map(|n| n.id.clone())
+                            && let Some(arr_node) = ctx.nodes.iter_mut().find(|n| n.id == node_id)
+                            && !arr_node.children.contains(&container_id)
                         {
-                            if let Some(arr_node) = ctx.nodes.iter_mut().find(|n| n.id == node_id) {
-                                if !arr_node.children.contains(&container_id) {
-                                    arr_node.add_child(container_id);
-                                }
-                            }
+                            arr_node.add_child(container_id);
                         }
 
                         current_line = end + 1;

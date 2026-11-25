@@ -846,10 +846,10 @@ impl EntityGroup {
 
         let mut spans: Vec<(Option<EntityId>, Span)> = Vec::new();
 
-        if let Some(header_id) = self.header_id {
-            if let Some(&span) = self.entity_spans.get(&header_id) {
-                spans.push((Some(header_id), span));
-            }
+        if let Some(header_id) = self.header_id
+            && let Some(&span) = self.entity_spans.get(&header_id)
+        {
+            spans.push((Some(header_id), span));
         }
 
         for &member_id in &self.member_ids {

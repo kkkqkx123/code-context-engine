@@ -283,22 +283,20 @@ impl LocalSymbolTable {
         // Traverse scope chain from innermost (last) to outermost (first)
         for scope_id in scope_chain.iter().rev() {
             let key = (Some(*scope_id), Arc::<str>::from(name));
-            if let Some(ids) = self.scope_index.get(&key) {
-                if let Some(first_id) = ids.first() {
-                    if let Some(entity) = self.entities.get(first_id) {
-                        return Some(entity);
-                    }
-                }
+            if let Some(ids) = self.scope_index.get(&key)
+                && let Some(first_id) = ids.first()
+                && let Some(entity) = self.entities.get(first_id)
+            {
+                return Some(entity);
             }
         }
         // Also check top-level scope (parent = None)
         let top_key = (None, Arc::<str>::from(name));
-        if let Some(ids) = self.scope_index.get(&top_key) {
-            if let Some(first_id) = ids.first() {
-                if let Some(entity) = self.entities.get(first_id) {
-                    return Some(entity);
-                }
-            }
+        if let Some(ids) = self.scope_index.get(&top_key)
+            && let Some(first_id) = ids.first()
+            && let Some(entity) = self.entities.get(first_id)
+        {
+            return Some(entity);
         }
         None
     }

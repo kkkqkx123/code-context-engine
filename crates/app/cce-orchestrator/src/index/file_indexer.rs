@@ -230,13 +230,13 @@ impl FileIndexer {
         // A mismatch means the file set (paths and/or content hashes)
         // changed between the crash and the resume; the old batch boundaries
         // are no longer trustworthy and recovery must start over.
-        if let Some(ref stored_hash) = checkpoint.file_list_hash {
-            if stored_hash != &self.file_list_hash {
-                return Err(format!(
-                    "File list hash mismatch: checkpoint={stored_hash}, current={}",
-                    self.file_list_hash
-                ));
-            }
+        if let Some(ref stored_hash) = checkpoint.file_list_hash
+            && stored_hash != &self.file_list_hash
+        {
+            return Err(format!(
+                "File list hash mismatch: checkpoint={stored_hash}, current={}",
+                self.file_list_hash
+            ));
         }
 
         // Check batch boundary files. The resume-start batch may carry a
@@ -417,12 +417,12 @@ impl FileIndexer {
             )));
         }
 
-        if let Some(ref hash) = checkpoint.file_list_hash {
-            if hash != file_list_hash {
-                return Err(RecoveryValidation::new(
-                    "File list hash changed, file list differs from checkpoint",
-                ));
-            }
+        if let Some(ref hash) = checkpoint.file_list_hash
+            && hash != file_list_hash
+        {
+            return Err(RecoveryValidation::new(
+                "File list hash changed, file list differs from checkpoint",
+            ));
         }
 
         Ok(())

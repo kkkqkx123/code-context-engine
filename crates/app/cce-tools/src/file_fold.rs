@@ -197,10 +197,10 @@ impl FileFoldTool {
 
     /// Resolve explicit language first, then file-name suffix, then unknown.
     fn resolve_language(request: &FileFoldRequest) -> Language {
-        if let Some(language) = request.language {
-            if language != Language::Unknown {
-                return language;
-            }
+        if let Some(language) = request.language
+            && language != Language::Unknown
+        {
+            return language;
         }
         if let Some(ref file_name) = request.file_name {
             let info = LanguageInfo::detect_from_path(file_name);
@@ -213,10 +213,10 @@ impl FileFoldTool {
 
     /// Build a synthetic path so the parse pipeline has a stable file name.
     fn synthetic_path(request: &FileFoldRequest, language: &Language) -> String {
-        if let Some(ref file_name) = request.file_name {
-            if !file_name.trim().is_empty() {
-                return file_name.clone();
-            }
+        if let Some(ref file_name) = request.file_name
+            && !file_name.trim().is_empty()
+        {
+            return file_name.clone();
         }
         match language.common_extensions().first() {
             Some(ext) => format!("fold.{ext}"),

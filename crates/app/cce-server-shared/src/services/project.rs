@@ -139,17 +139,16 @@ pub async fn create_project(
 
     if let Some(supply_mode) = request.supply_mode.as_deref() {
         let normalized = supply_mode.trim().to_lowercase();
-        if normalized == SUPPLY_MODE_GATEWAY || normalized == SUPPLY_MODE_LOCAL {
-            if let Err(e) = store
+        if (normalized == SUPPLY_MODE_GATEWAY || normalized == SUPPLY_MODE_LOCAL)
+            && let Err(e) = store
                 .project_meta_set_string(project_id, SUPPLY_MODE_KEY, &normalized)
                 .await
-            {
-                tracing::warn!(
-                    project_id = project_id,
-                    error = %e,
-                    "Failed to record supply mode (non-critical)"
-                );
-            }
+        {
+            tracing::warn!(
+                project_id = project_id,
+                error = %e,
+                "Failed to record supply mode (non-critical)"
+            );
         }
     }
 

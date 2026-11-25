@@ -22,18 +22,17 @@ pub fn visibility_from_signal(signal: &str) -> Option<Visibility> {
         return Some(Visibility::Private);
     }
     if trimmed.starts_with("pub(in") {
-        if let Some(open) = trimmed.find('(') {
-            if let Some(close) = trimmed.rfind(')') {
-                if close > open {
-                    let inside = trimmed[open + 1..close].trim();
-                    let path = inside
-                        .strip_prefix("in")
-                        .unwrap_or(inside)
-                        .trim()
-                        .to_string();
-                    return Some(Visibility::Restricted { path });
-                }
-            }
+        if let Some(open) = trimmed.find('(')
+            && let Some(close) = trimmed.rfind(')')
+            && close > open
+        {
+            let inside = trimmed[open + 1..close].trim();
+            let path = inside
+                .strip_prefix("in")
+                .unwrap_or(inside)
+                .trim()
+                .to_string();
+            return Some(Visibility::Restricted { path });
         }
         return None;
     }

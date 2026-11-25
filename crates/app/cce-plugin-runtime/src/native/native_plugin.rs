@@ -245,12 +245,12 @@ unsafe impl Sync for NativePlugin {}
 
 impl Drop for NativePlugin {
     fn drop(&mut self) {
-        if let Some(ctx) = &self.context {
-            if let Some(destroy_fn) = self.destroy_ctx_fn {
-                // SAFETY: `destroy_fn` comes from the same library and
-                // `context` was created by `cce_plugin_create`.
-                unsafe { destroy_fn(ctx.0) };
-            }
+        if let Some(ctx) = &self.context
+            && let Some(destroy_fn) = self.destroy_ctx_fn
+        {
+            // SAFETY: `destroy_fn` comes from the same library and
+            // `context` was created by `cce_plugin_create`.
+            unsafe { destroy_fn(ctx.0) };
         }
     }
 }
@@ -573,10 +573,10 @@ impl NativePlugin {
                         context_ptr,
                     )
                 };
-                if let Ok(Some(scheme)) = raw {
-                    if !scheme.is_empty() {
-                        query_schemes.insert(qt, scheme);
-                    }
+                if let Ok(Some(scheme)) = raw
+                    && !scheme.is_empty()
+                {
+                    query_schemes.insert(qt, scheme);
                 }
             }
         }

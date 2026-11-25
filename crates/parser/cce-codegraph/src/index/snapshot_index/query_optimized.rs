@@ -130,19 +130,18 @@ impl TransitiveFileDeps {
 
         for (caller_file, relations) in &index.file_relation_index {
             for rel in relations.iter() {
-                if let Some(callee_id) = rel.callee_id {
-                    if let Some(callee_file) = index.entity_file_index.get(&callee_id) {
-                        if caller_file != callee_file {
-                            transitive_dependents
-                                .entry(callee_file.clone())
-                                .or_default()
-                                .insert(caller_file.clone());
-                            transitive_dependencies
-                                .entry(caller_file.clone())
-                                .or_default()
-                                .insert(callee_file.clone());
-                        }
-                    }
+                if let Some(callee_id) = rel.callee_id
+                    && let Some(callee_file) = index.entity_file_index.get(&callee_id)
+                    && caller_file != callee_file
+                {
+                    transitive_dependents
+                        .entry(callee_file.clone())
+                        .or_default()
+                        .insert(caller_file.clone());
+                    transitive_dependencies
+                        .entry(caller_file.clone())
+                        .or_default()
+                        .insert(callee_file.clone());
                 }
             }
         }
@@ -150,19 +149,18 @@ impl TransitiveFileDeps {
         for (caller_id, relations) in &index.resolved_relation_index {
             if let Some(caller_file) = index.entity_file_index.get(caller_id) {
                 for rel in relations.iter() {
-                    if let Some(callee_id) = rel.callee_id {
-                        if let Some(callee_file) = index.entity_file_index.get(&callee_id) {
-                            if caller_file != callee_file {
-                                transitive_dependents
-                                    .entry(callee_file.clone())
-                                    .or_default()
-                                    .insert(caller_file.clone());
-                                transitive_dependencies
-                                    .entry(caller_file.clone())
-                                    .or_default()
-                                    .insert(callee_file.clone());
-                            }
-                        }
+                    if let Some(callee_id) = rel.callee_id
+                        && let Some(callee_file) = index.entity_file_index.get(&callee_id)
+                        && caller_file != callee_file
+                    {
+                        transitive_dependents
+                            .entry(callee_file.clone())
+                            .or_default()
+                            .insert(caller_file.clone());
+                        transitive_dependencies
+                            .entry(caller_file.clone())
+                            .or_default()
+                            .insert(callee_file.clone());
                     }
                 }
             }
@@ -213,21 +211,19 @@ impl TransitiveFileDeps {
         for entry in index.file_relation_index.iter() {
             let caller_file = entry.key().clone();
             for rel in entry.value().iter() {
-                if let Some(callee_id) = rel.callee_id {
-                    if let Some(callee_file) =
+                if let Some(callee_id) = rel.callee_id
+                    && let Some(callee_file) =
                         index.entity_file_index.get(&callee_id).map(|v| v.clone())
-                    {
-                        if caller_file != callee_file {
-                            transitive_dependents
-                                .entry(callee_file.clone())
-                                .or_default()
-                                .insert(caller_file.clone());
-                            transitive_dependencies
-                                .entry(caller_file.clone())
-                                .or_default()
-                                .insert(callee_file.clone());
-                        }
-                    }
+                    && caller_file != callee_file
+                {
+                    transitive_dependents
+                        .entry(callee_file.clone())
+                        .or_default()
+                        .insert(caller_file.clone());
+                    transitive_dependencies
+                        .entry(caller_file.clone())
+                        .or_default()
+                        .insert(callee_file.clone());
                 }
             }
         }
@@ -236,21 +232,19 @@ impl TransitiveFileDeps {
             let caller_id = *entry.key();
             if let Some(caller_file) = index.entity_file_index.get(&caller_id).map(|v| v.clone()) {
                 for rel in entry.value().iter() {
-                    if let Some(callee_id) = rel.callee_id {
-                        if let Some(callee_file) =
+                    if let Some(callee_id) = rel.callee_id
+                        && let Some(callee_file) =
                             index.entity_file_index.get(&callee_id).map(|v| v.clone())
-                        {
-                            if caller_file != callee_file {
-                                transitive_dependents
-                                    .entry(callee_file.clone())
-                                    .or_default()
-                                    .insert(caller_file.clone());
-                                transitive_dependencies
-                                    .entry(caller_file.clone())
-                                    .or_default()
-                                    .insert(callee_file);
-                            }
-                        }
+                        && caller_file != callee_file
+                    {
+                        transitive_dependents
+                            .entry(callee_file.clone())
+                            .or_default()
+                            .insert(caller_file.clone());
+                        transitive_dependencies
+                            .entry(caller_file.clone())
+                            .or_default()
+                            .insert(callee_file);
                     }
                 }
             }

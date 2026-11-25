@@ -46,10 +46,10 @@ pub fn split_by_nested_groups(
         if start_byte > current_start {
             let gap_text = &text[current_start..start_byte];
             if gap_text.trim().is_empty() {
-                if let Some(last) = boundaries.last_mut() {
-                    if last.end_byte < start_byte {
-                        last.end_byte = start_byte;
-                    }
+                if let Some(last) = boundaries.last_mut()
+                    && last.end_byte < start_byte
+                {
+                    last.end_byte = start_byte;
                 }
             } else {
                 boundaries.push(

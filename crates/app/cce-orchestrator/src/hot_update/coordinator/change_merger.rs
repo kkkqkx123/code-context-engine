@@ -175,17 +175,17 @@ impl HotUpdateCoordinator {
         // For full reload, we just call on_config_change for each processor
         // with the project root as the config path
         for processor in processors {
-            if processor.is_enabled() && processor.supports_config_reload() {
-                if let Err(e) = processor
+            if processor.is_enabled()
+                && processor.supports_config_reload()
+                && let Err(e) = processor
                     .on_config_change(&project_root, &project_root)
                     .await
-                {
-                    tracing::error!(
-                        processor = processor.name(),
-                        error = %e,
-                        "Failed to handle full config reload"
-                    );
-                }
+            {
+                tracing::error!(
+                    processor = processor.name(),
+                    error = %e,
+                    "Failed to handle full config reload"
+                );
             }
         }
 
@@ -420,14 +420,15 @@ impl HotUpdateCoordinator {
 
         // For full reload, we just call on_config_change for each processor
         for processor in processors {
-            if processor.is_enabled() && processor.supports_config_reload() {
-                if let Err(e) = processor.on_config_change(project_root, project_root).await {
-                    tracing::error!(
-                        processor = processor.name(),
-                        error = %e,
-                        "Failed to handle full config reload"
-                    );
-                }
+            if processor.is_enabled()
+                && processor.supports_config_reload()
+                && let Err(e) = processor.on_config_change(project_root, project_root).await
+            {
+                tracing::error!(
+                    processor = processor.name(),
+                    error = %e,
+                    "Failed to handle full config reload"
+                );
             }
         }
 

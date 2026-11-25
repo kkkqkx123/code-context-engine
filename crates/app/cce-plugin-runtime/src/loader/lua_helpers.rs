@@ -71,10 +71,10 @@ pub(crate) fn capability_label(operation: &str) -> &'static str {
 pub(crate) fn parse_entity_array(table: &Table) -> Vec<PluginEntity> {
     let mut out = Vec::new();
     for pair in table.pairs::<mlua::Value, mlua::Value>() {
-        if let Ok((_, mlua::Value::Table(t))) = pair {
-            if let Ok(e) = lua_table_to_plugin_entity(&t) {
-                out.push(e);
-            }
+        if let Ok((_, mlua::Value::Table(t))) = pair
+            && let Ok(e) = lua_table_to_plugin_entity(&t)
+        {
+            out.push(e);
         }
     }
     out

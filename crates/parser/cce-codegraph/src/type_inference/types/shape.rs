@@ -261,26 +261,26 @@ pub fn parse_type_shape(type_name: &str, language: Language) -> Option<TypeShape
     }
     // Handle Go-style leading slice/array prefix `[]T` or `[N]T` before
     // bracket-generic parsing (which requires a non-empty base name).
-    if trimmed.starts_with('[') {
-        if let Some(end) = trimmed.find(']') {
-            let inner_marker = trimmed[1..end].trim();
-            let is_go_prefix = inner_marker.is_empty()
-                || (inner_marker.len() <= 12 && inner_marker.chars().all(|c| c.is_ascii_digit()));
-            if is_go_prefix {
-                let elem = trimmed[end + 1..].trim();
-                if !elem.is_empty() {
-                    if let Some(inner) = parse_type_shape(elem, language) {
-                        return Some(TypeShape::Array(Box::new(inner)));
-                    }
-                }
+    if trimmed.starts_with('[')
+        && let Some(end) = trimmed.find(']')
+    {
+        let inner_marker = trimmed[1..end].trim();
+        let is_go_prefix = inner_marker.is_empty()
+            || (inner_marker.len() <= 12 && inner_marker.chars().all(|c| c.is_ascii_digit()));
+        if is_go_prefix {
+            let elem = trimmed[end + 1..].trim();
+            if !elem.is_empty()
+                && let Some(inner) = parse_type_shape(elem, language)
+            {
+                return Some(TypeShape::Array(Box::new(inner)));
             }
         }
     }
     // Handle array suffix `[]`
-    if let Some(elem) = trimmed.strip_suffix("[]") {
-        if let Some(inner) = parse_type_shape(elem.trim(), language) {
-            return Some(TypeShape::Array(Box::new(inner)));
-        }
+    if let Some(elem) = trimmed.strip_suffix("[]")
+        && let Some(inner) = parse_type_shape(elem.trim(), language)
+    {
+        return Some(TypeShape::Array(Box::new(inner)));
     }
     // Handle reference `&` or `&mut` (Rust)
     if trimmed.starts_with('&') {
@@ -310,43 +310,42 @@ pub fn parse_type_shape(type_name: &str, language: Language) -> Option<TypeShape
     }
     // Handle bracket generics `Base[Args]` (Python `tuple[int, str]`,
     // `dict[str, int]`, TypeScript `Array<string>`-adjacent forms).
-    if let Some(start) = trimmed.find('[') {
-        if let Some(end) = trimmed.rfind(']') {
-            if start < end && start > 0 {
-                let base = trimmed[..start].trim().to_string();
-                if !base.is_empty()
-                    && base
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == ' ')
-                {
-                    let inner = trimmed[start + 1..end].trim();
-                    let arg_strs = split_type_args(inner);
-                    let args: Vec<TypeShape> = arg_strs
-                        .iter()
-                        .filter_map(|a| parse_type_shape(a.trim(), language))
-                        .collect();
-                    if !args.is_empty() {
-                        return Some(TypeShape::Generic { base, args });
-                    }
-                }
+    if let Some(start) = trimmed.find('[')
+        && let Some(end) = trimmed.rfind(']')
+        && start < end
+        && start > 0
+    {
+        let base = trimmed[..start].trim().to_string();
+        if !base.is_empty()
+            && base
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == ' ')
+        {
+            let inner = trimmed[start + 1..end].trim();
+            let arg_strs = split_type_args(inner);
+            let args: Vec<TypeShape> = arg_strs
+                .iter()
+                .filter_map(|a| parse_type_shape(a.trim(), language))
+                .collect();
+            if !args.is_empty() {
+                return Some(TypeShape::Generic { base, args });
             }
         }
     }
     // Handle generic `Base<Args>`
-    if let Some(start) = trimmed.find('<') {
-        if let Some(end) = trimmed.rfind('>') {
-            if start < end {
-                let base = trimmed[..start].trim().to_string();
-                let inner = trimmed[start + 1..end].trim();
-                let arg_strs = split_type_args(inner);
-                let args: Vec<TypeShape> = arg_strs
-                    .iter()
-                    .filter_map(|a| parse_type_shape(a.trim(), language))
-                    .collect();
-                if !args.is_empty() {
-                    return Some(TypeShape::Generic { base, args });
-                }
-            }
+    if let Some(start) = trimmed.find('<')
+        && let Some(end) = trimmed.rfind('>')
+        && start < end
+    {
+        let base = trimmed[..start].trim().to_string();
+        let inner = trimmed[start + 1..end].trim();
+        let arg_strs = split_type_args(inner);
+        let args: Vec<TypeShape> = arg_strs
+            .iter()
+            .filter_map(|a| parse_type_shape(a.trim(), language))
+            .collect();
+        if !args.is_empty() {
+            return Some(TypeShape::Generic { base, args });
         }
     }
     // Handle Rust parenthesized tuple types `(A, B)` positionally.

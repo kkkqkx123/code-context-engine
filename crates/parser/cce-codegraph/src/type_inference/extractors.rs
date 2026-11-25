@@ -135,11 +135,11 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
     // No explicit return annotation — try return_body metadata.
     if let Some(return_body) = entity.metadata.get("return_body") {
         let body = return_body.trim();
-        if !body.is_empty() {
-            if let Some(binding) = infer_return_from_body(body, entity, ctx) {
-                ctx.add_return_type(entity.id, binding.clone());
-                ctx.add_return_type_by_name(entity.name.clone(), entity.id, binding);
-            }
+        if !body.is_empty()
+            && let Some(binding) = infer_return_from_body(body, entity, ctx)
+        {
+            ctx.add_return_type(entity.id, binding.clone());
+            ctx.add_return_type_by_name(entity.name.clone(), entity.id, binding);
         }
     }
 

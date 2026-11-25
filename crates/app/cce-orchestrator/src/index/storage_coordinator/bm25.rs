@@ -112,7 +112,7 @@ impl StorageCoordinator {
 
             let documents = build_bm25_documents(batch, self.project_id, self.epoch());
             let entity_mappings =
-                self.build_bm25_entity_mappings(batch, &documents, &source_entity_ids)?;
+                self.build_bm25_entity_mappings(batch, &documents, source_entity_ids)?;
             let chunk_records: Result<Vec<ChunkRecord>, OrchestratorError> = batch
                 .iter()
                 .filter(|chunk| !chunk.text.is_empty())

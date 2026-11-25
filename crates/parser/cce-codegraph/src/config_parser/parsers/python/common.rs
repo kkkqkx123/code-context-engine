@@ -61,12 +61,11 @@ fn parse_regular_requirement_name(line: &str) -> Option<String> {
 fn parse_package_name(requirement: &str) -> String {
     let re = Regex::new(r"^([a-zA-Z0-9_-]+)(?:\[[^\]]+\])?(.*)$").ok();
 
-    if let Some(regex) = re {
-        if let Some(caps) = regex.captures(requirement) {
-            if let Some(name) = caps.get(1) {
-                return name.as_str().to_string();
-            }
-        }
+    if let Some(regex) = re
+        && let Some(caps) = regex.captures(requirement)
+        && let Some(name) = caps.get(1)
+    {
+        return name.as_str().to_string();
     }
 
     // Fallback: take first word before any version specifier
@@ -88,12 +87,11 @@ fn extract_package_name_from_url_or_path(url: &str) -> Option<String> {
     ];
 
     for pattern in &patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            if let Some(caps) = re.captures(url) {
-                if let Some(name) = caps.get(1) {
-                    return Some(name.as_str().to_string());
-                }
-            }
+        if let Ok(re) = Regex::new(pattern)
+            && let Some(caps) = re.captures(url)
+            && let Some(name) = caps.get(1)
+        {
+            return Some(name.as_str().to_string());
         }
     }
 

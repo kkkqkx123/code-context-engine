@@ -280,11 +280,11 @@ pub fn check_string_closure(source: &str) -> Vec<Diagnostic> {
         match ch {
             '"' | '\'' => {
                 if in_string {
-                    if let Some((_, _, quote)) = string_start {
-                        if ch == quote {
-                            in_string = false;
-                            string_start = None;
-                        }
+                    if let Some((_, _, quote)) = string_start
+                        && ch == quote
+                    {
+                        in_string = false;
+                        string_start = None;
                     }
                 } else {
                     in_string = true;

@@ -251,14 +251,14 @@ impl BuilderConfig {
         }
 
         // Validate discovered config files consistency
-        if let Some(ref files) = self.package_data.discovered_config_files {
-            if let Some(ref file_deps) = self.package_data.config_file_deps {
-                for file in files {
-                    if !file_deps.contains_key(file) {
-                        return Err(BuilderConfigError::MissingDependencyMapping {
-                            file: file.clone(),
-                        });
-                    }
+        if let Some(ref files) = self.package_data.discovered_config_files
+            && let Some(ref file_deps) = self.package_data.config_file_deps
+        {
+            for file in files {
+                if !file_deps.contains_key(file) {
+                    return Err(BuilderConfigError::MissingDependencyMapping {
+                        file: file.clone(),
+                    });
                 }
             }
         }

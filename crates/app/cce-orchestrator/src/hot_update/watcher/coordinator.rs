@@ -149,11 +149,11 @@ impl WatchCoordinator {
                 match sync_rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(Ok(event)) => {
                         event_count.fetch_add(1, Ordering::Relaxed);
-                        if let Some(watch_event) = Self::convert_notify_event(event) {
-                            if event_tx_clone.send(watch_event).is_err() {
-                                tracing::error!("Failed to send watch event - channel closed");
-                                break;
-                            }
+                        if let Some(watch_event) = Self::convert_notify_event(event)
+                            && event_tx_clone.send(watch_event).is_err()
+                        {
+                            tracing::error!("Failed to send watch event - channel closed");
+                            break;
                         }
                     }
                     Ok(Err(e)) => {
@@ -209,10 +209,10 @@ impl WatchCoordinator {
         self.running.store(false, Ordering::Relaxed);
 
         // Stop watcher
-        if let Some(mut watcher) = self.watcher.take() {
-            if let Some(ref root) = self.root_path {
-                let _ = watcher.unwatch(root);
-            }
+        if let Some(mut watcher) = self.watcher.take()
+            && let Some(ref root) = self.root_path
+        {
+            let _ = watcher.unwatch(root);
         }
 
         // Update stats
@@ -530,12 +530,11 @@ impl InternalWatchRunner {
         }
 
         // Check extension for file events
-        if event.is_file_event() {
-            if let Some(ext) = path.extension() {
-                if !self.config.should_watch_extension(&ext.to_string_lossy()) {
-                    return false;
-                }
-            }
+        if event.is_file_event()
+            && let Some(ext) = path.extension()
+            && !self.config.should_watch_extension(&ext.to_string_lossy())
+        {
+            return false;
         }
 
         // Check for config files

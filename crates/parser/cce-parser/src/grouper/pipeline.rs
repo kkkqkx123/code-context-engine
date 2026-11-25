@@ -146,12 +146,11 @@ impl PreprocessingPipeline {
         // stages. EntityExtract injection, the post-group hook chain, and
         // combined-source generation still run on the plugin's groups so the
         // downstream converter/chunker remain agnostic.
-        if let Some((above, _)) = &group_override_segments {
-            if let Some(groups) =
+        if let Some((above, _)) = &group_override_segments
+            && let Some(groups) =
                 try_plugin_group_override(&self.plugin_registry, parsed_file, above)
-            {
-                return self.finish_plugin_groups(groups, parsed_file, stats);
-            }
+        {
+            return self.finish_plugin_groups(groups, parsed_file, stats);
         }
 
         // Steps 1+ (built-in grouping pipeline).
@@ -159,14 +158,12 @@ impl PreprocessingPipeline {
 
         // Step 0b: below-builtin fallback tier (negative priority) — only
         // when the built-in grouping produced no groups at all.
-        if result.groups.is_empty() {
-            if let Some((_, below)) = &group_override_segments {
-                if let Some(groups) =
-                    try_plugin_group_override(&self.plugin_registry, parsed_file, below)
-                {
-                    return self.finish_plugin_groups(groups, parsed_file, result.stats);
-                }
-            }
+        if result.groups.is_empty()
+            && let Some((_, below)) = &group_override_segments
+            && let Some(groups) =
+                try_plugin_group_override(&self.plugin_registry, parsed_file, below)
+        {
+            return self.finish_plugin_groups(groups, parsed_file, result.stats);
         }
         let mut result = result;
         if drop_import_only_groups(&mut result.groups) > 0 {
@@ -521,39 +518,35 @@ impl PreprocessingPipeline {
             };
 
             for group in &mut groups {
-                if let Some(header_id) = group.header_id {
-                    if let Some(paths) = call_paths_map.get(&header_id) {
-                        if !paths.is_empty() {
-                            if let Some(ref mut header) = group.header {
-                                header
-                                    .metadata
-                                    .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
-                                if let Some(resolved) = resolved_map.get(&header_id) {
-                                    if !resolved.is_empty() {
-                                        header.metadata.insert(
-                                            meta_keys::RESOLVED_CALLS.to_string(),
-                                            resolved.join(", "),
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                if let Some(header_id) = group.header_id
+                    && let Some(paths) = call_paths_map.get(&header_id)
+                    && !paths.is_empty()
+                    && let Some(ref mut header) = group.header
+                {
+                    header
+                        .metadata
+                        .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
+                    if let Some(resolved) = resolved_map.get(&header_id)
+                        && !resolved.is_empty()
+                    {
+                        header
+                            .metadata
+                            .insert(meta_keys::RESOLVED_CALLS.to_string(), resolved.join(", "));
                     }
                 }
                 for member in &mut group.members {
-                    if let Some(paths) = call_paths_map.get(&member.id) {
-                        if !paths.is_empty() {
+                    if let Some(paths) = call_paths_map.get(&member.id)
+                        && !paths.is_empty()
+                    {
+                        member
+                            .metadata
+                            .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
+                        if let Some(resolved) = resolved_map.get(&member.id)
+                            && !resolved.is_empty()
+                        {
                             member
                                 .metadata
-                                .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
-                            if let Some(resolved) = resolved_map.get(&member.id) {
-                                if !resolved.is_empty() {
-                                    member.metadata.insert(
-                                        meta_keys::RESOLVED_CALLS.to_string(),
-                                        resolved.join(", "),
-                                    );
-                                }
-                            }
+                                .insert(meta_keys::RESOLVED_CALLS.to_string(), resolved.join(", "));
                         }
                     }
                 }
@@ -612,10 +605,10 @@ impl PreprocessingPipeline {
             // FileDocumentation groups use the doc comment as their source,
             // not a source-code span. Their content is purely documentation.
             if group.group_type == GroupType::FileDocumentation {
-                if let Some(ref header) = group.header {
-                    if let Some(ref doc) = header.doc_comment {
-                        group.combined_source = Some(std::sync::Arc::from(doc.clone()));
-                    }
+                if let Some(ref header) = group.header
+                    && let Some(ref doc) = header.doc_comment
+                {
+                    group.combined_source = Some(std::sync::Arc::from(doc.clone()));
                 }
                 continue;
             }
@@ -1007,12 +1000,11 @@ impl PreprocessingPipeline {
         if owned.is_empty() {
             return *file_info;
         }
-        if let Some(header_id) = group.header_id {
-            if let Some(header_info) = entity_infos.get(&header_id) {
-                if header_info.is_test() {
-                    return *header_info;
-                }
-            }
+        if let Some(header_id) = group.header_id
+            && let Some(header_info) = entity_infos.get(&header_id)
+            && header_info.is_test()
+        {
+            return *header_info;
         }
         // Scaffolding headers (impl blocks, type declarations) carry no test
         // semantics of their own: members all test means the group is test.

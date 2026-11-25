@@ -264,90 +264,90 @@ impl SymbolExtractor for CSharpExtractor {
 
         for (node_kind, target_kind) in type_kinds {
             for type_node in find_children_by_kind(&root_node, node_kind) {
-                if Self::is_public_type(&type_node, source) {
-                    if let Some(type_name) = Self::get_type_name(&type_node, source) {
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: type_name,
-                                original_name: None,
-                                kind: target_kind,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(&type_node)),
-                        };
-                        exports.push(export);
-                    }
+                if Self::is_public_type(&type_node, source)
+                    && let Some(type_name) = Self::get_type_name(&type_node, source)
+                {
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: type_name,
+                            original_name: None,
+                            kind: target_kind,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(&type_node)),
+                    };
+                    exports.push(export);
                 }
             }
         }
 
         // Extract public method declarations (including extension methods)
         for method_node in find_children_by_kind(&root_node, "method_declaration") {
-            if Self::is_public_type(&method_node, source) {
-                if let Some(name) = method_node.child_by_field_name("name") {
-                    let method_name = node_text(&name, source);
-                    if !method_name.is_empty() {
-                        // Check if this is an extension method (has 'this' parameter modifier)
-                        let _is_extension = Self::is_extension_method(&method_node, source);
+            if Self::is_public_type(&method_node, source)
+                && let Some(name) = method_node.child_by_field_name("name")
+            {
+                let method_name = node_text(&name, source);
+                if !method_name.is_empty() {
+                    // Check if this is an extension method (has 'this' parameter modifier)
+                    let _is_extension = Self::is_extension_method(&method_node, source);
 
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: method_name,
-                                original_name: None,
-                                kind: TargetKind::Function,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(&method_node)),
-                        });
-                    }
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: method_name,
+                            original_name: None,
+                            kind: TargetKind::Function,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(&method_node)),
+                    });
                 }
             }
         }
 
         // Extract public property declarations
         for prop_node in find_children_by_kind(&root_node, "property_declaration") {
-            if Self::is_public_type(&prop_node, source) {
-                if let Some(name) = prop_node.child_by_field_name("name") {
-                    let prop_name = node_text(&name, source);
-                    if !prop_name.is_empty() {
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: prop_name,
-                                original_name: None,
-                                kind: TargetKind::Variable,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(&prop_node)),
-                        });
-                    }
+            if Self::is_public_type(&prop_node, source)
+                && let Some(name) = prop_node.child_by_field_name("name")
+            {
+                let prop_name = node_text(&name, source);
+                if !prop_name.is_empty() {
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: prop_name,
+                            original_name: None,
+                            kind: TargetKind::Variable,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(&prop_node)),
+                    });
                 }
             }
         }
 
         // Extract public event declarations
         for event_node in find_children_by_kind(&root_node, "event_declaration") {
-            if Self::is_public_type(&event_node, source) {
-                if let Some(name) = event_node.child_by_field_name("name") {
-                    let event_name = node_text(&name, source);
-                    if !event_name.is_empty() {
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: event_name,
-                                original_name: None,
-                                kind: TargetKind::Other,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(&event_node)),
-                        });
-                    }
+            if Self::is_public_type(&event_node, source)
+                && let Some(name) = event_node.child_by_field_name("name")
+            {
+                let event_name = node_text(&name, source);
+                if !event_name.is_empty() {
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: event_name,
+                            original_name: None,
+                            kind: TargetKind::Other,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(&event_node)),
+                    });
                 }
             }
         }

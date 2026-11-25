@@ -382,10 +382,10 @@ pub fn group_span_map(chunks: &[ChunkData]) -> std::collections::HashMap<String,
     }
     let mut out = HashMap::new();
     for (seg, &mn) in &min_map {
-        if let Some(&mx) = max_map.get(seg) {
-            if mx >= mn {
-                out.insert(seg.clone(), (mn, mx));
-            }
+        if let Some(&mx) = max_map.get(seg)
+            && mx >= mn
+        {
+            out.insert(seg.clone(), (mn, mx));
         }
     }
     out

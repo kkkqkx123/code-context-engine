@@ -178,20 +178,20 @@ pub fn check_no_dangling_references(snapshot: &RelationSnapshot) -> Vec<String> 
 
     let mut dangling = Vec::new();
     for rel in &snapshot.relations {
-        if !rel.is_external {
-            if let Some(ref tf) = rel.target_file {
-                let key = format!(
-                    "{}:{}:{}",
-                    tf,
-                    rel.target_scoped_name,
-                    rel.target_kind.as_deref().unwrap_or("")
-                );
-                if !entity_set.contains(&key) {
-                    dangling.push(format!(
-                        "Unresolved target: {} calls {} at {}:{:?}",
-                        rel.caller_scoped_name, rel.target_scoped_name, tf, rel.target_kind
-                    ));
-                }
+        if !rel.is_external
+            && let Some(ref tf) = rel.target_file
+        {
+            let key = format!(
+                "{}:{}:{}",
+                tf,
+                rel.target_scoped_name,
+                rel.target_kind.as_deref().unwrap_or("")
+            );
+            if !entity_set.contains(&key) {
+                dangling.push(format!(
+                    "Unresolved target: {} calls {} at {}:{:?}",
+                    rel.caller_scoped_name, rel.target_scoped_name, tf, rel.target_kind
+                ));
             }
         }
     }

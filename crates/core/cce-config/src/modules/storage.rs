@@ -543,15 +543,15 @@ impl Validate for HnswConfig {
                 "1000",
             ));
         }
-        if let Some(payload_m) = self.payload_m {
-            if !(2..=128).contains(&payload_m) {
-                errors.push(ConfigValidationError::out_of_range(
-                    "payload_m",
-                    payload_m.to_string(),
-                    "2",
-                    "128",
-                ));
-            }
+        if let Some(payload_m) = self.payload_m
+            && !(2..=128).contains(&payload_m)
+        {
+            errors.push(ConfigValidationError::out_of_range(
+                "payload_m",
+                payload_m.to_string(),
+                "2",
+                "128",
+            ));
         }
 
         if errors.is_empty() {
@@ -866,10 +866,10 @@ impl Validate for QdrantConfig {
                 format!("invalid URL: {}", self.url),
             ));
         }
-        if let Some(ref hnsw) = self.hnsw {
-            if let Err(e) = hnsw.validate_structured() {
-                errors.push(e);
-            }
+        if let Some(ref hnsw) = self.hnsw
+            && let Err(e) = hnsw.validate_structured()
+        {
+            errors.push(e);
         }
 
         if errors.is_empty() {

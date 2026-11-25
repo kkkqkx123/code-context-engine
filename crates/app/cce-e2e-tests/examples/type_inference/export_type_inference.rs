@@ -86,29 +86,29 @@ async fn export_case(case: &TypeInferenceCase, fixture: TestFixture) {
         {
             Ok(result) => {
                 let parsed = result.parsed_file.clone();
-                if let Some(processing_result) = result.processing_result {
-                    if !processing_result.groups.is_empty() {
-                        let converter = file_processor.converter();
-                        let source = &*result.parsed_file.source;
-                        let request = ConversionRequest {
-                            force_mode: Some(OutputMode::Embedding),
-                        };
-                        let conversions = converter
-                            .convert_entity_groups(
-                                &processing_result.groups,
-                                &file_path,
-                                Some(&request),
-                                Some(&processing_result),
-                                Some(source),
-                            )
-                            .groups;
-                        match direct_exporter
-                            .export_groups(&conversions, &file_path)
-                            .await
-                        {
-                            Ok(_) => indexed_files += 1,
-                            Err(e) => eprintln!("  Export error: {e}"),
-                        }
+                if let Some(processing_result) = result.processing_result
+                    && !processing_result.groups.is_empty()
+                {
+                    let converter = file_processor.converter();
+                    let source = &*result.parsed_file.source;
+                    let request = ConversionRequest {
+                        force_mode: Some(OutputMode::Embedding),
+                    };
+                    let conversions = converter
+                        .convert_entity_groups(
+                            &processing_result.groups,
+                            &file_path,
+                            Some(&request),
+                            Some(&processing_result),
+                            Some(source),
+                        )
+                        .groups;
+                    match direct_exporter
+                        .export_groups(&conversions, &file_path)
+                        .await
+                    {
+                        Ok(_) => indexed_files += 1,
+                        Err(e) => eprintln!("  Export error: {e}"),
                     }
                 }
                 parsed_files.push(parsed);
@@ -176,15 +176,15 @@ fn copy_nl_docs_to_output(case: &TypeInferenceCase, project_root: &Path, indexed
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|e| e == "md") {
-                if let Ok(rel) = path.strip_prefix(&cce_dir) {
-                    let target = output_dir.join(rel);
-                    if let Some(parent) = target.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    if std::fs::copy(&path, &target).is_ok() {
-                        copied += 1;
-                    }
+            } else if path.extension().is_some_and(|e| e == "md")
+                && let Ok(rel) = path.strip_prefix(&cce_dir)
+            {
+                let target = output_dir.join(rel);
+                if let Some(parent) = target.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if std::fs::copy(&path, &target).is_ok() {
+                    copied += 1;
                 }
             }
         }

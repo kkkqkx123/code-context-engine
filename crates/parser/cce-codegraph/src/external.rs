@@ -298,24 +298,21 @@ impl ExternalLibraryRegistry {
             .unwrap_or_else(|| "external".to_string());
         let mut info = ModuleInfo::new(name.clone(), library_path, language, ModuleType::Package);
         // Best-effort: if the path is a directory, list direct children as potential exports.
-        if library_path.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(library_path) {
-                for entry in entries.flatten() {
-                    if let Some(file_name) = entry.file_name().to_str() {
-                        if let Some(stem) = file_name
-                            .strip_suffix(".rs")
-                            .or_else(|| file_name.strip_suffix(".py"))
-                            .or_else(|| file_name.strip_suffix(".js"))
-                            .or_else(|| file_name.strip_suffix(".ts"))
-                        {
-                            if !stem.starts_with('_') && !stem.starts_with('.') {
-                                info.exports.push(ExportedSymbol::new(
-                                    stem.to_string(),
-                                    EntityKind::Module,
-                                ));
-                            }
-                        }
-                    }
+        if library_path.is_dir()
+            && let Ok(entries) = std::fs::read_dir(library_path)
+        {
+            for entry in entries.flatten() {
+                if let Some(file_name) = entry.file_name().to_str()
+                    && let Some(stem) = file_name
+                        .strip_suffix(".rs")
+                        .or_else(|| file_name.strip_suffix(".py"))
+                        .or_else(|| file_name.strip_suffix(".js"))
+                        .or_else(|| file_name.strip_suffix(".ts"))
+                    && !stem.starts_with('_')
+                    && !stem.starts_with('.')
+                {
+                    info.exports
+                        .push(ExportedSymbol::new(stem.to_string(), EntityKind::Module));
                 }
             }
         }

@@ -189,10 +189,10 @@ impl FindReferencesTool {
 
         if let Some(relations) = self.index.get_resolved_relations_by_caller(enclosing.id) {
             for rel in relations.iter() {
-                if self.contains_position(&rel.span, request.line, request.column) {
-                    if let Some(callee_id) = rel.callee_id {
-                        return Ok(callee_id);
-                    }
+                if self.contains_position(&rel.span, request.line, request.column)
+                    && let Some(callee_id) = rel.callee_id
+                {
+                    return Ok(callee_id);
                 }
             }
         }

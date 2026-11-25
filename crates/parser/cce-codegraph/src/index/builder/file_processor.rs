@@ -312,10 +312,10 @@ impl<'a, I: BuildIndexSink> FileProcessor<'a, I> {
                     .collect::<Vec<_>>();
                 if let Some(extra) = merged_children.get(&e.id) {
                     for child_local in extra {
-                        if let Some(child_global) = remap.get(child_local).copied() {
-                            if !children.contains(&child_global) {
-                                children.push(child_global);
-                            }
+                        if let Some(child_global) = remap.get(child_local).copied()
+                            && !children.contains(&child_global)
+                        {
+                            children.push(child_global);
                         }
                     }
                 }

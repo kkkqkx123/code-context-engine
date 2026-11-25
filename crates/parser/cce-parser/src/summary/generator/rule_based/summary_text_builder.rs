@@ -83,11 +83,11 @@ impl super::RuleBasedGenerator {
                     format!("{header_text} {{ {} }}.", member_names.join(", "))
                 };
 
-                if documented < self.config.max_entities {
-                    if let Some(doc_line) = Self::header_doc_line(header) {
-                        line = format!("{} — {doc_line}", line.trim_end_matches('.'));
-                        documented += 1;
-                    }
+                if documented < self.config.max_entities
+                    && let Some(doc_line) = Self::header_doc_line(header)
+                {
+                    line = format!("{} — {doc_line}", line.trim_end_matches('.'));
+                    documented += 1;
                 }
 
                 lines.push(line);
@@ -339,10 +339,10 @@ impl super::RuleBasedGenerator {
         if let Some(stats) = format_entity_stats(&parsed_file.entities) {
             structure_parts.push(stats);
         }
-        if !summary.main_entities.is_empty() {
-            if let Some(overview) = format_entity_overview(&parsed_file.entities) {
-                structure_parts.push(overview);
-            }
+        if !summary.main_entities.is_empty()
+            && let Some(overview) = format_entity_overview(&parsed_file.entities)
+        {
+            structure_parts.push(overview);
         }
         let structure = structure_parts.join("\n");
 

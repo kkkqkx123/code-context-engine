@@ -22,15 +22,15 @@ pub fn detect_from_annotations(
         if name == "test" || name == "tokio::test" {
             return Some(TestInfo::test_ast());
         }
-        if let Some(payload) = cfg_payload(name) {
-            if cfg_targets_test(payload) {
-                let granularity = if entity.kind.is_module_like() {
-                    TestInfo::test_ast_block()
-                } else {
-                    TestInfo::test_ast()
-                };
-                return Some(granularity);
-            }
+        if let Some(payload) = cfg_payload(name)
+            && cfg_targets_test(payload)
+        {
+            let granularity = if entity.kind.is_module_like() {
+                TestInfo::test_ast_block()
+            } else {
+                TestInfo::test_ast()
+            };
+            return Some(granularity);
         }
     }
     None

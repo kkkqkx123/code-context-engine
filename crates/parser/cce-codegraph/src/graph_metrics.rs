@@ -290,12 +290,12 @@ fn compute_pagerank(
             let mut rank =
                 (1.0 - PAGERANK_DAMPING) / n as f64 + PAGERANK_DAMPING * dangling_contrib;
             for other in nodes {
-                if let Some(neighbors) = adjacency.get(other) {
-                    if neighbors.contains(node) {
-                        let out = out_degree[other] as f64;
-                        if out > 0.0 {
-                            rank += PAGERANK_DAMPING * (pr[other] / out);
-                        }
+                if let Some(neighbors) = adjacency.get(other)
+                    && neighbors.contains(node)
+                {
+                    let out = out_degree[other] as f64;
+                    if out > 0.0 {
+                        rank += PAGERANK_DAMPING * (pr[other] / out);
                     }
                 }
             }

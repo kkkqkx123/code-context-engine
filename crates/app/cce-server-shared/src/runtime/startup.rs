@@ -171,19 +171,18 @@ impl StartupCoordinator {
                     continue;
                 }
             };
-            if hot_coordinator.lock().await.watch_root().await.is_none() {
-                if let Ok(entry) = self
+            if hot_coordinator.lock().await.watch_root().await.is_none()
+                && let Ok(entry) = self
                     .engine
                     .project_registry()
                     .get_or_load(*project_id)
                     .await
-                {
-                    hot_coordinator
-                        .lock()
-                        .await
-                        .set_watch_root(std::path::PathBuf::from(&entry.metadata.root_path))
-                        .await;
-                }
+            {
+                hot_coordinator
+                    .lock()
+                    .await
+                    .set_watch_root(std::path::PathBuf::from(&entry.metadata.root_path))
+                    .await;
             }
             let unfinished = match operation_coordinator
                 .checkpoint_manager()

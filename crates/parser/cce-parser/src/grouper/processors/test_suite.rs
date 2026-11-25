@@ -149,11 +149,11 @@ impl TestSuiteProcessor {
         // Method 1: Check parent-child relationship
         // If test cases have this suite as their parent, they belong here
         for entity in entities.iter().filter(|e| e.kind == EntityKind::TestCase) {
-            if let Some(parent_id) = entity.parent {
-                if parent_id == suite.id {
-                    test_cases.push(entity.clone());
-                    continue;
-                }
+            if let Some(parent_id) = entity.parent
+                && parent_id == suite.id
+            {
+                test_cases.push(entity.clone());
+                continue;
             }
 
             // Method 2: Check if test case is within suite's span

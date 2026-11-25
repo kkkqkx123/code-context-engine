@@ -109,14 +109,13 @@ impl StorageCoordinator {
                             document.fields.insert("content".to_string(), content);
                         }
                     }
-                    if !document.fields.contains_key("keywords") {
-                        if let Some(keywords) = document
+                    if !document.fields.contains_key("keywords")
+                        && let Some(keywords) = document
                             .fields
                             .get("chunk_id")
                             .and_then(|id| clone_content.keywords_by_id.get(id).cloned())
-                        {
-                            document.fields.insert("keywords".to_string(), keywords);
-                        }
+                    {
+                        document.fields.insert("keywords".to_string(), keywords);
                     }
                     let chunk_id = document.fields.get("chunk_id").cloned();
                     let document_id = if let Some(chunk_id) = chunk_id {

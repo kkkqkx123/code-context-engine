@@ -84,7 +84,7 @@ impl McpServerHandler {
     ///
     /// The effective tool set is the intersection of the capability profile
     /// and the explicit allow-list; the budget tracker is present whenever
-    /// budget enforcement is enabled (always for the wiki-read profile).
+    /// budget enforcement is enabled (always for the read-only profile).
     pub fn new(
         state: Arc<SharedContext>,
         profile: McpProfile,
@@ -375,7 +375,7 @@ impl ServerHandler for McpServerHandler {
     fn get_info(&self) -> ServerConfig {
         let profile_label = match self.profile {
             McpProfile::Full => "full",
-            McpProfile::WikiRead => "wiki_read",
+            McpProfile::ReadOnly => "read_only",
         };
         let budget_label = match &self.budget {
             None => "disabled",
@@ -616,19 +616,19 @@ mod tests {
     }
 
     #[test]
-    fn wiki_read_profile_resolves_to_read_only_tools() {
+    fn read_only_profile_resolves_to_read_only_tools() {
         let full = profile::resolve_allowed_tools(McpProfile::Full, None);
         assert_eq!(full.len(), 19);
-        let wiki = profile::resolve_allowed_tools(McpProfile::WikiRead, None);
+        let wiki = profile::resolve_allowed_tools(McpProfile::ReadOnly, None);
         assert!(!wiki.contains("index_project"));
         assert!(!wiki.contains("incremental_index"));
         assert!(wiki.contains("read_file"));
     }
 
     #[test]
-    fn wiki_read_intersects_explicit_allow_list() {
+    fn read_only_intersects_explicit_allow_list() {
         let explicit = vec!["read_file".to_string(), "index_project".to_string()];
-        let set = profile::resolve_allowed_tools(McpProfile::WikiRead, Some(&explicit));
+        let set = profile::resolve_allowed_tools(McpProfile::ReadOnly, Some(&explicit));
         assert_eq!(set.len(), 1);
         assert!(set.contains("read_file"));
         assert!(!set.contains("index_project"));

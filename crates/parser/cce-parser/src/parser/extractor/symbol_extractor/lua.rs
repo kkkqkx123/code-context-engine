@@ -60,12 +60,11 @@ impl LuaExtractor {
             if !child.is_named() {
                 continue;
             }
-            if child.kind() == "string" {
-                if let Some(path) = Self::string_argument_text(&child, source) {
-                    if !path.is_empty() {
-                        return Some(path);
-                    }
-                }
+            if child.kind() == "string"
+                && let Some(path) = Self::string_argument_text(&child, source)
+                && !path.is_empty()
+            {
+                return Some(path);
             }
         }
         None

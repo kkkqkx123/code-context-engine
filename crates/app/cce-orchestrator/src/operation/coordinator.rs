@@ -464,14 +464,14 @@ impl OperationCoordinator {
     /// - A full-index operation is active (blocks everything except itself)
     /// - Some other constraint prevents execution
     async fn can_execute_next(&self) -> Result<bool, StorageError> {
-        if let Some(active) = self.queue.get_active().await? {
-            if active.operation_type == OperationKind::FullIndex {
-                trace!(
-                    active_op = %active.operation_id,
-                    "Cannot execute: full-index is active"
-                );
-                return Ok(false);
-            }
+        if let Some(active) = self.queue.get_active().await?
+            && active.operation_type == OperationKind::FullIndex
+        {
+            trace!(
+                active_op = %active.operation_id,
+                "Cannot execute: full-index is active"
+            );
+            return Ok(false);
         }
         Ok(true)
     }
@@ -505,18 +505,17 @@ impl OperationCoordinator {
                 .await?;
 
             // Clean up ParsedFile artifacts for this operation
-            if let Some(ref recovery_manager) = self.recovery_manager {
-                if let Err(e) = recovery_manager
+            if let Some(ref recovery_manager) = self.recovery_manager
+                && let Err(e) = recovery_manager
                     .cleanup_operation_artifacts(&completed.operation_id)
                     .await
-                {
-                    warn!(
-                        operation_id = %completed.operation_id,
-                        error = %e,
-                        "Failed to clean up operation artifacts after completion"
-                    );
-                    // Don't fail the operation completion on cleanup error
-                }
+            {
+                warn!(
+                    operation_id = %completed.operation_id,
+                    error = %e,
+                    "Failed to clean up operation artifacts after completion"
+                );
+                // Don't fail the operation completion on cleanup error
             }
 
             trace!(
@@ -706,10 +705,10 @@ impl OperationCoordinator {
         operation_id: &str,
     ) -> Result<OperationPhase, StorageError> {
         // Check if active
-        if let Some(active) = self.queue.get_active().await? {
-            if active.operation_id == operation_id {
-                return Ok(OperationPhase::Active);
-            }
+        if let Some(active) = self.queue.get_active().await?
+            && active.operation_id == operation_id
+        {
+            return Ok(OperationPhase::Active);
         }
 
         // Check if pending

@@ -486,20 +486,19 @@ impl StartupRecoveryCoordinator {
                         error = %e,
                         "File still unreadable, removing external storage artifacts"
                     );
-                    if let Some(ref orch) = orchestrator {
-                        if let Err(remove_err) = orch
+                    if let Some(ref orch) = orchestrator
+                        && let Err(remove_err) = orch
                             .lock()
                             .await
                             .remove_file(Path::new(&classification.path))
                             .await
-                        {
-                            warn!(
-                                project_id = project_id,
-                                file = %classification.path,
-                                error = %remove_err,
-                                "Failed to remove external artifacts for resync file"
-                            );
-                        }
+                    {
+                        warn!(
+                            project_id = project_id,
+                            file = %classification.path,
+                            error = %remove_err,
+                            "Failed to remove external artifacts for resync file"
+                        );
                     }
                     processed += 1;
                 }

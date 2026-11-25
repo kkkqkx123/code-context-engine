@@ -129,10 +129,9 @@ impl TypeCompatibility {
         if let Some(level) = self
             .compatibility
             .get(&(actual.to_string(), expected.to_string()))
+            && *level == CompatibilityLevel::Coerce
         {
-            if *level == CompatibilityLevel::Coerce {
-                return CompatibilityLevel::Coerce;
-            }
+            return CompatibilityLevel::Coerce;
         }
         // numeric family heuristic
         let numeric = [
@@ -180,16 +179,16 @@ pub fn is_assignable_with_shapes(
         return true;
     }
     // Handle TypeShape::Param: check against shape bindings
-    if let TypeShape::Param(param_name) = expected {
-        if let Some(bound) = type_params.get(param_name) {
-            return actual == bound;
-        }
+    if let TypeShape::Param(param_name) = expected
+        && let Some(bound) = type_params.get(param_name)
+    {
+        return actual == bound;
     }
     // Handle generic params in Named form (legacy): if expected is a type param name
-    if let TypeShape::Named(exp_name) = expected {
-        if let Some(bound) = type_params.get(exp_name) {
-            return actual == bound;
-        }
+    if let TypeShape::Named(exp_name) = expected
+        && let Some(bound) = type_params.get(exp_name)
+    {
+        return actual == bound;
     }
     // Handle TypeShape::Param on actual side: a param matches if it's the same param
     if let (TypeShape::Param(a), TypeShape::Param(e)) = (actual, expected) {

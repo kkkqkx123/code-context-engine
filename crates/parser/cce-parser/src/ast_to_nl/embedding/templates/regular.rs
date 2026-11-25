@@ -67,10 +67,10 @@ impl GroupTemplate for RegularGroupTemplate {
     fn generate(&self, group: &EntityGroup) -> Vec<String> {
         // File documentation groups output their doc comment directly
         if group.group_type == GroupType::FileDocumentation {
-            if let Some(ref header) = group.header {
-                if let Some(ref doc) = header.doc_comment {
-                    return vec![doc.clone()];
-                }
+            if let Some(ref header) = group.header
+                && let Some(ref doc) = header.doc_comment
+            {
+                return vec![doc.clone()];
             }
             return Vec::new();
         }
@@ -152,21 +152,21 @@ impl RegularGroupTemplate {
         // targets belong to the group description. They sit right behind the
         // identity line, where a retriever reads them before the body
         // buries them under syntax.
-        if let Some(calls) = Self::call_targets_line(group.header.as_ref()) {
-            if !desc.contains(&calls) {
-                desc.push('\n');
-                desc.push_str(&calls);
-            }
+        if let Some(calls) = Self::call_targets_line(group.header.as_ref())
+            && !desc.contains(&calls)
+        {
+            desc.push('\n');
+            desc.push_str(&calls);
         }
 
         // Inheritance leads the description so it survives header
         // truncation in chunking (repeated headers are cut to a third of
         // the chunk limit; trailing lines would be lost for large docs).
-        if let Some(inheritance) = Self::inheritance_description(group) {
-            if !desc.contains(&inheritance) {
-                desc.push('\n');
-                desc.push_str(&inheritance);
-            }
+        if let Some(inheritance) = Self::inheritance_description(group)
+            && !desc.contains(&inheritance)
+        {
+            desc.push('\n');
+            desc.push_str(&inheritance);
         }
 
         // Long docstrings are emitted as a separate documentation segment by
@@ -176,20 +176,20 @@ impl RegularGroupTemplate {
             .as_ref()
             .and_then(|h| Self::clean_doc_comment(h.doc_comment.as_deref(), profile))
             .filter(|doc| estimate_tokens(doc) <= LONG_DOC_THRESHOLD);
-        if let Some(doc) = doc {
-            if !Self::is_text_duplicate(&desc, &doc) {
-                desc.push('\n');
-                desc.push_str(&doc);
-            }
+        if let Some(doc) = doc
+            && !Self::is_text_duplicate(&desc, &doc)
+        {
+            desc.push('\n');
+            desc.push_str(&doc);
         }
 
         // Surface method signatures early so class-level header chunks carry
         // more than a bare docstring and survive header truncation.
-        if let Some(signatures) = Self::method_signature_summary(group) {
-            if !desc.contains(&signatures) {
-                desc.push('\n');
-                desc.push_str(&signatures);
-            }
+        if let Some(signatures) = Self::method_signature_summary(group)
+            && !desc.contains(&signatures)
+        {
+            desc.push('\n');
+            desc.push_str(&signatures);
         }
 
         desc
@@ -363,11 +363,11 @@ impl RegularGroupTemplate {
         let mut member_desc =
             Self::semantic_entity_description(&display_name, effective_kind, Some(member));
 
-        if let Some(doc) = Self::clean_doc_comment(member.doc_comment.as_deref(), profile) {
-            if !Self::is_text_duplicate(&member_desc, &doc) {
-                member_desc.push('\n');
-                member_desc.push_str(&doc);
-            }
+        if let Some(doc) = Self::clean_doc_comment(member.doc_comment.as_deref(), profile)
+            && !Self::is_text_duplicate(&member_desc, &doc)
+        {
+            member_desc.push('\n');
+            member_desc.push_str(&doc);
         }
 
         if let Some(relation) = Self::variable_relation_description(member) {
@@ -562,10 +562,10 @@ impl RegularGroupTemplate {
                     return false;
                 }
                 // Skip boilerplate methods — they are compressed into group description
-                if let Some(role) = role_map.get(&member.id) {
-                    if role.is_boilerplate() {
-                        return false;
-                    }
+                if let Some(role) = role_map.get(&member.id)
+                    && role.is_boilerplate()
+                {
+                    return false;
                 }
                 true
             })
@@ -660,22 +660,20 @@ impl RegularGroupTemplate {
                 | EntityKind::Interface
                 | EntityKind::Enum
                 | EntityKind::Union
-        ) {
-            if let Some(bases) = entity
-                .and_then(|e| e.metadata.get(meta_keys::BASE_CLASSES))
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            {
-                base.push_str(&format!(" extends {}", bases));
-            }
+        ) && let Some(bases) = entity
+            .and_then(|e| e.metadata.get(meta_keys::BASE_CLASSES))
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            base.push_str(&format!(" extends {}", bases));
         }
 
         // For fields, include type information from parameters
         if matches!(kind, EntityKind::Field | EntityKind::Property) {
-            if let Some(entity) = entity {
-                if let Some((_, Some(field_type))) = entity.parameters.first() {
-                    base.push_str(&format!(": {}", field_type));
-                }
+            if let Some(entity) = entity
+                && let Some((_, Some(field_type))) = entity.parameters.first()
+            {
+                base.push_str(&format!(": {}", field_type));
             }
         } else if let Some(entity) = entity {
             // Build signature from structured parameters and return type for non-field entities

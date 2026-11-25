@@ -55,15 +55,15 @@ impl EmbeddingGenerator {
         // single summary chunk. Emitting the full doc causes the chunker to
         // split it into many near-identical chunks that dilute retrieval.
         if group.group_type == GroupType::FileDocumentation {
-            if let Some(ref header) = group.header {
-                if let Some(ref doc) = header.doc_comment {
-                    let cleaned = self.text_cleaner.clean(doc);
-                    let summary = self.file_doc_summary(&cleaned);
-                    if !summary.is_empty() {
-                        let profile = NoiseProfile::for_language(group.language);
-                        let summary = crate::ast_to_nl::common::filter_nl_noise(&summary, profile);
-                        return vec![self.truncate_to_word_limit(&summary)];
-                    }
+            if let Some(ref header) = group.header
+                && let Some(ref doc) = header.doc_comment
+            {
+                let cleaned = self.text_cleaner.clean(doc);
+                let summary = self.file_doc_summary(&cleaned);
+                if !summary.is_empty() {
+                    let profile = NoiseProfile::for_language(group.language);
+                    let summary = crate::ast_to_nl::common::filter_nl_noise(&summary, profile);
+                    return vec![self.truncate_to_word_limit(&summary)];
                 }
             }
             return Vec::new();
@@ -84,14 +84,14 @@ impl EmbeddingGenerator {
         // the cleaned doc only when it fits, so this segment exists only
         // when the template omitted it. Using raw text here would disagree
         // on borderline docs and emit the doc twice (cleaned + raw).
-        if let Some(ref header) = group.header {
-            if let Some(ref doc) = header.doc_comment {
-                let profile = NoiseProfile::for_language(group.language);
-                if let Some(cleaned) = Self::cleaned_doc_for_threshold(doc, profile) {
-                    if estimate_tokens(&cleaned) > LONG_DOC_THRESHOLD {
-                        descriptions.push(format!("Documentation of {}:\n{}", group.name, cleaned));
-                    }
-                }
+        if let Some(ref header) = group.header
+            && let Some(ref doc) = header.doc_comment
+        {
+            let profile = NoiseProfile::for_language(group.language);
+            if let Some(cleaned) = Self::cleaned_doc_for_threshold(doc, profile)
+                && estimate_tokens(&cleaned) > LONG_DOC_THRESHOLD
+            {
+                descriptions.push(format!("Documentation of {}:\n{}", group.name, cleaned));
             }
         }
 
@@ -148,17 +148,17 @@ impl EmbeddingGenerator {
         let group_name = group.name.as_str();
         let base = format!("{} {}", group_name, kind_name);
 
-        if let Some(header) = &group.header {
-            if let Some(ref doc) = header.doc_comment {
-                let cleaned = doc
-                    .lines()
-                    .map(|l| l.trim().trim_start_matches("///").trim())
-                    .filter(|l| !l.is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !cleaned.is_empty() {
-                    return format!("{}. {}", base, cleaned);
-                }
+        if let Some(header) = &group.header
+            && let Some(ref doc) = header.doc_comment
+        {
+            let cleaned = doc
+                .lines()
+                .map(|l| l.trim().trim_start_matches("///").trim())
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !cleaned.is_empty() {
+                return format!("{}. {}", base, cleaned);
             }
         }
         base

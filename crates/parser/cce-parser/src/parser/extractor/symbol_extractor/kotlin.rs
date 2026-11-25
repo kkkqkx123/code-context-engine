@@ -289,20 +289,20 @@ impl KotlinExtractor {
                         .map(|n| node_text(&n, source))
                 };
 
-                if let Some(name) = name {
-                    if !name.is_empty() {
-                        exports.push(StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name,
-                                original_name: None,
-                                kind: target_kind,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(node_to_span(node)),
-                        });
-                    }
+                if let Some(name) = name
+                    && !name.is_empty()
+                {
+                    exports.push(StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name,
+                            original_name: None,
+                            kind: target_kind,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(node_to_span(node)),
+                    });
                 }
             }
         }

@@ -183,21 +183,21 @@ fn bind_for_comprehension_generators(
                         }
                     }
                     let collection_expr = collection_expr.trim_end_matches('}').trim();
-                    if !collection_expr.is_empty() && ctx.get_variable_type(var_name).is_none() {
-                        if let Some(element_type) =
+                    if !collection_expr.is_empty()
+                        && ctx.get_variable_type(var_name).is_none()
+                        && let Some(element_type) =
                             resolve_collection_element_type(collection_expr, ctx)
-                        {
-                            ctx.add_variable_type(
-                                var_name.to_string(),
-                                TypeBinding {
-                                    type_name: type_shape_to_string(&element_type),
-                                    type_entity_id: None,
-                                    span,
-                                    origin: Some(super::types::InferenceOrigin::GenericInference),
-                                    shape: Some(element_type),
-                                },
-                            );
-                        }
+                    {
+                        ctx.add_variable_type(
+                            var_name.to_string(),
+                            TypeBinding {
+                                type_name: type_shape_to_string(&element_type),
+                                type_entity_id: None,
+                                span,
+                                origin: Some(super::types::InferenceOrigin::GenericInference),
+                                shape: Some(element_type),
+                            },
+                        );
                     }
                 }
             }
@@ -246,10 +246,10 @@ fn tokenize_for_comprehension(text: &str) -> Vec<String> {
 fn resolve_collection_element_type(expr: &str, ctx: &ScopedTypeContext) -> Option<TypeShape> {
     let expr = expr.trim();
     // Simple variable name — look up its type and extract element.
-    if is_scala_valid_ident(expr) {
-        if let Some(binding) = ctx.get_variable_type(expr) {
-            return extract_generic_element(&binding.type_name, &binding.shape);
-        }
+    if is_scala_valid_ident(expr)
+        && let Some(binding) = ctx.get_variable_type(expr)
+    {
+        return extract_generic_element(&binding.type_name, &binding.shape);
     }
     // Constructor call or collection factory: `List(...)`, `User(...)`.
     if let Some(args_start) = expr.find('(') {

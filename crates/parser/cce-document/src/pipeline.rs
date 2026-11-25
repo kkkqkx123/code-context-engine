@@ -413,16 +413,15 @@ impl PipelineRouter {
             self.process_with_degraded_flag(content, file_path, &effective, output_mode)?;
         let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config, file_path)?;
 
-        if chunks.is_empty() {
-            if let Some(parsed) =
+        if chunks.is_empty()
+            && let Some(parsed) =
                 self.process_with_plugin_list(content, file_path, &effective, output_mode, &below)?
-            {
-                let (mut chunks, summary) = parsed;
-                let fallback =
-                    inject_terminology(&mut chunks, vocabulary.as_deref(), config, file_path)?;
-                stats.absorb(fallback);
-                return Ok((chunks, summary, degraded, stats));
-            }
+        {
+            let (mut chunks, summary) = parsed;
+            let fallback =
+                inject_terminology(&mut chunks, vocabulary.as_deref(), config, file_path)?;
+            stats.absorb(fallback);
+            return Ok((chunks, summary, degraded, stats));
         }
         Ok((chunks, summary, degraded, stats))
     }

@@ -29,7 +29,7 @@ pub trait MetadataProjectScope: Clone {
     fn scope_to_project(&self, project_id: i64) -> Result<Self, StorageError>;
 }
 
-impl<T: MetadataProjectScope + ?Sized> MetadataProjectScope for std::sync::Arc<T> {
+impl<T: MetadataProjectScope> MetadataProjectScope for std::sync::Arc<T> {
     fn scope_to_project(&self, project_id: i64) -> Result<Self, StorageError> {
         Ok(std::sync::Arc::new(T::scope_to_project(
             self.as_ref(),

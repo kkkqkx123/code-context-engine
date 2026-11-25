@@ -77,27 +77,27 @@ impl PythonLibraryHandler {
 
         // 1. Parse __init__.py if present
         let init_path = package_path.join("__init__.py");
-        if init_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&init_path) {
-                if let Some(all_exports) = Self::extract_all_list(&content) {
-                    for name in &all_exports {
-                        self.init_exports.insert(name.clone());
-                        info.exports
-                            .push(ExportedSymbol::new(name.clone(), EntityKind::Function));
-                    }
+        if init_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&init_path)
+        {
+            if let Some(all_exports) = Self::extract_all_list(&content) {
+                for name in &all_exports {
+                    self.init_exports.insert(name.clone());
+                    info.exports
+                        .push(ExportedSymbol::new(name.clone(), EntityKind::Function));
                 }
-                if self.init_exports.is_empty() {
-                    // No __all__: fall back to public symbols in __init__.py
-                    for symbol in Self::extract_public_symbols(&content) {
-                        if self.init_exports.insert(symbol.clone()) {
-                            info.exports
-                                .push(ExportedSymbol::new(symbol, EntityKind::Function));
-                        }
-                    }
-                }
-                // Record submodules imported in __init__.py
-                info.dependencies.extend(Self::extract_imports(&content));
             }
+            if self.init_exports.is_empty() {
+                // No __all__: fall back to public symbols in __init__.py
+                for symbol in Self::extract_public_symbols(&content) {
+                    if self.init_exports.insert(symbol.clone()) {
+                        info.exports
+                            .push(ExportedSymbol::new(symbol, EntityKind::Function));
+                    }
+                }
+            }
+            // Record submodules imported in __init__.py
+            info.dependencies.extend(Self::extract_imports(&content));
         }
 
         // 2. Scan *.py files
@@ -310,12 +310,11 @@ fn collect_python_files(dir: &Path, stubs_only: bool) -> Vec<PathBuf> {
                 if let Ok(sub_entries) = std::fs::read_dir(&path) {
                     for sub in sub_entries.flatten() {
                         let sub_path = sub.path();
-                        if sub_path.is_file() {
-                            if let Some(ext) = sub_path.extension().and_then(|e| e.to_str()) {
-                                if ext == "py" {
-                                    files.push(sub_path);
-                                }
-                            }
+                        if sub_path.is_file()
+                            && let Some(ext) = sub_path.extension().and_then(|e| e.to_str())
+                            && ext == "py"
+                        {
+                            files.push(sub_path);
                         }
                     }
                 }

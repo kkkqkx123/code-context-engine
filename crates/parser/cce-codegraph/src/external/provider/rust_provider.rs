@@ -103,16 +103,16 @@ fn discover_cargo_target(package_name: &str, project_root: &Path) -> Option<Pack
         if let Ok(entries) = std::fs::read_dir(&dep_dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with(&format!("{package_name}-")) && name.ends_with(".d") {
-                    if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                        if let Some(source_path) = parse_cargo_dep_file(&content, package_name) {
-                            return Some(PackageDiscovery {
-                                package_name: package_name.to_string(),
-                                path: source_path,
-                                version: None,
-                            });
-                        }
-                    }
+                if name.starts_with(&format!("{package_name}-"))
+                    && name.ends_with(".d")
+                    && let Ok(content) = std::fs::read_to_string(entry.path())
+                    && let Some(source_path) = parse_cargo_dep_file(&content, package_name)
+                {
+                    return Some(PackageDiscovery {
+                        package_name: package_name.to_string(),
+                        path: source_path,
+                        version: None,
+                    });
                 }
             }
         }
@@ -161,21 +161,20 @@ fn discover_cargo_path_dep(package_name: &str, project_root: &Path) -> Option<Pa
     let content = std::fs::read_to_string(&cargo_toml).ok()?;
     let manifest: toml::Value = toml::from_str(&content).ok()?;
 
-    if let Some(deps) = manifest.get("dependencies") {
-        if let Some(dep) = deps.get(package_name) {
-            if let Some(path) = dep.get("path").and_then(|p| p.as_str()) {
-                let dep_path = project_root.join(path);
-                if dep_path.is_dir() && dep_path.join("Cargo.toml").is_file() {
-                    return Some(PackageDiscovery {
-                        package_name: package_name.to_string(),
-                        path: dep_path,
-                        version: dep
-                            .get("version")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string()),
-                    });
-                }
-            }
+    if let Some(deps) = manifest.get("dependencies")
+        && let Some(dep) = deps.get(package_name)
+        && let Some(path) = dep.get("path").and_then(|p| p.as_str())
+    {
+        let dep_path = project_root.join(path);
+        if dep_path.is_dir() && dep_path.join("Cargo.toml").is_file() {
+            return Some(PackageDiscovery {
+                package_name: package_name.to_string(),
+                path: dep_path,
+                version: dep
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            });
         }
     }
 

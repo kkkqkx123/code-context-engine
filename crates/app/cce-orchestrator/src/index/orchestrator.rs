@@ -335,13 +335,13 @@ impl IndexOrchestrator {
         self.llm_client = Some(llm_client);
         self.chat_config = Some(chat_config);
         // Rebuild strategies that can use the newly available model client.
-        if let Some(config) = self.summary_config.clone() {
-            if matches!(
+        if let Some(config) = self.summary_config.clone()
+            && matches!(
                 config.strategy,
                 SummaryStrategy::Auto | SummaryStrategy::ModelEnhanced
-            ) {
-                self.summary_generator = self.build_generator(config);
-            }
+            )
+        {
+            self.summary_generator = self.build_generator(config);
         }
         self
     }
@@ -356,17 +356,16 @@ impl IndexOrchestrator {
         if matches!(
             config.strategy,
             SummaryStrategy::Auto | SummaryStrategy::ModelEnhanced
-        ) {
-            if let (Some(client), Some(chat_cfg)) = (&self.llm_client, &self.chat_config) {
-                let mut generator =
-                    ModelEnhancedGenerator::with_config(client.clone(), chat_cfg.clone(), config);
+        ) && let (Some(client), Some(chat_cfg)) = (&self.llm_client, &self.chat_config)
+        {
+            let mut generator =
+                ModelEnhancedGenerator::with_config(client.clone(), chat_cfg.clone(), config);
 
-                if let Some(metrics) = summary_metrics.as_ref().cloned() {
-                    generator = generator.with_metrics(metrics);
-                }
-
-                return Box::new(generator);
+            if let Some(metrics) = summary_metrics.as_ref().cloned() {
+                generator = generator.with_metrics(metrics);
             }
+
+            return Box::new(generator);
         }
         let mut generator = RuleBasedGenerator::with_config(config);
         if let Some(metrics) = summary_metrics {

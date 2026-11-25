@@ -477,20 +477,19 @@ pub fn infer_variable_patterns(file: &cce_types::ParsedFile, ctx: &mut ScopedTyp
                             None => continue,
                         }
                     }
-                    if let TypeShape::Named(type_name) = &shape {
-                        if let Some(members) = named_type_members(file, type_name) {
-                            bind_member_names(ctx, file, entity, &members, &parts);
-                            continue;
-                        }
+                    if let TypeShape::Named(type_name) = &shape
+                        && let Some(members) = named_type_members(file, type_name)
+                    {
+                        bind_member_names(ctx, file, entity, &members, &parts);
+                        continue;
                     }
-                    if let Some(nested) = nested_pattern_parts(file, entity) {
-                        if nested
+                    if let Some(nested) = nested_pattern_parts(file, entity)
+                        && nested
                             .iter()
                             .any(|part| matches!(part, NestedPatternPart::Group(_)))
-                        {
-                            ctx.add_nested_destructuring_binding(&nested, &shape, entity.span);
-                            continue;
-                        }
+                    {
+                        ctx.add_nested_destructuring_binding(&nested, &shape, entity.span);
+                        continue;
                     }
                     let pattern = crate::type_inference::types::Pattern::Tuple(parts.clone());
                     ctx.add_pattern_match_binding(&pattern, &shape, entity.span);
@@ -499,11 +498,11 @@ pub fn infer_variable_patterns(file: &cce_types::ParsedFile, ctx: &mut ScopedTyp
                     }
                     continue;
                 }
-                if let Some(init_type) = entity.metadata.get("constructor_type") {
-                    if let Some(members) = named_type_members(file, init_type.trim()) {
-                        bind_member_names(ctx, file, entity, &members, &parts);
-                        continue;
-                    }
+                if let Some(init_type) = entity.metadata.get("constructor_type")
+                    && let Some(members) = named_type_members(file, init_type.trim())
+                {
+                    bind_member_names(ctx, file, entity, &members, &parts);
+                    continue;
                 }
                 let generic = TypeShape::Generic {
                     base: "Tuple".to_string(),
@@ -657,24 +656,23 @@ pub fn infer_variable_patterns(file: &cce_types::ParsedFile, ctx: &mut ScopedTyp
                     }
                 }
             }
-        } else if entity.name.trim().starts_with('{')
-            || entity.metadata.contains_key("pattern_struct")
+        } else if (entity.name.trim().starts_with('{')
+            || entity.metadata.contains_key("pattern_struct"))
+            && let Some(fields_str) = entity.metadata.get("pattern_fields")
         {
-            if let Some(fields_str) = entity.metadata.get("pattern_fields") {
-                let fields: Vec<String> = fields_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if !fields.is_empty() {
-                    let shape = entity
-                        .metadata
-                        .get("source_type")
-                        .and_then(|s| parse_type_shape(s, file.language))
-                        .unwrap_or(TypeShape::Named("unknown".to_string()));
-                    let pattern = crate::type_inference::types::Pattern::Struct(fields);
-                    ctx.add_pattern_match_binding(&pattern, &shape, entity.span);
-                }
+            let fields: Vec<String> = fields_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !fields.is_empty() {
+                let shape = entity
+                    .metadata
+                    .get("source_type")
+                    .and_then(|s| parse_type_shape(s, file.language))
+                    .unwrap_or(TypeShape::Named("unknown".to_string()));
+                let pattern = crate::type_inference::types::Pattern::Struct(fields);
+                ctx.add_pattern_match_binding(&pattern, &shape, entity.span);
             }
         }
     }

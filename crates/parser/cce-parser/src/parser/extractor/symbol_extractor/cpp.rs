@@ -203,10 +203,10 @@ impl CppExtractor {
     /// Extract function name from a declarator node
     fn extract_function_name(declarator: &tree_sitter::Node, source: &str) -> String {
         // Check if this is a function declarator
-        if declarator.kind() == "function_declarator" {
-            if let Some(inner_declarator) = declarator.child_by_field_name("declarator") {
-                return Self::extract_function_name(&inner_declarator, source);
-            }
+        if declarator.kind() == "function_declarator"
+            && let Some(inner_declarator) = declarator.child_by_field_name("declarator")
+        {
+            return Self::extract_function_name(&inner_declarator, source);
         }
 
         // Check for identifier
@@ -523,22 +523,22 @@ impl SymbolExtractor for CppExtractor {
                             });
                         }
                     }
-                } else if child.kind() == "function_definition" {
-                    if let Some(declarator) = child.child_by_field_name("declarator") {
-                        let func_name = Self::extract_function_name(&declarator, source);
-                        if !func_name.is_empty() {
-                            exports.push(StandardizedExport {
-                                kind: ExportKind::Named,
-                                target: ExportTarget {
-                                    name: func_name,
-                                    original_name: None,
-                                    kind: TargetKind::Function,
-                                    source_module: None,
-                                },
-                                is_reexport: false,
-                                span: Some(node_to_span(&template_node)),
-                            });
-                        }
+                } else if child.kind() == "function_definition"
+                    && let Some(declarator) = child.child_by_field_name("declarator")
+                {
+                    let func_name = Self::extract_function_name(&declarator, source);
+                    if !func_name.is_empty() {
+                        exports.push(StandardizedExport {
+                            kind: ExportKind::Named,
+                            target: ExportTarget {
+                                name: func_name,
+                                original_name: None,
+                                kind: TargetKind::Function,
+                                source_module: None,
+                            },
+                            is_reexport: false,
+                            span: Some(node_to_span(&template_node)),
+                        });
                     }
                 }
             }
@@ -608,22 +608,22 @@ impl SymbolExtractor for CppExtractor {
         for export_node in find_children_by_kind(&root_node, "export_declaration") {
             // Check for module export: export module MyModule;
             for child in export_node.children(&mut export_node.walk()) {
-                if child.kind() == "module_declaration" {
-                    if let Some(name) = child.child_by_field_name("name") {
-                        let module_name = node_text(&name, source);
-                        if !module_name.is_empty() {
-                            exports.push(StandardizedExport {
-                                kind: ExportKind::Named,
-                                target: ExportTarget {
-                                    name: module_name,
-                                    original_name: None,
-                                    kind: TargetKind::Module,
-                                    source_module: None,
-                                },
-                                is_reexport: false,
-                                span: Some(node_to_span(&export_node)),
-                            });
-                        }
+                if child.kind() == "module_declaration"
+                    && let Some(name) = child.child_by_field_name("name")
+                {
+                    let module_name = node_text(&name, source);
+                    if !module_name.is_empty() {
+                        exports.push(StandardizedExport {
+                            kind: ExportKind::Named,
+                            target: ExportTarget {
+                                name: module_name,
+                                original_name: None,
+                                kind: TargetKind::Module,
+                                source_module: None,
+                            },
+                            is_reexport: false,
+                            span: Some(node_to_span(&export_node)),
+                        });
                     }
                 }
             }

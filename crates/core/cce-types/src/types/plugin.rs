@@ -764,11 +764,11 @@ impl PluginImport {
                 standardized.is_wildcard = self.is_wildcard;
                 standardized.is_relative = is_relative;
                 let mut target = ImportTarget::new(symbol.clone(), target_kind);
-                if index == 0 {
-                    if let Some(alias) = alias_for_single.as_deref() {
-                        target = ImportTarget::new(alias, target_kind).with_original_name(symbol);
-                        standardized.alias = Some(alias.to_string());
-                    }
+                if index == 0
+                    && let Some(alias) = alias_for_single.as_deref()
+                {
+                    target = ImportTarget::new(alias, target_kind).with_original_name(symbol);
+                    standardized.alias = Some(alias.to_string());
                 }
                 standardized.target = target;
                 standardized
@@ -825,10 +825,10 @@ impl PluginExport {
         {
             export = export.with_reexport();
         }
-        if let Some(location) = self.location {
-            if let Some(span) = location.span {
-                export = export.with_span(span);
-            }
+        if let Some(location) = self.location
+            && let Some(span) = location.span
+        {
+            export = export.with_span(span);
         }
         export
     }

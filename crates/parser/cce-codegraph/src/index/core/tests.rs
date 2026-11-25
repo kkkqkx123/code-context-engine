@@ -394,10 +394,12 @@ fn streamed_artifact_matches_canonical_snapshot_fingerprint() {
     let first = create_test_function_entity(1, "caller");
     let second = create_test_function_entity(2, "callee");
     for (entity, path) in [(&first, "src/a.rs"), (&second, "src/b.rs")] {
-        let mut info = FileInfo::default();
-        info.id = path.to_string();
-        info.path = path.to_string();
-        info.language = "rust".to_string();
+        let info = FileInfo {
+            id: path.to_string(),
+            path: path.to_string(),
+            language: "rust".to_string(),
+            ..FileInfo::default()
+        };
         index.add_file(info);
         index.add_function_with_path(entity.id, entity.clone(), path.to_string());
         index.register_symbol_key(path, &entity.name, entity, entity.id);

@@ -76,10 +76,10 @@ impl BuildConfigParser {
 
             for req in reqs {
                 let req = req.trim().trim_matches('"').trim_matches('\'');
-                if !req.is_empty() {
-                    if let Some(name) = parse_python_requirement(req) {
-                        dependencies.insert(UntypedDependency::new(name, "external"));
-                    }
+                if !req.is_empty()
+                    && let Some(name) = parse_python_requirement(req)
+                {
+                    dependencies.insert(UntypedDependency::new(name, "external"));
                 }
             }
         }

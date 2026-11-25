@@ -92,35 +92,31 @@ impl GroupTracker {
         // Get from sequence (predecessor/successor)
         if let Some(pos) = self.group_sequence.iter().position(|id| id == group_id) {
             // Predecessor
-            if pos > 0 {
-                if let Some(prev_id) = self.group_sequence.get(pos - 1) {
-                    if !relations
-                        .iter()
-                        .any(|r| r.group_id.as_str() == prev_id.as_str())
-                    {
-                        relations.push(GroupRelation {
-                            group_id: prev_id.to_string(),
-                            relation_type: GroupRelationType::Predecessor,
-                            strength: 0.8,
-                        });
-                    }
-                }
+            if pos > 0
+                && let Some(prev_id) = self.group_sequence.get(pos - 1)
+                && !relations
+                    .iter()
+                    .any(|r| r.group_id.as_str() == prev_id.as_str())
+            {
+                relations.push(GroupRelation {
+                    group_id: prev_id.to_string(),
+                    relation_type: GroupRelationType::Predecessor,
+                    strength: 0.8,
+                });
             }
 
             // Successor
-            if pos + 1 < self.group_sequence.len() {
-                if let Some(next_id) = self.group_sequence.get(pos + 1) {
-                    if !relations
-                        .iter()
-                        .any(|r| r.group_id.as_str() == next_id.as_str())
-                    {
-                        relations.push(GroupRelation {
-                            group_id: next_id.to_string(),
-                            relation_type: GroupRelationType::Successor,
-                            strength: 0.8,
-                        });
-                    }
-                }
+            if pos + 1 < self.group_sequence.len()
+                && let Some(next_id) = self.group_sequence.get(pos + 1)
+                && !relations
+                    .iter()
+                    .any(|r| r.group_id.as_str() == next_id.as_str())
+            {
+                relations.push(GroupRelation {
+                    group_id: next_id.to_string(),
+                    relation_type: GroupRelationType::Successor,
+                    strength: 0.8,
+                });
             }
         }
 

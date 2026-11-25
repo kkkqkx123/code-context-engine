@@ -421,12 +421,11 @@ pub fn payload_matches_filter(payload: &Payload, filter: &SearchFilter) -> bool 
             return false;
         }
     }
-    if let Some(ref categories) = filter.exclude_categories {
-        if let Some(category) = payload.category
-            && categories.contains(&category)
-        {
-            return false;
-        }
+    if let Some(ref categories) = filter.exclude_categories
+        && let Some(category) = payload.category
+        && categories.contains(&category)
+    {
+        return false;
     }
     if filter.exclude_test && payload.test == Some(true) {
         return false;

@@ -312,24 +312,22 @@ impl SymbolExtractor for RustExtractor {
                 .children(&mut root_node.walk())
                 .any(|child| child.kind() == "visibility_modifier");
 
-            if is_pub {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let fn_name = node_text(&name, source);
-                    if !fn_name.is_empty() {
-                        let span = node_to_span(&node);
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: fn_name,
-                                original_name: None,
-                                kind: TargetKind::Function,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(span),
-                        };
-                        exports.push(export);
-                    }
+            if is_pub && let Some(name) = node.child_by_field_name("name") {
+                let fn_name = node_text(&name, source);
+                if !fn_name.is_empty() {
+                    let span = node_to_span(&node);
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: fn_name,
+                            original_name: None,
+                            kind: TargetKind::Function,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(span),
+                    };
+                    exports.push(export);
                 }
             }
         }
@@ -340,24 +338,22 @@ impl SymbolExtractor for RustExtractor {
                 .children(&mut root_node.walk())
                 .any(|child| child.kind() == "visibility_modifier");
 
-            if is_pub {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let struct_name = node_text(&name, source);
-                    if !struct_name.is_empty() {
-                        let span = node_to_span(&node);
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: struct_name,
-                                original_name: None,
-                                kind: TargetKind::Class,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(span),
-                        };
-                        exports.push(export);
-                    }
+            if is_pub && let Some(name) = node.child_by_field_name("name") {
+                let struct_name = node_text(&name, source);
+                if !struct_name.is_empty() {
+                    let span = node_to_span(&node);
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: struct_name,
+                            original_name: None,
+                            kind: TargetKind::Class,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(span),
+                    };
+                    exports.push(export);
                 }
             }
         }
@@ -368,24 +364,22 @@ impl SymbolExtractor for RustExtractor {
                 .children(&mut root_node.walk())
                 .any(|child| child.kind() == "visibility_modifier");
 
-            if is_pub {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let enum_name = node_text(&name, source);
-                    if !enum_name.is_empty() {
-                        let span = node_to_span(&node);
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: enum_name,
-                                original_name: None,
-                                kind: TargetKind::Other,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(span),
-                        };
-                        exports.push(export);
-                    }
+            if is_pub && let Some(name) = node.child_by_field_name("name") {
+                let enum_name = node_text(&name, source);
+                if !enum_name.is_empty() {
+                    let span = node_to_span(&node);
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: enum_name,
+                            original_name: None,
+                            kind: TargetKind::Other,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(span),
+                    };
+                    exports.push(export);
                 }
             }
         }
@@ -396,24 +390,22 @@ impl SymbolExtractor for RustExtractor {
                 .children(&mut root_node.walk())
                 .any(|child| child.kind() == "visibility_modifier");
 
-            if is_pub {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let trait_name = node_text(&name, source);
-                    if !trait_name.is_empty() {
-                        let span = node_to_span(&node);
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: trait_name,
-                                original_name: None,
-                                kind: TargetKind::Interface,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(span),
-                        };
-                        exports.push(export);
-                    }
+            if is_pub && let Some(name) = node.child_by_field_name("name") {
+                let trait_name = node_text(&name, source);
+                if !trait_name.is_empty() {
+                    let span = node_to_span(&node);
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: trait_name,
+                            original_name: None,
+                            kind: TargetKind::Interface,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(span),
+                    };
+                    exports.push(export);
                 }
             }
         }
@@ -424,24 +416,22 @@ impl SymbolExtractor for RustExtractor {
                 .children(&mut root_node.walk())
                 .any(|child| child.kind() == "visibility_modifier");
 
-            if is_pub {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let type_name = node_text(&name, source);
-                    if !type_name.is_empty() {
-                        let span = node_to_span(&node);
-                        let export = StandardizedExport {
-                            kind: ExportKind::Named,
-                            target: ExportTarget {
-                                name: type_name,
-                                original_name: None,
-                                kind: TargetKind::Other,
-                                source_module: None,
-                            },
-                            is_reexport: false,
-                            span: Some(span),
-                        };
-                        exports.push(export);
-                    }
+            if is_pub && let Some(name) = node.child_by_field_name("name") {
+                let type_name = node_text(&name, source);
+                if !type_name.is_empty() {
+                    let span = node_to_span(&node);
+                    let export = StandardizedExport {
+                        kind: ExportKind::Named,
+                        target: ExportTarget {
+                            name: type_name,
+                            original_name: None,
+                            kind: TargetKind::Other,
+                            source_module: None,
+                        },
+                        is_reexport: false,
+                        span: Some(span),
+                    };
+                    exports.push(export);
                 }
             }
         }
@@ -452,91 +442,89 @@ impl SymbolExtractor for RustExtractor {
                 .children(&mut root_node.walk())
                 .any(|child| child.kind() == "visibility_modifier");
 
-            if is_pub {
-                if let Some(argument) = node.child_by_field_name("argument") {
-                    let path = node_text(&argument, source);
-                    if !path.is_empty() {
-                        let span = node_to_span(&node);
+            if is_pub && let Some(argument) = node.child_by_field_name("argument") {
+                let path = node_text(&argument, source);
+                if !path.is_empty() {
+                    let span = node_to_span(&node);
 
-                        // Handle different use patterns
-                        if path.contains(" as ") {
-                            // pub use module::Item as Alias;
-                            let parts: Vec<&str> = path.split(" as ").collect();
-                            let original_path = parts.first().map(|s| s.trim()).unwrap_or("");
-                            let alias = parts.get(1).map(|s| s.trim()).unwrap_or("");
+                    // Handle different use patterns
+                    if path.contains(" as ") {
+                        // pub use module::Item as Alias;
+                        let parts: Vec<&str> = path.split(" as ").collect();
+                        let original_path = parts.first().map(|s| s.trim()).unwrap_or("");
+                        let alias = parts.get(1).map(|s| s.trim()).unwrap_or("");
 
-                            let export = StandardizedExport {
-                                kind: ExportKind::Named,
-                                target: ExportTarget {
-                                    name: alias.to_string(),
-                                    original_name: Some(original_path.to_string()),
-                                    kind: TargetKind::Other,
-                                    source_module: Some(original_path.to_string()),
-                                },
-                                is_reexport: true,
-                                span: Some(span),
-                            };
-                            exports.push(export);
-                        } else if path.contains("::{") {
-                            // pub use module::{Item1, Item2};
-                            // Extract items from the braces
-                            if let Some(start) = path.find("::{") {
-                                let module_path = &path[..start];
-                                if let Some(end) = path.find('}') {
-                                    let items_str = &path[start + 3..end];
-                                    for item in items_str.split(',') {
-                                        let item = item.trim();
-                                        if !item.is_empty() && item != "self" {
-                                            let export = StandardizedExport {
-                                                kind: ExportKind::Named,
-                                                target: ExportTarget {
-                                                    name: item.to_string(),
-                                                    original_name: None,
-                                                    kind: TargetKind::Other,
-                                                    source_module: Some(format!(
-                                                        "{}::{}",
-                                                        module_path, item
-                                                    )),
-                                                },
-                                                is_reexport: true,
-                                                span: Some(span),
-                                            };
-                                            exports.push(export);
-                                        }
+                        let export = StandardizedExport {
+                            kind: ExportKind::Named,
+                            target: ExportTarget {
+                                name: alias.to_string(),
+                                original_name: Some(original_path.to_string()),
+                                kind: TargetKind::Other,
+                                source_module: Some(original_path.to_string()),
+                            },
+                            is_reexport: true,
+                            span: Some(span),
+                        };
+                        exports.push(export);
+                    } else if path.contains("::{") {
+                        // pub use module::{Item1, Item2};
+                        // Extract items from the braces
+                        if let Some(start) = path.find("::{") {
+                            let module_path = &path[..start];
+                            if let Some(end) = path.find('}') {
+                                let items_str = &path[start + 3..end];
+                                for item in items_str.split(',') {
+                                    let item = item.trim();
+                                    if !item.is_empty() && item != "self" {
+                                        let export = StandardizedExport {
+                                            kind: ExportKind::Named,
+                                            target: ExportTarget {
+                                                name: item.to_string(),
+                                                original_name: None,
+                                                kind: TargetKind::Other,
+                                                source_module: Some(format!(
+                                                    "{}::{}",
+                                                    module_path, item
+                                                )),
+                                            },
+                                            is_reexport: true,
+                                            span: Some(span),
+                                        };
+                                        exports.push(export);
                                     }
                                 }
                             }
-                        } else if path.contains("::*") {
-                            // pub use module::*; - wildcard re-export
-                            let source_path = path.trim_end_matches("::*");
-                            let export = StandardizedExport {
-                                kind: ExportKind::Wildcard,
-                                target: ExportTarget {
-                                    name: "*".to_string(),
-                                    original_name: None,
-                                    kind: TargetKind::Other,
-                                    source_module: Some(source_path.to_string()),
-                                },
-                                is_reexport: true,
-                                span: Some(span),
-                            };
-                            exports.push(export);
-                        } else {
-                            // pub use module::Item;
-                            let item_name = path.split("::").last().unwrap_or(&path);
-                            let export = StandardizedExport {
-                                kind: ExportKind::Named,
-                                target: ExportTarget {
-                                    name: item_name.to_string(),
-                                    original_name: None,
-                                    kind: TargetKind::Other,
-                                    source_module: Some(path.to_string()),
-                                },
-                                is_reexport: true,
-                                span: Some(span),
-                            };
-                            exports.push(export);
                         }
+                    } else if path.contains("::*") {
+                        // pub use module::*; - wildcard re-export
+                        let source_path = path.trim_end_matches("::*");
+                        let export = StandardizedExport {
+                            kind: ExportKind::Wildcard,
+                            target: ExportTarget {
+                                name: "*".to_string(),
+                                original_name: None,
+                                kind: TargetKind::Other,
+                                source_module: Some(source_path.to_string()),
+                            },
+                            is_reexport: true,
+                            span: Some(span),
+                        };
+                        exports.push(export);
+                    } else {
+                        // pub use module::Item;
+                        let item_name = path.split("::").last().unwrap_or(&path);
+                        let export = StandardizedExport {
+                            kind: ExportKind::Named,
+                            target: ExportTarget {
+                                name: item_name.to_string(),
+                                original_name: None,
+                                kind: TargetKind::Other,
+                                source_module: Some(path.to_string()),
+                            },
+                            is_reexport: true,
+                            span: Some(span),
+                        };
+                        exports.push(export);
                     }
                 }
             }

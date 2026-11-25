@@ -197,13 +197,13 @@ impl TypeMemberIndex {
         kind: EntityKind,
         visibility: Visibility,
     ) {
-        if let Some(entry) = self.types.get_mut(key) {
-            if entry.is_placeholder {
-                entry.entity_id = entity_id;
-                entry.kind = kind;
-                entry.visibility = visibility;
-                entry.is_placeholder = false;
-            }
+        if let Some(entry) = self.types.get_mut(key)
+            && entry.is_placeholder
+        {
+            entry.entity_id = entity_id;
+            entry.kind = kind;
+            entry.visibility = visibility;
+            entry.is_placeholder = false;
         }
     }
 
@@ -214,10 +214,10 @@ impl TypeMemberIndex {
     pub fn get_type(&self, qualified: &str) -> Option<&TypeEntry> {
         let keys = self.qualified_index.get(qualified)?;
         for k in keys {
-            if let Some(e) = self.types.get(k) {
-                if !e.is_placeholder {
-                    return Some(e);
-                }
+            if let Some(e) = self.types.get(k)
+                && !e.is_placeholder
+            {
+                return Some(e);
             }
         }
         for k in keys {

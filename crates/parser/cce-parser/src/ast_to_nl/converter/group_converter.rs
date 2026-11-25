@@ -202,23 +202,21 @@ impl super::AstToNlConverter {
             // Skip standalone groups for low-level local variables.
             // Top-level variables (file scope exports, seed data, config
             // assignments) carry retrieval value and must be kept.
-            if group.members.is_empty() {
-                if let Some(ref header) = group.header {
-                    if matches!(header.kind, EntityKind::Variable)
-                        && !Self::is_top_level_variable_group(group, header)
-                    {
-                        continue;
-                    }
-                }
+            if group.members.is_empty()
+                && let Some(ref header) = group.header
+                && matches!(header.kind, EntityKind::Variable)
+                && !Self::is_top_level_variable_group(group, header)
+            {
+                continue;
             }
 
             // Skip groups whose header has already been converted by a previous group.
             // This prevents file documentation from appearing in both a merged group
             // and a standalone file_doc group.
-            if let Some(ref header) = group.header {
-                if converted_entity_ids.contains(&header.id) {
-                    continue;
-                }
+            if let Some(ref header) = group.header
+                && converted_entity_ids.contains(&header.id)
+            {
+                continue;
             }
 
             let conversions = self.convert_entity_group(
@@ -335,10 +333,10 @@ impl super::AstToNlConverter {
         let mut parent_to_children: std::collections::HashMap<usize, Vec<usize>> =
             std::collections::HashMap::new();
         for (i, gc) in group_conversions.iter().enumerate() {
-            if let Some(ref parent_id) = gc.group.parent_group_id {
-                if let Some(&parent_idx) = conv_index.get(parent_id.as_str()) {
-                    parent_to_children.entry(parent_idx).or_default().push(i);
-                }
+            if let Some(ref parent_id) = gc.group.parent_group_id
+                && let Some(&parent_idx) = conv_index.get(parent_id.as_str())
+            {
+                parent_to_children.entry(parent_idx).or_default().push(i);
             }
         }
 
@@ -402,44 +400,42 @@ impl super::AstToNlConverter {
             stdlib_names,
         } in parent_enrichments
         {
-            if let Some(ref mut header) = group_conversions[parent_idx].header_conversion {
-                if let Some(ref mut emb_text) = header.embedding_text {
-                    if !emb_text.is_empty() {
-                        // Append stdlib summary as a natural-language "Implements" line
-                        let trait_names: Vec<&String> = stdlib_names
+            if let Some(ref mut header) = group_conversions[parent_idx].header_conversion
+                && let Some(ref mut emb_text) = header.embedding_text
+                && !emb_text.is_empty()
+            {
+                // Append stdlib summary as a natural-language "Implements" line
+                let trait_names: Vec<&String> = stdlib_names
+                    .iter()
+                    .filter(|name| {
+                        // Drop structural import blocks (e.g. `core::{...}`) and
+                        // qualified paths — keep simple trait identifiers only.
+                        !name.contains('{') && !name.contains("::")
+                    })
+                    .collect();
+                let mut seen = HashSet::new();
+                let unique_names: Vec<&str> = trait_names
+                    .into_iter()
+                    .filter(|name| seen.insert(name.as_str()))
+                    .map(|name| name.as_str())
+                    .collect();
+                if !unique_names.is_empty() {
+                    emb_text.push_str(&format!("\nImplements: {}.", unique_names.join(", ")));
+                }
+                // Append non-stdlib children with their NL descriptions
+                let non_stdlib_lines: Vec<&String> = child_doc_lines
+                    .iter()
+                    .filter(|line| {
+                        !stdlib_names
                             .iter()
-                            .filter(|name| {
-                                // Drop structural import blocks (e.g. `core::{...}`) and
-                                // qualified paths — keep simple trait identifiers only.
-                                !name.contains('{') && !name.contains("::")
-                            })
-                            .collect();
-                        let mut seen = HashSet::new();
-                        let unique_names: Vec<&str> = trait_names
-                            .into_iter()
-                            .filter(|name| seen.insert(name.as_str()))
-                            .map(|name| name.as_str())
-                            .collect();
-                        if !unique_names.is_empty() {
-                            emb_text
-                                .push_str(&format!("\nImplements: {}.", unique_names.join(", ")));
-                        }
-                        // Append non-stdlib children with their NL descriptions
-                        let non_stdlib_lines: Vec<&String> = child_doc_lines
-                            .iter()
-                            .filter(|line| {
-                                !stdlib_names
-                                    .iter()
-                                    .any(|s| line.starts_with(&format!("{}:", s)))
-                            })
-                            .collect();
-                        if !non_stdlib_lines.is_empty() {
-                            emb_text.push_str("\n\nContains:");
-                            for line in non_stdlib_lines {
-                                emb_text.push_str("\n- ");
-                                emb_text.push_str(line);
-                            }
-                        }
+                            .any(|s| line.starts_with(&format!("{}:", s)))
+                    })
+                    .collect();
+                if !non_stdlib_lines.is_empty() {
+                    emb_text.push_str("\n\nContains:");
+                    for line in non_stdlib_lines {
+                        emb_text.push_str("\n- ");
+                        emb_text.push_str(line);
                     }
                 }
             }
@@ -465,52 +461,45 @@ impl super::AstToNlConverter {
         // Keywords stay as the entity's own declaration name; the BM25 path
         // recomputes titles and keywords per chunk in the chunk builder.
         for (child_idx, parent_name, parent_kind) in child_enrichments {
-            if let Some(ref mut header) = group_conversions[child_idx].header_conversion {
-                if let Some(ref mut emb_text) = header.embedding_text {
-                    if !emb_text.is_empty() {
-                        // Determine the context prefix format based on entity kind.
-                        // Function-like entities use a compact qualified path instead
-                        // of the verbose "In <parent> <kind>:" boilerplate.
-                        let prefix = if matches!(
-                            header.kind,
-                            EntityKind::Function | EntityKind::Method | EntityKind::Constructor
-                        ) && Self::carries_owner_qualification(
-                            emb_text,
-                            &parent_name,
-                            &header.name,
-                        ) {
-                            // The member conversion already carries the
-                            // owner-qualified name via group qualification;
-                            // repeating it only duplicates the identity.
-                            String::new()
-                        } else if matches!(
-                            header.kind,
-                            EntityKind::Function | EntityKind::Method | EntityKind::Constructor
-                        ) {
-                            format!("{}.{}(). ", parent_name, header.name)
-                        } else if matches!(header.kind, EntityKind::Field | EntityKind::Property)
-                            && Self::carries_owner_qualification(
-                                emb_text,
-                                &parent_name,
-                                &header.name,
-                            )
-                        {
-                            // The field text already carries the
-                            // owner-qualified name; repeating the ownership
-                            // prefix only duplicates it.
-                            String::new()
-                        } else if matches!(header.kind, EntityKind::Field | EntityKind::Property) {
-                            format!("Field of {}: ", parent_name)
-                        } else if matches!(header.kind, EntityKind::TraitImpl) {
-                            format!("Implementation for {}: ", parent_name)
-                        } else {
-                            format!("In {} {}: ", parent_name, Self::kind_label(parent_kind))
-                        };
-                        let mut new_text = prefix;
-                        new_text.push_str(emb_text);
-                        *emb_text = new_text;
-                    }
-                }
+            if let Some(ref mut header) = group_conversions[child_idx].header_conversion
+                && let Some(ref mut emb_text) = header.embedding_text
+                && !emb_text.is_empty()
+            {
+                // Determine the context prefix format based on entity kind.
+                // Function-like entities use a compact qualified path instead
+                // of the verbose "In <parent> <kind>:" boilerplate.
+                let prefix =
+                    if matches!(
+                        header.kind,
+                        EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                    ) && Self::carries_owner_qualification(emb_text, &parent_name, &header.name)
+                    {
+                        // The member conversion already carries the
+                        // owner-qualified name via group qualification;
+                        // repeating it only duplicates the identity.
+                        String::new()
+                    } else if matches!(
+                        header.kind,
+                        EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                    ) {
+                        format!("{}.{}(). ", parent_name, header.name)
+                    } else if matches!(header.kind, EntityKind::Field | EntityKind::Property)
+                        && Self::carries_owner_qualification(emb_text, &parent_name, &header.name)
+                    {
+                        // The field text already carries the
+                        // owner-qualified name; repeating the ownership
+                        // prefix only duplicates it.
+                        String::new()
+                    } else if matches!(header.kind, EntityKind::Field | EntityKind::Property) {
+                        format!("Field of {}: ", parent_name)
+                    } else if matches!(header.kind, EntityKind::TraitImpl) {
+                        format!("Implementation for {}: ", parent_name)
+                    } else {
+                        format!("In {} {}: ", parent_name, Self::kind_label(parent_kind))
+                    };
+                let mut new_text = prefix;
+                new_text.push_str(emb_text);
+                *emb_text = new_text;
             }
         }
 
@@ -526,52 +515,47 @@ impl super::AstToNlConverter {
             }
             let parent_kind = gc.group.kind;
             for member in &mut gc.member_conversions {
-                if let Some(ref mut emb_text) = member.embedding_text {
-                    if !emb_text.is_empty() {
-                        // Trait implementation members already carry the concrete
-                        // self type (`RegexMatcher.find_at`); the group name is
-                        // the trait and must not be prepended as a second owner.
-                        let member_entity =
-                            gc.group.members.iter().find(|m| m.id == member.entity_id);
-                        let parent_name: &str =
-                            RegularGroupTemplate::trait_impl_self_type(&gc.group, member_entity)
-                                .unwrap_or(gc.group.name.as_str());
-                        let prefix = if matches!(
-                            member.kind,
-                            EntityKind::Function | EntityKind::Method | EntityKind::Constructor
-                        ) && Self::carries_owner_qualification(
-                            emb_text,
-                            parent_name,
-                            &member.name,
-                        ) {
-                            // Already owner-qualified via group qualification;
-                            // repeating the prefix only duplicates the identity.
-                            String::new()
-                        } else if matches!(
-                            member.kind,
-                            EntityKind::Function | EntityKind::Method | EntityKind::Constructor
-                        ) {
-                            format!("{}.{}(). ", parent_name, member.name)
-                        } else if matches!(member.kind, EntityKind::Field | EntityKind::Property)
-                            && Self::carries_owner_qualification(
-                                emb_text,
-                                parent_name,
-                                &member.name,
-                            )
-                        {
-                            // The field text already carries the
-                            // owner-qualified name; repeating the ownership
-                            // prefix only duplicates it.
-                            String::new()
-                        } else if matches!(member.kind, EntityKind::Field | EntityKind::Property) {
-                            format!("Field of {}: ", parent_name)
-                        } else {
-                            format!("In {} {}: ", parent_name, Self::kind_label(parent_kind))
-                        };
-                        let mut new_text = prefix;
-                        new_text.push_str(emb_text);
-                        *emb_text = new_text;
-                    }
+                if let Some(ref mut emb_text) = member.embedding_text
+                    && !emb_text.is_empty()
+                {
+                    // Trait implementation members already carry the concrete
+                    // self type (`RegexMatcher.find_at`); the group name is
+                    // the trait and must not be prepended as a second owner.
+                    let member_entity = gc.group.members.iter().find(|m| m.id == member.entity_id);
+                    let parent_name: &str =
+                        RegularGroupTemplate::trait_impl_self_type(&gc.group, member_entity)
+                            .unwrap_or(gc.group.name.as_str());
+                    let prefix = if matches!(
+                        member.kind,
+                        EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                    ) && Self::carries_owner_qualification(
+                        emb_text,
+                        parent_name,
+                        &member.name,
+                    ) {
+                        // Already owner-qualified via group qualification;
+                        // repeating the prefix only duplicates the identity.
+                        String::new()
+                    } else if matches!(
+                        member.kind,
+                        EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                    ) {
+                        format!("{}.{}(). ", parent_name, member.name)
+                    } else if matches!(member.kind, EntityKind::Field | EntityKind::Property)
+                        && Self::carries_owner_qualification(emb_text, parent_name, &member.name)
+                    {
+                        // The field text already carries the
+                        // owner-qualified name; repeating the ownership
+                        // prefix only duplicates it.
+                        String::new()
+                    } else if matches!(member.kind, EntityKind::Field | EntityKind::Property) {
+                        format!("Field of {}: ", parent_name)
+                    } else {
+                        format!("In {} {}: ", parent_name, Self::kind_label(parent_kind))
+                    };
+                    let mut new_text = prefix;
+                    new_text.push_str(emb_text);
+                    *emb_text = new_text;
                 }
             }
         }
@@ -678,21 +662,20 @@ impl super::AstToNlConverter {
             if local_calls.is_empty() && external_calls.is_empty() {
                 continue;
             }
-            if let Some(ref mut header) = gc.header_conversion {
-                if let Some(ref mut emb_text) = header.embedding_text {
-                    if !emb_text.is_empty() {
-                        emb_text.push_str("\ncalls: ");
-                        let mut parts: Vec<String> = Vec::new();
-                        if !local_calls.is_empty() {
-                            parts.push(format!("internal [{}]", local_calls.join(", ")));
-                        }
-                        if !external_calls.is_empty() {
-                            parts.push(format!("external [{}]", external_calls.join(", ")));
-                        }
-                        emb_text.push_str(&parts.join("; "));
-                        emb_text.push('.');
-                    }
+            if let Some(ref mut header) = gc.header_conversion
+                && let Some(ref mut emb_text) = header.embedding_text
+                && !emb_text.is_empty()
+            {
+                emb_text.push_str("\ncalls: ");
+                let mut parts: Vec<String> = Vec::new();
+                if !local_calls.is_empty() {
+                    parts.push(format!("internal [{}]", local_calls.join(", ")));
                 }
+                if !external_calls.is_empty() {
+                    parts.push(format!("external [{}]", external_calls.join(", ")));
+                }
+                emb_text.push_str(&parts.join("; "));
+                emb_text.push('.');
             }
         }
     }
@@ -841,16 +824,16 @@ impl super::AstToNlConverter {
 
             // Step 3: below-builtin fallback tier — consulted only when the
             // built-in produced no conversions (e.g. an unsupported language).
-            if builtin.is_empty() {
-                if let Some(result) = self.generate_from_plugins(
+            if builtin.is_empty()
+                && let Some(result) = self.generate_from_plugins(
                     group,
                     file_path,
                     request,
                     &bm25_below,
                     &embedding_below,
-                ) {
-                    return result;
-                }
+                )
+            {
+                return result;
             }
             return builtin;
         }
@@ -1037,12 +1020,12 @@ impl super::AstToNlConverter {
             }
 
             // Trim docstring if it exceeds 50% of total tokens
-            if let Some(ref mut emb_text) = header_result.embedding_text {
-                if !header_result.entity_end_lines.is_empty() {
-                    let cleaner = EmbeddingTextCleaner::new().with_docstring_ratio(0.50);
-                    *emb_text =
-                        cleaner.clean_with_boundaries(emb_text, &header_result.entity_end_lines);
-                }
+            if let Some(ref mut emb_text) = header_result.embedding_text
+                && !header_result.entity_end_lines.is_empty()
+            {
+                let cleaner = EmbeddingTextCleaner::new().with_docstring_ratio(0.50);
+                *emb_text =
+                    cleaner.clean_with_boundaries(emb_text, &header_result.entity_end_lines);
             }
 
             header_result.embedding_brief_header = embedding_brief;
@@ -1104,13 +1087,13 @@ impl super::AstToNlConverter {
                         // and standalone conversion qualifies them with the file
                         // stem (`lib.new`); replace that prefix with the owner
                         // before attaching, otherwise every `lib.rs` collides.
-                        if member.kind == EntityKind::Function {
-                            if let Some(stem) = super::entity_converter::module_stem(file_path) {
-                                let wrong = format!("{}.{}", stem, member.name);
-                                if emb.contains(&wrong) {
-                                    let right = format!("{}.{}", emb_owner, member.name);
-                                    *emb = emb.replace(&wrong, &right);
-                                }
+                        if member.kind == EntityKind::Function
+                            && let Some(stem) = super::entity_converter::module_stem(file_path)
+                        {
+                            let wrong = format!("{}.{}", stem, member.name);
+                            if emb.contains(&wrong) {
+                                let right = format!("{}.{}", emb_owner, member.name);
+                                *emb = emb.replace(&wrong, &right);
                             }
                         }
                         *emb = super::entity_converter::qualify_member_head(
@@ -1141,16 +1124,14 @@ impl super::AstToNlConverter {
             }
         }
 
-        if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
-            if let Some(summary) = Self::trait_impl_summary(group) {
-                if let Some(first_trait_result) = results
-                    .iter_mut()
-                    .skip(usize::from(group.header.is_some()))
-                    .find(|result| result.kind == EntityKind::TraitImpl)
-                {
-                    first_trait_result.embedding_text = Some(summary);
-                }
-            }
+        if matches!(mode, OutputMode::Embedding | OutputMode::Both)
+            && let Some(summary) = Self::trait_impl_summary(group)
+            && let Some(first_trait_result) = results
+                .iter_mut()
+                .skip(usize::from(group.header.is_some()))
+                .find(|result| result.kind == EntityKind::TraitImpl)
+        {
+            first_trait_result.embedding_text = Some(summary);
         }
 
         results
@@ -1259,10 +1240,10 @@ impl super::AstToNlConverter {
             }
             return true;
         }
-        if let Some(raw) = entity.metadata.get(meta_keys::RESOLVED_CALLS) {
-            if !raw.trim().is_empty() {
-                return true;
-            }
+        if let Some(raw) = entity.metadata.get(meta_keys::RESOLVED_CALLS)
+            && !raw.trim().is_empty()
+        {
+            return true;
         }
         false
     }
@@ -1363,10 +1344,10 @@ impl super::AstToNlConverter {
         // If this member is the same entity as the current group's header, skip it.
         // The header is already processed separately; processing it again as a member
         // would create duplicate output (e.g., same function appearing twice in BM25).
-        if let Some(header) = &group.header {
-            if header.id == member.id {
-                return false;
-            }
+        if let Some(header) = &group.header
+            && header.id == member.id
+        {
+            return false;
         }
 
         // If this member entity is the header of another group, skip it here.

@@ -798,19 +798,19 @@ fn score_order(
     let mut related = Vec::new();
     for (position, candidate) in ordered.iter().take(max_cutoff).enumerate() {
         let relevance = scan.advance(&candidate.eval_chunk);
-        if position < DEFAULT_TOP_K {
-            if let Some(level) = relevance.highest_level() {
-                let location = format!(
-                    "{}:{}-{}",
-                    candidate.eval_chunk.file_path,
-                    candidate.eval_chunk.start_line,
-                    candidate.eval_chunk.end_line
-                );
-                match level {
-                    RelevanceLevel::Strong => strong.push((position + 1, location, level)),
-                    RelevanceLevel::Related => related.push((position + 1, location, level)),
-                    _ => {}
-                }
+        if position < DEFAULT_TOP_K
+            && let Some(level) = relevance.highest_level()
+        {
+            let location = format!(
+                "{}:{}-{}",
+                candidate.eval_chunk.file_path,
+                candidate.eval_chunk.start_line,
+                candidate.eval_chunk.end_line
+            );
+            match level {
+                RelevanceLevel::Strong => strong.push((position + 1, location, level)),
+                RelevanceLevel::Related => related.push((position + 1, location, level)),
+                _ => {}
             }
         }
     }

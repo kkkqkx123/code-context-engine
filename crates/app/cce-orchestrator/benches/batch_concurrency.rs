@@ -61,10 +61,10 @@ fn process_file(
     let chunker = GroupChunker::new(chunk_config.clone());
     let mut chunks = 0;
     for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {
-        if let Some(header) = conversion.header_conversion.as_ref() {
-            if let Ok(out) = chunker.chunk_group(group, header, path) {
-                chunks += out.chunks.len();
-            }
+        if let Some(header) = conversion.header_conversion.as_ref()
+            && let Ok(out) = chunker.chunk_group(group, header, path)
+        {
+            chunks += out.chunks.len();
         }
         for member in &conversion.member_conversions {
             if let Ok(out) = chunker.chunk_group(group, member, path) {

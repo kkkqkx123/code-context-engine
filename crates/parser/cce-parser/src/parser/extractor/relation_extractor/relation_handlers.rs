@@ -73,16 +73,14 @@ fn ast_name_from_capture(
     if let Some(node) = tree
         .root_node()
         .descendant_for_byte_range(capture.start_byte, capture.end_byte)
-    {
-        if let Some(ast_name) =
+        && let Some(ast_name) =
             cce_parser_core::ast_accessor::build_callee_name(node, source.as_bytes())
-        {
-            if ast_name == capture.text || capture.text.is_empty() {
-                return Some(ast_name);
-            }
-            // Capture text was overridden; use it instead of the AST text.
-            return Some(capture.text.clone());
+    {
+        if ast_name == capture.text || capture.text.is_empty() {
+            return Some(ast_name);
         }
+        // Capture text was overridden; use it instead of the AST text.
+        return Some(capture.text.clone());
     }
     // Fallback to capture text when AST lookup fails.
     if !capture.text.is_empty() {
@@ -133,38 +131,33 @@ pub(crate) fn build_full_callee_name(
     // Parse the raw source text to extract qualified name
     if let Some(reference_text) = utils::find_capture_by_name(&mat.captures, |name| {
         name.ends_with(".reference") || name.ends_with(".hof.callback")
-    }) {
-        if let Some(qualified_name) = parse_method_reference(&reference_text.text, language) {
-            return Some(qualified_name);
-        }
+    }) && let Some(qualified_name) = parse_method_reference(&reference_text.text, language)
+    {
+        return Some(qualified_name);
     }
 
     // Rust associated calls: `Type::func` and `mod::Type::func`.
     if let Some(path) = utils::find_capture_by_name(&mat.captures, |name| {
         name.ends_with(".associated.nested.path")
+    }) && let Some(func) = utils::find_capture_by_name(&mat.captures, |name| {
+        name.ends_with(".associated.nested.function.name")
     }) {
-        if let Some(func) = utils::find_capture_by_name(&mat.captures, |name| {
-            name.ends_with(".associated.nested.function.name")
-        }) {
-            let path_name = ast_name_from_capture(path, tree, source)
-                .unwrap_or_else(|| normalize_callee_name(&path.text));
-            let func_name = ast_name_from_capture(func, tree, source)
-                .unwrap_or_else(|| normalize_callee_name(&func.text));
-            return Some(format!("{}::{}", path_name, func_name));
-        }
+        let path_name = ast_name_from_capture(path, tree, source)
+            .unwrap_or_else(|| normalize_callee_name(&path.text));
+        let func_name = ast_name_from_capture(func, tree, source)
+            .unwrap_or_else(|| normalize_callee_name(&func.text));
+        return Some(format!("{}::{}", path_name, func_name));
     }
     if let Some(type_name) = utils::find_capture_by_name(&mat.captures, |name| {
         name.ends_with(".associated.type.name")
+    }) && let Some(func) = utils::find_capture_by_name(&mat.captures, |name| {
+        name.ends_with(".associated.function.name")
     }) {
-        if let Some(func) = utils::find_capture_by_name(&mat.captures, |name| {
-            name.ends_with(".associated.function.name")
-        }) {
-            let type_name_str = ast_name_from_capture(type_name, tree, source)
-                .unwrap_or_else(|| normalize_callee_name(&type_name.text));
-            let func_name = ast_name_from_capture(func, tree, source)
-                .unwrap_or_else(|| normalize_callee_name(&func.text));
-            return Some(format!("{}::{}", type_name_str, func_name));
-        }
+        let type_name_str = ast_name_from_capture(type_name, tree, source)
+            .unwrap_or_else(|| normalize_callee_name(&type_name.text));
+        let func_name = ast_name_from_capture(func, tree, source)
+            .unwrap_or_else(|| normalize_callee_name(&func.text));
+        return Some(format!("{}::{}", type_name_str, func_name));
     }
 
     // Inline anonymous closures (`(|| {})()` captured as `.closure`) have no

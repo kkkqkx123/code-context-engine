@@ -40,7 +40,7 @@ impl PostgresClient {
         self.run(async move {
             let mut client = self.pooled().await?;
             let tx = client.transaction().await.map_err(classify_pg)?;
-            snapshot_write_artifact_in(&tx, project_id, epoch, &artifact).await?;
+            snapshot_write_artifact_in(&tx, project_id, epoch, artifact).await?;
             tx.commit().await.map_err(classify_pg)?;
             Ok(())
         })

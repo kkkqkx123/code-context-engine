@@ -7,7 +7,7 @@ use cce_types::{Entity, EntityId, EntityKind, Language, RawRelationData, Relatio
 
 use std::collections::HashMap;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Helper function to create a test entity of any kind
 fn create_test_entity(id: u32, name: &str, kind: EntityKind) -> Entity {
@@ -318,9 +318,9 @@ fn streamed_symbol_build_keeps_cross_file_resolution_equivalent() {
 fn cce_codegraph_symbol_table(
     builder: &SymbolTableBuilder,
     files: &[&cce_types::ParsedFile],
-    root: &PathBuf,
+    root: &Path,
 ) -> crate::symbol_table::ProjectSymbolTable {
-    let project = crate::symbol_table::ProjectSymbolTable::new(root.clone());
+    let project = crate::symbol_table::ProjectSymbolTable::new(root.to_path_buf());
     let mut session = builder.begin_streaming_build();
     for file in files {
         session.add_file(file, &project);

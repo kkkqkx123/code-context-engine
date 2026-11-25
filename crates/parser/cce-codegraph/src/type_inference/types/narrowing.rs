@@ -39,11 +39,11 @@ pub fn narrow_discriminated_union(
             for member in members {
                 let names = shape_members(member);
                 for name in &names {
-                    if let Some(entry) = index.get_type(name) {
-                        if entry.fields.contains_key(field_name) {
-                            matched.push(member.clone());
-                            break;
-                        }
+                    if let Some(entry) = index.get_type(name)
+                        && entry.fields.contains_key(field_name)
+                    {
+                        matched.push(member.clone());
+                        break;
                     }
                 }
             }
@@ -217,10 +217,10 @@ pub fn subtract_union_members(shape: &TypeShape, excluded: &[String]) -> Option<
     // Nullable wrappers (`Option[T]`, `T?`) unwrap to their inner type when
     // the exclusion targets the null member; other exclusions against a
     // bare wrapper stay conservative.
-    if is_null_exclusion(excluded) {
-        if let Some(inner) = unwrap_nullable(shape) {
-            return Some(inner);
-        }
+    if is_null_exclusion(excluded)
+        && let Some(inner) = unwrap_nullable(shape)
+    {
+        return Some(inner);
     }
     let mut members: Vec<TypeShape> = match shape {
         TypeShape::Union(members) => members.clone(),
@@ -604,14 +604,14 @@ fn negated_guard_positive(text: &str, language: Language) -> Vec<(String, TypeBi
                 .find("not isinstance(")
                 .and_then(|pos| extract_call_args(&text[pos + "not ".len()..], "isinstance"))
             {
-                if let Some((var, type_arg)) = split_two_args(rest) {
-                    if let Some(ty) = parse_type_arg(type_arg.trim()) {
-                        // Tuples widen (`(A, B)` → `A | B`); record only
-                        // when the union actually informs (single types
-                        // always do; unions are checked against declared
-                        // by the caller via the identity rule below).
-                        push(var, &ty, &mut out);
-                    }
+                if let Some((var, type_arg)) = split_two_args(rest)
+                    && let Some(ty) = parse_type_arg(type_arg.trim())
+                {
+                    // Tuples widen (`(A, B)` → `A | B`); record only
+                    // when the union actually informs (single types
+                    // always do; unions are checked against declared
+                    // by the caller via the identity rule below).
+                    push(var, &ty, &mut out);
                 }
             } else if let Some((head, _)) = text.split_once(" is not None") {
                 let var = head
@@ -761,10 +761,9 @@ pub fn declared_shape(
         .iter()
         .find(|(n, _)| n == name)
         .and_then(|(_, ty)| ty.as_deref())
+        && let Some(shape) = parse_type_shape(ty, language)
     {
-        if let Some(shape) = parse_type_shape(ty, language) {
-            return Some(shape);
-        }
+        return Some(shape);
     }
     ctx.get_variable_type(name).and_then(|binding| {
         binding

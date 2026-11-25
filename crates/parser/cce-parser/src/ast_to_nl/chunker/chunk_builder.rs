@@ -309,10 +309,10 @@ impl ChunkBuilder {
     }
 
     fn entity_name_by_id(group: &EntityGroup, id: EntityId) -> Option<String> {
-        if let Some(header) = &group.header {
-            if header.id == id {
-                return Some(header.name.clone());
-            }
+        if let Some(header) = &group.header
+            && header.id == id
+        {
+            return Some(header.name.clone());
         }
         group
             .members
@@ -334,10 +334,10 @@ impl ChunkBuilder {
     }
 
     fn entity_name_and_kind(group: &EntityGroup, id: EntityId) -> Option<(String, EntityKind)> {
-        if let Some(header) = &group.header {
-            if header.id == id {
-                return Some((header.name.clone(), header.kind));
-            }
+        if let Some(header) = &group.header
+            && header.id == id
+        {
+            return Some((header.name.clone(), header.kind));
         }
         group
             .members
@@ -513,12 +513,11 @@ impl ChunkBuilder {
         if group.kind != EntityKind::TraitImpl {
             return None;
         }
-        if let Some(header) = &group.header {
-            if let Some(for_type) = header.metadata.get("impl_for_type") {
-                if !for_type.is_empty() {
-                    return Some(for_type);
-                }
-            }
+        if let Some(header) = &group.header
+            && let Some(for_type) = header.metadata.get("impl_for_type")
+            && !for_type.is_empty()
+        {
+            return Some(for_type);
         }
         group.members.iter().find_map(|member| {
             member
@@ -586,27 +585,27 @@ impl ChunkBuilder {
         file_path: &str,
     ) -> String {
         let sorted = Self::sorted_content_ids(group, content_ids);
-        if let Some(first) = sorted.first() {
-            if let Some(name) = Self::entity_name_by_id(group, *first) {
-                if Some(*first) != group.header_id
-                    && !group.name.is_empty()
-                    && name != group.name.as_str()
-                {
-                    // A recorded parent is the real owner for standalone
-                    // groups; only container members use the group name.
-                    if let Some(owner) = Self::resolve_owner(group, parent) {
-                        return format!("{owner}.{name}");
-                    }
-                    // A merged group is named after one of its own
-                    // fragments, so it never owns the others. Such a title
-                    // falls back to the file scope instead of claiming a
-                    // sibling as a member.
-                    if group.group_type != GroupType::MergedFragments {
-                        return format!("{}.{}", group.name, name);
-                    }
+        if let Some(first) = sorted.first()
+            && let Some(name) = Self::entity_name_by_id(group, *first)
+        {
+            if Some(*first) != group.header_id
+                && !group.name.is_empty()
+                && name != group.name.as_str()
+            {
+                // A recorded parent is the real owner for standalone
+                // groups; only container members use the group name.
+                if let Some(owner) = Self::resolve_owner(group, parent) {
+                    return format!("{owner}.{name}");
                 }
-                return Self::qualify_bm25_title(name, group, parent, file_path);
+                // A merged group is named after one of its own
+                // fragments, so it never owns the others. Such a title
+                // falls back to the file scope instead of claiming a
+                // sibling as a member.
+                if group.group_type != GroupType::MergedFragments {
+                    return format!("{}.{}", group.name, name);
+                }
             }
+            return Self::qualify_bm25_title(name, group, parent, file_path);
         }
         Self::qualify_bm25_title(group.name.to_string(), group, parent, file_path)
     }
@@ -1061,12 +1060,12 @@ impl ChunkBuilder {
                         segment.boundary.start_byte,
                         segment.boundary.end_byte,
                     );
-                    if ids.is_empty() {
-                        if let Some(boundary) = nl_boundaries.iter().min_by_key(|b| {
+                    if ids.is_empty()
+                        && let Some(boundary) = nl_boundaries.iter().min_by_key(|b| {
                             (b.start_byte as isize - segment.boundary.start_byte as isize).abs()
-                        }) {
-                            ids.push(boundary.entity_id);
-                        }
+                        })
+                    {
+                        ids.push(boundary.entity_id);
                     }
                     let mut seen = std::collections::HashSet::new();
                     ids.retain(|id| seen.insert(*id));

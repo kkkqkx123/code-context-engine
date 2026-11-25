@@ -22,22 +22,22 @@ pub enum McpTransport {
 
 /// Capability profile that decides which tools the MCP surface exposes.
 ///
-/// The default keeps the historical behavior (all tools). `WikiRead` is the
-/// read-only profile for bounded, tool-assisted document generation.
+/// The default is `ReadOnly`: MCP stays read-only and budget-capped unless
+/// `full` is explicitly requested for tool-assisted generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum McpProfile {
     /// Expose all registered tools, subject only to `enabled_tools`.
-    #[default]
     Full,
     /// Expose only read-capable tools and force the call budget on.
-    WikiRead,
+    #[default]
+    ReadOnly,
 }
 
 impl McpProfile {
     /// Whether this profile forbids every write-capable tool.
     pub fn is_read_only(self) -> bool {
-        matches!(self, Self::WikiRead)
+        matches!(self, Self::ReadOnly)
     }
 }
 
@@ -76,7 +76,7 @@ impl Default for McpHttpConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpBudgetConfig {
-    /// Master switch. Forced on when `profile = "wiki_read"`.
+    /// Master switch. Forced on when `profile = "read_only"`.
     pub enabled: bool,
     /// Maximum number of billable tool calls within one run.
     pub max_calls_per_run: usize,
@@ -163,7 +163,7 @@ impl Default for McpConfig {
             transport: McpTransport::Stdio,
             http: McpHttpConfig::default(),
             enabled_tools: None,
-            profile: McpProfile::Full,
+            profile: McpProfile::ReadOnly,
             budget: McpBudgetConfig::default(),
         }
     }
@@ -187,10 +187,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_defaults_to_full() {
-        assert_eq!(McpProfile::default(), McpProfile::Full);
+    fn profile_defaults_to_read_only() {
+        assert_eq!(McpProfile::default(), McpProfile::ReadOnly);
+        assert!(McpProfile::ReadOnly.is_read_only());
         assert!(!McpProfile::Full.is_read_only());
-        assert!(McpProfile::WikiRead.is_read_only());
     }
 
     #[test]
@@ -198,11 +198,11 @@ mod tests {
         let full: McpProfile = toml::from_str("profile = \"full\"")
             .map(|v: ProfileProbe| v.profile)
             .expect("full profile parses");
-        let wiki: McpProfile = toml::from_str("profile = \"wiki_read\"")
+        let read_only: McpProfile = toml::from_str("profile = \"read_only\"")
             .map(|v: ProfileProbe| v.profile)
-            .expect("wiki_read profile parses");
+            .expect("read_only profile parses");
         assert_eq!(full, McpProfile::Full);
-        assert_eq!(wiki, McpProfile::WikiRead);
+        assert_eq!(read_only, McpProfile::ReadOnly);
     }
 
     #[derive(Deserialize)]
@@ -220,11 +220,14 @@ mod tests {
     }
 
     #[test]
-    fn wiki_read_forces_budget_on() {
-        let mut config = McpConfig::default();
+    fn read_only_profile_forces_budget_on() {
+        let mut config = McpConfig {
+            profile: McpProfile::Full,
+            ..McpConfig::default()
+        };
         config.budget.enabled = false;
         assert!(!config.budget_enabled());
-        config.profile = McpProfile::WikiRead;
+        config.profile = McpProfile::ReadOnly;
         assert!(config.budget_enabled());
     }
 

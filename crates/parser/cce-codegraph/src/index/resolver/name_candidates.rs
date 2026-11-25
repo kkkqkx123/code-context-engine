@@ -102,10 +102,10 @@ impl RelationResolver {
     /// entity instead of degrading to a spurious Unknown edge.
     pub(crate) fn resolution_names(&self, callee_name: &str, parsed: &ParsedFile) -> Vec<String> {
         let mut names = vec![callee_name.to_string()];
-        if let Some(redirect) = self.import_alias_redirect(callee_name, parsed) {
-            if redirect != callee_name {
-                names.push(redirect);
-            }
+        if let Some(redirect) = self.import_alias_redirect(callee_name, parsed)
+            && redirect != callee_name
+        {
+            names.push(redirect);
         }
         names
     }
@@ -123,10 +123,10 @@ impl RelationResolver {
         let imports = parsed.import_table.as_ref()?;
         for import in &imports.standardized_imports {
             let local = import.alias.as_deref().unwrap_or(&import.target.local_name);
-            if local == callee_name {
-                if let Some(original) = import.target.original_name.as_deref() {
-                    return Some(original.to_string());
-                }
+            if local == callee_name
+                && let Some(original) = import.target.original_name.as_deref()
+            {
+                return Some(original.to_string());
             }
         }
         None

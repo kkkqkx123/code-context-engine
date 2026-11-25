@@ -190,10 +190,10 @@ impl SharedContext {
         let epoch = snapshot.relation_epoch;
         {
             let cache = self.relation_searcher_cache.read().await;
-            if let Some((cached_epoch, searcher)) = cache.get(&project_id) {
-                if *cached_epoch == epoch {
-                    return Ok(Arc::clone(searcher));
-                }
+            if let Some((cached_epoch, searcher)) = cache.get(&project_id)
+                && *cached_epoch == epoch
+            {
+                return Ok(Arc::clone(searcher));
             }
         }
         let query = CallChainQuery::from_snapshot(Arc::clone(&snapshot.index));

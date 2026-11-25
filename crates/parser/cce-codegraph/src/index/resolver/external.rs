@@ -44,10 +44,10 @@ impl RelationResolver {
         // Qualified names retry with the last segment so a local
         // definition still counts as internal.
         let last = self.last_segment_for_resolution(&raw_data.dst_name, false);
-        if let Some(last) = last {
-            if parsed.local_symbols.contains_key(last) {
-                return false;
-            }
+        if let Some(last) = last
+            && parsed.local_symbols.contains_key(last)
+        {
+            return false;
         }
 
         // Check local symbols
@@ -112,15 +112,15 @@ impl RelationResolver {
         if ids.is_empty() {
             return None;
         }
-        if let Some(file_path) = prefer_file {
-            if let Some(id) = ids.iter().copied().find(|id| {
+        if let Some(file_path) = prefer_file
+            && let Some(id) = ids.iter().copied().find(|id| {
                 entity_index
                     .get_file_path_by_entity(*id)
                     .as_deref()
                     .is_some_and(|p| Self::paths_equivalent(p, file_path))
-            }) {
-                return Some(id);
-            }
+            })
+        {
+            return Some(id);
         }
         if ids.len() == 1 {
             return ids.first().copied();

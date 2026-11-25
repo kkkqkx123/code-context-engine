@@ -95,18 +95,17 @@ impl FunctionMemberProcessor {
                 }
 
                 absorbed_group_indices.insert(idx);
-                if let Some(ref inner_header) = group.header {
-                    if inner_ids.insert(inner_header.id) {
-                        if let Some(entity) = entities.iter().find(|e| e.id == inner_header.id) {
-                            child_entities.push(entity.clone());
-                        }
-                    }
+                if let Some(ref inner_header) = group.header
+                    && inner_ids.insert(inner_header.id)
+                    && let Some(entity) = entities.iter().find(|e| e.id == inner_header.id)
+                {
+                    child_entities.push(entity.clone());
                 }
                 for member in &group.members {
-                    if inner_ids.insert(member.id) {
-                        if let Some(entity) = entities.iter().find(|e| e.id == member.id) {
-                            child_entities.push(entity.clone());
-                        }
+                    if inner_ids.insert(member.id)
+                        && let Some(entity) = entities.iter().find(|e| e.id == member.id)
+                    {
+                        child_entities.push(entity.clone());
                     }
                 }
             }

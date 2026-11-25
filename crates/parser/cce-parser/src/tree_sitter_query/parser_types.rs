@@ -261,28 +261,28 @@ impl CaptureName {
             return false;
         }
 
-        if let Some(cat) = category {
-            if self.category.as_deref() != Some(cat) {
-                return false;
-            }
+        if let Some(cat) = category
+            && self.category.as_deref() != Some(cat)
+        {
+            return false;
         }
 
-        if let Some(sub) = subtype {
-            if self.subtype.as_deref() != Some(sub) {
-                return false;
-            }
+        if let Some(sub) = subtype
+            && self.subtype.as_deref() != Some(sub)
+        {
+            return false;
         }
 
-        if let Some(r) = role {
-            if self.role.as_deref() != Some(r) {
-                return false;
-            }
+        if let Some(r) = role
+            && self.role.as_deref() != Some(r)
+        {
+            return false;
         }
 
-        if let Some(attr) = attribute {
-            if self.attribute.as_deref() != Some(attr) {
-                return false;
-            }
+        if let Some(attr) = attribute
+            && self.attribute.as_deref() != Some(attr)
+        {
+            return false;
         }
 
         true

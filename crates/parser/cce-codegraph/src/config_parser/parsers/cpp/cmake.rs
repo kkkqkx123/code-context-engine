@@ -45,18 +45,18 @@ pub(crate) fn parse_cmake_content(content: &str) -> HashSet<UntypedDependency> {
     }
 
     for args in command_args(&body, r"find_library") {
-        if let Some(name) = args.get(1) {
-            if !name.starts_with(['$', '<']) {
-                dependencies.insert(UntypedDependency::new(strip_namespace(name), "external"));
-            }
+        if let Some(name) = args.get(1)
+            && !name.starts_with(['$', '<'])
+        {
+            dependencies.insert(UntypedDependency::new(strip_namespace(name), "external"));
         }
     }
 
     for args in command_args(&body, r"add_subdirectory") {
-        if let Some(dir) = args.first() {
-            if let Some(segment) = plain_path_segment(dir) {
-                dependencies.insert(UntypedDependency::new(segment, "local"));
-            }
+        if let Some(dir) = args.first()
+            && let Some(segment) = plain_path_segment(dir)
+        {
+            dependencies.insert(UntypedDependency::new(segment, "local"));
         }
     }
 

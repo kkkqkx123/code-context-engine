@@ -207,21 +207,17 @@ impl OperationQueue {
         // priority first, so the lowest-priority entries form the suffix; the
         // first member of that suffix is the oldest). Newer operations carry
         // fresher state and supersede older ones, so they are preferred.
-        if pending.len() > MAX_PENDING_OPERATIONS {
-            if let Some(lowest_priority) = pending.back().map(|op| op.priority) {
-                if let Some(dropped_pos) =
-                    pending.iter().position(|op| op.priority == lowest_priority)
-                {
-                    if let Some(dropped) = pending.remove(dropped_pos) {
-                        warn!(
-                            dropped_operation = %dropped.operation_id,
-                            dropped_type = ?dropped.operation_type,
-                            queue_len = pending.len(),
-                            "Pending operation queue at capacity, dropping oldest lowest-priority entry"
-                        );
-                    }
-                }
-            }
+        if pending.len() > MAX_PENDING_OPERATIONS
+            && let Some(lowest_priority) = pending.back().map(|op| op.priority)
+            && let Some(dropped_pos) = pending.iter().position(|op| op.priority == lowest_priority)
+            && let Some(dropped) = pending.remove(dropped_pos)
+        {
+            warn!(
+                dropped_operation = %dropped.operation_id,
+                dropped_type = ?dropped.operation_type,
+                queue_len = pending.len(),
+                "Pending operation queue at capacity, dropping oldest lowest-priority entry"
+            );
         }
 
         trace!(
@@ -356,14 +352,14 @@ impl OperationQueue {
     pub async fn clear_active_by_operation(&self, operation_id: &str) -> Result<(), StorageError> {
         {
             let mut active = self.active.lock().await;
-            if let Some(op) = active.as_ref() {
-                if op.operation_id == operation_id {
-                    *active = None;
-                    trace!(
-                        operation_id = %operation_id,
-                        "Cleared in-memory active flag by operation id"
-                    );
-                }
+            if let Some(op) = active.as_ref()
+                && op.operation_id == operation_id
+            {
+                *active = None;
+                trace!(
+                    operation_id = %operation_id,
+                    "Cleared in-memory active flag by operation id"
+                );
             }
         }
         self.db

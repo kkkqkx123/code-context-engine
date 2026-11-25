@@ -209,13 +209,14 @@ impl GraphService {
                 if !Self::relation_passes_filter(relation, filter) {
                     continue;
                 }
-                if let Some(callee) = relation.callee_id {
-                    if parent.contains_key(&caller) && parent.contains_key(&callee) {
-                        let a = find(&mut parent, caller);
-                        let b = find(&mut parent, callee);
-                        if a != b {
-                            parent.insert(a, b);
-                        }
+                if let Some(callee) = relation.callee_id
+                    && parent.contains_key(&caller)
+                    && parent.contains_key(&callee)
+                {
+                    let a = find(&mut parent, caller);
+                    let b = find(&mut parent, callee);
+                    if a != b {
+                        parent.insert(a, b);
                     }
                 }
             }

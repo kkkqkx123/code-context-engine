@@ -249,11 +249,11 @@ mod tests {
         let mut decls: Vec<(String, usize, usize)> = Vec::new();
         let mut stack = vec![tree.root_node()];
         while let Some(node) = stack.pop() {
-            if node.kind() == "function_declaration" {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let text = source[name.start_byte()..name.end_byte()].to_string();
-                    decls.push((text, node.start_byte(), node.end_byte()));
-                }
+            if node.kind() == "function_declaration"
+                && let Some(name) = node.child_by_field_name("name")
+            {
+                let text = source[name.start_byte()..name.end_byte()].to_string();
+                decls.push((text, node.start_byte(), node.end_byte()));
             }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {

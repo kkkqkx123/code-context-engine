@@ -76,13 +76,14 @@ impl GoPackageProvider {
                 }
             }
             // Also treat the file stem as a module export if not already
-            if let Some(stem) = file.file_stem().and_then(|s| s.to_str()) {
-                if !stem.starts_with('_') && !info.exports.iter().any(|e| e.name == stem) {
-                    info.exports.push(
-                        ExportedSymbol::new(stem.to_string(), EntityKind::Module)
-                            .with_source_file(file.to_string_lossy().to_string()),
-                    );
-                }
+            if let Some(stem) = file.file_stem().and_then(|s| s.to_str())
+                && !stem.starts_with('_')
+                && !info.exports.iter().any(|e| e.name == stem)
+            {
+                info.exports.push(
+                    ExportedSymbol::new(stem.to_string(), EntityKind::Module)
+                        .with_source_file(file.to_string_lossy().to_string()),
+                );
             }
         }
         if info.exports.is_empty() {

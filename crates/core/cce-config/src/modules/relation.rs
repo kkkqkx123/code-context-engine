@@ -201,7 +201,7 @@ impl Validate for RelationConfig {
         if let Err(error) = self.shard.validate() {
             errors.push(ConfigValidationError::invalid_field(
                 "shard",
-                &error.to_string(),
+                error.to_string(),
             ));
         }
         if !(0.0..=1.0).contains(&self.max_fingerprint_scope_ratio) {

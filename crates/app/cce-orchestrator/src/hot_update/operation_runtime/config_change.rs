@@ -235,19 +235,17 @@ impl HotUpdateOperationRuntime {
                 }
             }
         }
-        if processor_failed || !all_failures.is_empty() {
-            if let Some(ref coordinator) = self.operation_coordinator {
-                if let Err(error) = coordinator
-                    .clear_active_by_operation(&ctx.operation_id)
-                    .await
-                {
-                    tracing::warn!(
-                        operation_id = %ctx.operation_id,
-                        error = %error,
-                        "Failed to clear active flag after config-change failure"
-                    );
-                }
-            }
+        if (processor_failed || !all_failures.is_empty())
+            && let Some(ref coordinator) = self.operation_coordinator
+            && let Err(error) = coordinator
+                .clear_active_by_operation(&ctx.operation_id)
+                .await
+        {
+            tracing::warn!(
+                operation_id = %ctx.operation_id,
+                error = %error,
+                "Failed to clear active flag after config-change failure"
+            );
         }
 
         let result = self

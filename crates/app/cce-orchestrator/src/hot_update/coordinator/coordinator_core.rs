@@ -693,11 +693,10 @@ impl HotUpdateCoordinator {
                                     pending_changes
                                         .extend(std::mem::take(&mut accumulated_events))
                                         .await;
-                                    if !was_full_rescan && pending_changes.needs_full_rescan() {
-                                        if let Some(ref metrics) = watch_metrics {
+                                    if !was_full_rescan && pending_changes.needs_full_rescan()
+                                        && let Some(ref metrics) = watch_metrics {
                                             metrics.record_overflow();
                                         }
-                                    }
                                     processing_notify.notify_one();
                                 }
                             }
@@ -708,11 +707,10 @@ impl HotUpdateCoordinator {
                                     pending_changes
                                         .extend(std::mem::take(&mut accumulated_events))
                                         .await;
-                                    if !was_full_rescan && pending_changes.needs_full_rescan() {
-                                        if let Some(ref metrics) = watch_metrics {
+                                    if !was_full_rescan && pending_changes.needs_full_rescan()
+                                        && let Some(ref metrics) = watch_metrics {
                                             metrics.record_overflow();
                                         }
-                                    }
                                     processing_notify.notify_one();
                                 }
                                 tracing::info!("Event channel closed, stopping event loop");
@@ -730,11 +728,10 @@ impl HotUpdateCoordinator {
                             pending_changes
                                 .extend(std::mem::take(&mut accumulated_events))
                                 .await;
-                            if !was_full_rescan && pending_changes.needs_full_rescan() {
-                                if let Some(ref metrics) = watch_metrics {
+                            if !was_full_rescan && pending_changes.needs_full_rescan()
+                                && let Some(ref metrics) = watch_metrics {
                                     metrics.record_overflow();
                                 }
-                            }
                             processing_notify.notify_one();
                         }
                     }

@@ -46,10 +46,10 @@ where
             self.map.insert(key, value);
             return;
         }
-        if self.map.len() >= self.capacity {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
-            }
+        if self.map.len() >= self.capacity
+            && let Some(old) = self.order.pop_front()
+        {
+            self.map.remove(&old);
         }
         self.order.push_back(key.clone());
         self.map.insert(key, value);

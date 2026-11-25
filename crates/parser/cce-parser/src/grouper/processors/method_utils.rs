@@ -145,15 +145,15 @@ impl GetterSetterDetector {
             }
         }
 
-        if let Some(field) = name.strip_prefix("is") {
-            if !field.is_empty() {
-                let mut chars = field.chars();
-                let first = chars.next()?;
-                let mut result = String::new();
-                result.push(first.to_ascii_lowercase());
-                result.extend(chars);
-                return Some(result);
-            }
+        if let Some(field) = name.strip_prefix("is")
+            && !field.is_empty()
+        {
+            let mut chars = field.chars();
+            let first = chars.next()?;
+            let mut result = String::new();
+            result.push(first.to_ascii_lowercase());
+            result.extend(chars);
+            return Some(result);
         }
 
         None
@@ -219,20 +219,19 @@ impl GetterSetterDetector {
             return false;
         }
 
-        if self.has_explicit_self_parameter(language) {
-            if let Some((_, param_type)) = method.parameters.first() {
-                if !self.is_self_reference(param_type, language) {
-                    return false;
-                }
-            }
+        if self.has_explicit_self_parameter(language)
+            && let Some((_, param_type)) = method.parameters.first()
+            && !self.is_self_reference(param_type, language)
+        {
+            return false;
         }
 
         let has_return_type = !method.name.to_lowercase().starts_with("set");
 
-        if let Some(ref return_type) = method.return_type {
-            if return_type.to_lowercase().contains("void") {
-                return false;
-            }
+        if let Some(ref return_type) = method.return_type
+            && return_type.to_lowercase().contains("void")
+        {
+            return false;
         }
 
         let is_simple = self.is_simple_method(method);
@@ -275,17 +274,16 @@ impl GetterSetterDetector {
         }
 
         if self.has_explicit_self_parameter(language) && param_count > 1 {
-            if let Some((_, param_type)) = method.parameters.first() {
-                if !self.is_self_reference(param_type, language) {
-                    return false;
-                }
+            if let Some((_, param_type)) = method.parameters.first()
+                && !self.is_self_reference(param_type, language)
+            {
+                return false;
             }
-            if param_count >= 2 {
-                if let Some((_, param_type)) = method.parameters.get(1) {
-                    if self.is_self_reference(param_type, language) {
-                        return false;
-                    }
-                }
+            if param_count >= 2
+                && let Some((_, param_type)) = method.parameters.get(1)
+                && self.is_self_reference(param_type, language)
+            {
+                return false;
             }
         }
 

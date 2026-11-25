@@ -131,19 +131,18 @@ fn matches_pattern(path: &str, pattern: &Pattern) -> bool {
         // or filename in the path.
         if !pattern.original.contains('/') {
             let file_name = p.file_name().and_then(|f| f.to_str());
-            if let Some(name) = file_name {
-                if glob.is_match(Path::new(name)) {
-                    return true;
-                }
+            if let Some(name) = file_name
+                && glob.is_match(Path::new(name))
+            {
+                return true;
             }
             // Also check intermediate directories
             for ancestor in p.ancestors() {
-                if let Some(dir_name) = ancestor.file_name().and_then(|f| f.to_str()) {
-                    if file_name.as_ref().is_none_or(|fn_| *fn_ != dir_name)
-                        && glob.is_match(Path::new(dir_name))
-                    {
-                        return true;
-                    }
+                if let Some(dir_name) = ancestor.file_name().and_then(|f| f.to_str())
+                    && file_name.as_ref().is_none_or(|fn_| *fn_ != dir_name)
+                    && glob.is_match(Path::new(dir_name))
+                {
+                    return true;
                 }
             }
         }

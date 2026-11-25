@@ -24,10 +24,10 @@ pub fn detect_from_annotations(
             return Some(TestInfo::test_ast());
         }
     }
-    if let Some(doc) = entity.doc_comment.as_deref() {
-        if docblock_marks_test(doc) {
-            return Some(TestInfo::test_ast());
-        }
+    if let Some(doc) = entity.doc_comment.as_deref()
+        && docblock_marks_test(doc)
+    {
+        return Some(TestInfo::test_ast());
     }
     None
 }

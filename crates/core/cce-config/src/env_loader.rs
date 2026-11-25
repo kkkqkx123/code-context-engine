@@ -112,20 +112,20 @@ fn find_dotenv_candidates() -> Vec<std::path::PathBuf> {
     let mut candidates = Vec::new();
 
     // Try project root (look for config.toml or Cargo.toml)
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(parent) = exe_path.parent() {
-            // Check executable directory
-            candidates.push(parent.join(".env"));
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(parent) = exe_path.parent()
+    {
+        // Check executable directory
+        candidates.push(parent.join(".env"));
 
-            // Check parent directories for config.toml or Cargo.toml
-            let mut current = Some(parent);
-            while let Some(dir) = current {
-                if dir.join("config.toml").exists() || dir.join("Cargo.toml").exists() {
-                    candidates.push(dir.join(".env"));
-                    break;
-                }
-                current = dir.parent();
+        // Check parent directories for config.toml or Cargo.toml
+        let mut current = Some(parent);
+        while let Some(dir) = current {
+            if dir.join("config.toml").exists() || dir.join("Cargo.toml").exists() {
+                candidates.push(dir.join(".env"));
+                break;
             }
+            current = dir.parent();
         }
     }
 
@@ -171,29 +171,29 @@ pub fn apply_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
 /// container defaults.
 fn apply_server_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     let default_server = crate::global::ServerConfig::default();
-    if config.server.host == default_server.host {
-        if let Ok(val) = std::env::var("CCE_SERVER_HOST") {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                config.server.host = trimmed.to_string();
-            }
+    if config.server.host == default_server.host
+        && let Ok(val) = std::env::var("CCE_SERVER_HOST")
+    {
+        let trimmed = val.trim();
+        if !trimmed.is_empty() {
+            config.server.host = trimmed.to_string();
         }
     }
-    if config.server.port == default_server.port {
-        if let Ok(val) = std::env::var("CCE_SERVER_PORT") {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                let port: u16 = trimmed
-                    .parse()
-                    .map_err(|_| ConfigError::invalid_env_var("CCE_SERVER_PORT", "invalid port"))?;
-                if port == 0 {
-                    return Err(ConfigError::invalid_env_var(
-                        "CCE_SERVER_PORT",
-                        "must be greater than 0",
-                    ));
-                }
-                config.server.port = port;
+    if config.server.port == default_server.port
+        && let Ok(val) = std::env::var("CCE_SERVER_PORT")
+    {
+        let trimmed = val.trim();
+        if !trimmed.is_empty() {
+            let port: u16 = trimmed
+                .parse()
+                .map_err(|_| ConfigError::invalid_env_var("CCE_SERVER_PORT", "invalid port"))?;
+            if port == 0 {
+                return Err(ConfigError::invalid_env_var(
+                    "CCE_SERVER_PORT",
+                    "must be greater than 0",
+                ));
             }
+            config.server.port = port;
         }
     }
     if config.server.frontend.enabled == default_server.frontend.enabled
@@ -213,53 +213,52 @@ fn apply_server_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
             };
         }
     }
-    if config.server.frontend.dir == default_server.frontend.dir {
-        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_DIR") {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                config.server.frontend.dir = trimmed.to_string();
-            }
+    if config.server.frontend.dir == default_server.frontend.dir
+        && let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_DIR")
+    {
+        let trimmed = val.trim();
+        if !trimmed.is_empty() {
+            config.server.frontend.dir = trimmed.to_string();
         }
     }
-    if config.server.frontend.index == default_server.frontend.index {
-        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_INDEX") {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                config.server.frontend.index = trimmed.to_string();
-            }
+    if config.server.frontend.index == default_server.frontend.index
+        && let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_INDEX")
+    {
+        let trimmed = val.trim();
+        if !trimmed.is_empty() {
+            config.server.frontend.index = trimmed.to_string();
         }
     }
-    if config.server.frontend.fallback == default_server.frontend.fallback {
-        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_FALLBACK") {
-            let trimmed = val.trim().to_lowercase();
-            if !trimmed.is_empty() {
-                config.server.frontend.fallback = match trimmed.as_str() {
-                    "1" | "true" | "yes" | "on" => true,
-                    "0" | "false" | "no" | "off" => false,
-                    _ => {
-                        return Err(ConfigError::invalid_env_var(
-                            "CCE_SERVER_FRONTEND_FALLBACK",
-                            "expected one of 1/true/yes/on or 0/false/no/off",
-                        ));
-                    }
-                };
-            }
+    if config.server.frontend.fallback == default_server.frontend.fallback
+        && let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_FALLBACK")
+    {
+        let trimmed = val.trim().to_lowercase();
+        if !trimmed.is_empty() {
+            config.server.frontend.fallback = match trimmed.as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => {
+                    return Err(ConfigError::invalid_env_var(
+                        "CCE_SERVER_FRONTEND_FALLBACK",
+                        "expected one of 1/true/yes/on or 0/false/no/off",
+                    ));
+                }
+            };
         }
     }
     if config.server.frontend.immutable_max_age_secs
         == default_server.frontend.immutable_max_age_secs
+        && let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS")
     {
-        if let Ok(val) = std::env::var("CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS") {
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                let secs: u64 = trimmed.parse().map_err(|_| {
-                    ConfigError::invalid_env_var(
-                        "CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS",
-                        "invalid cache lifetime in seconds",
-                    )
-                })?;
-                config.server.frontend.immutable_max_age_secs = secs;
-            }
+        let trimmed = val.trim();
+        if !trimmed.is_empty() {
+            let secs: u64 = trimmed.parse().map_err(|_| {
+                ConfigError::invalid_env_var(
+                    "CCE_SERVER_FRONTEND_IMMUTABLE_MAX_AGE_SECS",
+                    "invalid cache lifetime in seconds",
+                )
+            })?;
+            config.server.frontend.immutable_max_age_secs = secs;
         }
     }
     Ok(())
@@ -577,12 +576,13 @@ pub fn validate_required_env_vars(config: &AppConfig) -> Result<(), ConfigError>
     }
 
     // Check database Qdrant API key
-    if let Some(ref key_ref) = config.database.qdrant.api_key {
-        if key_ref.starts_with("${") && key_ref.ends_with('}') {
-            let var_name = &key_ref[2..key_ref.len() - 1];
-            if std::env::var(var_name).is_err() {
-                missing_vars.push(format!("database.qdrant.{}", var_name));
-            }
+    if let Some(ref key_ref) = config.database.qdrant.api_key
+        && key_ref.starts_with("${")
+        && key_ref.ends_with('}')
+    {
+        let var_name = &key_ref[2..key_ref.len() - 1];
+        if std::env::var(var_name).is_err() {
+            missing_vars.push(format!("database.qdrant.{}", var_name));
         }
     }
 

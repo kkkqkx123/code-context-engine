@@ -281,8 +281,7 @@ where
     std::thread::spawn(move || {
         let _ = tx.send(handle.block_on(future));
     });
-    let result = rx
-        .recv()
-        .map_err(|error| StorageError::connection(format!("snapshot worker: {error}")))?;
-    result
+
+    rx.recv()
+        .map_err(|error| StorageError::connection(format!("snapshot worker: {error}")))?
 }

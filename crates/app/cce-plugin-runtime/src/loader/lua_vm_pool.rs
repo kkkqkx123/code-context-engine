@@ -31,10 +31,10 @@ impl LuaVmPool {
     /// Acquire a VM from the pool, or create a new one if the pool is
     /// empty.  The returned VM has the plugin script already loaded.
     pub(crate) fn acquire(&self) -> Result<Lua, PluginError> {
-        if let Ok(mut states) = self.states.lock() {
-            if let Some(lua) = states.pop() {
-                return Ok(lua);
-            }
+        if let Ok(mut states) = self.states.lock()
+            && let Some(lua) = states.pop()
+        {
+            return Ok(lua);
         }
         Self::create(&self.script)
     }
@@ -45,10 +45,10 @@ impl LuaVmPool {
     /// dropped so burst concurrency does not grow memory without bound.
     pub(crate) fn release(&self, lua: Lua) {
         lua.remove_hook();
-        if let Ok(mut states) = self.states.lock() {
-            if states.len() < LUA_POOL_MAX_STATES {
-                states.push(lua);
-            }
+        if let Ok(mut states) = self.states.lock()
+            && states.len() < LUA_POOL_MAX_STATES
+        {
+            states.push(lua);
         }
     }
 

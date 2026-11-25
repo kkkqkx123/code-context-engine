@@ -251,10 +251,10 @@ impl ProjectSymbolTable {
                 .map(|p| Arc::clone(p.value()))
                 .collect();
         }
-        if let Ok(guard) = self.sorted_packages_cache.read() {
-            if let Some(cached) = guard.as_ref() {
-                return cached.clone();
-            }
+        if let Ok(guard) = self.sorted_packages_cache.read()
+            && let Some(cached) = guard.as_ref()
+        {
+            return cached.clone();
         }
         let mut packages: Vec<Arc<package::PackageSymbolTable>> = self
             .packages
@@ -276,10 +276,10 @@ impl ProjectSymbolTable {
                 .map(|d| Arc::clone(d.value()))
                 .collect();
         }
-        if let Ok(guard) = self.sorted_external_cache.read() {
-            if let Some(cached) = guard.as_ref() {
-                return cached.clone();
-            }
+        if let Ok(guard) = self.sorted_external_cache.read()
+            && let Some(cached) = guard.as_ref()
+        {
+            return cached.clone();
         }
         let mut deps: Vec<Arc<ExternalSymbolTable>> = self
             .external_deps
@@ -468,10 +468,10 @@ impl ProjectSymbolTable {
             if entity.kind != EntityKind::Variable {
                 continue;
             }
-            if let Some(existing) = ctx.get_variable_type(&entity.name) {
-                if crate::type_inference::origin_is_authoritative(existing.origin) {
-                    continue;
-                }
+            if let Some(existing) = ctx.get_variable_type(&entity.name)
+                && crate::type_inference::origin_is_authoritative(existing.origin)
+            {
+                continue;
             }
             let call_target = entity
                 .metadata

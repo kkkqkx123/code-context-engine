@@ -93,24 +93,24 @@ impl QdrantRetrieval {
                 }));
             }
 
-            if let Some(ref categories) = f.include_categories {
-                if !categories.is_empty() {
-                    let or_conditions: Vec<serde_json::Value> = categories
-                        .iter()
-                        .map(|cat| {
-                            serde_json::json!({
-                                "key": "category",
-                                "match": { "value": cat.as_u8() }
-                            })
+            if let Some(ref categories) = f.include_categories
+                && !categories.is_empty()
+            {
+                let or_conditions: Vec<serde_json::Value> = categories
+                    .iter()
+                    .map(|cat| {
+                        serde_json::json!({
+                            "key": "category",
+                            "match": { "value": cat.as_u8() }
                         })
-                        .collect();
-                    must_conditions.push(serde_json::json!({
-                        "min_should": {
-                            "conditions": or_conditions,
-                            "min_count": 1
-                        }
-                    }));
-                }
+                    })
+                    .collect();
+                must_conditions.push(serde_json::json!({
+                    "min_should": {
+                        "conditions": or_conditions,
+                        "min_count": 1
+                    }
+                }));
             }
 
             if let Some(ref categories) = f.exclude_categories {

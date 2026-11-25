@@ -47,59 +47,52 @@ pub fn build_type_index(
         id_to_key.insert(e.entity_id, e.key.clone());
     }
     for e in entities {
-        if let Some(pid) = e.parent {
-            if let Some(parent) = by_id.get(&pid) {
-                if is_php_type_kind(parent.kind) {
-                    let key = match id_to_key.get(&pid) {
-                        Some(k) => k.clone(),
-                        None => {
-                            let simple = super::common::simple_name(&parent.name).to_string();
-                            let qualified = if module_path.is_empty() {
-                                simple.clone()
-                            } else {
-                                format!("{module_path}::{simple}")
-                            };
-                            TypeKey::new(qualified, simple, file_path.to_string())
-                        }
+        if let Some(pid) = e.parent
+            && let Some(parent) = by_id.get(&pid)
+            && is_php_type_kind(parent.kind)
+        {
+            let key = match id_to_key.get(&pid) {
+                Some(k) => k.clone(),
+                None => {
+                    let simple = super::common::simple_name(&parent.name).to_string();
+                    let qualified = if module_path.is_empty() {
+                        simple.clone()
+                    } else {
+                        format!("{module_path}::{simple}")
                     };
-                    if is_php_type_kind(e.kind) {
-                        continue;
-                    }
-                    let vis = crate::policy::detect_entity_visibility(e, &language);
-                    let is_static = super::common::is_static_modifiers(&e.modifiers);
-                    let member = MemberEntry {
-                        entity_id: e.id,
-                        name: e.name.clone(),
-                        kind: e.kind,
-                        visibility: vis,
-                        is_static,
-                        is_associated: is_static,
-                        span: e.span,
-                        file_path: file_path.to_string(),
-                        module_path: if module_path.is_empty() {
-                            None
-                        } else {
-                            Some(module_path.to_string())
-                        },
-                        package: package.to_string(),
-                    };
-                    if index.get_type_by_key(&key).is_none() {
-                        let parent_vis = crate::policy::detect_entity_visibility(parent, &language);
-                        index.insert_type(
-                            key.clone(),
-                            TypeEntry::new(
-                                parent.id,
-                                key.clone(),
-                                parent.kind,
-                                language,
-                                parent_vis,
-                            ),
-                        );
-                        id_to_key.insert(pid, key.clone());
-                    }
-                    let _ = index.insert_member(&key, member);
+                    TypeKey::new(qualified, simple, file_path.to_string())
                 }
+            };
+            if is_php_type_kind(e.kind) {
+                continue;
             }
+            let vis = crate::policy::detect_entity_visibility(e, &language);
+            let is_static = super::common::is_static_modifiers(&e.modifiers);
+            let member = MemberEntry {
+                entity_id: e.id,
+                name: e.name.clone(),
+                kind: e.kind,
+                visibility: vis,
+                is_static,
+                is_associated: is_static,
+                span: e.span,
+                file_path: file_path.to_string(),
+                module_path: if module_path.is_empty() {
+                    None
+                } else {
+                    Some(module_path.to_string())
+                },
+                package: package.to_string(),
+            };
+            if index.get_type_by_key(&key).is_none() {
+                let parent_vis = crate::policy::detect_entity_visibility(parent, &language);
+                index.insert_type(
+                    key.clone(),
+                    TypeEntry::new(parent.id, key.clone(), parent.kind, language, parent_vis),
+                );
+                id_to_key.insert(pid, key.clone());
+            }
+            let _ = index.insert_member(&key, member);
         }
     }
 }

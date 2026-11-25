@@ -439,27 +439,26 @@ fn narrow_csharp_discriminated_union(
                 .or_else(|| parse_type_shape(&existing.type_name, Language::CSharp))
         })
         .or_else(|| declared_shape(ctx, params, Language::CSharp, &var_name));
-    if let Some(shape) = shape_opt {
-        if let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+    if let Some(shape) = shape_opt
+        && let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+    {
+        if covers_declared_members(&shape, &narrowed)
+            || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
         {
-            if covers_declared_members(&shape, &narrowed)
-                || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
-            {
-                return results;
-            }
-            let type_name = type_shape_to_string(&narrowed);
-            results.push(NarrowingResult {
-                variable_name: var_name.clone(),
-                narrowed_type: TypeBinding {
-                    type_name: type_name.clone(),
-                    type_entity_id: None,
-                    span: Span::default(),
-                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                    shape: Some(narrowed),
-                },
-            });
             return results;
         }
+        let type_name = type_shape_to_string(&narrowed);
+        results.push(NarrowingResult {
+            variable_name: var_name.clone(),
+            narrowed_type: TypeBinding {
+                type_name: type_name.clone(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
+        return results;
     }
     results
 }

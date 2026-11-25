@@ -94,12 +94,11 @@ pub fn extract_entities(content: &str, patterns: &[CompiledPattern]) -> Vec<Plug
 
             let mut metadata = HashMap::new();
             for (group_index, group_name) in pattern.regex.capture_names().enumerate() {
-                if let Some(capture_name) = group_name {
-                    if let Some(rest) = capture_name.strip_prefix("meta_") {
-                        if let Some(g) = caps.get(group_index) {
-                            metadata.insert(rest.to_string(), g.as_str().to_string());
-                        }
-                    }
+                if let Some(capture_name) = group_name
+                    && let Some(rest) = capture_name.strip_prefix("meta_")
+                    && let Some(g) = caps.get(group_index)
+                {
+                    metadata.insert(rest.to_string(), g.as_str().to_string());
                 }
             }
 

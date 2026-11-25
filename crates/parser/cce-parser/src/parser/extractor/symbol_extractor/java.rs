@@ -259,22 +259,24 @@ impl JavaExtractor {
             _ => ("", TargetKind::Other),
         };
 
-        if !declaration_kind.is_empty() && Self::is_public_declaration(node, source) {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = node_text(&name_node, source);
-                if !name.is_empty() {
-                    exports.push(Self::create_export(name, target_kind, node));
-                }
+        if !declaration_kind.is_empty()
+            && Self::is_public_declaration(node, source)
+            && let Some(name_node) = node.child_by_field_name("name")
+        {
+            let name = node_text(&name_node, source);
+            if !name.is_empty() {
+                exports.push(Self::create_export(name, target_kind, node));
             }
         }
 
         // Check for method declarations (public methods)
-        if node.kind() == "method_declaration" && Self::is_public_declaration(node, source) {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = node_text(&name_node, source);
-                if !name.is_empty() {
-                    exports.push(Self::create_export(name, TargetKind::Function, node));
-                }
+        if node.kind() == "method_declaration"
+            && Self::is_public_declaration(node, source)
+            && let Some(name_node) = node.child_by_field_name("name")
+        {
+            let name = node_text(&name_node, source);
+            if !name.is_empty() {
+                exports.push(Self::create_export(name, TargetKind::Function, node));
             }
         }
 

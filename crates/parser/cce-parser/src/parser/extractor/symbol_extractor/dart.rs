@@ -52,37 +52,33 @@ impl DartExtractor {
         if let Some(config_uri) = find_children_by_kind(node, "configurable_uri")
             .first()
             .copied()
+            && let Some(uri) = find_children_by_kind(&config_uri, "uri").first().copied()
+            && let Some(str_lit) = find_children_by_kind(&uri, "string_literal")
+                .first()
+                .copied()
         {
-            if let Some(uri) = find_children_by_kind(&config_uri, "uri").first().copied() {
-                if let Some(str_lit) = find_children_by_kind(&uri, "string_literal")
-                    .first()
-                    .copied()
-                {
-                    let text = node_text(&str_lit, source);
-                    return Some(
-                        text.trim_matches('"')
-                            .trim_matches('\'')
-                            .trim_start_matches('r')
-                            .to_string(),
-                    );
-                }
-            }
+            let text = node_text(&str_lit, source);
+            return Some(
+                text.trim_matches('"')
+                    .trim_matches('\'')
+                    .trim_start_matches('r')
+                    .to_string(),
+            );
         }
 
         // Try direct uri (for part directives)
-        if let Some(uri) = find_children_by_kind(node, "uri").first().copied() {
-            if let Some(str_lit) = find_children_by_kind(&uri, "string_literal")
+        if let Some(uri) = find_children_by_kind(node, "uri").first().copied()
+            && let Some(str_lit) = find_children_by_kind(&uri, "string_literal")
                 .first()
                 .copied()
-            {
-                let text = node_text(&str_lit, source);
-                return Some(
-                    text.trim_matches('"')
-                        .trim_matches('\'')
-                        .trim_start_matches('r')
-                        .to_string(),
-                );
-            }
+        {
+            let text = node_text(&str_lit, source);
+            return Some(
+                text.trim_matches('"')
+                    .trim_matches('\'')
+                    .trim_start_matches('r')
+                    .to_string(),
+            );
         }
 
         None
@@ -195,39 +191,39 @@ impl DartExtractor {
         }
 
         // Check if this node is a part_directive
-        if node.kind() == "part_directive" {
-            if let Some(uri) = Self::extract_uri(node, source) {
-                let is_relative = Self::is_relative_import(&uri);
-                imports.push(StandardizedImport {
-                    kind: ImportKind::SymbolImport,
-                    source: uri,
-                    target: ImportTarget::default(),
-                    alias: None,
-                    is_wildcard: false,
-                    is_default: false,
-                    is_system_header: false,
-                    is_relative,
-                    span: Some(node_to_span(node)),
-                });
-            }
+        if node.kind() == "part_directive"
+            && let Some(uri) = Self::extract_uri(node, source)
+        {
+            let is_relative = Self::is_relative_import(&uri);
+            imports.push(StandardizedImport {
+                kind: ImportKind::SymbolImport,
+                source: uri,
+                target: ImportTarget::default(),
+                alias: None,
+                is_wildcard: false,
+                is_default: false,
+                is_system_header: false,
+                is_relative,
+                span: Some(node_to_span(node)),
+            });
         }
 
         // Check if this node is a part_of_directive
-        if node.kind() == "part_of_directive" {
-            if let Some(uri) = Self::extract_uri(node, source) {
-                let is_relative = Self::is_relative_import(&uri);
-                imports.push(StandardizedImport {
-                    kind: ImportKind::SymbolImport,
-                    source: uri,
-                    target: ImportTarget::default(),
-                    alias: None,
-                    is_wildcard: false,
-                    is_default: false,
-                    is_system_header: false,
-                    is_relative,
-                    span: Some(node_to_span(node)),
-                });
-            }
+        if node.kind() == "part_of_directive"
+            && let Some(uri) = Self::extract_uri(node, source)
+        {
+            let is_relative = Self::is_relative_import(&uri);
+            imports.push(StandardizedImport {
+                kind: ImportKind::SymbolImport,
+                source: uri,
+                target: ImportTarget::default(),
+                alias: None,
+                is_wildcard: false,
+                is_default: false,
+                is_system_header: false,
+                is_relative,
+                span: Some(node_to_span(node)),
+            });
         }
 
         // Recursively process children
@@ -244,140 +240,140 @@ impl DartExtractor {
         exports: &mut Vec<StandardizedExport>,
     ) {
         // Check if this node is a library_export (re-export)
-        if node.kind() == "library_export" {
-            if let Some(uri) = Self::extract_uri(node, source) {
+        if node.kind() == "library_export"
+            && let Some(uri) = Self::extract_uri(node, source)
+        {
+            exports.push(StandardizedExport {
+                kind: ExportKind::Wildcard,
+                target: ExportTarget {
+                    name: "*".to_string(),
+                    original_name: None,
+                    kind: TargetKind::Module,
+                    source_module: Some(uri),
+                },
+                is_reexport: true,
+                span: Some(node_to_span(node)),
+            });
+        }
+
+        // In Dart, all top-level definitions are automatically exported
+        // Extract class definitions
+        if node.kind() == "class_declaration"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            let class_name = node_text(&name, source);
+            if !class_name.is_empty() {
                 exports.push(StandardizedExport {
-                    kind: ExportKind::Wildcard,
+                    kind: ExportKind::Named,
                     target: ExportTarget {
-                        name: "*".to_string(),
+                        name: class_name,
                         original_name: None,
-                        kind: TargetKind::Module,
-                        source_module: Some(uri),
+                        kind: TargetKind::Class,
+                        source_module: None,
                     },
-                    is_reexport: true,
+                    is_reexport: false,
                     span: Some(node_to_span(node)),
                 });
             }
         }
 
-        // In Dart, all top-level definitions are automatically exported
-        // Extract class definitions
-        if node.kind() == "class_declaration" {
-            if let Some(name) = node.child_by_field_name("name") {
-                let class_name = node_text(&name, source);
-                if !class_name.is_empty() {
-                    exports.push(StandardizedExport {
-                        kind: ExportKind::Named,
-                        target: ExportTarget {
-                            name: class_name,
-                            original_name: None,
-                            kind: TargetKind::Class,
-                            source_module: None,
-                        },
-                        is_reexport: false,
-                        span: Some(node_to_span(node)),
-                    });
-                }
-            }
-        }
-
         // Extract function definitions (top-level function_signature)
-        if node.kind() == "function_signature" {
-            if let Some(name) = node.child_by_field_name("name") {
-                let func_name = node_text(&name, source);
-                if !func_name.is_empty() {
-                    exports.push(StandardizedExport {
-                        kind: ExportKind::Named,
-                        target: ExportTarget {
-                            name: func_name,
-                            original_name: None,
-                            kind: TargetKind::Function,
-                            source_module: None,
-                        },
-                        is_reexport: false,
-                        span: Some(node_to_span(node)),
-                    });
-                }
+        if node.kind() == "function_signature"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            let func_name = node_text(&name, source);
+            if !func_name.is_empty() {
+                exports.push(StandardizedExport {
+                    kind: ExportKind::Named,
+                    target: ExportTarget {
+                        name: func_name,
+                        original_name: None,
+                        kind: TargetKind::Function,
+                        source_module: None,
+                    },
+                    is_reexport: false,
+                    span: Some(node_to_span(node)),
+                });
             }
         }
 
         // Extract mixin definitions
-        if node.kind() == "mixin_declaration" {
-            if let Some(name) = node.child_by_field_name("name") {
-                let mixin_name = node_text(&name, source);
-                if !mixin_name.is_empty() {
-                    exports.push(StandardizedExport {
-                        kind: ExportKind::Named,
-                        target: ExportTarget {
-                            name: mixin_name,
-                            original_name: None,
-                            kind: TargetKind::Class,
-                            source_module: None,
-                        },
-                        is_reexport: false,
-                        span: Some(node_to_span(node)),
-                    });
-                }
+        if node.kind() == "mixin_declaration"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            let mixin_name = node_text(&name, source);
+            if !mixin_name.is_empty() {
+                exports.push(StandardizedExport {
+                    kind: ExportKind::Named,
+                    target: ExportTarget {
+                        name: mixin_name,
+                        original_name: None,
+                        kind: TargetKind::Class,
+                        source_module: None,
+                    },
+                    is_reexport: false,
+                    span: Some(node_to_span(node)),
+                });
             }
         }
 
         // Extract extension definitions
-        if node.kind() == "extension_declaration" {
-            if let Some(name) = node.child_by_field_name("name") {
-                let ext_name = node_text(&name, source);
-                if !ext_name.is_empty() {
-                    exports.push(StandardizedExport {
-                        kind: ExportKind::Named,
-                        target: ExportTarget {
-                            name: ext_name,
-                            original_name: None,
-                            kind: TargetKind::Class,
-                            source_module: None,
-                        },
-                        is_reexport: false,
-                        span: Some(node_to_span(node)),
-                    });
-                }
+        if node.kind() == "extension_declaration"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            let ext_name = node_text(&name, source);
+            if !ext_name.is_empty() {
+                exports.push(StandardizedExport {
+                    kind: ExportKind::Named,
+                    target: ExportTarget {
+                        name: ext_name,
+                        original_name: None,
+                        kind: TargetKind::Class,
+                        source_module: None,
+                    },
+                    is_reexport: false,
+                    span: Some(node_to_span(node)),
+                });
             }
         }
 
         // Extract enum definitions
-        if node.kind() == "enum_declaration" {
-            if let Some(name) = node.child_by_field_name("name") {
-                let enum_name = node_text(&name, source);
-                if !enum_name.is_empty() {
-                    exports.push(StandardizedExport {
-                        kind: ExportKind::Named,
-                        target: ExportTarget {
-                            name: enum_name,
-                            original_name: None,
-                            kind: TargetKind::Other,
-                            source_module: None,
-                        },
-                        is_reexport: false,
-                        span: Some(node_to_span(node)),
-                    });
-                }
+        if node.kind() == "enum_declaration"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            let enum_name = node_text(&name, source);
+            if !enum_name.is_empty() {
+                exports.push(StandardizedExport {
+                    kind: ExportKind::Named,
+                    target: ExportTarget {
+                        name: enum_name,
+                        original_name: None,
+                        kind: TargetKind::Other,
+                        source_module: None,
+                    },
+                    is_reexport: false,
+                    span: Some(node_to_span(node)),
+                });
             }
         }
 
         // Extract typedef definitions
-        if node.kind() == "type_alias" {
-            if let Some(name) = node.child_by_field_name("name") {
-                let type_name = node_text(&name, source);
-                if !type_name.is_empty() {
-                    exports.push(StandardizedExport {
-                        kind: ExportKind::Named,
-                        target: ExportTarget {
-                            name: type_name,
-                            original_name: None,
-                            kind: TargetKind::Type,
-                            source_module: None,
-                        },
-                        is_reexport: false,
-                        span: Some(node_to_span(node)),
-                    });
-                }
+        if node.kind() == "type_alias"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            let type_name = node_text(&name, source);
+            if !type_name.is_empty() {
+                exports.push(StandardizedExport {
+                    kind: ExportKind::Named,
+                    target: ExportTarget {
+                        name: type_name,
+                        original_name: None,
+                        kind: TargetKind::Type,
+                        source_module: None,
+                    },
+                    is_reexport: false,
+                    span: Some(node_to_span(node)),
+                });
             }
         }
 

@@ -547,12 +547,12 @@ pub fn render_file_report(
     writeln!(out).expect("write");
     let mut contains: Vec<(String, String, String)> = Vec::new();
     for (_, e) in entities {
-        if let Some(pid) = e.parent {
-            if let Some(parent) = global_id_to_entity.get(&pid) {
-                let parent_file = index.get_file_path_by_entity(pid).unwrap_or_default();
-                if parent_file == file_path {
-                    contains.push((parent.name.clone(), e.name.clone(), e.kind.to_string()));
-                }
+        if let Some(pid) = e.parent
+            && let Some(parent) = global_id_to_entity.get(&pid)
+        {
+            let parent_file = index.get_file_path_by_entity(pid).unwrap_or_default();
+            if parent_file == file_path {
+                contains.push((parent.name.clone(), e.name.clone(), e.kind.to_string()));
             }
         }
     }

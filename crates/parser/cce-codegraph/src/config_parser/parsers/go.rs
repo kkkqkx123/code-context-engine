@@ -83,18 +83,16 @@ impl LanguageParser for GoParser {
                 }
             }
 
-            if in_replace_block {
-                if let Some(local_dep) = parse_go_replace_line(trimmed) {
-                    if module_name
-                        .as_ref()
-                        .map(|m| m == &local_dep)
-                        .unwrap_or(false)
-                    {
-                        continue;
-                    }
-
-                    dependencies.insert(UntypedDependency::new(local_dep, "local"));
+            if in_replace_block && let Some(local_dep) = parse_go_replace_line(trimmed) {
+                if module_name
+                    .as_ref()
+                    .map(|m| m == &local_dep)
+                    .unwrap_or(false)
+                {
+                    continue;
                 }
+
+                dependencies.insert(UntypedDependency::new(local_dep, "local"));
             }
         }
 

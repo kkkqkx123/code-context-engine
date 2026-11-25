@@ -314,25 +314,25 @@ impl ConversionResult {
         use cce_utils::token_estimation::estimate_tokens;
 
         let bm25_extra = bm25_extra.trim();
-        if !bm25_extra.is_empty() {
-            if let Some(text) = self.bm25_text.as_mut() {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(bm25_extra);
-                self.bm25_word_count = Some(Self::count_words(text));
+        if !bm25_extra.is_empty()
+            && let Some(text) = self.bm25_text.as_mut()
+        {
+            if !text.is_empty() {
+                text.push('\n');
             }
+            text.push_str(bm25_extra);
+            self.bm25_word_count = Some(Self::count_words(text));
         }
 
         let emb_extra = emb_extra.trim();
-        if !emb_extra.is_empty() {
-            if let Some(text) = self.embedding_text.as_mut() {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(emb_extra);
-                self.embedding_tokens = Some(estimate_tokens(text));
+        if !emb_extra.is_empty()
+            && let Some(text) = self.embedding_text.as_mut()
+        {
+            if !text.is_empty() {
+                text.push('\n');
             }
+            text.push_str(emb_extra);
+            self.embedding_tokens = Some(estimate_tokens(text));
         }
     }
 

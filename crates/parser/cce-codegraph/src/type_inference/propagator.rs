@@ -195,13 +195,13 @@ impl CrossFilePropagator {
         if let Some((_, entries)) = self.file_return_index.remove(&normalized) {
             for (entity_id, _) in entries {
                 self.return_type_cache.remove(&entity_id);
-                if let Some((_, name)) = self.id_to_name.remove(&entity_id) {
-                    if let Some(mut ids) = self.name_to_ids.get_mut(&name) {
-                        ids.retain(|id| *id != entity_id);
-                        if ids.is_empty() {
-                            drop(ids);
-                            self.name_to_ids.remove(&name);
-                        }
+                if let Some((_, name)) = self.id_to_name.remove(&entity_id)
+                    && let Some(mut ids) = self.name_to_ids.get_mut(&name)
+                {
+                    ids.retain(|id| *id != entity_id);
+                    if ids.is_empty() {
+                        drop(ids);
+                        self.name_to_ids.remove(&name);
                     }
                 }
             }

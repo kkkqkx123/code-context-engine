@@ -13,6 +13,9 @@ use futures::stream::{self, StreamExt};
 use llm_suite_client::Resilience;
 use llm_suite_embedding::EmbeddingProvider;
 
+/// One ordered batch result paired with its timing on the timed transport.
+type TimedBatchResult = (usize, Result<(EmbeddingResult, EmbeddingTiming), LlmError>);
+
 /// Transport for one embedding batch: an llm-suite provider wrapped in the
 /// shared resilience stack (limiter + breaker + retry injected from the
 /// gateway's per-endpoint registries, so one upstream shares one set of
@@ -230,10 +233,10 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
 
     /// Timing of the most recent request.
     pub fn last_timing(&self) -> EmbeddingTiming {
-        self.timing
+        *self
+            .timing
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
     }
 
     /// Clear the diagnostic timing before starting a request.
@@ -293,7 +296,7 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
             .map(|(idx, batch)| (idx, batch.iter().map(|text| (*text).to_string()).collect()))
             .collect();
         let transport = &self.inner;
-        let mut ordered: Vec<(usize, Result<(EmbeddingResult, EmbeddingTiming), LlmError>)> =
+        let mut ordered: Vec<TimedBatchResult> =
             stream::iter(owned_batches.into_iter().map(|(idx, owned)| async move {
                 let result = transport.embed_batch_timed(owned).await;
                 (idx, result)

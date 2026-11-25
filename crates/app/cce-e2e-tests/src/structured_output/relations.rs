@@ -303,16 +303,16 @@ pub fn render_relations(index: &RelationIndex, project_name: &str) -> String {
     let mut contains: Vec<(String, String, String, String)> = Vec::new();
     for entry in index.function_index().iter() {
         let e = entry.value();
-        if let Some(pid) = e.parent {
-            if let Some(parent) = index.function_index().get(&pid) {
-                let parent_file = index.get_file_path_by_entity(pid).unwrap_or_default();
-                contains.push((
-                    parent.name.clone(),
-                    e.name.clone(),
-                    e.kind.to_string(),
-                    parent_file,
-                ));
-            }
+        if let Some(pid) = e.parent
+            && let Some(parent) = index.function_index().get(&pid)
+        {
+            let parent_file = index.get_file_path_by_entity(pid).unwrap_or_default();
+            contains.push((
+                parent.name.clone(),
+                e.name.clone(),
+                e.kind.to_string(),
+                parent_file,
+            ));
         }
     }
     contains.sort();

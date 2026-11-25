@@ -178,17 +178,16 @@ impl HotUpdateOperationRuntime {
 
         // Persist summaries generated during resume so a subsequent crash is
         // also recoverable without regenerating summaries.
-        if let Some(ref cm) = self.checkpoint_manager {
-            if let Err(error) = self
+        if let Some(ref cm) = self.checkpoint_manager
+            && let Err(error) = self
                 .persist_summaries_to_checkpoints(ctx, &batch_result, cm)
                 .await
-            {
-                tracing::warn!(
-                    operation_id = %ctx.operation_id,
-                    error = %error,
-                    "Failed to persist summaries into checkpoints during resume"
-                );
-            }
+        {
+            tracing::warn!(
+                operation_id = %ctx.operation_id,
+                error = %error,
+                "Failed to persist summaries into checkpoints during resume"
+            );
         }
 
         if !processor_failed && all_failures.is_empty() {
@@ -251,17 +250,16 @@ impl HotUpdateOperationRuntime {
             // Stay resumable: a failed resume keeps its checkpoint InProgress
             // so the next scan retries with envelope reuse; only the queue
             // activity is released here.
-            if let Some(ref coordinator) = self.operation_coordinator {
-                if let Err(error) = coordinator
+            if let Some(ref coordinator) = self.operation_coordinator
+                && let Err(error) = coordinator
                     .clear_active_by_operation(&ctx.operation_id)
                     .await
-                {
-                    tracing::warn!(
-                        operation_id = %ctx.operation_id,
-                        error = %error,
-                        "Failed to clear active flag after resume failure"
-                    );
-                }
+            {
+                tracing::warn!(
+                    operation_id = %ctx.operation_id,
+                    error = %error,
+                    "Failed to clear active flag after resume failure"
+                );
             }
         }
 

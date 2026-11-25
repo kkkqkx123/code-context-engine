@@ -64,20 +64,20 @@ fn discover_ruby_gems(package_name: &str) -> Option<PackageDiscovery> {
     {
         let dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let gem_path = PathBuf::from(dir).join("gems");
-        if gem_path.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&gem_path) {
-                for e in entries.flatten() {
-                    let n = e.file_name().to_string_lossy().to_string();
-                    if n == package_name || n.starts_with(&format!("{package_name}-")) {
-                        let version = n
-                            .strip_prefix(&format!("{package_name}-"))
-                            .map(|v| v.to_string());
-                        return Some(PackageDiscovery {
-                            package_name: package_name.to_string(),
-                            path: e.path(),
-                            version,
-                        });
-                    }
+        if gem_path.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&gem_path)
+        {
+            for e in entries.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                if n == package_name || n.starts_with(&format!("{package_name}-")) {
+                    let version = n
+                        .strip_prefix(&format!("{package_name}-"))
+                        .map(|v| v.to_string());
+                    return Some(PackageDiscovery {
+                        package_name: package_name.to_string(),
+                        path: e.path(),
+                        version,
+                    });
                 }
             }
         }
@@ -88,17 +88,17 @@ fn discover_ruby_gems(package_name: &str) -> Option<PackageDiscovery> {
         home.join(".rvm").join("gems"),
         home.join(".rbenv").join("versions"),
     ] {
-        if base.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&base) {
-                for e in entries.flatten() {
-                    let n = e.file_name().to_string_lossy().to_string();
-                    if n.contains(package_name) && e.path().is_dir() {
-                        return Some(PackageDiscovery {
-                            package_name: package_name.to_string(),
-                            path: e.path(),
-                            version: None,
-                        });
-                    }
+        if base.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&base)
+        {
+            for e in entries.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                if n.contains(package_name) && e.path().is_dir() {
+                    return Some(PackageDiscovery {
+                        package_name: package_name.to_string(),
+                        path: e.path(),
+                        version: None,
+                    });
                 }
             }
         }

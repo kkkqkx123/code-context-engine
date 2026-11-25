@@ -41,18 +41,17 @@ impl StorageCoordinator {
         }
 
         // Remove from BM25 (scoped to project)
-        if let Some(ref bm25) = self.fulltext {
-            if let Err(error) = bm25
+        if let Some(ref bm25) = self.fulltext
+            && let Err(error) = bm25
                 .delete_by_file_path_scoped(
                     &bm25.configured_index_name(),
                     &file_id,
                     self.project_id,
                 )
                 .await
-            {
-                tracing::warn!(path = %file_id, error = %error, "Failed to remove file from BM25");
-                backend_errors.push(format!("bm25: {error}"));
-            }
+        {
+            tracing::warn!(path = %file_id, error = %error, "Failed to remove file from BM25");
+            backend_errors.push(format!("bm25: {error}"));
         }
 
         // Remove entity detail mappings and file records via FK cascade.

@@ -116,16 +116,16 @@ pub fn resolve_group_hierarchy(groups: &mut [EntityGroup], entities: &[Entity]) 
 
     // Collect links first to avoid borrow conflicts
     for (i, group) in groups.iter().enumerate() {
-        if let Some(header_id) = group.header_id {
-            if let Some(entity) = entities.iter().find(|e| e.id == header_id) {
-                if !entity.children.is_empty() {
-                    for &child_id in &entity.children {
-                        if let Some(&child_idx) = entity_to_group.get(&child_id) {
-                            if i != child_idx && groups[child_idx].parent_group_id.is_none() {
-                                links.push((child_idx, groups[i].group_id.to_string()));
-                            }
-                        }
-                    }
+        if let Some(header_id) = group.header_id
+            && let Some(entity) = entities.iter().find(|e| e.id == header_id)
+            && !entity.children.is_empty()
+        {
+            for &child_id in &entity.children {
+                if let Some(&child_idx) = entity_to_group.get(&child_id)
+                    && i != child_idx
+                    && groups[child_idx].parent_group_id.is_none()
+                {
+                    links.push((child_idx, groups[i].group_id.to_string()));
                 }
             }
         }

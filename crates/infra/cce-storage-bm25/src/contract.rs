@@ -23,16 +23,16 @@ impl FulltextStorage for Bm25Client {
         index_name: &str,
         documents: &[FulltextDocument],
     ) -> Result<usize, FulltextError> {
-        Ok(Bm25Client::stage_documents(self, index_name, documents).await?)
+        Bm25Client::stage_documents(self, index_name, documents).await
     }
 
     async fn commit_staged(&self, index_name: &str) -> Result<usize, FulltextError> {
-        Ok(Bm25Client::commit_staged(self, index_name).await?)
+        Bm25Client::commit_staged(self, index_name).await
     }
 
     async fn finish_writes(&self, index_name: &str) -> Result<(), FulltextError> {
         let _ = index_name;
-        Ok(Bm25Client::finish_writes(self).await?)
+        Bm25Client::finish_writes(self).await
     }
 
     async fn batch_index(

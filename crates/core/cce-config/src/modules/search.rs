@@ -392,13 +392,13 @@ impl Validate for HybridFusionConfig {
                 "must be finite and within [0.0, 1.0] (normalized across all algorithms)",
             ));
         }
-        if let RecallFusionAlgorithm::Rrf { k } = self.algorithm {
-            if k == 0 {
-                errors.push(ConfigValidationError::invalid_field(
-                    "algorithm.rrf.k",
-                    "must be greater than 0",
-                ));
-            }
+        if let RecallFusionAlgorithm::Rrf { k } = self.algorithm
+            && k == 0
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "algorithm.rrf.k",
+                "must be greater than 0",
+            ));
         }
         if self.require_strict_intersection
             && (!self.include_vector_only_keys || !self.include_bm25_only_keys)

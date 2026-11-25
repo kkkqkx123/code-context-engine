@@ -31,10 +31,10 @@ impl BuildConfigParser {
             // Parse dependencies
             if let Some(deps) = project.get("dependencies").and_then(|v| v.as_array()) {
                 for req_value in deps {
-                    if let Some(req_str) = req_value.as_str() {
-                        if let Some(name) = parse_python_requirement(req_str) {
-                            dependencies.insert(UntypedDependency::new(name, "external"));
-                        }
+                    if let Some(req_str) = req_value.as_str()
+                        && let Some(name) = parse_python_requirement(req_str)
+                    {
+                        dependencies.insert(UntypedDependency::new(name, "external"));
                     }
                 }
             }
@@ -47,10 +47,10 @@ impl BuildConfigParser {
                 for (_extra_name, extra_reqs) in optional_deps {
                     if let Some(req_array) = extra_reqs.as_array() {
                         for req_value in req_array {
-                            if let Some(req_str) = req_value.as_str() {
-                                if let Some(name) = parse_python_requirement(req_str) {
-                                    dependencies.insert(UntypedDependency::new(name, "external"));
-                                }
+                            if let Some(req_str) = req_value.as_str()
+                                && let Some(name) = parse_python_requirement(req_str)
+                            {
+                                dependencies.insert(UntypedDependency::new(name, "external"));
                             }
                         }
                     }
@@ -59,42 +59,38 @@ impl BuildConfigParser {
         }
 
         // Parse [tool.hatch] section
-        if let Some(tool) = parsed.get("tool") {
-            if let Some(hatch) = tool.get("hatch") {
-                // Parse build dependencies
-                if let Some(build) = hatch.get("build").and_then(|v| v.as_table()) {
-                    if let Some(deps) = build.get("dependencies").and_then(|v| v.as_array()) {
-                        for req_value in deps {
-                            if let Some(req_str) = req_value.as_str() {
-                                if let Some(name) = parse_python_requirement(req_str) {
-                                    dependencies.insert(UntypedDependency::new(name, "dev"));
-                                }
-                            }
-                        }
+        if let Some(tool) = parsed.get("tool")
+            && let Some(hatch) = tool.get("hatch")
+        {
+            // Parse build dependencies
+            if let Some(build) = hatch.get("build").and_then(|v| v.as_table())
+                && let Some(deps) = build.get("dependencies").and_then(|v| v.as_array())
+            {
+                for req_value in deps {
+                    if let Some(req_str) = req_value.as_str()
+                        && let Some(name) = parse_python_requirement(req_str)
+                    {
+                        dependencies.insert(UntypedDependency::new(name, "dev"));
                     }
                 }
+            }
 
-                // Parse environment dependencies
-                if let Some(envs) = hatch.get("envs").and_then(|v| v.as_table()) {
-                    for (env_name, env_config) in envs {
-                        let is_dev = env_name == "default"
-                            || env_name.contains("dev")
-                            || env_name.contains("test");
+            // Parse environment dependencies
+            if let Some(envs) = hatch.get("envs").and_then(|v| v.as_table()) {
+                for (env_name, env_config) in envs {
+                    let is_dev = env_name == "default"
+                        || env_name.contains("dev")
+                        || env_name.contains("test");
 
-                        if let Some(deps) =
-                            env_config.get("dependencies").and_then(|v| v.as_array())
-                        {
-                            for req_value in deps {
-                                if let Some(req_str) = req_value.as_str() {
-                                    if let Some(name) = parse_python_requirement(req_str) {
-                                        if is_dev {
-                                            dependencies
-                                                .insert(UntypedDependency::new(name, "dev"));
-                                        } else {
-                                            dependencies
-                                                .insert(UntypedDependency::new(name, "external"));
-                                        }
-                                    }
+                    if let Some(deps) = env_config.get("dependencies").and_then(|v| v.as_array()) {
+                        for req_value in deps {
+                            if let Some(req_str) = req_value.as_str()
+                                && let Some(name) = parse_python_requirement(req_str)
+                            {
+                                if is_dev {
+                                    dependencies.insert(UntypedDependency::new(name, "dev"));
+                                } else {
+                                    dependencies.insert(UntypedDependency::new(name, "external"));
                                 }
                             }
                         }

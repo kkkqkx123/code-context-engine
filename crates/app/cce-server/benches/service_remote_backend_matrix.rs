@@ -543,8 +543,8 @@ fn main() {
             }
         }
     });
-    let _ = write!(
+    let _ = writeln!(
         std::io::stdout(),
-        "backend matrix complete; run_id={run_id}\n"
+        "backend matrix complete; run_id={run_id}"
     );
 }

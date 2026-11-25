@@ -83,18 +83,17 @@ pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visib
                 return Some(Visibility::Private);
             }
             if trimmed.starts_with("pub(in") {
-                if let Some(open) = trimmed.find('(') {
-                    if let Some(close) = trimmed.rfind(')') {
-                        if close > open {
-                            let inside = trimmed[open + 1..close].trim();
-                            let path = inside
-                                .strip_prefix("in")
-                                .unwrap_or(inside)
-                                .trim()
-                                .to_string();
-                            return Some(Visibility::Restricted { path });
-                        }
-                    }
+                if let Some(open) = trimmed.find('(')
+                    && let Some(close) = trimmed.rfind(')')
+                    && close > open
+                {
+                    let inside = trimmed[open + 1..close].trim();
+                    let path = inside
+                        .strip_prefix("in")
+                        .unwrap_or(inside)
+                        .trim()
+                        .to_string();
+                    return Some(Visibility::Restricted { path });
                 }
                 return None;
             }
@@ -159,19 +158,19 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
             return vis;
         }
     }
-    if let Some(signal) = entity.metadata.get("visibility") {
-        if let Some(vis) = visibility_from_signal(&signal.to_lowercase(), language) {
-            return vis;
-        }
+    if let Some(signal) = entity.metadata.get("visibility")
+        && let Some(vis) = visibility_from_signal(&signal.to_lowercase(), language)
+    {
+        return vis;
     }
 
-    if *language == Language::Python {
-        if let Some(flag) = entity.metadata.get("is_exported_by_all") {
-            if flag == "true" {
-                return Visibility::Public;
-            } else if flag == "false" {
-                return Visibility::Private;
-            }
+    if *language == Language::Python
+        && let Some(flag) = entity.metadata.get("is_exported_by_all")
+    {
+        if flag == "true" {
+            return Visibility::Public;
+        } else if flag == "false" {
+            return Visibility::Private;
         }
     }
 

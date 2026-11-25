@@ -314,10 +314,9 @@ impl FileProcessor {
                     .groups
                     .iter()
                     .find(|g| g.group_id == chunk.source_group_id)
+                    && let Some(code_meta) = chunk.metadata.as_code_mut()
                 {
-                    if let Some(code_meta) = chunk.metadata.as_code_mut() {
-                        code_meta.entity_kind = group.kind;
-                    }
+                    code_meta.entity_kind = group.kind;
                 }
                 chunk
             })

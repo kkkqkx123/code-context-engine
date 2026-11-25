@@ -97,10 +97,9 @@ impl ClassMethodProcessor {
                         // An explicit property declaration is always an accessor;
                         // `get_field_name` still yields its underlying name.
                         if let Some(field_name) = self.getter_setter_detector.get_field_name(method)
+                            && !getter_setter_properties.contains(&field_name)
                         {
-                            if !getter_setter_properties.contains(&field_name) {
-                                getter_setter_properties.push(field_name);
-                            }
+                            getter_setter_properties.push(field_name);
                         }
                         include_method = false;
                         roles_builder.mark_boilerplate(method.id);

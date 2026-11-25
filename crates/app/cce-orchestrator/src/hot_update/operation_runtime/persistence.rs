@@ -244,18 +244,18 @@ impl HotUpdateOperationRuntime {
     ) -> Result<()> {
         // 1. Remove hash records for deleted files so the next scan does not
         //    re-discover them as stale entries.
-        if !deleted_paths.is_empty() {
-            if let Some(store) = &self.metadata_store {
-                let epoch = self.change_detector.write_epoch().await?;
-                let paths: Vec<String> = deleted_paths
-                    .iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect();
-                store
-                    .files_remove_hashes(self.project_id, epoch, &paths)
-                    .await
-                    .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
-            }
+        if !deleted_paths.is_empty()
+            && let Some(store) = &self.metadata_store
+        {
+            let epoch = self.change_detector.write_epoch().await?;
+            let paths: Vec<String> = deleted_paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            store
+                .files_remove_hashes(self.project_id, epoch, &paths)
+                .await
+                .map_err(|error| HotUpdateError::hot_update(error.to_string()))?;
         }
 
         if paths.is_empty() {

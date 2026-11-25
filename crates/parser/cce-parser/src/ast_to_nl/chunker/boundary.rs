@@ -334,14 +334,14 @@ pub fn assemble_with_boundaries(
     }
 
     let mut boundaries = Vec::new();
-    if !header_text.is_empty() {
-        if let Some(id) = header_entity_id {
-            boundaries.push(NlEntityBoundary {
-                entity_id: id,
-                start_byte: 0,
-                end_byte: header_text.len(),
-            });
-        }
+    if !header_text.is_empty()
+        && let Some(id) = header_entity_id
+    {
+        boundaries.push(NlEntityBoundary {
+            entity_id: id,
+            start_byte: 0,
+            end_byte: header_text.len(),
+        });
     }
 
     let mut member_entity_ids = Vec::new();

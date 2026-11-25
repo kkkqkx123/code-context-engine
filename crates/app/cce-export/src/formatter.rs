@@ -73,13 +73,13 @@ impl MarkdownFormatter {
         output.push_str(&format!("# {}\n\n", display_path));
 
         // File-level documentation comment (from //! crate/module doc)
-        if let Some(ref summary) = doc.summary {
-            if let Some(ref file_doc) = summary.file_doc_comment {
-                let cleaned_doc = clean_comment_content(file_doc);
-                if !cleaned_doc.is_empty() {
-                    output.push_str(&cleaned_doc);
-                    output.push_str("\n\n");
-                }
+        if let Some(ref summary) = doc.summary
+            && let Some(ref file_doc) = summary.file_doc_comment
+        {
+            let cleaned_doc = clean_comment_content(file_doc);
+            if !cleaned_doc.is_empty() {
+                output.push_str(&cleaned_doc);
+                output.push_str("\n\n");
             }
         }
 
@@ -99,12 +99,12 @@ impl MarkdownFormatter {
         }
 
         // Clean summary from FileSummary data
-        if let Some(ref summary) = doc.summary {
-            if let Some(summary_line) = self.format_summary(summary, &doc.entities) {
-                output.push_str(&summary_line);
-                output.push('\n');
-                has_metadata = true;
-            }
+        if let Some(ref summary) = doc.summary
+            && let Some(summary_line) = self.format_summary(summary, &doc.entities)
+        {
+            output.push_str(&summary_line);
+            output.push('\n');
+            has_metadata = true;
         }
 
         // Separator between metadata and entities

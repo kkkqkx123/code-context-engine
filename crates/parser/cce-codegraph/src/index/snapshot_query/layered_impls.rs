@@ -342,10 +342,10 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
         }
         for delta in &self.deltas {
             for rel in &delta.removed_relations {
-                if let Some(ref ext_type) = rel.external_type {
-                    if let Some(count) = stats.get_mut(ext_type) {
-                        *count = count.saturating_sub(1);
-                    }
+                if let Some(ref ext_type) = rel.external_type
+                    && let Some(count) = stats.get_mut(ext_type)
+                {
+                    *count = count.saturating_sub(1);
                 }
             }
         }

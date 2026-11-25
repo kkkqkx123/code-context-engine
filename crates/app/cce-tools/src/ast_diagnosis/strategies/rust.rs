@@ -155,10 +155,11 @@ fn looks_like_missing_semicolon(candidate: &ErrorCandidate, source: &str) -> boo
 
 /// Check if error looks like an unclosed string
 fn looks_like_unclosed_string(candidate: &ErrorCandidate) -> bool {
-    if let Some(ref text) = candidate.text {
-        if text.starts_with('"') && !text.ends_with('"') {
-            return true;
-        }
+    if let Some(ref text) = candidate.text
+        && text.starts_with('"')
+        && !text.ends_with('"')
+    {
+        return true;
     }
     false
 }

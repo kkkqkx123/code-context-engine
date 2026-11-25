@@ -71,17 +71,17 @@ impl GlobFilter {
                 let path = &r.file_path;
 
                 // Must match at least one include pattern (if specified)
-                if let Some(ref include_set) = include_set {
-                    if !include_set.is_match(path) {
-                        return false;
-                    }
+                if let Some(ref include_set) = include_set
+                    && !include_set.is_match(path)
+                {
+                    return false;
                 }
 
                 // Must NOT match any exclude pattern (if specified)
-                if let Some(ref exclude_set) = exclude_set {
-                    if exclude_set.is_match(path) {
-                        return false;
-                    }
+                if let Some(ref exclude_set) = exclude_set
+                    && exclude_set.is_match(path)
+                {
+                    return false;
                 }
 
                 true

@@ -320,10 +320,10 @@ fn extract_import_package_base(source: &str, language: Language) -> String {
     {
         let mut parts = source.split('/');
         let scope = parts.next().unwrap_or("");
-        if let Some(name) = parts.next() {
-            if !name.is_empty() {
-                return format!("{scope}/{name}");
-            }
+        if let Some(name) = parts.next()
+            && !name.is_empty()
+        {
+            return format!("{scope}/{name}");
         }
         return scope.to_string();
     }

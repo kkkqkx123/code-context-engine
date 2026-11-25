@@ -143,10 +143,10 @@ fn parse_generic_arg(arg: &str) -> Option<GenericTypeArg> {
         return Some(GenericTypeArg::Param(trimmed.to_string()));
     }
     // Nested generic?
-    if trimmed.contains('<') {
-        if let Some(nested) = parse_generic_type(trimmed) {
-            return Some(GenericTypeArg::Nested(nested));
-        }
+    if trimmed.contains('<')
+        && let Some(nested) = parse_generic_type(trimmed)
+    {
+        return Some(GenericTypeArg::Nested(nested));
     }
     Some(GenericTypeArg::Concrete(trimmed.to_string()))
 }

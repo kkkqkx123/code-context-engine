@@ -319,13 +319,13 @@ pub fn is_structural_line(line: &str) -> bool {
         return true;
     }
 
-    if let Some(first_char) = line.chars().next() {
-        if first_char.is_ascii_digit() {
-            let after_digits: String = line.chars().take_while(|c| c.is_ascii_digit()).collect();
-            let rest = &line[after_digits.len()..];
-            if rest.starts_with(". ") {
-                return true;
-            }
+    if let Some(first_char) = line.chars().next()
+        && first_char.is_ascii_digit()
+    {
+        let after_digits: String = line.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let rest = &line[after_digits.len()..];
+        if rest.starts_with(". ") {
+            return true;
         }
     }
 

@@ -53,10 +53,10 @@ impl GenericChunker<YamlGroup, YamlNode> for YamlChunker {
         if !group.path_prefix.is_empty() {
             return Some(group.path_prefix.clone());
         }
-        if let Some(ref header) = group.header {
-            if let Some(ref key) = header.key {
-                return Some(key.clone());
-            }
+        if let Some(ref header) = group.header
+            && let Some(ref key) = header.key
+        {
+            return Some(key.clone());
         }
         std::path::Path::new(file_path)
             .file_stem()

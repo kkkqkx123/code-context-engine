@@ -258,19 +258,17 @@ pub async fn handle_update_project(
     reload_project_after_profile_change(&state, id).await;
     if let Some(supply_mode) = request.supply_mode.as_deref() {
         let normalized = supply_mode.trim().to_lowercase();
-        if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
-            || normalized == cce_api::models::SUPPLY_MODE_LOCAL
-        {
-            if let Err(e) = metadata_store
+        if (normalized == cce_api::models::SUPPLY_MODE_GATEWAY
+            || normalized == cce_api::models::SUPPLY_MODE_LOCAL)
+            && let Err(e) = metadata_store
                 .project_meta_set_string(id, cce_api::models::SUPPLY_MODE_KEY, &normalized)
                 .await
-            {
-                tracing::warn!(
-                    project_id = id,
-                    error = %e,
-                    "Failed to record supply mode (non-critical)"
-                );
-            }
+        {
+            tracing::warn!(
+                project_id = id,
+                error = %e,
+                "Failed to record supply mode (non-critical)"
+            );
         }
     }
 
@@ -316,10 +314,10 @@ pub async fn handle_delete_project(
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectDeleteResponse> {
     // 1. Stop watch if running (handler-specific: maintenance service doesn't manage watchers)
-    if let Some(tracker) = state.watch_status.write().await.remove(&id) {
-        if tracker.active {
-            tracing::info!(project_id = id, "Watch stopped during project deletion");
-        }
+    if let Some(tracker) = state.watch_status.write().await.remove(&id)
+        && tracker.active
+    {
+        tracing::info!(project_id = id, "Watch stopped during project deletion");
     }
 
     // 2. Use unified maintenance service for all storage-layer cleanup

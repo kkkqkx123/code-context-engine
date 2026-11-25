@@ -112,14 +112,14 @@ impl RelationBuildSpool {
             .join(".cce")
             .join(format!("relation-build-{project_id}"));
         // Clean up an orphaned spool left behind by a crashed run.
-        if directory.exists() {
-            if let Err(error) = fs::remove_dir_all(&directory) {
-                tracing::warn!(
-                    path = %directory.display(),
-                    %error,
-                    "Failed to remove orphaned relation build spool"
-                );
-            }
+        if directory.exists()
+            && let Err(error) = fs::remove_dir_all(&directory)
+        {
+            tracing::warn!(
+                path = %directory.display(),
+                %error,
+                "Failed to remove orphaned relation build spool"
+            );
         }
         fs::create_dir_all(&directory)?;
 

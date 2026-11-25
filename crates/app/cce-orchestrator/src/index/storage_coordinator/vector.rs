@@ -36,7 +36,6 @@ pub(crate) use crate::error::EMBEDDING_STAGE_TIMEOUT_CODE;
 /// Read the parse-time entity id persisted in an entity row's metadata.
 fn source_id_from_metadata(metadata: Option<&str>) -> Option<i64> {
     metadata
-        .as_deref()
         .and_then(|raw| serde_json::from_str::<std::collections::HashMap<String, String>>(raw).ok())
         .and_then(|map| {
             map.get("__source_entity_id")
@@ -603,7 +602,7 @@ impl StorageCoordinator {
                     batch,
                     &embeddings,
                     staged,
-                    &source_entity_ids,
+                    source_entity_ids,
                     hash.clone(),
                 )
                 .await?;
@@ -643,7 +642,7 @@ impl StorageCoordinator {
                                 batch,
                                 &embeddings,
                                 staged,
-                                &source_entity_ids,
+                                source_entity_ids,
                                 hash,
                             )
                             .await?;

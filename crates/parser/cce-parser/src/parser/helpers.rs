@@ -175,18 +175,15 @@ fn resolve_component_usage(
         let name = template_entity.name.as_str();
 
         // PascalCase check: starts with uppercase
-        if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-            if let Some(script_entity) = script_names.get(name) {
-                relations.push(BlockRelation {
-                    source_id: template_entity.id,
-                    target_id: script_entity.id,
-                    relation_type: BlockRelationType::ComponentUsage,
-                    description: format!(
-                        "Template component `{}` references script definition",
-                        name
-                    ),
-                });
-            }
+        if name.chars().next().is_some_and(|c| c.is_uppercase())
+            && let Some(script_entity) = script_names.get(name)
+        {
+            relations.push(BlockRelation {
+                source_id: template_entity.id,
+                target_id: script_entity.id,
+                relation_type: BlockRelationType::ComponentUsage,
+                description: format!("Template component `{}` references script definition", name),
+            });
         }
     }
 
@@ -214,36 +211,36 @@ fn resolve_event_handlers(
             let handler_name = attr_value.trim();
             if !handler_name.is_empty()
                 && (attr_key.starts_with('@') || attr_key.starts_with("on:"))
+                && let Some(script_entity) = function_names.get(handler_name)
             {
-                if let Some(script_entity) = function_names.get(handler_name) {
-                    relations.push(BlockRelation {
-                        source_id: entity.id,
-                        target_id: script_entity.id,
-                        relation_type: BlockRelationType::EventHandler,
-                        description: format!(
-                            "Template event `{}` binds to script method `{}`",
-                            attr_key, handler_name
-                        ),
-                    });
-                }
+                relations.push(BlockRelation {
+                    source_id: entity.id,
+                    target_id: script_entity.id,
+                    relation_type: BlockRelationType::EventHandler,
+                    description: format!(
+                        "Template event `{}` binds to script method `{}`",
+                        attr_key, handler_name
+                    ),
+                });
             }
         }
 
         // Also check metadata for event handler references
         if let Some(directives) = entity.metadata.get("directives") {
             for handler_name in directives.split(',').map(|s| s.trim()) {
-                if !handler_name.is_empty() && function_names.contains_key(handler_name) {
-                    if let Some(script_entity) = function_names.get(handler_name) {
-                        relations.push(BlockRelation {
-                            source_id: entity.id,
-                            target_id: script_entity.id,
-                            relation_type: BlockRelationType::EventHandler,
-                            description: format!(
-                                "Template directive references script method `{}`",
-                                handler_name
-                            ),
-                        });
-                    }
+                if !handler_name.is_empty()
+                    && function_names.contains_key(handler_name)
+                    && let Some(script_entity) = function_names.get(handler_name)
+                {
+                    relations.push(BlockRelation {
+                        source_id: entity.id,
+                        target_id: script_entity.id,
+                        relation_type: BlockRelationType::EventHandler,
+                        description: format!(
+                            "Template directive references script method `{}`",
+                            handler_name
+                        ),
+                    });
                 }
             }
         }

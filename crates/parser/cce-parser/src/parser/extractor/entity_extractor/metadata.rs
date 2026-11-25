@@ -135,22 +135,22 @@ pub(crate) fn extract_metadata(
         }
     }
 
-    if entity.kind == EntityKind::Method {
-        if let Some(method_type) = capture_module::parser::extract_python_method_type(mat) {
-            entity.set_metadata("method_type", method_type);
-        }
+    if entity.kind == EntityKind::Method
+        && let Some(method_type) = capture_module::parser::extract_python_method_type(mat)
+    {
+        entity.set_metadata("method_type", method_type);
     }
 
-    if entity.kind == EntityKind::EnumVariant {
-        if let Some(variant_type) = capture_module::parser::extract_enum_variant_type(mat) {
-            entity.set_metadata("enum_variant_type", variant_type);
-        }
+    if entity.kind == EntityKind::EnumVariant
+        && let Some(variant_type) = capture_module::parser::extract_enum_variant_type(mat)
+    {
+        entity.set_metadata("enum_variant_type", variant_type);
     }
 
-    if entity.kind == EntityKind::StyleProperty {
-        if let Some(property_value) = capture_module::parser::extract_css_property_value(mat) {
-            entity.set_metadata("property_value", property_value);
-        }
+    if entity.kind == EntityKind::StyleProperty
+        && let Some(property_value) = capture_module::parser::extract_css_property_value(mat)
+    {
+        entity.set_metadata("property_value", property_value);
     }
 
     if entity.kind == EntityKind::TraitImpl || entity.kind == EntityKind::InherentImpl {
@@ -176,12 +176,12 @@ pub(crate) fn extract_metadata(
                 entity.set_metadata("type_annotation", trimmed.to_string());
             }
         }
-        if !entity.metadata.contains_key("type_annotation") {
-            if let Some(captured) = find_type_annotation_capture(mat) {
-                let trimmed = captured.trim();
-                if !trimmed.is_empty() {
-                    entity.set_metadata("type_annotation", trimmed.to_string());
-                }
+        if !entity.metadata.contains_key("type_annotation")
+            && let Some(captured) = find_type_annotation_capture(mat)
+        {
+            let trimmed = captured.trim();
+            if !trimmed.is_empty() {
+                entity.set_metadata("type_annotation", trimmed.to_string());
             }
         }
     }
@@ -189,17 +189,16 @@ pub(crate) fn extract_metadata(
     // Field/Property initializer tracking (constructor calls, literals):
     // mirrors the variable path so annotated properties such as
     // `val c = Container("v")` feed type inference.
-    if matches!(entity.kind, EntityKind::Field | EntityKind::Property) {
-        if let Some(value) =
+    if matches!(entity.kind, EntityKind::Field | EntityKind::Property)
+        && let Some(value) =
             capture_text_over_field_siblings(mat, tree, source, |name| name.ends_with(".value"))
-        {
-            extract_initializer_metadata(entity, &value, language);
-            // Bare-identifier initializers (`self.radius = radius`): remember
-            // the source name so inference can bind the enclosing
-            // constructor parameter's type (`radius: float`).
-            if !entity.metadata.contains_key("source_type") && is_bare_identifier(value.trim()) {
-                entity.set_metadata("source_type", value.trim().to_string());
-            }
+    {
+        extract_initializer_metadata(entity, &value, language);
+        // Bare-identifier initializers (`self.radius = radius`): remember
+        // the source name so inference can bind the enclosing
+        // constructor parameter's type (`radius: float`).
+        if !entity.metadata.contains_key("source_type") && is_bare_identifier(value.trim()) {
+            entity.set_metadata("source_type", value.trim().to_string());
         }
     }
 
@@ -239,10 +238,9 @@ pub(crate) fn extract_metadata(
         && matches!(entity.kind, EntityKind::Function | EntityKind::Method)
         && entity.return_type.is_none()
         && let Some(body) = find_capture_by_name(&mat.captures, |name| name.ends_with(".body"))
+        && let Some(return_expr) = extract_last_return_expression(&body.text, *language)
     {
-        if let Some(return_expr) = extract_last_return_expression(&body.text, *language) {
-            entity.set_metadata("return_body", return_expr);
-        }
+        entity.set_metadata("return_body", return_expr);
     }
 }
 
@@ -528,13 +526,12 @@ fn extend_dart_signature_span(mat: &QueryMatch, entity: &mut Entity, tree: &tree
     // first following named body sibling.
     let mut index = None;
     for i in 0..parent.child_count() {
-        if let Some(child) = parent.child(i as u32) {
-            if child.start_byte() == signature.start_byte()
-                && child.end_byte() == signature.end_byte()
-            {
-                index = Some(i);
-                break;
-            }
+        if let Some(child) = parent.child(i as u32)
+            && child.start_byte() == signature.start_byte()
+            && child.end_byte() == signature.end_byte()
+        {
+            index = Some(i);
+            break;
         }
     }
     let Some(start) = index else {
@@ -846,12 +843,13 @@ fn capture_text_over_field_siblings(
     let mut field_name = None;
     let mut position = None;
     for i in 0..parent.child_count() {
-        if let Some(child) = parent.child(i as u32) {
-            if child.start_byte() == node.start_byte() && child.end_byte() == node.end_byte() {
-                field_name = parent.field_name_for_child(i as u32).map(str::to_string);
-                position = Some(i);
-                break;
-            }
+        if let Some(child) = parent.child(i as u32)
+            && child.start_byte() == node.start_byte()
+            && child.end_byte() == node.end_byte()
+        {
+            field_name = parent.field_name_for_child(i as u32).map(str::to_string);
+            position = Some(i);
+            break;
         }
     }
     let (field_name, position) = match (field_name, position) {
@@ -873,10 +871,10 @@ fn capture_text_over_field_siblings(
         if !same_field {
             break;
         }
-        if let Some(child) = parent.child(i as u32) {
-            if child.is_named() {
-                end_byte = end_byte.max(child.end_byte());
-            }
+        if let Some(child) = parent.child(i as u32)
+            && child.is_named()
+        {
+            end_byte = end_byte.max(child.end_byte());
         }
     }
     source
@@ -1446,10 +1444,10 @@ fn extract_constructor_type_from_expr(expr: &str) -> Option<String> {
     // ClassName(...) - function call that looks like a constructor
     if let Some(paren_pos) = trimmed.find('(') {
         let base = trimmed[..paren_pos].trim();
-        if let Some((name, args)) = split_explicit_generic_args(base) {
-            if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                return Some(format!("{name}<{args}>"));
-            }
+        if let Some((name, args)) = split_explicit_generic_args(base)
+            && name.chars().next().is_some_and(|c| c.is_uppercase())
+        {
+            return Some(format!("{name}<{args}>"));
         }
         let func_name = truncate_generic_args(base).trim();
         // Ruby-style `ClassName.new(...)` normalizes to the class name.

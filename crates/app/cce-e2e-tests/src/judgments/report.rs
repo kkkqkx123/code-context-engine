@@ -737,7 +737,7 @@ fn title_duplicates(docs: &[crate::bench_data::Bm25DocRecord]) -> usize {
 /// Groups chunks by (entity set + range signature): a group with more than
 /// one chunk is a single entity whose documentation and code were split into
 /// separate index entries sharing the same coverage.
-
+///
 /// Write chunk-shape diagnostics: how many chunks claim a source range no
 /// other chunk claims, and how many repeat another chunk's text.
 ///

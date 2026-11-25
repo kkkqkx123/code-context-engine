@@ -395,10 +395,10 @@ impl SymbolTableBuilder {
                     if ctx.contains("if ") && ctx.contains(":") {
                         // Look for the specific import line to see if it's inside an if block
                         let lines: Vec<&str> = ctx.lines().collect();
-                        if let Some(last_line) = lines.last() {
-                            if last_line.trim_start().starts_with("if ") {
-                                return Some("if_guard".to_string());
-                            }
+                        if let Some(last_line) = lines.last()
+                            && last_line.trim_start().starts_with("if ")
+                        {
+                            return Some("if_guard".to_string());
                         }
                     }
                 }
@@ -578,14 +578,13 @@ impl SymbolTableBuilder {
 
         let exports = crate::helpers::extract_exports_from_entities(&file.entities, &file.language);
         for export in &exports {
-            if !module_table.has_export(&export.function_name) {
-                if let Some(entity) = file.entities.iter().find(|e| e.id == export.function_id) {
-                    let location =
-                        SymbolLocation::new(file.path.clone(), entity.span, file.language);
-                    let metadata = SymbolMetadata::new(entity.name.clone(), entity.kind, location);
-                    let visibility = self.detect_visibility(entity, file.language);
-                    module_table.add_export(export.function_name.clone(), metadata, visibility);
-                }
+            if !module_table.has_export(&export.function_name)
+                && let Some(entity) = file.entities.iter().find(|e| e.id == export.function_id)
+            {
+                let location = SymbolLocation::new(file.path.clone(), entity.span, file.language);
+                let metadata = SymbolMetadata::new(entity.name.clone(), entity.kind, location);
+                let visibility = self.detect_visibility(entity, file.language);
+                module_table.add_export(export.function_name.clone(), metadata, visibility);
             }
         }
 

@@ -64,56 +64,53 @@ pub fn build_type_index(
     };
 
     for entity in entities {
-        if let Some(parent_id) = entity.parent {
-            if let Some(parent) = by_id.get(&parent_id) {
-                if is_java_type_kind(parent.kind) {
-                    if let Some(key) = get_key(parent_id) {
-                        // skip types themselves (already inserted)
-                        if is_java_type_kind(entity.kind) {
-                            continue;
-                        }
-                        let is_ctor =
-                            entity.kind == EntityKind::Constructor || entity.name == parent.name;
-                        let is_field = matches!(
-                            entity.kind,
-                            EntityKind::Field
-                                | EntityKind::Property
-                                | EntityKind::Variable
-                                | EntityKind::Constant
-                        );
-                        let kind = if is_ctor {
-                            EntityKind::Constructor
-                        } else if is_field {
-                            EntityKind::Field
-                        } else {
-                            entity.kind
-                        };
-                        let vis = crate::policy::detect_entity_visibility(entity, &language);
-                        let is_static = entity
-                            .modifiers
-                            .iter()
-                            .any(|m| m.eq_ignore_ascii_case("static"));
-                        let member = MemberEntry {
-                            entity_id: entity.id,
-                            name: entity.name.clone(),
-                            kind,
-                            visibility: vis,
-                            is_static,
-                            is_associated: is_static,
-                            span: entity.span,
-                            file_path: file_path.to_string(),
-                            module_path: if module_path.is_empty() {
-                                None
-                            } else {
-                                Some(module_path.to_string())
-                            },
-                            package: package.to_string(),
-                        };
-                        // ensure type exists (already)
-                        let _ = type_index.insert_member(&key, member);
-                    }
-                }
+        if let Some(parent_id) = entity.parent
+            && let Some(parent) = by_id.get(&parent_id)
+            && is_java_type_kind(parent.kind)
+            && let Some(key) = get_key(parent_id)
+        {
+            // skip types themselves (already inserted)
+            if is_java_type_kind(entity.kind) {
+                continue;
             }
+            let is_ctor = entity.kind == EntityKind::Constructor || entity.name == parent.name;
+            let is_field = matches!(
+                entity.kind,
+                EntityKind::Field
+                    | EntityKind::Property
+                    | EntityKind::Variable
+                    | EntityKind::Constant
+            );
+            let kind = if is_ctor {
+                EntityKind::Constructor
+            } else if is_field {
+                EntityKind::Field
+            } else {
+                entity.kind
+            };
+            let vis = crate::policy::detect_entity_visibility(entity, &language);
+            let is_static = entity
+                .modifiers
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case("static"));
+            let member = MemberEntry {
+                entity_id: entity.id,
+                name: entity.name.clone(),
+                kind,
+                visibility: vis,
+                is_static,
+                is_associated: is_static,
+                span: entity.span,
+                file_path: file_path.to_string(),
+                module_path: if module_path.is_empty() {
+                    None
+                } else {
+                    Some(module_path.to_string())
+                },
+                package: package.to_string(),
+            };
+            // ensure type exists (already)
+            let _ = type_index.insert_member(&key, member);
         }
     }
 }
@@ -138,10 +135,10 @@ fn parent_qualified(
     module_path: &str,
     package: &str,
 ) -> String {
-    if let Some(parent_id) = entity.parent {
-        if let Some(parent) = by_id.get(&parent_id) {
-            return top_qualified(&parent.name, module_path, package);
-        }
+    if let Some(parent_id) = entity.parent
+        && let Some(parent) = by_id.get(&parent_id)
+    {
+        return top_qualified(&parent.name, module_path, package);
     }
     package.to_string()
 }

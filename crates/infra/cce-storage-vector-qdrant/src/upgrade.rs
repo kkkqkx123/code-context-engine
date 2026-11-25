@@ -507,20 +507,20 @@ impl ConfigUpgradeService {
         let collection_name = self.client.collection_name().to_string();
         let mut upgrades = self.current_upgrades.lock().await;
 
-        if let Some(progress) = upgrades.get_mut(&collection_name) {
-            if progress.status == UpgradeStatus::InProgress {
-                progress.cancel();
+        if let Some(progress) = upgrades.get_mut(&collection_name)
+            && progress.status == UpgradeStatus::InProgress
+        {
+            progress.cancel();
 
-                let mut history = self.upgrade_history.lock().await;
-                history
-                    .entry(collection_name.clone())
-                    .or_default()
-                    .push(progress.clone());
+            let mut history = self.upgrade_history.lock().await;
+            history
+                .entry(collection_name.clone())
+                .or_default()
+                .push(progress.clone());
 
-                upgrades.remove(&collection_name);
-                tracing::info!("Upgrade cancelled for {}", collection_name);
-                return true;
-            }
+            upgrades.remove(&collection_name);
+            tracing::info!("Upgrade cancelled for {}", collection_name);
+            return true;
         }
 
         false
@@ -531,17 +531,17 @@ impl ConfigUpgradeService {
         let collection_name = self.client.collection_name().to_string();
         let mut upgrades = self.current_upgrades.lock().await;
 
-        if let Some(progress) = upgrades.get_mut(&collection_name) {
-            if progress.status == UpgradeStatus::InProgress {
-                let step_index = progress.steps.len().saturating_sub(1);
-                progress.pause(step_index);
-                tracing::info!(
-                    "Upgrade paused for {} at step {}",
-                    collection_name,
-                    step_index + 1
-                );
-                return true;
-            }
+        if let Some(progress) = upgrades.get_mut(&collection_name)
+            && progress.status == UpgradeStatus::InProgress
+        {
+            let step_index = progress.steps.len().saturating_sub(1);
+            progress.pause(step_index);
+            tracing::info!(
+                "Upgrade paused for {} at step {}",
+                collection_name,
+                step_index + 1
+            );
+            return true;
         }
 
         false
