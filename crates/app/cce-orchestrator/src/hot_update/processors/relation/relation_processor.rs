@@ -24,9 +24,7 @@ use crate::hot_update::{BatchChangeResult, FileChangeType};
 use crate::index::vector_store::MetadataStore;
 use cce_codegraph::BuildConfigParser;
 use cce_codegraph::IndexBuilder;
-use cce_codegraph::index::{
-    RelationDeltaOps, RelationIndex, RelationIndexView, SnapshotFileQueryOps,
-};
+use cce_codegraph::index::{RelationDeltaOps, RelationIndex, RelationIndexView};
 use cce_config::RelationBuilderParams;
 use cce_metrics::RelationMetrics;
 use cce_plugin::PluginRegistry;

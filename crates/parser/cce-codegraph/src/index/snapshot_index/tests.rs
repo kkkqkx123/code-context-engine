@@ -467,6 +467,7 @@ fn sharded_facade_matches_in_memory_queries_and_fingerprints() {
             shard_lru_shards: 2,
             shard_lru_bytes: u64::MAX,
             shard_query_shards: 8,
+            route_cache_entries: 16,
         },
     )
     .expect("sharded facade should build");
@@ -506,6 +507,7 @@ fn shard_lru_is_bounded_by_configuration() {
             shard_lru_shards: 1,
             shard_lru_bytes: u64::MAX,
             shard_query_shards: 8,
+            route_cache_entries: 16,
         },
     )
     .expect("sharded facade should build");
@@ -538,6 +540,7 @@ fn shard_query_limit_fails_explicitly_instead_of_truncating_edges() {
             shard_lru_shards: 4,
             shard_lru_bytes: u64::MAX,
             shard_query_shards: 1,
+            route_cache_entries: 16,
         },
     )
     .expect("sharded facade should build");
@@ -578,4 +581,51 @@ fn shard_fingerprint_reuses_canonical_hash_entry_point() {
             .fingerprint(),
         direct
     );
+}
+
+#[test]
+fn streaming_artifact_matches_full_graph_artifact() {
+    let full = fixture();
+    let expected = full
+        .build_snapshot_artifact("config".to_string(), SnapshotArtifactOptions::default())
+        .expect("full artifact");
+
+    let streamed_index = fixture();
+    let mut streamed = super::StreamingSnapshotArtifactBuilder::new(
+        &streamed_index,
+        "config".to_string(),
+        SnapshotArtifactOptions::default(),
+    )
+    .expect("streaming artifact");
+    for (path, ids) in [
+        ("src/a.rs", vec![EntityId(1)]),
+        ("src/b.rs", vec![EntityId(2)]),
+        ("src/c.rs", vec![EntityId(3)]),
+        ("src/d.rs", vec![EntityId(4)]),
+    ] {
+        streamed
+            .push_registered_file(path, &ids)
+            .expect("registered file should stream");
+    }
+    for (path, callers) in [
+        ("src/a.rs", vec![EntityId(1)]),
+        ("src/b.rs", vec![EntityId(2)]),
+        ("src/c.rs", vec![EntityId(3)]),
+        ("src/d.rs", vec![EntityId(4)]),
+    ] {
+        streamed
+            .push_resolved_file(path, &callers)
+            .expect("resolved file should stream");
+    }
+    let actual = streamed.finish().expect("streaming artifact should finish");
+
+    assert_eq!(
+        actual.snapshot_fingerprint(),
+        expected.snapshot_fingerprint()
+    );
+    assert_eq!(actual.input_fingerprint(), expected.input_fingerprint());
+    assert_eq!(actual.counts().files, expected.counts().files);
+    assert_eq!(actual.counts().entities, expected.counts().entities);
+    assert_eq!(actual.counts().relations, expected.counts().relations);
+    assert_eq!(actual.counts().dependencies, expected.counts().dependencies);
 }

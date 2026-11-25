@@ -45,7 +45,6 @@ use super::stores::FileRecord;
 use super::stores::diagnostics::RelationDiagnostics;
 
 use crate::dependency_graph::FileDependencyGraph;
-use crate::index::snapshot_index::RelationSnapshotIndex;
 use crate::index::view::{RelationIndexView, active_file_set};
 use cce_metrics::domain::pipeline::RelationMetrics;
 use cce_types::{
@@ -761,6 +760,32 @@ impl RelationIndex {
             .insert(entity_id, file_path.to_string());
     }
 
+    /// Release indexes and payload fields that are only needed while
+    /// canonical entity rows are produced. Cross-file resolution still has
+    /// the name, kind, modifiers, span and type hints it needs, but the
+    /// second-wins symbol/registry copies no longer stay resident.
+    /// Clear payload fields of streamed entities that are not needed by
+    /// cross-file resolution. Called per file so the full payload set never
+    /// accumulates in memory during a streamed build.
+    pub fn release_entity_payloads(&self, entity_ids: &[EntityId]) {
+        for id in entity_ids {
+            if let Some(mut entity) = self.function_index.get_mut(id) {
+                let entity = entity.value_mut();
+                entity.signature.clear();
+                entity.doc_comment = None;
+                entity.attributes.clear();
+                entity.subtype = None;
+            }
+        }
+    }
+
+    pub fn release_entity_build_indexes(&self) {
+        self.symbol_key_to_entity.write().clear();
+        self.stable_id_to_entity.write().clear();
+        self.file_symbol_keys.write().clear();
+        self.file_entities_by_start.write().clear();
+    }
+
     /// Add a resolved relation to the index
     ///
     /// Updates both forward index (caller -> relations) and the global
@@ -791,6 +816,25 @@ impl RelationIndex {
         for relation in relations {
             self.add_resolved_relation(relation);
         }
+    }
+
+    /// Drop the forward and reverse relations of one caller after they have
+    /// been streamed into a build artifact. Entities and file records stay
+    /// intact for the remaining cross-file resolution passes.
+    pub fn clear_relations_of_caller(&self, caller: EntityId) {
+        if let Some((_, edges)) = self.resolved_relation_index.remove(&caller) {
+            for relation in edges.iter() {
+                if let Some(callee) = relation.callee_id {
+                    self.untrack_reverse_caller(callee, caller);
+                }
+            }
+        }
+    }
+
+    /// Drop all file-scoped relations of one file after they have been
+    /// streamed into a build artifact.
+    pub fn clear_file_relations(&self, path: &str) {
+        let _ = self.take_file_relations(path);
     }
 
     /// Add a resolved file-level relation to the index, keyed by normalized
@@ -1074,7 +1118,8 @@ impl RelationIndex {
         &self,
         config_fingerprint: String,
     ) -> Result<CanonicalRelationSnapshot, String> {
-        RelationSnapshotIndex::from_index_shared(self).to_canonical_snapshot(config_fingerprint)
+        let view = crate::index::snapshot_index::shared_view(self);
+        view.to_canonical_snapshot(config_fingerprint)
     }
 
     /// Compute a deterministic fingerprint of the current snapshot.

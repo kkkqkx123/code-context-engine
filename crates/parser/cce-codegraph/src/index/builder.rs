@@ -392,6 +392,11 @@ impl IndexBuilder {
         &self.index
     }
 
+    /// Mutable access for callers that take ownership of a detached snapshot.
+    pub fn index_mut(&mut self) -> &mut RelationIndex {
+        &mut self.index
+    }
+
     pub fn config_fingerprint(&self) -> String {
         let base = self.config.fingerprint();
         let plugins = self
@@ -697,6 +702,23 @@ impl IndexBuilder {
         processor.index_file_core(file);
     }
 
+    /// Global entity IDs that can own relations in `file`.
+    ///
+    /// Streaming builds use this to flush only the current file's edges into
+    /// the artifact and reclaim them immediately instead of scanning the
+    /// whole graph.
+    pub fn caller_entity_ids(&self, file: &ParsedFile) -> Vec<EntityId> {
+        let path = cce_types::normalize_project_path(&file.path);
+        let remap = self.index.entity_id_remaps.read().get(&path).cloned();
+        let Some(remap) = remap else {
+            return Vec::new();
+        };
+        let mut ids: Vec<EntityId> = remap.values().copied().collect();
+        ids.sort_by_key(|id| id.0);
+        ids.dedup();
+        ids
+    }
+
     /// Resolve and register relations for a file using a complete symbol table.
     pub fn resolve_file_relations(&self, file: &ParsedFile, symbols: &ProjectSymbolTable) {
         let processor = self.make_file_processor(&self.config);
@@ -706,9 +728,19 @@ impl IndexBuilder {
 
     /// Record metrics for a streamed build after all phases have completed.
     pub fn record_streamed_build(&self, elapsed: std::time::Duration, file_count: usize) {
+        let extracted_count = self.index.resolved_relation_count();
+        self.record_streamed_build_with_count(elapsed, file_count, extracted_count);
+    }
+
+    /// Record a build whose edges were streamed out before this call.
+    pub fn record_streamed_build_with_count(
+        &self,
+        elapsed: std::time::Duration,
+        file_count: usize,
+        extracted_count: usize,
+    ) {
         if let Some(metrics) = &self.metrics {
             let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-            let extracted_count = self.index.resolved_relation_count();
             metrics.record_build(elapsed_ms, extracted_count, file_count);
         }
     }

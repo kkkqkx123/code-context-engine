@@ -87,7 +87,7 @@ impl IndexOrchestrator {
         &mut self,
         ctx: &mut FullIndexContext,
     ) -> Result<(), OrchestratorError> {
-        let builder = self.create_relation_builder()?;
+        let mut builder = self.create_relation_builder()?;
         let spool = ctx.relation_spool.as_mut().ok_or_else(|| {
             OrchestratorError::index("relation_build_spool", "relation spool is unavailable")
         })?;
@@ -207,13 +207,29 @@ impl IndexOrchestrator {
         ctx.stages.symbol_cross_file_ms += propagation_started.elapsed().as_millis() as u64;
         record_pass(propagation_started.elapsed(), total_bytes);
 
+        let artifact_options = cce_types::SnapshotArtifactOptions::default()
+            .with_shard_items(self.relation_config.shard.max_shard_items);
+        let mut streaming = cce_codegraph::index::StreamingSnapshotArtifactBuilder::new(
+            builder.index(),
+            builder.config_fingerprint(),
+            artifact_options,
+        )
+        .map_err(|error| {
+            OrchestratorError::index(
+                "relation_snapshot_artifact",
+                format!("Failed to start streaming snapshot artifact: {error}"),
+            )
+        })?;
+
         let t0 = Instant::now();
+        let mut registered_paths = Vec::new();
         let registered_files = spool
             .for_each(|parsed| {
                 builder.register_file_entities(parsed);
                 if plugin_enabled {
                     builder.register_file_plugin_symbols(parsed, project_symbols);
                 }
+                registered_paths.push((parsed.path.clone(), builder.caller_entity_ids(parsed)));
             })
             .map_err(|error| {
                 OrchestratorError::index(
@@ -221,16 +237,36 @@ impl IndexOrchestrator {
                     format!("Failed to replay relation entities: {error}"),
                 )
             })?;
+        for (path, entity_ids) in &registered_paths {
+            streaming
+                .push_registered_file(path, entity_ids)
+                .map_err(|error| {
+                    OrchestratorError::index(
+                        "relation_snapshot_artifact",
+                        format!("Failed to stream registered file {path}: {error}"),
+                    )
+                })?;
+            builder.index().release_entity_payloads(entity_ids);
+        }
         record_pass(t0.elapsed(), total_bytes);
+        builder.index().release_entity_build_indexes();
         if let Some(parser) = &self.cached_build_config {
             Self::inject_governance_edges(&builder, parser);
         }
         let t1 = Instant::now();
+        let mut stream_failure = None;
         let resolved_files = spool
             .for_each(|parsed| {
                 builder.resolve_file_relations(parsed, project_symbols);
                 if plugin_enabled {
                     builder.inject_plugin_relations(parsed, project_symbols);
+                }
+                let callers = builder.caller_entity_ids(parsed);
+                if let Err(error) = streaming.push_resolved_file(&parsed.path, &callers) {
+                    stream_failure = Some(format!(
+                        "Failed to stream resolved relations of {}: {error}",
+                        parsed.path
+                    ));
                 }
             })
             .map_err(|error| {
@@ -239,6 +275,12 @@ impl IndexOrchestrator {
                     format!("Failed to replay relation edges: {error}"),
                 )
             })?;
+        if let Some(error) = stream_failure {
+            return Err(OrchestratorError::index(
+                "relation_snapshot_artifact",
+                error,
+            ));
+        }
         record_pass(t1.elapsed(), total_bytes);
 
         let (symbol_entries, symbol_bytes) = project_symbols.capacity_counts();
@@ -264,22 +306,29 @@ impl IndexOrchestrator {
         // satisfaction) once the complete graph is resolved and before the
         // canonical snapshot is taken.
         builder.derive_implicit_hierarchy_edges(spool.project_symbols());
-        builder.record_streamed_build(relation_build_started.elapsed(), registered_files);
-        let (nodes, edges, relation_bytes) = builder.index().capacity_counts();
+        streaming.push_pending_relations().map_err(|error| {
+            OrchestratorError::index(
+                "relation_snapshot_artifact",
+                format!("Failed to stream derived relations: {error}"),
+            )
+        })?;
+        builder.record_streamed_build_with_count(
+            relation_build_started.elapsed(),
+            registered_files,
+            streaming.relation_count(),
+        );
+        let (nodes, _edges, relation_bytes) = builder.index().capacity_counts();
         ctx.stages.relation_nodes = nodes;
-        ctx.stages.relation_edges = edges;
+        ctx.stages.relation_edges = streaming.relation_count() as u64;
         ctx.stages.relation_estimated_bytes = relation_bytes;
 
-        let artifact_options = cce_types::SnapshotArtifactOptions::default()
-            .with_shard_items(self.relation_config.shard.max_shard_items);
-        match builder
-            .index()
-            .build_snapshot_artifact(builder.config_fingerprint(), artifact_options)
-        {
+        match streaming.finish() {
             Ok(artifact) => {
-                let (entries, _edges, estimated_bytes) = builder.index().capacity_counts();
-                ctx.stages.relation_snapshot_entries = entries;
-                ctx.stages.relation_snapshot_estimated_bytes = estimated_bytes;
+                let counts = artifact.counts();
+                ctx.stages.relation_snapshot_entries =
+                    (counts.files + counts.entities + counts.relations + counts.dependencies)
+                        as u64;
+                ctx.stages.relation_snapshot_estimated_bytes = builder.index().capacity_counts().2;
                 ctx.stages.canonical_write_batches = artifact.write_batches();
                 ctx.stages.canonical_write_buffer_peak_bytes = artifact.buffer_peak_bytes();
                 if let Ok(plan) =
@@ -297,12 +346,7 @@ impl IndexOrchestrator {
                 match &self.relation_publisher {
                     Some(publisher) => {
                         match publisher
-                            .publish(
-                                self.project_id,
-                                &ctx.operation_id,
-                                &artifact,
-                                builder.index(),
-                            )
+                            .publish(self.project_id, &ctx.operation_id, &artifact)
                             .await
                         {
                             Ok(publication) => {
@@ -376,10 +420,11 @@ impl IndexOrchestrator {
                             operation_id = %ctx.operation_id,
                             "No relation snapshot publisher configured; relations stay in-memory only"
                         );
-                        let base =
-                            Arc::new(cce_codegraph::index::RelationSnapshotIndex::from_index(
-                                builder.index(),
-                            ));
+                        let base = Arc::new(
+                            cce_codegraph::index::RelationSnapshotIndex::from_index_owned(
+                                builder.index_mut(),
+                            ),
+                        );
                         self.last_published_snapshot = Some(Arc::new(
                             cce_codegraph::index::LayeredSnapshotIndex::new(base),
                         ));

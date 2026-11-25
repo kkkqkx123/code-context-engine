@@ -12,6 +12,7 @@ use cce_orchestrator::hot_update::processors::RelationUpdateProcessor;
 use cce_orchestrator::index::StorageCoordinator;
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_storage_common::MetadataStorage;
+use cce_types::relation::RelationSnapshotStore;
 
 impl super::CodeContextEngine {
     /// Get or create project-specific RelationRuntime
@@ -235,28 +236,43 @@ impl super::CodeContextEngine {
             .await
             .map(|entry| entry.config.relation.shard)
             .unwrap_or_default();
-        let index = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
-            &store,
+        let base_epoch = store
+            .find_base_epoch(project_id, active_epoch)
+            .map_err(|e| EngineError::Config(format!("cannot find base epoch: {e}")))?
+            .unwrap_or(active_epoch);
+        let base = cce_codegraph::index::RelationSnapshotIndex::from_store(
+            Arc::new(store.clone()),
             project_id,
-            active_epoch,
+            base_epoch,
+            shard_config.clone(),
         )
-        .map_err(|e| EngineError::Config(format!("Failed to load active epoch: {e}")))?;
+        .map_err(|e| EngineError::Config(format!("Failed to open base epoch: {e}")))?;
+        let deltas = store
+            .get_delta_chain(project_id, base_epoch, active_epoch)
+            .map_err(|e| EngineError::Config(format!("cannot read delta chain: {e}")))?;
+        let layered = cce_codegraph::index::LayeredSnapshotIndex::with_deltas(
+            Arc::new(base),
+            deltas.into_iter().map(Arc::new).collect(),
+        );
         let config_fingerprint = store
             .snapshot_manifest(project_id, active_epoch)
             .await
             .map_err(|e| EngineError::Config(format!("cannot read manifest: {e}")))?
             .map(|manifest| manifest.config_fingerprint)
             .unwrap_or_else(|| "maintenance-republish".to_string());
-        let artifact = match index.build_snapshot_artifact(
-            config_fingerprint,
+        let canonical = layered
+            .to_canonical_snapshot(config_fingerprint)
+            .map_err(EngineError::Config)?;
+        let artifact = match cce_types::CanonicalSnapshotArtifact::from_snapshot(
+            &canonical,
             cce_types::SnapshotArtifactOptions::default()
                 .with_shard_items(shard_config.max_shard_items),
         ) {
             Ok(artifact) => artifact,
             Err(error) => {
-                self.report_relation_failure(project_id, error.clone())
+                self.report_relation_failure(project_id, error.to_string())
                     .await?;
-                return Err(EngineError::Config(error));
+                return Err(EngineError::Config(error.to_string()));
             }
         };
         let publisher = self.get_relation_snapshot_publisher(project_id).await?;
@@ -268,7 +284,6 @@ impl super::CodeContextEngine {
                     chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
                 ),
                 &artifact,
-                &index,
             )
             .await
         {
@@ -369,7 +384,6 @@ impl super::CodeContextEngine {
                     chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
                 ),
                 &artifact,
-                &cce_codegraph::index::RelationIndex::new(),
             )
             .await
             .map_err(cce_orchestrator::OrchestratorError::from)?;

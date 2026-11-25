@@ -4,14 +4,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cce_codegraph::index::RelationIndexView;
-use cce_codegraph::index::core::RelationIndex;
 use cce_codegraph::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
-use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_orchestrator::index::MetadataStore;
 use cce_orchestrator::index::{
     RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
 };
 use cce_storage_common::MetadataStorage;
+use cce_types::relation::RelationSnapshotStore;
 use cce_types::{CanonicalSnapshotArtifact, SnapshotDelta, StorageError};
 use tokio::sync::Mutex;
 
@@ -260,16 +259,10 @@ impl ServerRelationSnapshotPublisher {
 
         self.runtime.set_updating().await;
 
-        // Load current full state (base + deltas) through the relation contract
-        let full_index = match RelationSnapshotLoader::load(&self.store, project_id, active_epoch) {
-            Ok(index) => index,
-            Err(error) => {
-                self.runtime.report_failure(error.to_string()).await;
-                return Err(error);
-            }
-        };
-
-        // Export as full canonical snapshot
+        // Build the compacted rows from the published base shard and its
+        // delta chain. No mutable full graph is constructed; the layered
+        // view exports canonical rows through the same read surface used by
+        // queries.
         let config_fingerprint = {
             let manifest = self
                 .store
@@ -283,15 +276,54 @@ impl ServerRelationSnapshotPublisher {
                 })?;
             manifest.config_fingerprint
         };
-
-        let artifact =
-            match full_index.build_snapshot_artifact(config_fingerprint, Default::default()) {
-                Ok(artifact) => artifact,
-                Err(error) => {
-                    self.runtime.report_failure(error.clone()).await;
-                    return Err(StorageError::Validation(error));
-                }
-            };
+        let base_epoch = self
+            .store
+            .find_base_epoch(project_id, active_epoch)
+            .unwrap_or(Some(active_epoch))
+            .unwrap_or(active_epoch);
+        let base = match RelationSnapshotIndex::from_store(
+            Arc::new(self.store.clone()),
+            project_id,
+            base_epoch,
+            cce_types::ShardQueryConfig::default(),
+        ) {
+            Ok(base) => base,
+            Err(error) => {
+                self.runtime.report_failure(error.to_string()).await;
+                return Err(error);
+            }
+        };
+        let deltas = match self
+            .store
+            .get_delta_chain(project_id, base_epoch, active_epoch)
+        {
+            Ok(deltas) => deltas,
+            Err(error) => {
+                self.runtime.report_failure(error.to_string()).await;
+                return Err(error);
+            }
+        };
+        let layered = LayeredSnapshotIndex::with_deltas(
+            Arc::new(base),
+            deltas.into_iter().map(Arc::new).collect(),
+        );
+        let canonical = match layered.to_canonical_snapshot(config_fingerprint) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.runtime.report_failure(error.clone()).await;
+                return Err(StorageError::Validation(error));
+            }
+        };
+        let artifact = match cce_types::CanonicalSnapshotArtifact::from_snapshot(
+            &canonical,
+            Default::default(),
+        ) {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                self.runtime.report_failure(error.to_string()).await;
+                return Err(error);
+            }
+        };
         // The merged snapshot is a full base; `base_relation_epoch` is only
         // meaningful for `publish()`'s CAS check and is not persisted, so
         // leaving it unset keeps the written fingerprint identical to the
@@ -366,7 +398,6 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         project_id: i64,
         operation_id: &str,
         artifact: &CanonicalSnapshotArtifact,
-        index: &RelationIndex,
     ) -> Result<RelationPublication, StorageError> {
         let _guard = self.publish_lock.lock().await;
 
@@ -391,15 +422,12 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         let integrity = Self::integrity(artifact);
         let shard_config = cce_types::ShardQueryConfig::default();
 
-        // Validate the terminal builder before writing the artifact. The
-        // published projection is constructed from the activated epoch so it
-        // owns only its shard directory and bounded LRU.
-        // SQLite write  so publication does not re-read what it just
-        // persisted. Validation replaces the previous load-back as the
-        // integrity check.
-        if let Err(error) = index.validate_snapshot() {
-            self.runtime.report_failure(error.clone()).await;
-            return Err(StorageError::Validation(error));
+        // The artifact was produced by streaming canonical rows through the
+        // external sort used for both fingerprints. Its counts and row shape
+        // are the publication integrity check; no build graph is consulted.
+        if let Err(error) = artifact.validate_rows() {
+            self.runtime.report_failure(error.to_string()).await;
+            return Err(error);
         }
         let epoch = match self
             .writer
@@ -502,14 +530,28 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 // removal). No detached O(project) clone is performed here;
                 // `detached_clone` is reserved for scenarios that genuinely
                 // need an independent mutable copy (e.g. compaction)
-                match RelationSnapshotIndex::from_store(
-                    Arc::new(self.store.clone()),
-                    project_id,
-                    delta.base_epoch,
-                    cce_types::ShardQueryConfig::default(),
+                let base_epoch = self
+                    .store
+                    .find_base_epoch(project_id, delta.base_epoch)
+                    .unwrap_or(Some(delta.base_epoch))
+                    .unwrap_or(delta.base_epoch);
+                let deltas = self
+                    .store
+                    .get_delta_chain(project_id, base_epoch, delta.base_epoch);
+                match (
+                    RelationSnapshotIndex::from_store(
+                        Arc::new(self.store.clone()),
+                        project_id,
+                        base_epoch,
+                        cce_types::ShardQueryConfig::default(),
+                    ),
+                    deltas,
                 ) {
-                    Ok(base) => LayeredSnapshotIndex::new(Arc::new(base)),
-                    Err(error) => {
+                    (Ok(base), Ok(deltas)) => LayeredSnapshotIndex::with_deltas(
+                        Arc::new(base),
+                        deltas.into_iter().map(Arc::new).collect(),
+                    ),
+                    (Err(error), _) | (_, Err(error)) => {
                         self.runtime.report_failure(error.to_string()).await;
                         return Err(error);
                     }

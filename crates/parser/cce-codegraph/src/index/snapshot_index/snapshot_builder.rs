@@ -200,7 +200,7 @@ impl InMemoryRelationSnapshotIndex {
     /// The derived key `(file, name, kind, signature)` matches the fallback
     /// used by `compute_delta` and `fingerprint_in_files_from_maps`, so a
     /// degraded snapshot stays byte-identical to the index fingerprint.
-    fn entity_key_or_derived(&self, entity_id: EntityId) -> SymbolKey {
+    pub(super) fn entity_key_or_derived(&self, entity_id: EntityId) -> SymbolKey {
         if let Some(key) = self.entity_to_symbol_key.read().get(&entity_id) {
             return key.clone();
         }
@@ -221,7 +221,11 @@ impl InMemoryRelationSnapshotIndex {
     /// Stable symbol key of a relation caller/target, degrading to a derived
     /// key when the reverse map has no entry. Counts toward
     /// `relation_derived_key_count`.
-    fn relation_key_or_derived(&self, entity_id: EntityId, name_fallback: &str) -> SymbolKey {
+    pub(super) fn relation_key_or_derived(
+        &self,
+        entity_id: EntityId,
+        name_fallback: &str,
+    ) -> SymbolKey {
         if let Some(key) = self.entity_to_symbol_key.read().get(&entity_id) {
             return key.clone();
         }
@@ -807,5 +811,230 @@ impl LayeredSnapshotIndex {
         // metadata (deltas do not carry conflict records).
         snapshot.build_metadata = self.base.build_metadata_snapshot();
         Ok(snapshot)
+    }
+}
+
+/// Build-time shard writer.
+///
+/// Canonical rows are serialized into the artifact as soon as a file has been
+/// registered or resolved. Relation edges are removed from the mutable index
+/// after they have been written, so the build never retains the complete edge
+/// graph. Entity metadata stays available for two-stage cross-file resolution.
+pub struct StreamingSnapshotArtifactBuilder<'a> {
+    index: &'a RelationIndex,
+    view: InMemoryRelationSnapshotIndex,
+    builder: cce_types::SnapshotArtifactBuilder,
+    streamed_files: HashSet<String>,
+    streamed_entities: HashSet<EntityId>,
+    relation_count: usize,
+}
+
+impl<'a> StreamingSnapshotArtifactBuilder<'a> {
+    pub fn new(
+        index: &'a RelationIndex,
+        config_fingerprint: String,
+        options: SnapshotArtifactOptions,
+    ) -> Result<Self, String> {
+        let view = shared_view(index);
+        let header = SnapshotArtifactHeader {
+            schema_version: RELATION_SNAPSHOT_SCHEMA_VERSION,
+            parser_version: RELATION_PARSER_VERSION,
+            resolver_version: RELATION_RESOLVER_VERSION,
+            path_normalization_version: RELATION_PATH_NORMALIZATION_VERSION,
+            config_fingerprint,
+            base_relation_epoch: None,
+            build_metadata: view.build_metadata_snapshot(),
+        };
+        Ok(Self {
+            index,
+            view,
+            builder: cce_types::SnapshotArtifactBuilder::new(header, options)
+                .map_err(|error| error.to_string())?,
+            streamed_files: HashSet::new(),
+            streamed_entities: HashSet::new(),
+            relation_count: 0,
+        })
+    }
+
+    /// Write the file row, its entity rows and its dependency rows once the
+    /// registration pass has indexed the file.
+    pub fn push_registered_file(
+        &mut self,
+        path: &str,
+        entity_ids: &[EntityId],
+    ) -> Result<(), String> {
+        let normalized = normalize_project_path(path);
+        if !self.streamed_files.insert(normalized.clone()) {
+            return Ok(());
+        }
+        let record = {
+            let guard = self.index.file_records.read();
+            guard.get(&normalized).cloned().ok_or_else(|| {
+                format!("registered file {normalized} has no file record to stream")
+            })?
+        };
+        let mut exports = Vec::new();
+        for export in record.exports.iter() {
+            exports.push(cce_types::CanonicalExport {
+                symbol: self.view.entity_key_or_derived(export.function_id),
+                export_type: format!("{:?}", export.export_type).to_lowercase(),
+            });
+        }
+        self.builder
+            .push_file(CanonicalFile {
+                path: normalized.clone(),
+                language: record.info.language.clone(),
+                input_hash: record.info.file_hash.clone(),
+                file_size: record.info.file_size,
+                imports: record.imports.standardized_imports.clone(),
+                exports,
+            })
+            .map_err(|error| error.to_string())?;
+
+        for entity_id in entity_ids {
+            let Some(entity) = self.index.function_index.get(entity_id) else {
+                continue;
+            };
+            let entity = entity.value();
+            if !self.streamed_entities.insert(*entity_id) {
+                continue;
+            }
+            self.builder
+                .push_entity(CanonicalEntity {
+                    key: self.view.entity_key_or_derived(*entity_id),
+                    entity_id: Some(entity_id.0),
+                    name: entity.name.clone(),
+                    signature: entity.signature.clone(),
+                    parameters: entity.parameters.clone(),
+                    return_type: entity.return_type.clone(),
+                    span: entity.span,
+                    depth: entity.depth,
+                    parent: entity
+                        .parent
+                        .map(|parent| self.view.entity_key_or_derived(parent)),
+                    doc_comment: entity.doc_comment.clone(),
+                    modifiers: entity.modifiers.clone(),
+                    attributes: entity.attributes.clone().into_iter().collect(),
+                    metadata: entity.metadata.clone().into_iter().collect(),
+                    is_stdlib: entity.is_stdlib,
+                    stdlib_category: entity.stdlib_category,
+                    subtype: entity.subtype.clone(),
+                })
+                .map_err(|error| error.to_string())?;
+        }
+
+        for target in self.index.dependency_graph.get_dependencies(&normalized) {
+            self.builder
+                .push_dependency(CanonicalDependency {
+                    source_file: normalized.clone(),
+                    target_file: normalize_project_path(&target),
+                    source: "resolved_or_import".to_string(),
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Write entity-scoped and file-scoped relations of one file, then drop
+    /// them from the mutable index. The caller IDs come from the file's entity
+    /// remap so this stays O(file) instead of scanning the whole graph.
+    pub fn push_resolved_file(
+        &mut self,
+        path: &str,
+        caller_ids: &[EntityId],
+    ) -> Result<usize, String> {
+        let normalized = normalize_project_path(path);
+        let mut written = 0usize;
+        for caller in caller_ids {
+            let relations = self
+                .index
+                .resolved_relation_index
+                .get(caller)
+                .map(|entry| entry.value().iter().cloned().collect::<Vec<_>>());
+            let Some(relations) = relations else {
+                continue;
+            };
+            for relation in relations {
+                let canonical = canonical_relation(&self.view, *caller, &relation);
+                self.builder
+                    .push_relation(canonical)
+                    .map_err(|error| error.to_string())?;
+                written += 1;
+            }
+            self.index.clear_relations_of_caller(*caller);
+        }
+        let file_relations = self.index.file_relations(&normalized).unwrap_or_default();
+        for relation in file_relations {
+            let caller_key = SymbolKey::new(&normalized, "<file>", EntityKind::Module, "<file>");
+            self.builder
+                .push_relation(canonical_relation_with_caller(
+                    &self.view, caller_key, &relation,
+                ))
+                .map_err(|error| error.to_string())?;
+            written += 1;
+        }
+        self.index.clear_file_relations(&normalized);
+        self.relation_count += written;
+        Ok(written)
+    }
+
+    /// Write relations that were derived after all files were resolved.
+    pub fn push_pending_relations(&mut self) -> Result<usize, String> {
+        let callers: Vec<EntityId> = self
+            .index
+            .resolved_relation_index
+            .iter()
+            .map(|entry| *entry.key())
+            .collect();
+        let paths: Vec<String> = self
+            .index
+            .file_relation_index
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+        let mut written = 0usize;
+        for caller in callers {
+            written += self.push_resolved_file("", &[caller])?;
+        }
+        for path in paths {
+            written += self.push_resolved_file(&path, &[])?;
+        }
+        self.relation_count += written;
+        // push_resolved_file already counted these edges.
+        self.relation_count -= written;
+        Ok(written)
+    }
+
+    pub fn relation_count(&self) -> usize {
+        self.relation_count
+    }
+
+    pub fn finish(mut self) -> Result<cce_types::CanonicalSnapshotArtifact, String> {
+        self.builder
+            .set_build_metadata(self.view.build_metadata_snapshot());
+        self.builder.finish().map_err(|error| error.to_string())
+    }
+}
+
+pub(crate) fn shared_view(index: &RelationIndex) -> InMemoryRelationSnapshotIndex {
+    InMemoryRelationSnapshotIndex {
+        function_index: Arc::clone(&index.function_index),
+        name_index: Arc::clone(&index.name_index),
+        entity_file_index: Arc::clone(&index.entity_file_index),
+        resolved_relation_index: Arc::clone(&index.resolved_relation_index),
+        reverse_callee_index: Arc::clone(&index.reverse_callee_index),
+        file_relation_index: Arc::clone(&index.file_relation_index),
+        file_callers_by_callee: Arc::clone(&index.file_callers_by_callee),
+        file_records: Arc::clone(&index.file_records),
+        dependency_graph: Arc::clone(&index.dependency_graph),
+        symbol_key_to_entity: Arc::clone(&index.symbol_key_to_entity),
+        entity_to_symbol_key: Arc::clone(&index.entity_to_symbol_key),
+        stable_id_to_entity: Arc::clone(&index.stable_id_to_entity),
+        file_symbol_keys: Arc::clone(&index.file_symbol_keys),
+        file_entities_by_start: Arc::clone(&index.file_entities_by_start),
+        diagnostics: Arc::clone(&index.diagnostics),
+        query_optimized: Arc::new(QueryOptimizedIndex::empty()),
+        transitive_deps: Arc::new(TransitiveFileDeps::empty()),
+        classification_stats_cache: Arc::new(parking_lot::RwLock::new(None)),
     }
 }

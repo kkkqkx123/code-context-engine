@@ -39,8 +39,10 @@ mod snapshot_builder;
 mod tests;
 
 pub use query_optimized::{QueryOptimizedIndex, TransitiveFileDeps};
+pub use snapshot_builder::StreamingSnapshotArtifactBuilder;
 
 use sharded::ShardedSnapshotIndex;
+pub(crate) use snapshot_builder::shared_view;
 
 /// Capacity of the sharded query index at a point in time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,9 @@ pub struct ShardCapacityReport {
     pub lru_evictions: u64,
     pub max_loaded_shards: usize,
     pub max_shards_per_query: usize,
+    pub route_cache_entries: usize,
+    pub route_cache_hits: u64,
+    pub route_store_lookups: u64,
 }
 
 /// In-memory implementation used while a relation graph is being built and
@@ -353,6 +358,11 @@ pub struct RelationSnapshotIndex {
 }
 
 impl RelationSnapshotIndex {
+    /// Empty immutable view used for valid zero-record projects.
+    pub fn empty() -> Self {
+        Self::from_memory(shared_view(&RelationIndex::new()))
+    }
+
     pub fn from_index(index: &RelationIndex) -> Self {
         Self::from_memory(InMemoryRelationSnapshotIndex::from_index(index))
     }
@@ -479,9 +489,9 @@ impl RelationSnapshotIndex {
             SnapshotBacking::InMemory(index) => index
                 .dependency_graph
                 .collect_transitive_dependents(file, max_depth),
-            SnapshotBacking::Sharded(sharded) => {
-                transitive_walk(file, max_depth, |path| sharded.dependents_of(path))
-            }
+            SnapshotBacking::Sharded(_) => transitive_walk(file, max_depth, |path| {
+                self.shard_read("transitive_dependents", |s| s.dependents_of(path))
+            }),
         }
     }
 
@@ -490,9 +500,9 @@ impl RelationSnapshotIndex {
             SnapshotBacking::InMemory(index) => index
                 .dependency_graph
                 .collect_transitive_dependencies(file, max_depth),
-            SnapshotBacking::Sharded(sharded) => {
-                transitive_walk(file, max_depth, |path| sharded.dependencies_of(path))
-            }
+            SnapshotBacking::Sharded(_) => transitive_walk(file, max_depth, |path| {
+                self.shard_read("transitive_dependencies", |s| s.dependencies_of(path))
+            }),
         }
     }
 
@@ -552,9 +562,9 @@ impl RelationSnapshotIndex {
             SnapshotBacking::InMemory(index) => {
                 active_file_set(&index.file_records, &index.entity_file_index)
             }
-            SnapshotBacking::Sharded(sharded) => {
-                sharded.files().into_iter().collect::<HashSet<_>>()
-            }
+            SnapshotBacking::Sharded(_) => self.shard_read("active_file_set", |s| {
+                Ok(s.files().into_iter().collect::<HashSet<_>>())
+            }),
         };
         self.fingerprint_in_files(&files)
     }
@@ -633,13 +643,8 @@ impl RelationSnapshotIndex {
     pub(super) fn function_ids_by_name(&self, name: &str) -> Vec<EntityId> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.function_ids_by_name(name),
-            SnapshotBacking::Sharded(sharded) => {
-                let shard_ids = sharded
-                    .directory
-                    .name_locations
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_default();
+            SnapshotBacking::Sharded(_) => {
+                let shard_ids = self.shard_read("name_shards", |s| s.name_shards(name));
                 if shard_ids.is_empty() {
                     return Vec::new();
                 }
@@ -657,7 +662,7 @@ impl RelationSnapshotIndex {
     pub(super) fn file_path_of(&self, id: EntityId) -> Option<String> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.file_path_of(id),
-            SnapshotBacking::Sharded(sharded) => sharded.file_path_of(id),
+            SnapshotBacking::Sharded(_) => self.shard_read("file_path_of", |s| s.file_path_of(id)),
         }
     }
 
@@ -736,7 +741,8 @@ impl RelationSnapshotIndex {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.relations_by_classification(classification),
             SnapshotBacking::Sharded(_) => self.shard_read("relations_by_classification", |s| {
-                let shards = s.load_shards(&s.classification_shards(classification))?;
+                let shard_ids = s.classification_shards_for_query(classification)?;
+                let shards = s.load_shards(&shard_ids)?;
                 Ok(shards
                     .iter()
                     .flat_map(|shard| shard.relations_by_classification(classification))
@@ -764,7 +770,9 @@ impl RelationSnapshotIndex {
     pub(super) fn contains_file(&self, path: &str) -> bool {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.file_records.read().contains_key(path),
-            SnapshotBacking::Sharded(sharded) => sharded.directory.file_shards.contains_key(path),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("contains_file", |s| Ok(s.file_shard(path)?.is_some()))
+            }
         }
     }
 
@@ -814,21 +822,27 @@ impl RelationSnapshotIndex {
     pub(super) fn symbol_key_of(&self, id: EntityId) -> Option<SymbolKey> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.symbol_key_of(id),
-            SnapshotBacking::Sharded(sharded) => sharded.symbol_key_of(id),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("symbol_key_of", |s| s.symbol_key_of(id))
+            }
         }
     }
 
     pub(super) fn entity_id_by_symbol_key(&self, key: &SymbolKey) -> Option<EntityId> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.entity_id_by_symbol(key),
-            SnapshotBacking::Sharded(sharded) => sharded.entity_id_by_symbol_key(key),
+            SnapshotBacking::Sharded(_) => self.shard_read("entity_id_by_symbol_key", |s| {
+                s.entity_id_by_symbol_key(key)
+            }),
         }
     }
 
     pub(super) fn entity_id_by_stable_symbol_id(&self, stable_id: &str) -> Option<EntityId> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.entity_id_by_stable_id(stable_id),
-            SnapshotBacking::Sharded(sharded) => sharded.entity_id_by_stable_id(stable_id),
+            SnapshotBacking::Sharded(_) => self.shard_read("entity_id_by_stable_id", |s| {
+                s.entity_id_by_stable_id(stable_id)
+            }),
         }
     }
 
@@ -837,42 +851,50 @@ impl RelationSnapshotIndex {
             SnapshotBacking::InMemory(index) => {
                 index.symbol_key_to_entity.read().keys().cloned().collect()
             }
-            SnapshotBacking::Sharded(sharded) => sharded.stable_symbol_keys(None),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("stable_symbol_keys", |s| s.stable_symbol_keys(None))
+            }
         }
     }
 
     pub(super) fn stable_symbol_keys_in_files(&self, files: &HashSet<String>) -> Vec<SymbolKey> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.symbol_keys_in_files(files),
-            SnapshotBacking::Sharded(sharded) => sharded.symbol_keys_in_files(files),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("symbol_keys_in_files", |s| s.symbol_keys_in_files(files))
+            }
         }
     }
 
     pub(super) fn max_entity_id(&self) -> u64 {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.max_entity_id(),
-            SnapshotBacking::Sharded(sharded) => sharded.max_entity_id(),
+            SnapshotBacking::Sharded(_) => self.shard_read("max_entity_id", |s| s.max_entity_id()),
         }
     }
 
     pub(super) fn dependency_files(&self) -> Vec<String> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.dependency_graph.get_all_files(),
-            SnapshotBacking::Sharded(sharded) => sharded.files(),
+            SnapshotBacking::Sharded(_) => self.shard_read("dependency_files", |s| Ok(s.files())),
         }
     }
 
     pub(super) fn dependencies_of(&self, source: &str) -> Vec<String> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.dependency_graph.get_dependencies(source),
-            SnapshotBacking::Sharded(sharded) => sharded.dependencies_of(source),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("dependencies_of", |s| s.dependencies_of(source))
+            }
         }
     }
 
     pub(super) fn dependents_of(&self, file: &str) -> Vec<String> {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.dependency_graph.get_dependents(file),
-            SnapshotBacking::Sharded(sharded) => sharded.dependents_of(file),
+            SnapshotBacking::Sharded(_) => {
+                self.shard_read("dependents_of", |s| s.dependents_of(file))
+            }
         }
     }
 
@@ -965,10 +987,11 @@ impl RelationSnapshotIndex {
                 }
             }
             SnapshotBacking::Sharded(sharded) => {
-                for (source, targets) in &sharded.directory.dependencies {
-                    for target in targets {
-                        visit(source, target);
-                    }
+                let pairs = sharded
+                    .all_dependencies()
+                    .expect("sharded relation dependency scan failed");
+                for (source, target) in &pairs {
+                    visit(source, target);
                 }
             }
         }
@@ -977,9 +1000,9 @@ impl RelationSnapshotIndex {
     pub(super) fn contains_function(&self, id: EntityId) -> bool {
         match &self.backing {
             SnapshotBacking::InMemory(index) => index.function_index.contains_key(&id),
-            SnapshotBacking::Sharded(sharded) => {
-                sharded.directory.entity_locations.contains_key(&id.0)
-            }
+            SnapshotBacking::Sharded(_) => self.shard_read("contains_function", |s| {
+                Ok(s.entity_location_by_id(id)?.is_some())
+            }),
         }
     }
 
@@ -1103,9 +1126,7 @@ impl LayeredSnapshotIndex {
     }
 
     pub fn empty() -> Self {
-        Self::new(Arc::new(RelationSnapshotIndex::from_index_shared(
-            &RelationIndex::new(),
-        )))
+        Self::new(Arc::new(RelationSnapshotIndex::empty()))
     }
 
     pub fn function_count(&self) -> usize {

@@ -1,10 +1,14 @@
 //! SQLite adapter for the relation snapshot read port.
 
+use std::collections::HashSet;
+
 use cce_types::relation::RelationSnapshotStore;
+use cce_types::relation::classification::ExternalCallType;
 use cce_types::{
     CanonicalRelationSnapshot, RelationShardComponents, RelationSnapshotManifest, ShardDirectory,
     SnapshotDelta, StorageError,
 };
+use cce_types::{ShardLocation, StableSymbolKey};
 
 use crate::client::SqliteClient;
 use crate::repo::relation_snapshot_repo::RelationSnapshotRepository;
@@ -63,6 +67,146 @@ impl RelationSnapshotStore for SqliteSnapshotStore {
         RelationSnapshotRepository::read_shard_components(&conn, &manifest, shard_id)
     }
 
+    fn entity_location_by_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::entity_location_by_id(&conn, project_id, epoch, entity_id)
+    }
+
+    fn symbol_key_by_entity_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<StableSymbolKey>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::symbol_key_by_entity_id(&conn, project_id, epoch, entity_id)
+    }
+
+    fn entity_location_by_symbol(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        key: &StableSymbolKey,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::entity_location_by_symbol(&conn, project_id, epoch, key)
+    }
+
+    fn entity_location_by_stable_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        stable_id: &str,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::entity_location_by_stable_id(
+            &conn, project_id, epoch, stable_id,
+        )
+    }
+
+    fn name_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        name: &str,
+    ) -> Result<Vec<i64>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::name_shards(&conn, project_id, epoch, name)
+    }
+
+    fn file_shard(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::file_shard(&conn, project_id, epoch, path)
+    }
+
+    fn caller_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        callee: u64,
+    ) -> Result<Vec<i64>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::caller_shards(&conn, project_id, epoch, callee)
+    }
+
+    fn classification_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        classification: &ExternalCallType,
+    ) -> Result<Vec<i64>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::classification_shards(&conn, project_id, epoch, classification)
+    }
+
+    fn classification_counts(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<std::collections::HashMap<ExternalCallType, usize>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::classification_counts(&conn, project_id, epoch)
+    }
+
+    fn directory_files(&self, project_id: i64, epoch: i64) -> Result<Vec<String>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::directory_files(&conn, project_id, epoch)
+    }
+
+    fn max_entity_id(&self, project_id: i64, epoch: i64) -> Result<u64, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::max_entity_id(&conn, project_id, epoch)
+    }
+
+    fn stable_symbol_keys(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        files: Option<&HashSet<String>>,
+    ) -> Result<Vec<StableSymbolKey>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::stable_symbol_keys(&conn, project_id, epoch, files)
+    }
+
+    fn dependencies_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        source: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::dependencies_of(&conn, project_id, epoch, source)
+    }
+
+    fn dependents_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        file: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::dependents_of(&conn, project_id, epoch, file)
+    }
+
+    fn all_dependencies(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<(String, String)>, StorageError> {
+        let conn = self.sqlite.read_connection()?;
+        RelationSnapshotRepository::all_dependencies(&conn, project_id, epoch)
+    }
+
     fn find_base_epoch(
         &self,
         project_id: i64,
@@ -118,6 +262,134 @@ impl RelationSnapshotStore for SqliteClient {
             relation_epoch,
             shard_id,
         )
+    }
+
+    fn entity_location_by_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).entity_location_by_id(project_id, epoch, entity_id)
+    }
+
+    fn symbol_key_by_entity_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<StableSymbolKey>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).symbol_key_by_entity_id(project_id, epoch, entity_id)
+    }
+
+    fn entity_location_by_symbol(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        key: &StableSymbolKey,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).entity_location_by_symbol(project_id, epoch, key)
+    }
+
+    fn entity_location_by_stable_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        stable_id: &str,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        SqliteSnapshotStore::new(self.clone())
+            .entity_location_by_stable_id(project_id, epoch, stable_id)
+    }
+
+    fn name_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        name: &str,
+    ) -> Result<Vec<i64>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).name_shards(project_id, epoch, name)
+    }
+
+    fn file_shard(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).file_shard(project_id, epoch, path)
+    }
+
+    fn caller_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        callee: u64,
+    ) -> Result<Vec<i64>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).caller_shards(project_id, epoch, callee)
+    }
+
+    fn classification_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        classification: &ExternalCallType,
+    ) -> Result<Vec<i64>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).classification_shards(
+            project_id,
+            epoch,
+            classification,
+        )
+    }
+
+    fn classification_counts(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<std::collections::HashMap<ExternalCallType, usize>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).classification_counts(project_id, epoch)
+    }
+
+    fn directory_files(&self, project_id: i64, epoch: i64) -> Result<Vec<String>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).directory_files(project_id, epoch)
+    }
+
+    fn max_entity_id(&self, project_id: i64, epoch: i64) -> Result<u64, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).max_entity_id(project_id, epoch)
+    }
+
+    fn stable_symbol_keys(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        files: Option<&HashSet<String>>,
+    ) -> Result<Vec<StableSymbolKey>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).stable_symbol_keys(project_id, epoch, files)
+    }
+
+    fn dependencies_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        source: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).dependencies_of(project_id, epoch, source)
+    }
+
+    fn dependents_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        file: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).dependents_of(project_id, epoch, file)
+    }
+
+    fn all_dependencies(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<(String, String)>, StorageError> {
+        SqliteSnapshotStore::new(self.clone()).all_dependencies(project_id, epoch)
     }
 
     fn find_base_epoch(
@@ -350,9 +622,20 @@ mod tests {
             directory.descriptors.len() >= 2,
             "small budget must split shards"
         );
-        assert_eq!(directory.file_shards.len(), 2);
-        assert_eq!(directory.entity_locations.len(), 2);
-        assert_eq!(directory.target_callers.len(), 1);
+        assert_eq!(store.directory_files(1, epoch).expect("files").len(), 2);
+        assert!(
+            store
+                .entity_location_by_id(1, epoch, 1)
+                .expect("entity route")
+                .is_some()
+        );
+        assert_eq!(
+            store
+                .caller_shards(1, epoch, 2)
+                .expect("caller routes")
+                .len(),
+            1
+        );
 
         let mut assembled = CanonicalRelationSnapshot::new("config".to_string());
         for descriptor in &directory.descriptors {
@@ -379,5 +662,120 @@ mod tests {
                 .expect("lookup should not fail")
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+    use crate::client::SqliteClient;
+    use crate::repo::relation_snapshot_repo::RelationSnapshotRepository;
+    use cce_types::{
+        CanonicalEntity, CanonicalFile, CanonicalRelationTarget, EntityKind, Span, StableSymbolKey,
+    };
+
+    fn sqlite() -> SqliteClient {
+        let sqlite = SqliteClient::in_memory().expect("in-memory database should open");
+        sqlite
+            .read_connection()
+            .expect("connection")
+            .execute(
+                "INSERT INTO projects (id, name, root_path, config_file_path, created_at, updated_at)
+                 VALUES (1, 'test', '/tmp/project', '.cce/config.json', 1, 1)",
+                [],
+            )
+            .expect("project");
+        sqlite
+    }
+
+    #[test]
+    fn route_queries_resolve_entity_file_and_caller_shards() {
+        let sqlite = sqlite();
+        let key =
+            StableSymbolKey::new("src/main.rs", "caller", EntityKind::Function, "fn caller()");
+        let target =
+            StableSymbolKey::new("src/lib.rs", "callee", EntityKind::Function, "fn callee()");
+        let mut snapshot = CanonicalRelationSnapshot::new("config".to_string());
+        snapshot.files.push(CanonicalFile {
+            path: "src/main.rs".to_string(),
+            language: "rust".to_string(),
+            input_hash: "a".to_string(),
+            file_size: 1,
+            imports: Vec::new(),
+            exports: Vec::new(),
+        });
+        snapshot.files.push(CanonicalFile {
+            path: "src/lib.rs".to_string(),
+            language: "rust".to_string(),
+            input_hash: "b".to_string(),
+            file_size: 1,
+            imports: Vec::new(),
+            exports: Vec::new(),
+        });
+        for (id, k, name) in [(1, key.clone(), "caller"), (2, target.clone(), "callee")] {
+            snapshot.entities.push(CanonicalEntity {
+                key: k,
+                entity_id: Some(id),
+                name: name.to_string(),
+                signature: format!("fn {name}()"),
+                parameters: Vec::new(),
+                return_type: None,
+                span: Span::default(),
+                depth: 0,
+                parent: None,
+                doc_comment: None,
+                modifiers: Vec::new(),
+                attributes: Default::default(),
+                metadata: Default::default(),
+                is_stdlib: false,
+                stdlib_category: None,
+                subtype: None,
+            });
+        }
+        snapshot.relations.push(cce_types::CanonicalRelation {
+            caller: key.clone(),
+            target: CanonicalRelationTarget::Internal {
+                key: target.clone(),
+            },
+            raw_target: "callee".to_string(),
+            relation_type: cce_types::RelationType::DirectCall,
+            span: Span::default(),
+            stdlib_category: None,
+            overload_signature: None,
+            callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
+            call_frequency: 1,
+            cfg_condition: None,
+        });
+        let epoch = sqlite
+            .with_transaction(|tx| {
+                RelationSnapshotRepository::allocate_building(tx, 1, "operation", "config")
+            })
+            .expect("epoch");
+        let artifact =
+            cce_types::CanonicalSnapshotArtifact::from_snapshot(&snapshot, Default::default())
+                .expect("artifact");
+        sqlite
+            .with_transaction(|tx| {
+                RelationSnapshotRepository::write_snapshot_and_mark_ready(tx, 1, epoch, &artifact)?;
+                RelationSnapshotRepository::activate(tx, 1, epoch)
+            })
+            .expect("write");
+
+        let store = SqliteSnapshotStore::new(sqlite);
+        assert!(store.entity_location_by_id(1, epoch, 1).unwrap().is_some());
+        assert_eq!(
+            store.symbol_key_by_entity_id(1, epoch, 1).unwrap(),
+            Some(key.clone())
+        );
+        assert!(
+            store
+                .entity_location_by_symbol(1, epoch, &key)
+                .unwrap()
+                .is_some()
+        );
+        assert!(store.file_shard(1, epoch, "src/main.rs").unwrap().is_some());
+        assert!(!store.caller_shards(1, epoch, 2).unwrap().is_empty());
     }
 }

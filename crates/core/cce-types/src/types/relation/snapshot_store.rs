@@ -5,10 +5,12 @@
 //! SQLite directly. The concrete SQLite adapter lives in
 //! `cce_infrastructure::storage::sqlite::SnapshotStoreAdapter`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::types::relation::{
-    CanonicalRelationSnapshot, RelationShardComponents, ShardDirectory, SymbolKeyConflictRecord,
+    CanonicalRelationSnapshot, ExternalCallType, RelationShardComponents, ShardDirectory,
+    ShardLocation, StableSymbolKey, SymbolKeyConflictRecord,
 };
 use crate::types::{SnapshotDelta, StorageError};
 
@@ -110,6 +112,217 @@ pub trait RelationSnapshotStore: Send + Sync {
         shard_id: i64,
     ) -> Result<Option<RelationShardComponents>, StorageError>;
 
+    /// Locate one entity by its runtime ID. Implementations backed by an
+    /// indexed store answer this without loading the shard.
+    fn entity_location_by_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .entity_locations
+            .get(&entity_id)
+            .cloned())
+    }
+
+    /// Stable symbol key of one entity, without loading the whole shard.
+    fn symbol_key_by_entity_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<StableSymbolKey>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .entity_locations
+            .get(&entity_id)
+            .and_then(|_location| {
+                self.read_shard_directory(project_id, epoch)
+                    .ok()?
+                    .symbol_locations
+                    .iter()
+                    .find(|(_, candidate)| candidate.entity_id == entity_id)
+                    .map(|(key, _)| key.clone())
+            }))
+    }
+
+    /// Locate one entity by its stable symbol key.
+    fn entity_location_by_symbol(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        key: &StableSymbolKey,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .symbol_locations
+            .get(key)
+            .cloned())
+    }
+
+    /// Locate one entity by its stable ID.
+    fn entity_location_by_stable_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        stable_id: &str,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .stable_id_locations
+            .get(stable_id)
+            .cloned())
+    }
+
+    /// Shard IDs containing entities with this simple name.
+    fn name_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        name: &str,
+    ) -> Result<Vec<i64>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .name_locations
+            .get(name)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Shard owning a normalized file path.
+    fn file_shard(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .file_shards
+            .get(path)
+            .copied())
+    }
+
+    /// Shards that contain callers of `callee`.
+    fn caller_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        callee: u64,
+    ) -> Result<Vec<i64>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .target_callers
+            .get(&callee)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Shards containing edges of an external classification.
+    fn classification_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        classification: &ExternalCallType,
+    ) -> Result<Vec<i64>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .classification_shards
+            .get(classification)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Aggregated counts by external classification.
+    fn classification_counts(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<std::collections::HashMap<ExternalCallType, usize>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .classification_counts)
+    }
+
+    /// All normalized file paths of an epoch.
+    fn directory_files(&self, project_id: i64, epoch: i64) -> Result<Vec<String>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .file_shards
+            .into_keys()
+            .collect())
+    }
+
+    /// Highest entity ID of an epoch.
+    fn max_entity_id(&self, project_id: i64, epoch: i64) -> Result<u64, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .entity_locations
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(0))
+    }
+
+    /// Stable symbol keys, optionally restricted to a set of files.
+    fn stable_symbol_keys(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        files: Option<&HashSet<String>>,
+    ) -> Result<Vec<StableSymbolKey>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .stable_symbol_keys(files))
+    }
+
+    fn dependencies_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        source: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .dependencies
+            .get(source)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn dependents_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        file: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .dependents
+            .get(file)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn all_dependencies(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<(String, String)>, StorageError> {
+        Ok(self
+            .read_shard_directory(project_id, epoch)?
+            .dependencies
+            .into_iter()
+            .flat_map(|(source, targets)| {
+                targets
+                    .into_iter()
+                    .map(move |target| (source.clone(), target))
+            })
+            .collect())
+    }
+
     /// Walk the delta chain backwards to find the nearest base epoch
     fn find_base_epoch(
         &self,
@@ -158,6 +371,129 @@ impl<T: RelationSnapshotStore + ?Sized> RelationSnapshotStore for Arc<T> {
         shard_id: i64,
     ) -> Result<Option<RelationShardComponents>, StorageError> {
         T::read_shard_components(self.as_ref(), project_id, relation_epoch, shard_id)
+    }
+
+    fn entity_location_by_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        T::entity_location_by_id(self.as_ref(), project_id, epoch, entity_id)
+    }
+
+    fn symbol_key_by_entity_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        entity_id: u64,
+    ) -> Result<Option<StableSymbolKey>, StorageError> {
+        T::symbol_key_by_entity_id(self.as_ref(), project_id, epoch, entity_id)
+    }
+
+    fn entity_location_by_symbol(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        key: &StableSymbolKey,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        T::entity_location_by_symbol(self.as_ref(), project_id, epoch, key)
+    }
+
+    fn entity_location_by_stable_id(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        stable_id: &str,
+    ) -> Result<Option<ShardLocation>, StorageError> {
+        T::entity_location_by_stable_id(self.as_ref(), project_id, epoch, stable_id)
+    }
+
+    fn name_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        name: &str,
+    ) -> Result<Vec<i64>, StorageError> {
+        T::name_shards(self.as_ref(), project_id, epoch, name)
+    }
+
+    fn file_shard(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        path: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        T::file_shard(self.as_ref(), project_id, epoch, path)
+    }
+
+    fn caller_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        callee: u64,
+    ) -> Result<Vec<i64>, StorageError> {
+        T::caller_shards(self.as_ref(), project_id, epoch, callee)
+    }
+
+    fn classification_shards(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        classification: &ExternalCallType,
+    ) -> Result<Vec<i64>, StorageError> {
+        T::classification_shards(self.as_ref(), project_id, epoch, classification)
+    }
+
+    fn classification_counts(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<std::collections::HashMap<ExternalCallType, usize>, StorageError> {
+        T::classification_counts(self.as_ref(), project_id, epoch)
+    }
+
+    fn directory_files(&self, project_id: i64, epoch: i64) -> Result<Vec<String>, StorageError> {
+        T::directory_files(self.as_ref(), project_id, epoch)
+    }
+
+    fn max_entity_id(&self, project_id: i64, epoch: i64) -> Result<u64, StorageError> {
+        T::max_entity_id(self.as_ref(), project_id, epoch)
+    }
+
+    fn stable_symbol_keys(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        files: Option<&HashSet<String>>,
+    ) -> Result<Vec<StableSymbolKey>, StorageError> {
+        T::stable_symbol_keys(self.as_ref(), project_id, epoch, files)
+    }
+
+    fn dependencies_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        source: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        T::dependencies_of(self.as_ref(), project_id, epoch, source)
+    }
+
+    fn dependents_of(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        file: &str,
+    ) -> Result<Vec<String>, StorageError> {
+        T::dependents_of(self.as_ref(), project_id, epoch, file)
+    }
+
+    fn all_dependencies(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<(String, String)>, StorageError> {
+        T::all_dependencies(self.as_ref(), project_id, epoch)
     }
 
     fn find_base_epoch(

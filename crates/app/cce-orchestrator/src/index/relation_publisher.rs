@@ -4,7 +4,7 @@
 //! process-local runtime. This trait keeps that dependency direction intact.
 
 use async_trait::async_trait;
-use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndex};
+use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_types::{CanonicalSnapshotArtifact, SnapshotDelta, StorageError};
 use std::sync::Arc;
 
@@ -29,15 +29,14 @@ pub struct RelationPublication {
 pub trait RelationSnapshotPublisher: Send + Sync {
     /// Validate, persist, activate, and expose a complete snapshot.
     ///
-    /// `index` is the in-memory relation index the artifact was exported
-    /// from; implementations build the query-time runtime projection from it
-    /// directly instead of re-reading what was just persisted.
+    /// The artifact is the sole input. Validation, publication and the
+    /// runtime projection are derived from its rows and the activated epoch;
+    /// no build-time graph is retained or shared with the runtime.
     async fn publish(
         &self,
         project_id: i64,
         operation_id: &str,
         artifact: &CanonicalSnapshotArtifact,
-        index: &RelationIndex,
     ) -> Result<RelationPublication, StorageError>;
 
     /// Publish an incremental delta on top of an existing base snapshot.

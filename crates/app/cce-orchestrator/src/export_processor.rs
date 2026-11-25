@@ -37,7 +37,6 @@ use crate::hot_update::{
     BatchChangeResult, HotUpdateError, ParseResultWithChanges, Result, UpdateProcessor,
 };
 use crate::index::vector_store::MetadataStore;
-use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_config::{AstToNlConfig, NestProcessorConfig, Settings};
 use cce_parser::ast_to_nl::AstToNlConverter;
 use cce_parser::ast_to_nl::chunker::GroupChunker;

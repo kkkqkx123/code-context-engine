@@ -63,7 +63,6 @@ impl RelationSnapshotPublisher for TestRelationPublisher {
         project_id: i64,
         operation_id: &str,
         artifact: &CanonicalSnapshotArtifact,
-        index: &cce_codegraph::index::RelationIndex,
     ) -> Result<RelationPublication, StorageError> {
         self.ensure_project(project_id).await?;
         let relation_epoch = self
@@ -74,11 +73,14 @@ impl RelationSnapshotPublisher for TestRelationPublisher {
         // ready epoch and records `active_relation_epoch` in project_meta, so
         // downstream delta flows have a CAS base.
         self.pipeline.activate(project_id, relation_epoch).await?;
-        // Share the same deep-copied product the production publisher hands
-        // to export enhancement so workflow tests exercise the shared path.
-        let base = Arc::new(cce_codegraph::index::RelationSnapshotIndex::from_index(
-            index,
-        ));
+        // Use the same store-backed product as production so workflow tests
+        // exercise the published sharded view rather than a builder copy.
+        let base = Arc::new(cce_codegraph::index::RelationSnapshotIndex::from_store(
+            Arc::new(self.store.clone()),
+            project_id,
+            relation_epoch,
+            cce_types::ShardQueryConfig::default(),
+        )?);
         Ok(RelationPublication {
             relation_epoch,
             snapshot: Arc::new(cce_codegraph::index::LayeredSnapshotIndex::new(base)),

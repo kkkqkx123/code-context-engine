@@ -47,6 +47,15 @@ pub struct SnapshotArtifactCounts {
     pub dependencies: usize,
 }
 
+impl SnapshotArtifactCounts {
+    fn debug_string(&self) -> String {
+        format!(
+            "({}, {}, {}, {})",
+            self.files, self.entities, self.relations, self.dependencies
+        )
+    }
+}
+
 /// Bounded row batch handed to the persistence layer.
 #[derive(Debug)]
 pub enum CanonicalComponentBatch {
@@ -246,6 +255,42 @@ impl CanonicalSnapshotArtifact {
         SnapshotBatchReader::new(self, batch_items.max(1))
     }
 
+    /// Stream every row once to verify that the artifact is complete and its
+    /// declared counts match its on-disk content.
+    ///
+    /// Publication uses this instead of materializing a relation graph: the
+    /// rows were serialized by the artifact builder and their fingerprints
+    /// were computed from the same external-sort payloads.
+    pub fn validate_rows(&self) -> Result<(), StorageError> {
+        let mut files = 0usize;
+        let mut entities = 0usize;
+        let mut relations = 0usize;
+        let mut dependencies = 0usize;
+        for batch in self.batches(DEFAULT_SNAPSHOT_BATCH_ITEMS) {
+            match batch? {
+                CanonicalComponentBatch::Files(rows) => files += rows.len(),
+                CanonicalComponentBatch::Entities(rows) => entities += rows.len(),
+                CanonicalComponentBatch::Relations(rows) => relations += rows.len(),
+                CanonicalComponentBatch::Dependencies(rows) => dependencies += rows.len(),
+            }
+        }
+        let counts = self.counts;
+        if (files, entities, relations, dependencies)
+            == (
+                counts.files,
+                counts.entities,
+                counts.relations,
+                counts.dependencies,
+            )
+        {
+            return Ok(());
+        }
+        Err(StorageError::validation(format!(
+            "artifact row counts ({files}, {entities}, {relations}, {dependencies}) do not match header {}",
+            counts.debug_string()
+        )))
+    }
+
     /// File-only batches, for writes that need both file and entity rows.
     pub fn file_batches(
         &self,
@@ -380,6 +425,13 @@ impl SnapshotArtifactBuilder {
             buffer_peak_bytes: 0,
             options,
         })
+    }
+
+    /// Refresh build metadata after the last row has been streamed.
+    ///
+    /// Metadata is diagnostic only and never enters either fingerprint.
+    pub fn set_build_metadata(&mut self, metadata: SnapshotBuildMetadata) {
+        self.header.build_metadata = metadata;
     }
 
     pub fn push_file(&mut self, mut file: CanonicalFile) -> Result<(), StorageError> {

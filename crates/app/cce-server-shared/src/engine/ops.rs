@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use super::EngineError;
 use crate::runtime::{ProjectMeta, RecoveryResult, SnapshotIntegrity, StartupRecoveryCoordinator};
-use cce_codegraph::index::entity_index::EntityIndexOps;
-use cce_codegraph::index::relation_query::RelationQueryOps;
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_orchestrator::query::types::{QueryOptions, QueryResult};
 use cce_orchestrator::{IndexOptions, IndexResult};

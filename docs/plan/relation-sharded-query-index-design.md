@@ -184,7 +184,7 @@ canonical 写入指标同表输出。
 
 本次实现已完成：核心目录/组件类型与显式容量参数、SQLite/PG 的 shard_id/stable_id 与目录表、`RelationSnapshotIndex` 外观拆分与分片 LRU 路由、所有快照查询/view 调用点迁移、冷启动/base cache/publisher/导出增强切换、等价性与有界性测试、分片计数接入索引容量报表。运行时读取的硬上界为 `shard_lru_shards × max_shard_items + 目录 + delta 链`；单次查询装载上限为 `shard_query_shards`，超限显式失败。
 
-待实测项：medium 与 50,000 文件档的 RSS/查询 p95 复测与 issue 回写，需在 devs 基准机上按验证计划执行。
+实测结果已回写 `docs/issue/relation-sharded-query-index-metrics-2026-11-25.md`：medium/large 索引峰值 RSS 分别下降约 6.7%/8.7%，未达 50% 目标；medium 关系图冷查询 p95 为 108 ms、热查询 p95 低于 1 ms。结论是查询侧分片有效，但构建期仍创建并共享完整 `RelationIndex`，因此本方案没有解决峰值 RSS。全链路重构范围、未完成项与一次性验收门槛见 `docs/plan/relation-index-full-sharded-refactor.md`。
 
 ## 明确不做
 

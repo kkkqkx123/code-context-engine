@@ -28,6 +28,8 @@ pub const DEFAULT_SHARD_LRU_SHARDS: usize = 4;
 pub const DEFAULT_SHARD_LRU_BYTES: u64 = 256 * 1024 * 1024;
 /// Default upper bound on shards loaded by a single query.
 pub const DEFAULT_SHARD_QUERY_SHARDS: usize = 64;
+/// Default number of cached routing lookups kept alongside the shard LRU.
+pub const DEFAULT_ROUTE_CACHE_ENTRIES: usize = 4096;
 
 /// Explicit capacity controls for the sharded query index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +43,9 @@ pub struct ShardQueryConfig {
     pub shard_lru_bytes: u64,
     /// Maximum shards one query may load before failing explicitly.
     pub shard_query_shards: usize,
+    /// Maximum cached route lookups. Route data is read from the store on a
+    /// miss, so this cache is the only resident per-entity routing memory.
+    pub route_cache_entries: usize,
 }
 
 impl Default for ShardQueryConfig {
@@ -50,6 +55,7 @@ impl Default for ShardQueryConfig {
             shard_lru_shards: DEFAULT_SHARD_LRU_SHARDS,
             shard_lru_bytes: DEFAULT_SHARD_LRU_BYTES,
             shard_query_shards: DEFAULT_SHARD_QUERY_SHARDS,
+            route_cache_entries: DEFAULT_ROUTE_CACHE_ENTRIES,
         }
     }
 }
@@ -60,6 +66,7 @@ impl ShardQueryConfig {
             || self.shard_lru_shards == 0
             || self.shard_lru_bytes == 0
             || self.shard_query_shards == 0
+            || self.route_cache_entries == 0
         {
             return Err(StorageError::validation(
                 "shard capacity parameters must be greater than zero",

@@ -12722,6 +12722,7 @@
           "manifest",
           "files",
           "entities",
+          "entities_truncated",
           "dep_graph",
           "external_deps",
           "metrics",
@@ -12741,6 +12742,10 @@
             "items": {
               "$ref": "#/components/schemas/WikiEntityEntry"
             }
+          },
+          "entities_truncated": {
+            "type": "boolean",
+            "description": "Whether the entity catalog was truncated at the export cap."
           },
           "external_deps": {
             "$ref": "#/components/schemas/WikiExternalDeps"
@@ -13155,11 +13160,11 @@
           "entity_epoch": {
             "type": "integer",
             "format": "int64",
-            "description": "Epoch of the file inventory and entity catalog (the data generation)."
+            "description": "Epoch of the file inventory and entity catalog (the data generation).\n\nType entities supplemented from metadata share this epoch with the\nfile list, so downstream can join entity → file without a cross-epoch\nmismatch."
           },
           "epoch_aligned": {
             "type": "boolean",
-            "description": "Whether `index_epoch`/`entity_epoch` and `relation_epoch` belong to the same publication."
+            "description": "Whether `index_epoch`/`entity_epoch` and `relation_epoch` belong to the\nsame publication. `false` means the relation snapshot lagged the\nactive metadata generation and the package spans two generations."
           },
           "external_deps_mode": {
             "type": "string",

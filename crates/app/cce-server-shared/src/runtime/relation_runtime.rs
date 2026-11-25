@@ -7,7 +7,6 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use cce_codegraph::index::core::RelationIndex;
 use cce_codegraph::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use tokio::sync::{Mutex, RwLock};
 
@@ -123,9 +122,7 @@ impl PublishedSnapshot {
         Self::new(
             project_id,
             relation_epoch,
-            Arc::new(RelationSnapshotIndex::from_index_shared(
-                &RelationIndex::new(),
-            )),
+            Arc::new(RelationSnapshotIndex::empty()),
             SnapshotIntegrity::Empty,
             None,
         )
@@ -649,6 +646,7 @@ impl RelationCapabilityInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_codegraph::index::RelationIndex;
 
     #[tokio::test]
     async fn test_runtime_state_transitions() {

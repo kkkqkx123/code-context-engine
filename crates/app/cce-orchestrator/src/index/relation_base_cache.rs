@@ -46,7 +46,7 @@
 
 use std::sync::Arc;
 
-use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndex, RelationSnapshotIndex};
+use cce_codegraph::index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use cce_types::SnapshotDelta;
 use cce_types::StorageError;
 use cce_types::relation::RelationSnapshotStore;
@@ -166,13 +166,21 @@ impl RelationBaseCache {
     /// The caller (the server publisher) has already merged the chain and
     /// activated the new base in SQLite. This method replaces the cached
     /// entry with the compacted base and resets the chain.
-    pub fn rebuild_from_compacted(
+    pub fn rebuild_from_compacted<S>(
         &self,
+        store: &S,
         project_id: i64,
         epoch: i64,
-        compacted_base: Arc<RelationIndex>,
-    ) {
-        let base_snapshot = Arc::new(RelationSnapshotIndex::from_index_shared(&compacted_base));
+    ) -> Result<(), StorageError>
+    where
+        S: RelationSnapshotStore + Clone + 'static,
+    {
+        let base_snapshot = Arc::new(RelationSnapshotIndex::from_store(
+            Arc::new(store.clone()),
+            project_id,
+            epoch,
+            cce_types::ShardQueryConfig::default(),
+        )?);
         self.projects.insert(
             project_id,
             CachedBase {
@@ -186,6 +194,7 @@ impl RelationBaseCache {
             epoch,
             "Relation base cache rebuilt from compacted snapshot"
         );
+        Ok(())
     }
 }
 
@@ -285,7 +294,143 @@ mod tests {
         (explicit, fallback)
     }
 
+    impl StubStore {
+        fn route_directory(&self, epoch: i64) -> Result<cce_types::ShardDirectory, StorageError> {
+            self.snapshots
+                .get(&epoch)
+                .map(|_| {
+                    let mut directory = cce_types::ShardDirectory::default();
+                    directory
+                        .descriptors
+                        .push(cce_types::RelationShardDescriptor {
+                            shard_id: 0,
+                            file_count: 0,
+                            entity_count: 0,
+                            relation_count: 0,
+                            dependency_count: 0,
+                            estimated_bytes: 0,
+                            path_start: String::new(),
+                            path_end: String::new(),
+                        });
+                    directory
+                })
+                .ok_or_else(|| StorageError::validation("stub snapshot is missing"))
+        }
+    }
+
     impl RelationSnapshotStore for StubStore {
+        fn entity_location_by_id(
+            &self,
+            _project_id: i64,
+            epoch: i64,
+            entity_id: u64,
+        ) -> Result<Option<cce_types::ShardLocation>, StorageError> {
+            Ok(self
+                .snapshots
+                .get(&epoch)
+                .into_iter()
+                .flat_map(|snapshot| snapshot.entities.iter())
+                .find(|entity| entity.entity_id == Some(entity_id))
+                .map(|entity| cce_types::ShardLocation {
+                    shard_id: 0,
+                    entity_id,
+                    file_path: entity.key.file_path.clone(),
+                    name: entity.name.clone(),
+                }))
+        }
+
+        fn name_shards(
+            &self,
+            _project_id: i64,
+            epoch: i64,
+            name: &str,
+        ) -> Result<Vec<i64>, StorageError> {
+            self.route_directory(epoch).map(|_| {
+                if self
+                    .snapshots
+                    .get(&epoch)
+                    .is_some_and(|snapshot| snapshot.entities.iter().any(|e| e.name == name))
+                {
+                    vec![0]
+                } else {
+                    Vec::new()
+                }
+            })
+        }
+
+        fn file_shard(
+            &self,
+            _project_id: i64,
+            epoch: i64,
+            path: &str,
+        ) -> Result<Option<i64>, StorageError> {
+            self.route_directory(epoch).map(|_| {
+                if self
+                    .snapshots
+                    .get(&epoch)
+                    .is_some_and(|snapshot| snapshot.files.iter().any(|f| f.path == path))
+                {
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+        }
+
+        fn directory_files(
+            &self,
+            _project_id: i64,
+            epoch: i64,
+        ) -> Result<Vec<String>, StorageError> {
+            Ok(self
+                .snapshots
+                .get(&epoch)
+                .map(|snapshot| {
+                    snapshot
+                        .files
+                        .iter()
+                        .map(|file| file.path.clone())
+                        .collect()
+                })
+                .unwrap_or_default())
+        }
+
+        fn max_entity_id(&self, _project_id: i64, epoch: i64) -> Result<u64, StorageError> {
+            Ok(self
+                .snapshots
+                .get(&epoch)
+                .and_then(|snapshot| {
+                    snapshot
+                        .entities
+                        .iter()
+                        .filter_map(|entity| entity.entity_id)
+                        .max()
+                })
+                .unwrap_or(0))
+        }
+
+        fn stable_symbol_keys(
+            &self,
+            _project_id: i64,
+            epoch: i64,
+            files: Option<&std::collections::HashSet<String>>,
+        ) -> Result<Vec<StableSymbolKey>, StorageError> {
+            Ok(self
+                .snapshots
+                .get(&epoch)
+                .map(|snapshot| {
+                    snapshot
+                        .entities
+                        .iter()
+                        .filter(|entity| {
+                            files.is_none_or(|files| files.contains(&entity.key.file_path))
+                        })
+                        .map(|entity| entity.key.clone())
+                        .collect()
+                })
+                .unwrap_or_default())
+        }
+
         fn read_shard_directory(
             &self,
             _project_id: i64,
@@ -697,7 +842,7 @@ mod tests {
 
     #[test]
     fn rebuild_from_compacted_preserves_state() {
-        let store = store_with(&[1]);
+        let mut store = store_with(&[1]);
         let cache = RelationBaseCache::new();
 
         cache
@@ -733,10 +878,15 @@ mod tests {
         {
             merged.apply_delta(d);
         }
-        let compacted_arc = Arc::new(merged);
+        let compacted = merged
+            .to_canonical_snapshot("config".to_string())
+            .expect("compacted snapshot should serialize");
+        store.snapshots.insert(6, compacted);
 
-        // Rebuild the cache from the compacted snapshot.
-        cache.rebuild_from_compacted(1, 6, Arc::clone(&compacted_arc));
+        // Rebuild the cache from the compacted snapshot's shard directory.
+        cache
+            .rebuild_from_compacted(&store, 1, 6)
+            .expect("compacted epoch should load");
 
         let view = cache
             .get_or_load(&store, 1, 6)
