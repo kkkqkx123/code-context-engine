@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use cce_types::{
     CanonicalDependency, CanonicalEntity, CanonicalFile, CanonicalRelation,
@@ -24,6 +24,7 @@ use serde::de::DeserializeOwned;
 
 use super::build_view::{BuildEntityView, BuildIndexSink};
 use super::core::{ExportInfo, relation_identity};
+use crate::symbol_table::LocalSymbolStore;
 use cce_types::CanonicalSnapshotArtifact;
 
 /// Build-time relation store backed by a temporary SQLite database.
@@ -35,6 +36,7 @@ pub struct BuildRelationStore {
     entity_derived_keys: AtomicU64,
     relation_derived_keys: AtomicU64,
     conflict_samples: Mutex<VecDeque<SymbolKeyConflictRecord>>,
+    local_symbols: Arc<LocalSymbolStore>,
 }
 
 impl BuildRelationStore {
@@ -79,6 +81,8 @@ impl BuildRelationStore {
                     UNIQUE(path, identity));",
             )
             .map_err(|error| error.to_string())?;
+        let local_symbols =
+            Arc::new(LocalSymbolStore::new(&path).map_err(|error| error.to_string())?);
         Ok(Self {
             connection: Mutex::new(connection),
             path,
@@ -87,7 +91,13 @@ impl BuildRelationStore {
             entity_derived_keys: AtomicU64::new(0),
             relation_derived_keys: AtomicU64::new(0),
             conflict_samples: Mutex::new(VecDeque::new()),
+            local_symbols,
         })
+    }
+
+    /// Shared disk-backed local symbol table store for this build.
+    pub fn local_symbol_store(&self) -> Arc<LocalSymbolStore> {
+        Arc::clone(&self.local_symbols)
     }
 
     fn sequence(&self) -> u64 {

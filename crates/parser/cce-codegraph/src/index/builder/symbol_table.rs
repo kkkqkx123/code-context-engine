@@ -9,8 +9,8 @@
 
 use crate::symbol::{SymbolLocation, SymbolMetadata, Visibility};
 use crate::symbol_table::{
-    ImportBinding, LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable, ProjectSymbolTable,
-    ReexportBinding, strip_crate_prefix,
+    ImportBinding, LocalSymbolStore, LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable,
+    ProjectSymbolTable, ReexportBinding, strip_crate_prefix,
 };
 use crate::type_inference::{InferenceContext, TypeInferenceEngine};
 use cce_metrics::domain::pipeline::RelationMetrics;
@@ -86,6 +86,7 @@ pub struct SymbolBuildSession<'a> {
     modules_elapsed: Duration,
     flat_elapsed: Duration,
     stream_contexts: bool,
+    local_symbols: Option<Arc<LocalSymbolStore>>,
     file_count: usize,
 }
 
@@ -95,6 +96,7 @@ impl<'a> SymbolBuildSession<'a> {
         project_root: PathBuf,
         metrics: Option<Arc<RelationMetrics>>,
         stream_contexts: bool,
+        local_symbols: Option<Arc<LocalSymbolStore>>,
     ) -> Self {
         Self {
             owner,
@@ -105,6 +107,7 @@ impl<'a> SymbolBuildSession<'a> {
             modules_elapsed: Duration::ZERO,
             flat_elapsed: Duration::ZERO,
             stream_contexts,
+            local_symbols,
             file_count: 0,
         }
     }
@@ -114,7 +117,11 @@ impl<'a> SymbolBuildSession<'a> {
     }
 
     /// Register one decoded file and drop it when the call returns.
-    pub fn add_file(&mut self, file: &ParsedFile, project_symbols: &ProjectSymbolTable) {
+    pub fn add_file(
+        &mut self,
+        file: &ParsedFile,
+        project_symbols: &ProjectSymbolTable,
+    ) -> Result<(), String> {
         let file_started = Instant::now();
         self.file_count += 1;
         let package_name = self.package_name();
@@ -165,7 +172,12 @@ impl<'a> SymbolBuildSession<'a> {
         self.owner.wire_reexports(file, &mut module_table);
 
         let local_table = LocalSymbolTable::from_parsed_file(file);
-        module_table.set_local_table(local_table);
+        if let Some(store) = &self.local_symbols {
+            store.insert(&file.path, &local_table)?;
+            module_table.set_disk_local_table(&file.path, Arc::clone(store));
+        } else {
+            module_table.set_local_table(local_table);
+        }
 
         let type_index = build_file_type_index(file, &module_path, &package_name);
         let type_ctx = infer_file_type_context(file, &type_index);
@@ -208,6 +220,7 @@ impl<'a> SymbolBuildSession<'a> {
         }
         self.flat_elapsed += flat_started.elapsed();
         self.modules_elapsed += file_started.elapsed();
+        Ok(())
     }
 
     /// Finish global index rebuilds and return the accumulated timings.
@@ -268,6 +281,7 @@ impl<'a> SymbolBuildSession<'a> {
 pub struct SymbolTableBuilder {
     project_root: PathBuf,
     metrics: Option<Arc<RelationMetrics>>,
+    local_symbols: Option<Arc<LocalSymbolStore>>,
 }
 
 impl SymbolTableBuilder {
@@ -276,12 +290,19 @@ impl SymbolTableBuilder {
         Self {
             project_root,
             metrics: None,
+            local_symbols: None,
         }
     }
 
     /// Attach relation metrics so module-path collisions can be accounted.
     pub fn with_metrics(&mut self, metrics: Option<Arc<RelationMetrics>>) -> &mut Self {
         self.metrics = metrics;
+        self
+    }
+
+    /// Route file-local tables through the build-local disk store.
+    pub fn with_local_symbols(&mut self, store: Option<Arc<LocalSymbolStore>>) -> &mut Self {
+        self.local_symbols = store;
         self
     }
 
@@ -499,14 +520,26 @@ impl SymbolTableBuilder {
     /// Start a streaming build. Callers feed files with `add_file`, finish
     /// with `finish`, then propagate cross-file variables per file.
     pub fn begin_build(&self) -> SymbolBuildSession<'_> {
-        SymbolBuildSession::new(self, self.project_root.clone(), self.metrics.clone(), false)
+        SymbolBuildSession::new(
+            self,
+            self.project_root.clone(),
+            self.metrics.clone(),
+            false,
+            self.local_symbols.clone(),
+        )
     }
 
     /// Stream type contexts through the cross-file propagator instead of
     /// retaining one context per file. Used by full builds that replay the
     /// parsed spool a second time to rebuild a context per processed file.
     pub fn begin_streaming_build(&self) -> SymbolBuildSession<'_> {
-        SymbolBuildSession::new(self, self.project_root.clone(), self.metrics.clone(), true)
+        SymbolBuildSession::new(
+            self,
+            self.project_root.clone(),
+            self.metrics.clone(),
+            true,
+            self.local_symbols.clone(),
+        )
     }
 
     /// Populate an existing project symbol table in one bulk pass.
@@ -520,7 +553,9 @@ impl SymbolTableBuilder {
     ) -> SymbolBuildTimings {
         let mut session = self.begin_build();
         for file in files {
-            session.add_file(file, project_symbols);
+            session
+                .add_file(file, project_symbols)
+                .expect("in-memory symbol build must persist local tables");
         }
         let timings = session.finish(project_symbols);
         project_symbols.rebuild_cross_file_propagator(files);

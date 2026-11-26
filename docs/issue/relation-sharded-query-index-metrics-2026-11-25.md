@@ -65,3 +65,29 @@
 同一批代码上 `cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features`、
 `cargo test --workspace --lib`、`cargo build -p cce-cli -p cce-server` 全部通过。
 关系阶段仍高于 500 MiB 目标；50,000 文件档尚未复测。
+
+## 构建期磁盘化后复测（devs）
+
+构建期已将关系实体、符号键、ID 重映射、导入导出、依赖和关系边写入操作本地临时 SQLite，并由该库流式写出 canonical artifact；发布后的查询结构未改动。日志为 `check-buildstore-raw.log`、`test-buildstore-raw.log`、`clippy-buildstore-raw.log`、`build-buildstore-raw.log`、`bench-buildstore-medium3.log`、`bench-buildstore-large.log`、`bench-query-matrix-buildstore.log`。
+
+| 档位 | 文件数 | 批次结束 RSS KiB | 关系结束 RSS KiB | 关系阶段增量 KiB | 峰值 RSS KiB | 相对 shard 基线 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| medium | 5,000 | 379,092 | 783,760 | 404,668 | 783,884 | -33.2% |
+| large | 50,000 | 1,400,872 | 5,491,140 | 4,090,268 | 5,494,096 | -39.6% |
+
+shard 基线分别为 1,173,636 KiB 与 9,103,100 KiB。medium 关系阶段增量已低于 500 MiB（512,000 KiB），但峰值下降未达到 50%，large 阶段增量也远未达到 500 MiB 硬上界。阶段 RSS 采样显示，medium 在 `symbol_add_files_done` 时已从 379,572 KiB 升至 735,264 KiB，large 从 1,401,872 KiB 升至 5,019,764 KiB；当前瓶颈是 `ProjectSymbolTable` 的模块/局部符号表，而不是关系边或 artifact 写出。后续仍需完成 `BuildSymbolView` 与符号上下文磁盘化，才能满足全量构建的硬上界。
+
+一致性方面，`cce-codegraph` 新增单测用同一组文件、实体、符号键、关系和依赖分别生成磁盘构建 artifact 与参考 canonical artifact，双 fingerprint、行计数完全一致。workspace `cargo check --workspace --all-targets`、`cargo test --workspace --lib`、`cargo clippy --all-targets --all-features`、`cargo build -p cce-cli -p cce-server` 均通过。
+
+查询延迟复测结果：
+
+| 模式 | 阶段 | 请求数 | 错误数 | 首请求 ms | p95 ms | p99 ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| caller_out depth=1 | cold | 12 | 0 | 47 | 47 | 57 |
+| caller_out depth=1 | warm | 12 | 0 | 0 | 0 | 0 |
+| both_2 depth=2 | cold | 12 | 0 | 0 | 0 | 0 |
+| both_2 depth=2 | warm | 12 | 0 | 0 | 0 | 0 |
+
+冷/热 p95 均明显低于 146/168 ms 的两倍上界，热查询低于 1 ms；分片 LRU、目录与单次查询 64 分片上限未改动。
+
+**状态**：关系边与 artifact 构建期磁盘化已完成，medium 峰值下降 33.2%、large 下降 39.6%，查询延迟和一致性通过；符号表磁盘化未完成，因此 50% 峰值和 500 MiB 阶段增量验收项尚未全部达成。

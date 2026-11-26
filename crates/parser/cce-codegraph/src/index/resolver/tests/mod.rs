@@ -323,7 +323,9 @@ fn cce_codegraph_symbol_table(
     let project = crate::symbol_table::ProjectSymbolTable::new(root.to_path_buf());
     let mut session = builder.begin_streaming_build();
     for file in files {
-        session.add_file(file, &project);
+        session
+            .add_file(file, &project)
+            .expect("test symbol build must persist local tables");
     }
     session.finish(&project);
     project

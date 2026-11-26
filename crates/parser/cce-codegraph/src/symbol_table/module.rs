@@ -5,6 +5,7 @@
 
 use crate::symbol::{ScopeContext, SymbolMetadata, SymbolRef, Visibility};
 use crate::symbol_table::local::LocalSymbolTable;
+use crate::symbol_table::local_store::LocalSymbolStore;
 use crate::symbol_table::type_index::TypeMemberIndex;
 use cce_types::NamespacePath;
 use cce_types::entity::EntityId;
@@ -13,6 +14,17 @@ use cce_types::language::Language;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Where a module's file-local symbol table lives.
+#[derive(Debug, Clone)]
+enum LocalSymbolSource {
+    Memory(Option<Arc<LocalSymbolTable>>),
+    Disk {
+        path: Arc<str>,
+        store: Arc<LocalSymbolStore>,
+    },
+}
 
 /// Module symbol table - combines imports and exports
 #[derive(Debug, Clone)]
@@ -36,7 +48,7 @@ pub struct ModuleSymbolTable {
     exports: ModuleExportMap,
 
     /// Local symbol table for file-level scope resolution
-    local_table: Option<LocalSymbolTable>,
+    local_table: LocalSymbolSource,
 
     /// Import bindings (local name -> binding)
     imports: DashMap<String, ImportBinding>,
@@ -140,7 +152,7 @@ impl ModuleSymbolTable {
             language,
             package,
             exports: ModuleExportMap::default(),
-            local_table: None,
+            local_table: LocalSymbolSource::Memory(None),
             imports: DashMap::new(),
             reexports: DashMap::new(),
             wildcard_imports: Vec::new(),
@@ -461,12 +473,23 @@ impl ModuleSymbolTable {
 
     /// Set the local symbol table for file-level scope resolution
     pub fn set_local_table(&mut self, table: LocalSymbolTable) {
-        self.local_table = Some(table);
+        self.local_table = LocalSymbolSource::Memory(Some(Arc::new(table)));
     }
 
-    /// Get reference to the local symbol table
-    pub fn get_local_table(&self) -> Option<&LocalSymbolTable> {
-        self.local_table.as_ref()
+    /// Point file-level scope resolution at the build-local disk store.
+    pub fn set_disk_local_table(&mut self, path: &str, store: Arc<LocalSymbolStore>) {
+        self.local_table = LocalSymbolSource::Disk {
+            path: Arc::from(path),
+            store,
+        };
+    }
+
+    /// Materialise the local symbol table for this module.
+    pub fn get_local_table(&self) -> Option<Arc<LocalSymbolTable>> {
+        match &self.local_table {
+            LocalSymbolSource::Memory(table) => table.clone(),
+            LocalSymbolSource::Disk { path, store } => store.get(path),
+        }
     }
 
     /// Resolve a name using the local scope chain (inner-to-outer).
@@ -477,7 +500,7 @@ impl ModuleSymbolTable {
     /// - The scope chain is empty
     /// - No matching entity is found
     pub fn resolve_local_scope(&self, name: &str, scope_chain: &[EntityId]) -> Option<SymbolRef> {
-        let local = self.local_table.as_ref()?;
+        let local = self.get_local_table()?;
         if scope_chain.is_empty() {
             return None;
         }
@@ -490,8 +513,7 @@ impl ModuleSymbolTable {
     /// Returns an ordered list from outermost (root) to innermost (the entity).
     /// Returns empty Vec if no local table is set.
     pub fn get_scope_chain(&self, entity_id: EntityId, max_depth: usize) -> Vec<EntityId> {
-        self.local_table
-            .as_ref()
+        self.get_local_table()
             .map(|local| local.build_scope_chain_with_limit(entity_id, max_depth))
             .unwrap_or_default()
     }

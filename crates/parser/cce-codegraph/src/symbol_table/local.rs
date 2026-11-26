@@ -9,12 +9,30 @@
 use crate::symbol::{SymbolMetadata, SymbolRef};
 use cce_types::language::Language;
 use cce_types::{Entity, EntityId, EntityKind};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Default maximum scope chain depth, matching
 /// `SymbolResolutionConfig::max_scope_chain_depth` default.
 const DEFAULT_MAX_SCOPE_CHAIN_DEPTH: usize = 100;
+
+/// Serializable form of a local symbol table.
+///
+/// Shared `Arc` storage is flattened to owned values so a build can keep the
+/// table on disk and materialise one file at a time. Lookup indexes are
+/// preserved so resolution semantics do not change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LocalSymbolTableRecord {
+    file_path: String,
+    language: Language,
+    entities: Vec<Entity>,
+    entity_ids: Vec<EntityId>,
+    name_index: Vec<(String, Vec<EntityId>)>,
+    scope_index: Vec<(Option<EntityId>, String, Vec<EntityId>)>,
+    metadata_cache: Vec<(EntityId, SymbolMetadata)>,
+    max_scope_chain_depth: usize,
+}
 
 /// Local symbol table for file-level symbol management
 ///
@@ -57,6 +75,58 @@ pub struct LocalSymbolTable {
 }
 
 impl LocalSymbolTable {
+    /// Convert to the durable build record.
+    pub(crate) fn to_record(&self) -> LocalSymbolTableRecord {
+        LocalSymbolTableRecord {
+            file_path: self.file_path.to_string(),
+            language: self.language,
+            entities: self.entities.values().cloned().collect(),
+            entity_ids: self.entity_ids.clone(),
+            name_index: self
+                .name_index
+                .iter()
+                .map(|(name, ids)| (name.to_string(), ids.clone()))
+                .collect(),
+            scope_index: self
+                .scope_index
+                .iter()
+                .map(|((parent, name), ids)| (*parent, name.to_string(), ids.clone()))
+                .collect(),
+            metadata_cache: self
+                .metadata_cache
+                .iter()
+                .map(|(id, metadata)| (*id, metadata.clone()))
+                .collect(),
+            max_scope_chain_depth: self.max_scope_chain_depth,
+        }
+    }
+
+    /// Rebuild from a durable build record.
+    pub(crate) fn from_record(record: LocalSymbolTableRecord) -> Self {
+        let mut entities = HashMap::with_capacity(record.entities.len());
+        for entity in record.entities {
+            entities.insert(entity.id, entity);
+        }
+        Self {
+            file_path: record.file_path.into(),
+            language: record.language,
+            entities: Arc::new(entities),
+            entity_ids: record.entity_ids,
+            name_index: record
+                .name_index
+                .into_iter()
+                .map(|(name, ids)| (name.into(), ids))
+                .collect(),
+            scope_index: record
+                .scope_index
+                .into_iter()
+                .map(|(parent, name, ids)| ((parent, name.into()), ids))
+                .collect(),
+            metadata_cache: record.metadata_cache.into_iter().collect(),
+            max_scope_chain_depth: record.max_scope_chain_depth,
+        }
+    }
+
     /// Create a new local symbol table
     pub fn new(file_path: impl Into<Arc<str>>, language: Language) -> Self {
         Self {

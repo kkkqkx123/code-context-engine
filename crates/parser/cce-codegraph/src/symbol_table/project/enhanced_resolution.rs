@@ -16,6 +16,7 @@ use std::sync::Arc;
 use super::qualified_resolution::OverloadContext;
 use super::{ProjectSymbolTable, ResolutionContext};
 use crate::symbol::SymbolRef;
+use crate::symbol_table::local::LocalSymbolTable;
 use crate::symbol_table::module;
 use crate::symbol_table::package;
 impl ProjectSymbolTable {
@@ -320,19 +321,53 @@ impl ProjectSymbolTable {
         if let Some(package) = self.get_package_for_file(&context.file_path)
             && let Some(module) = package.get_module(&context.file_path)
         {
-            return module
-                .resolve_local_scope(name, &context.scope_chain)
+            return self
+                .resolve_local_scope_in_module(&module, name, &context)
                 .map(translate);
         }
         // Fallback to deterministic scan when file->package mapping is stale.
         for package in self.sorted_packages() {
             if let Some(module) = package.get_module(&context.file_path)
-                && let Some(symbol) = module.resolve_local_scope(name, &context.scope_chain)
+                && let Some(symbol) = self.resolve_local_scope_in_module(&module, name, &context)
             {
                 return Some(translate(symbol));
             }
         }
         None
+    }
+
+    /// Install a file's already-decoded local table for one replayed file.
+    pub fn set_current_local_table(&self, path: &str, table: LocalSymbolTable) {
+        if let Ok(mut guard) = self.current_local_table.write() {
+            *guard = Some((path.to_string(), Arc::new(table)));
+        }
+    }
+
+    /// Release the per-file scope override.
+    pub fn clear_current_local_table(&self) {
+        if let Ok(mut guard) = self.current_local_table.write() {
+            *guard = None;
+        }
+    }
+
+    fn resolve_local_scope_in_module(
+        &self,
+        module: &module::ModuleSymbolTable,
+        name: &str,
+        context: &ResolutionContext,
+    ) -> Option<SymbolRef> {
+        let current = self
+            .current_local_table
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone());
+        if let Some((path, table)) = current
+            && path == context.file_path
+        {
+            let entity = table.resolve_by_scope(name, &context.scope_chain)?;
+            return table.create_symbol_ref(entity.id);
+        }
+        module.resolve_local_scope(name, &context.scope_chain)
     }
 
     /// Resolve via cross-package lookup (Level 4)

@@ -113,6 +113,7 @@ impl IndexOrchestrator {
                 )
             })?;
         let builder = self.create_relation_builder()?.into_disk_builder(store);
+        let local_symbols = builder.store().local_symbol_store();
         let relation_build_started = Instant::now();
         let rss_trace = std::env::var_os("CCE_RELATION_RSS_TRACE").is_some();
         let trace_rss = |stage: &str| {
@@ -206,17 +207,34 @@ impl IndexOrchestrator {
         let mut symbol_builder =
             cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
         symbol_builder.with_metrics(self.relation_metrics());
+        symbol_builder.with_local_symbols(Some(local_symbols));
         let project_symbols = spool.project_symbols();
         let mut session = symbol_builder.begin_streaming_build();
         let symbols_started = Instant::now();
+        let mut symbol_build_error = None;
+        let mut symbol_files = 0usize;
         spool
-            .for_each(|parsed| session.add_file(parsed, project_symbols))
+            .for_each(|parsed| {
+                if symbol_build_error.is_none() {
+                    symbol_build_error = session.add_file(parsed, project_symbols).err();
+                }
+                symbol_files += 1;
+                if rss_trace && symbol_files % 10000 == 0 {
+                    eprintln!("[relation-rss] pass=symbol_register files={symbol_files}");
+                }
+            })
             .map_err(|error| {
                 OrchestratorError::index(
                     "relation_build_spool",
                     format!("Failed to build symbols from spool: {error}"),
                 )
             })?;
+        if let Some(error) = symbol_build_error {
+            return Err(OrchestratorError::index(
+                "relation_build_spool",
+                format!("Failed to persist local symbols: {error}"),
+            ));
+        }
         let symbol_timings = session.finish(project_symbols);
         trace_rss("symbol_add_files_done");
         record_pass(symbols_started.elapsed(), total_bytes);
@@ -229,11 +247,21 @@ impl IndexOrchestrator {
         ctx.stages.relation_symbols_ms += symbols_ms;
 
         let propagation_started = Instant::now();
+        let mut propagation_files = 0usize;
         spool
             .for_each(|parsed| {
+                propagation_files += 1;
+                if rss_trace && propagation_files % 10000 == 0 {
+                    eprintln!("[relation-rss] pass=symbol_propagation files={propagation_files}");
+                }
                 install_type_context(parsed, project_symbols);
+                project_symbols.set_current_local_table(
+                    &parsed.path,
+                    cce_codegraph::symbol_table::LocalSymbolTable::from_parsed_file(parsed),
+                );
                 project_symbols.insert_cross_file_for_file(parsed);
                 project_symbols.propagate_cross_file_variables_for_file(parsed);
+                project_symbols.clear_current_local_table();
                 project_symbols.forget_type_inference_context(&parsed.path);
             })
             .map_err(|error| {
@@ -270,13 +298,23 @@ impl IndexOrchestrator {
             Self::inject_governance_edges(builder.store(), parser);
         }
         let t1 = Instant::now();
+        let mut resolution_files = 0usize;
         let resolved_files = spool
             .for_each(|parsed| {
+                resolution_files += 1;
+                if rss_trace && resolution_files % 10000 == 0 {
+                    eprintln!("[relation-rss] pass=relation_resolution files={resolution_files}");
+                }
                 install_type_context(parsed, project_symbols);
+                project_symbols.set_current_local_table(
+                    &parsed.path,
+                    cce_codegraph::symbol_table::LocalSymbolTable::from_parsed_file(parsed),
+                );
                 builder.resolve_file_relations(parsed, project_symbols);
                 if plugin_enabled {
                     builder.inject_plugin_relations(parsed, project_symbols);
                 }
+                project_symbols.clear_current_local_table();
                 project_symbols.forget_type_inference_context(&parsed.path);
             })
             .map_err(|error| {

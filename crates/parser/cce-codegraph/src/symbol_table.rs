@@ -7,11 +7,13 @@
 //! - LocalSymbolTable: File-local symbol index
 
 pub mod local;
+pub mod local_store;
 pub mod module;
 pub mod package;
 pub mod project;
 pub mod type_index;
 pub use local::LocalSymbolTable;
+pub use local_store::LocalSymbolStore;
 pub use module::{ImportBinding, ModuleSymbolTable, ReexportBinding, strip_crate_prefix};
 pub use package::PackageSymbolTable;
 pub use project::{ProjectSymbolTable, ResolutionContext};

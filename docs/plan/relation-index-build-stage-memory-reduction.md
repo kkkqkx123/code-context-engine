@@ -87,3 +87,54 @@
 5. 核对规范指纹、关系计数、delta 合并和导出结果。
 
 只有峰值下降 50%、关系阶段增量硬上界、查询延迟和一致性全部通过，才认为本重构完成。
+
+## 落地状态（devs 复测后）
+
+已落地 `BuildEntityView`、`BuildIndexSink` 与临时 SQLite 关系构建库；实体、符号键、ID 重映射、文件、导入导出、依赖、关系边均不再以完整 `RelationIndex` 常驻。canonical artifact 由临时库按行写出，发布路径保持 store-backed snapshot。单测验证了磁盘 artifact 与参考 canonical artifact 的双 fingerprint 和行计数一致。
+
+实测 medium 峰值下降 33.2%，large 下降 39.6%；medium 关系阶段增量 404,668 KiB，低于 500 MiB。large 关系阶段增量 4,090,268 KiB，峰值下降也未达到 50%。阶段 RSS 表明剩余增量集中在符号表构建：medium 符号阶段增加约 356 MiB，large 增加约 3.6 GiB。查询矩阵 cold p95 47 ms、warm p95 0 ms，未回归。
+
+因此本轮只完成了关系构建存储的替换。`BuildSymbolView`、符号/类型上下文磁盘化与符号表工作集上限尚未实现，不能宣布全部验收项通过。下一步必须在符号表构建路径中落实同一临时库契约，再按相同口径复测 medium/large。
+
+## 符号表磁盘化细化设计
+
+### 边界与目标
+
+关系边已经由构建期 SQLite 承载；剩余的线性增长来自 `ProjectSymbolTable` 为每个文件保留的 `LocalSymbolTable`。本轮只把文件级局部符号表移到同一临时库，不改写查询期快照，也不改变解析算法。
+
+硬约束：
+
+- 物化的局部表工作集最多 128 个文件、约 96 MiB；按 LRU 淘汰。
+- 写入失败必须使构建失败，不能静默生成缺失符号的关系图。
+- 同一文件的局部表在注册、跨文件传播、关系解析三次回放中必须解析为同一份数据。
+- 增量构建的既有内存路径保持不变，不引入第二套解析逻辑。
+
+### 存储结构
+
+临时 SQLite 增加 `local_symbols(path, record_json)` 表。`record_json` 保存完整的局部表记录：文件路径、语言、实体集合、实体 ID 顺序、名称索引、按父作用域分组的索引、元数据缓存、最大作用域深度。共享的 `Arc` 实体容器在序列化时展开为值，反序列化后重新建立共享容器，保证 `resolve_by_scope` 与 `build_scope_chain_with_limit` 的输入完全一致。
+
+`LocalSymbolStore` 与关系构建库共用同一个数据库文件，但持有独立连接，避免把局部表数据混入 artifact 写出路径。读取命中 LRU 时直接返回 `Arc<LocalSymbolTable>`；未命中时按 path 查询一行、反序列化、加入工作集。工作集按估算字节数淘汰，单条过大时仍可加载但不驻留，避免因为一个异常文件污染缓存。
+
+### 模块表接入
+
+`ModuleSymbolTable` 的局部表来源改为两种确定性状态：内存表，或指向磁盘库的文件路径加共享句柄。两种状态都通过同一个 `get_local_table()` 暴露为 `Arc<LocalSymbolTable>`，因此 `resolve_local_scope` 与 `get_scope_chain` 不需要分支逻辑，也不需要动态分发。
+
+`SymbolBuildSession::add_file` 注册每个文件时先把局部表写入磁盘库，再把模块表指向该磁盘记录；非全量构建仍走内存表。写入错误通过 `Result` 冒泡到 finalize，转换为显式的 operation manifest 失败。
+
+### 构建顺序
+
+1. finalize 创建关系构建库，并取得局部表存储句柄。
+2. 符号注册回放逐文件写局部表；全局导出、类型索引、简单名称索引继续在内存中聚合，但这些结构只保存小而固定的路由信息。
+3. 跨文件传播与关系解析再次读取同一路径时，从有界工作集或磁盘恢复局部表，用完即由 LRU 淘汰。
+4. artifact 写出仍只访问关系构建库的关系与实体表，不读取局部表。
+5. spool 与临时库同时删除，磁盘数据不跨越操作边界。
+
+### 一致性验证
+
+- 单测覆盖局部表序列化往返后的实体数量、实体内容和作用域链。
+- 已有 fingerprint 单测继续覆盖磁盘关系 artifact 与参考 canonical artifact 的双指纹和行计数。
+- 复测时对比 medium/large 的关系计数、fingerprint 与查询结果；若出现偏差，优先检查 `local_symbols` 的 path 归一化与记录字段完整性。
+
+### 已知边界
+
+本轮磁盘化只覆盖文件级局部符号表。`PackageSymbolTable` 的导出/导入/重导出表与全局名称、类型索引仍常驻内存，这部分不随文件数线性增长到实体级别，但仍是后续可观察的占用来源。若阶段 RSS 仍不满足 500 MiB 硬上界，下一步应把模块表整体纳入同一临时库，而不是放宽工作集上限。

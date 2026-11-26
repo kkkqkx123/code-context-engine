@@ -11,6 +11,7 @@
 //! - Visibility rules
 
 use crate::symbol::{SymbolMetadata, SymbolRef};
+use crate::symbol_table::local::LocalSymbolTable;
 use crate::symbol_table::type_index::TypeMemberIndex;
 use crate::type_inference::TypeInferenceContext;
 use crate::type_inference::cross_file::CrossFilePropagator;
@@ -224,6 +225,11 @@ pub struct ProjectSymbolTable {
     /// Namespace-qualified index: "package::namespace::symbol" -> EntityId
     namespace_index: DashMap<String, EntityId>,
 
+    /// Local table for the file currently being processed. Full builds
+    /// install this for one replayed file at a time so scope resolution does
+    /// not materialise the on-disk table for every lookup.
+    current_local_table: Arc<std::sync::RwLock<Option<(String, Arc<LocalSymbolTable>)>>>,
+
     /// Symbol resolution tuning knobs (replaces hard-coded constants).
     symbol_resolution_config: Arc<std::sync::RwLock<cce_config::SymbolResolutionConfig>>,
 }
@@ -321,6 +327,7 @@ impl ProjectSymbolTable {
             call_frequency: DashMap::new(),
             file_to_package: DashMap::new(),
             namespace_index: DashMap::new(),
+            current_local_table: Arc::new(std::sync::RwLock::new(None)),
             symbol_resolution_config: Arc::new(std::sync::RwLock::new(config)),
         }
     }
