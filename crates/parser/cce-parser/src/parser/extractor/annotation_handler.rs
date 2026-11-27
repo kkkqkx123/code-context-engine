@@ -75,14 +75,9 @@ pub fn should_skip_rust_attr(entity: &Entity) -> bool {
     }
 
     let internal_param_attrs = ["path ", "allow(", "deny(", "warn(", "forbid("];
-    if internal_param_attrs
+    internal_param_attrs
         .iter()
         .any(|prefix| entity.name.starts_with(prefix))
-    {
-        return true;
-    }
-
-    false
 }
 
 #[cfg(test)]

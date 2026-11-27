@@ -10,12 +10,14 @@ use axum::{
 use super::handlers;
 use super::log_paths;
 use super::middleware::metrics_middleware;
+#[cfg(debug_assertions)]
 use super::openapi::openapi_json;
 use cce_api::paths as api_paths;
 use cce_metrics::HttpMetrics;
 use cce_server_shared::context::SharedContext;
 
 /// Serve the OpenAPI document (debug builds only).
+#[cfg(debug_assertions)]
 async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
     ([("Content-Type", "application/json")], openapi_json())
 }
@@ -25,7 +27,7 @@ async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
 /// Neither state nor layers are applied here so both shapes serve the same
 /// endpoints and differ only in middleware.
 pub(crate) fn api_routes() -> Router<SharedContext> {
-    let mut router = Router::new()
+    let router = Router::new()
         // Index operations
         .route(api_paths::INDEX, post(handlers::index::handle_index))
         .route(
@@ -375,9 +377,7 @@ pub(crate) fn api_routes() -> Router<SharedContext> {
 
     // Debug-only self-hosted OpenAPI document; excluded from the contract tests.
     #[cfg(debug_assertions)]
-    {
-        router = router.route("/api-docs/openapi.json", get(serve_openapi));
-    }
+    let router = router.route("/api-docs/openapi.json", get(serve_openapi));
 
     router
 }

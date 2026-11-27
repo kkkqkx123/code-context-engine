@@ -102,11 +102,7 @@ fn entities_differ(old: &Entity, new: &Entity) -> bool {
         }
     }
     // Compare span (location changes)
-    if old.span != new.span {
-        return true;
-    }
-
-    false
+    old.span != new.span
 }
 
 #[cfg(test)]

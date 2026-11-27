@@ -243,16 +243,11 @@ fn looks_like_missing_semicolon(candidate: &ErrorCandidate, source: &str) -> boo
     let before = before.trim_end();
 
     // In JS, statements that might need semicolons
-    if before.ends_with(')')
+    before.ends_with(')')
         || before.ends_with(']')
         || before.ends_with('"')
         || before.ends_with('\'')
         || before.ends_with('`')
-    {
-        return true;
-    }
-
-    false
 }
 
 #[cfg(test)]

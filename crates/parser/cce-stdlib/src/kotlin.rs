@@ -985,11 +985,7 @@ impl KotlinStdlibDetector {
 
         // Also check first component for top-level packages like "kotlin", "kotlinx"
         let first_component = path.split('.').next().unwrap_or("");
-        if first_component == "kotlin" || first_component == "kotlinx" {
-            return true;
-        }
-
-        false
+        first_component == "kotlin" || first_component == "kotlinx"
     }
 
     /// Standard library constants.

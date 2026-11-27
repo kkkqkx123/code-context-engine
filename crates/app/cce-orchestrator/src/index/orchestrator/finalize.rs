@@ -219,7 +219,7 @@ impl IndexOrchestrator {
                     symbol_build_error = session.add_file(parsed, project_symbols).err();
                 }
                 symbol_files += 1;
-                if rss_trace && symbol_files % 10000 == 0 {
+                if rss_trace && symbol_files.is_multiple_of(10000) {
                     eprintln!("[relation-rss] pass=symbol_register files={symbol_files}");
                 }
             })
@@ -252,7 +252,7 @@ impl IndexOrchestrator {
         spool
             .for_each(|parsed| {
                 propagation_files += 1;
-                if rss_trace && propagation_files % 10000 == 0 {
+                if rss_trace && propagation_files.is_multiple_of(10000) {
                     eprintln!("[relation-rss] pass=symbol_propagation files={propagation_files}");
                 }
                 install_type_context(parsed, project_symbols);
@@ -305,7 +305,7 @@ impl IndexOrchestrator {
         let resolved_files = spool
             .for_each(|parsed| {
                 resolution_files += 1;
-                if rss_trace && resolution_files % 10000 == 0 {
+                if rss_trace && resolution_files.is_multiple_of(10000) {
                     eprintln!("[relation-rss] pass=relation_resolution files={resolution_files}");
                 }
                 install_type_context(parsed, project_symbols);

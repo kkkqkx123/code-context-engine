@@ -36,7 +36,7 @@ cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
-cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer" }
+cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer", optional = true }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-server-shared = { version = "0.1.0", path = "../cce-server-shared" }
 chrono = { workspace = true }
@@ -78,7 +78,7 @@ harness = false
 default = []
 # Remote hosting shape: admission middleware and gateway ingest entries. The
 # default build excludes both.
-admission = ["dep:cce-admission", "dep:base64"]
+admission = ["dep:cce-admission", "dep:base64", "dep:cce-ingest-transfer"]
 # Lua/native plugin overrides for BM25/embedding generation and file
 # filtering (`.cce/plugins.json`). Opt-in: the scripting runtime (mlua,
 # libloading) is excluded from the default build and test closure.

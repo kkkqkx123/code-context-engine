@@ -13,9 +13,6 @@ encoding_rs = { workspace = true }
 encoding-guess = { path = "../../encoding-guess" }
 sha2 = { workspace = true }
 hex = { workspace = true }
-walkdir = { workspace = true }
-regex = { workspace = true }
-globset = { workspace = true }
 tokio = { workspace = true }
 once_cell = { workspace = true }
 serde = { workspace = true }

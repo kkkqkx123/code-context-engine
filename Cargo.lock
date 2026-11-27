@@ -535,7 +535,6 @@ dependencies = [
 name = "cce-config"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "cce-metrics",
  "cce-text",
  "cce-types",
@@ -1036,7 +1035,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1119,7 +1117,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "cce-bench-kit",
- "cce-circuit-breaker",
  "cce-config",
  "cce-metrics",
  "cce-storage-common",
@@ -1244,11 +1241,9 @@ dependencies = [
  "encoding-guess",
  "encoding_rs",
  "fastrand",
- "globset",
  "hex",
  "llm-suite-token",
  "once_cell",
- "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1256,7 +1251,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "walkdir",
 ]
 
 [[package]]

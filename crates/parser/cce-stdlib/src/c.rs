@@ -924,11 +924,7 @@ impl CStdlibDetector {
 
         // Also check with .h suffix appended (for input like "stdio")
         let with_suffix = format!("{}.h", clean_header);
-        if Self::STDLIB_HEADERS.contains(&with_suffix.as_str()) {
-            return true;
-        }
-
-        false
+        Self::STDLIB_HEADERS.contains(&with_suffix.as_str())
     }
 
     pub fn is_stdlib_function(name: &str) -> bool {

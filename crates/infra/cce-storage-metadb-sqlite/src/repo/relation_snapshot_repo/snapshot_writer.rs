@@ -23,9 +23,14 @@ const INSERT_ENTITY: &str = "INSERT INTO relation_snapshot_entities (
 const FIND_FILE: &str = "SELECT id FROM relation_snapshot_files
     WHERE project_id = ?1 AND relation_epoch = ?2 AND path = ?3";
 
-const FIND_ENTITY: &str = "SELECT e.id FROM relation_snapshot_entities e
-    JOIN relation_snapshot_files f ON f.id = e.file_id
-    WHERE e.project_id = ?1 AND e.relation_epoch = ?2 AND f.path = ?3
+// Resolve the file first: the stable key includes `file_path`, and a name
+// can repeat in thousands of files. Joining entities first would scan every
+// same-name row for each lookup, turning artifact publication quadratic.
+const FIND_ENTITY: &str = "SELECT e.id
+    FROM relation_snapshot_files AS f
+    CROSS JOIN relation_snapshot_entities AS e INDEXED BY idx_relation_snapshot_entities_file
+    WHERE f.project_id = ?1 AND f.relation_epoch = ?2 AND f.path = ?3
+      AND e.project_id = ?1 AND e.relation_epoch = ?2 AND e.file_id = f.id
       AND e.scoped_name = ?4 AND e.kind_json = ?5 AND e.overload_discriminator = ?6";
 
 impl RelationSnapshotRepository {
@@ -419,4 +424,93 @@ fn unique_or_query(table: &str, error: rusqlite::Error) -> StorageError {
         return StorageError::unique_violation(format!("duplicate key in {table}: {}", error));
     }
     query_error(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::FIND_ENTITY;
+
+    fn lookup_schema() -> Connection {
+        let conn = Connection::open_in_memory().expect("test database must open");
+        conn.execute_batch(
+            "CREATE TABLE relation_snapshot_files (
+                id INTEGER PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                relation_epoch INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                UNIQUE(project_id, relation_epoch, path)
+             );
+             CREATE TABLE relation_snapshot_entities (
+                id INTEGER PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                relation_epoch INTEGER NOT NULL,
+                file_id INTEGER NOT NULL,
+                scoped_name TEXT NOT NULL,
+                kind_json TEXT NOT NULL,
+                overload_discriminator TEXT NOT NULL
+             );
+             CREATE INDEX idx_relation_snapshot_entities_file
+                ON relation_snapshot_entities(project_id, relation_epoch, file_id);",
+        )
+        .expect("test schema must be created");
+        conn
+    }
+
+    #[test]
+    fn entity_lookup_resolves_file_before_scanning_same_name_rows() {
+        let conn = lookup_schema();
+        let sql = format!("EXPLAIN QUERY PLAN {FIND_ENTITY}");
+        let mut statement = conn
+            .prepare(&sql)
+            .expect("query plan statement must prepare");
+        let plan: Vec<(i64, i64, i64, String)> = statement
+            .query_map(
+                rusqlite::params![7, 3, "a.rs", "run", "Function", "0"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("query plan must be available")
+            .collect::<Result<_, _>>()
+            .expect("query plan rows must be readable");
+        assert!(plan[0].3.contains("relation_snapshot_files"), "{plan:?}");
+        assert!(
+            plan[1].3.contains("idx_relation_snapshot_entities_file"),
+            "{plan:?}"
+        );
+    }
+
+    #[test]
+    fn entity_lookup_uses_file_path_to_disambiguate_repeated_names() {
+        let conn = lookup_schema();
+        conn.execute(
+            "INSERT INTO relation_snapshot_files (id, project_id, relation_epoch, path)
+             VALUES (1, 7, 3, 'a.rs'), (2, 7, 3, 'b.rs')",
+            [],
+        )
+        .expect("file rows must be inserted");
+        conn.execute(
+            "INSERT INTO relation_snapshot_entities
+                (id, project_id, relation_epoch, file_id, scoped_name, kind_json, overload_discriminator)
+             VALUES (11, 7, 3, 1, 'run', 'Function', '0'),
+                    (22, 7, 3, 2, 'run', 'Function', '0')",
+            [],
+        )
+        .expect("entity rows must be inserted");
+        let first: i64 = conn
+            .query_row(
+                FIND_ENTITY,
+                rusqlite::params![7, 3, "a.rs", "run", "Function", "0"],
+                |row| row.get(0),
+            )
+            .expect("first lookup must succeed");
+        let second: i64 = conn
+            .query_row(
+                FIND_ENTITY,
+                rusqlite::params![7, 3, "b.rs", "run", "Function", "0"],
+                |row| row.get(0),
+            )
+            .expect("second lookup must succeed");
+        assert_eq!((first, second), (11, 22));
+    }
 }

@@ -202,12 +202,8 @@ fn is_python_noise_line(line: &str) -> bool {
         return true;
     }
     let normalized: String = t.chars().filter(|c| !c.is_whitespace()).collect();
-    if normalized.starts_with("if__name__==")
+    normalized.starts_with("if__name__==")
         && (normalized.contains("\"__main__\"") || normalized.contains("'__main__'"))
-    {
-        return true;
-    }
-    false
 }
 
 fn is_js_strict_line(line: &str) -> bool {
@@ -243,10 +239,7 @@ fn is_go_noise_line(line: &str) -> bool {
             return true;
         }
     }
-    if t.starts_with("if err != nil") {
-        return true;
-    }
-    false
+    t.starts_with("if err != nil")
 }
 
 fn is_bash_noise_line(line: &str) -> bool {

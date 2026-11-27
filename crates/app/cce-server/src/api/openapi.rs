@@ -217,12 +217,8 @@ mod tests {
     /// annotations stabilize with the admission build; local builds skip
     /// them so the local contract stays free of remote symbols.
     fn annotations_included(rel: &str) -> bool {
-        if !cfg!(feature = "admission")
-            && (rel == "api/handlers/ingest.rs" || rel.starts_with("api/handlers/ingest/"))
-        {
-            return false;
-        }
-        true
+        !(!cfg!(feature = "admission")
+            && (rel == "api/handlers/ingest.rs" || rel.starts_with("api/handlers/ingest/")))
     }
 
     /// Dev-only documentation endpoint and the WebSocket log stream, neither

@@ -322,13 +322,13 @@ impl ProjectSymbolTable {
             && let Some(module) = package.get_module(&context.file_path)
         {
             return self
-                .resolve_local_scope_in_module(&module, name, &context)
+                .resolve_local_scope_in_module(&module, name, context)
                 .map(translate);
         }
         // Fallback to deterministic scan when file->package mapping is stale.
         for package in self.sorted_packages() {
             if let Some(module) = package.get_module(&context.file_path)
-                && let Some(symbol) = self.resolve_local_scope_in_module(&module, name, &context)
+                && let Some(symbol) = self.resolve_local_scope_in_module(&module, name, context)
             {
                 return Some(translate(symbol));
             }

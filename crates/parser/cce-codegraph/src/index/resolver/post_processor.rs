@@ -128,10 +128,7 @@ impl RelationPostProcessor {
         } else {
             is_variable_receiver
         };
-        if generic_candidate && !has_member {
-            return true;
-        }
-        false
+        generic_candidate && !has_member
     }
 
     /// Generic post-filter for unresolved call relations that look like
@@ -395,14 +392,10 @@ impl RelationPostProcessor {
         is_stdlib: bool,
         relation_is_call: bool,
     ) -> bool {
-        if is_external
+        is_external
             && !is_stdlib
             && relation_is_call
             && self.should_filter_unresolved_call(dst_name, language)
-        {
-            return true;
-        }
-        false
     }
 }
 

@@ -117,23 +117,25 @@ mod tests {
     use cce_types::{Entity, EntityKind, ParsedFile, Span};
 
     fn sample_file() -> ParsedFile {
-        let mut file = ParsedFile::default();
-        file.path = "src/lib.rs".to_string();
-        file.language = cce_types::Language::Rust;
-        file.entities = vec![
-            Entity::new(
-                EntityId(1),
-                EntityKind::Function,
-                "outer".to_string(),
-                Span::default(),
-            ),
-            Entity::new(
-                EntityId(2),
-                EntityKind::Function,
-                "inner".to_string(),
-                Span::default(),
-            ),
-        ];
+        let mut file = ParsedFile {
+            path: "src/lib.rs".to_string(),
+            language: cce_types::Language::Rust,
+            entities: vec![
+                Entity::new(
+                    EntityId(1),
+                    EntityKind::Function,
+                    "outer".to_string(),
+                    Span::default(),
+                ),
+                Entity::new(
+                    EntityId(2),
+                    EntityKind::Function,
+                    "inner".to_string(),
+                    Span::default(),
+                ),
+            ],
+            ..Default::default()
+        };
         file.entities[1].parent = Some(EntityId(1));
         file
     }

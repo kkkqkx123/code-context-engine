@@ -33,6 +33,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Replay-local symbol table installed for the file currently being resolved.
+type CurrentLocalTable = Arc<std::sync::RwLock<Option<(String, Arc<LocalSymbolTable>)>>>;
+
 /// Simple-name index entry.
 ///
 /// Explicitly distinguishes the two sources of a bare-name match so
@@ -228,7 +231,7 @@ pub struct ProjectSymbolTable {
     /// Local table for the file currently being processed. Full builds
     /// install this for one replayed file at a time so scope resolution does
     /// not materialise the on-disk table for every lookup.
-    current_local_table: Arc<std::sync::RwLock<Option<(String, Arc<LocalSymbolTable>)>>>,
+    current_local_table: CurrentLocalTable,
 
     /// Symbol resolution tuning knobs (replaces hard-coded constants).
     symbol_resolution_config: Arc<std::sync::RwLock<cce_config::SymbolResolutionConfig>>,

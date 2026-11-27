@@ -272,12 +272,8 @@ impl RelationAnnotator {
         {
             return false;
         }
-        if config.dedup_strategy == DedupStrategy::ByContentHash
-            && !seen_hashes.insert(unit.content_hash())
-        {
-            return false;
-        }
-        true
+        !(config.dedup_strategy == DedupStrategy::ByContentHash
+            && !seen_hashes.insert(unit.content_hash()))
     }
 
     /// Stable identity hash of a primary unit (FNV-1a over file path, line
