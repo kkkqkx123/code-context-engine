@@ -176,6 +176,32 @@ impl DatabaseConfig {
 }
 
 impl AppConfig {
+    /// Balanced preset matching the default medium workload.
+    pub fn balanced() -> Self {
+        let mut config = Self::default();
+        config.orchestrator.batch = crate::modules::BatchConfig::balanced_project();
+        config.relation = RelationConfig::balanced();
+        config
+    }
+
+    /// Memory-constrained preset for small build workers.
+    pub fn low_memory() -> Self {
+        let mut config = Self::default();
+        config.orchestrator.batch = crate::modules::BatchConfig::low_memory();
+        config.relation = RelationConfig::low_memory();
+        config.symbol_resolution = SymbolResolutionConfig::low_memory();
+        config
+    }
+
+    /// High-throughput preset for dedicated indexing nodes.
+    pub fn high_throughput() -> Self {
+        let mut config = Self::default();
+        config.orchestrator.batch = crate::modules::BatchConfig::high_throughput_project();
+        config.relation = RelationConfig::high_throughput();
+        config.symbol_resolution = SymbolResolutionConfig::high_throughput();
+        config
+    }
+
     /// Default embedding dimension implied by the configured default model.
     fn default_embedding_dimension(&self) -> Option<usize> {
         let key = if !self.embedder.default_model.trim().is_empty() {

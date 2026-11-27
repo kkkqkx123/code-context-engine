@@ -9517,6 +9517,13 @@
           "symbol_view_module_peak_bytes",
           "symbol_view_name_peak_entries",
           "symbol_view_name_peak_bytes",
+          "symbol_view_name_bucket_peak_candidates",
+          "symbol_view_global_index_queries",
+          "symbol_view_global_index_hits",
+          "symbol_view_namespace_index_queries",
+          "symbol_view_namespace_index_hits",
+          "symbol_view_global_index_entries",
+          "symbol_view_namespace_index_entries",
           "symbol_view_queries",
           "symbol_view_candidate_truncated",
           "cross_file_candidate_truncated",
@@ -9834,6 +9841,21 @@
             "format": "int64",
             "minimum": 0
           },
+          "symbol_view_global_index_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_global_index_hits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_global_index_queries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "symbol_view_module_peak_bytes": {
             "type": "integer",
             "format": "int64",
@@ -9844,12 +9866,32 @@
             "format": "int64",
             "minimum": 0
           },
+          "symbol_view_name_bucket_peak_candidates": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "symbol_view_name_peak_bytes": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
           "symbol_view_name_peak_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_namespace_index_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_namespace_index_hits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_namespace_index_queries": {
             "type": "integer",
             "format": "int64",
             "minimum": 0

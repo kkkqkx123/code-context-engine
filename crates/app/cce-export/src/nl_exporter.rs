@@ -127,6 +127,14 @@ impl NlDocumentExporter {
             Some(RelationEnhancer::new(relation_index, enhancer_config));
     }
 
+    /// Whether a relation snapshot is currently attached.
+    pub fn has_relation_enhancement(&self) -> bool {
+        self.relation_enhancer
+            .read()
+            .expect("Relation enhancer lock poisoned")
+            .is_some()
+    }
+
     /// Clear relation enhancement (disable it)
     pub fn clear_relation_enhancement(&self) {
         *self

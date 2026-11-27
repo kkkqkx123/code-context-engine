@@ -273,6 +273,26 @@ impl BatchConfig {
             embedding_stage_timeout_secs: 0,
         }
     }
+
+    /// Balanced preset with a bounded concurrency ceiling.
+    pub fn balanced_project() -> Self {
+        Self {
+            process_concurrency: Self::default_file_concurrency().min(12),
+            ..Self::default()
+        }
+    }
+
+    /// High-throughput preset for dedicated indexing nodes.
+    pub fn high_throughput_project() -> Self {
+        Self {
+            scan_batch_size: 200,
+            parse_concurrency: 20,
+            process_concurrency: Self::default_file_concurrency().min(24),
+            store_batch_size: 100,
+            embedding_batch_size: 64,
+            ..Self::default()
+        }
+    }
 }
 
 /// Hot update configuration (user-configurable)

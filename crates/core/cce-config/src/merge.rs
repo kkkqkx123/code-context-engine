@@ -36,17 +36,18 @@ use crate::modules::{
     AstToNlConfig, BatchConfig, Bm25GeneratorConfig, CacheConfig, ChunkingConfig, DebounceConfig,
     EmbeddingGeneratorConfig, FileWatchConfig, HotUpdateConfig, IndexConfig, IndexerConfig,
     LicenseHeaderConfig, NestProcessorConfig, OrchestratorConfig, RelationConfig, ScannerConfig,
-    SummaryConfig,
+    SummaryConfig, SymbolResolutionConfig,
 };
 use crate::project::{
     ProjectAstToNlPatch, ProjectBatchPatch, ProjectBm25GeneratorPatch, ProjectCachePatch,
     ProjectChunkingPatch, ProjectDebouncePatch, ProjectEmbeddingGeneratorPatch,
     ProjectFileWatchPatch, ProjectGetterSetterPatch, ProjectGrouperPatch, ProjectHotUpdatePatch,
     ProjectIndexerPatch, ProjectLicenseHeaderPatch, ProjectOrchestratorConfig,
-    ProjectRelationIndexPatch, ProjectRelationPatch, ProjectScannerPatch, ProjectSummaryPatch,
-    ProjectTextCleanerPatch,
+    ProjectRelationIndexPatch, ProjectRelationPatch, ProjectScannerPatch, ProjectShardPatch,
+    ProjectSummaryPatch, ProjectSymbolResolutionPatch, ProjectTextCleanerPatch,
 };
 use cce_text::Bm25TextCleanerConfig;
+use cce_types::ShardQueryConfig;
 
 impl Mergeable for ScannerConfig {
     type Override = ProjectScannerPatch;
@@ -396,6 +397,74 @@ impl Mergeable for RelationConfig {
         }
         if let Some(ref value) = patch.index {
             self.index.merge(value);
+        }
+        if let Some(value) = patch.artifact_chunk_bytes {
+            self.artifact_chunk_bytes = value;
+        }
+        if let Some(ref value) = patch.shard {
+            self.shard.merge(value);
+        }
+    }
+}
+
+impl Mergeable for ShardQueryConfig {
+    type Override = ProjectShardPatch;
+
+    fn merge(&mut self, patch: &ProjectShardPatch) {
+        if let Some(value) = patch.max_shard_items {
+            self.max_shard_items = value;
+        }
+        if let Some(value) = patch.shard_lru_shards {
+            self.shard_lru_shards = value;
+        }
+        if let Some(value) = patch.shard_lru_bytes {
+            self.shard_lru_bytes = value;
+        }
+        if let Some(value) = patch.shard_query_shards {
+            self.shard_query_shards = value;
+        }
+        if let Some(value) = patch.route_cache_entries {
+            self.route_cache_entries = value;
+        }
+    }
+}
+
+impl Mergeable for SymbolResolutionConfig {
+    type Override = ProjectSymbolResolutionPatch;
+
+    fn merge(&mut self, patch: &ProjectSymbolResolutionPatch) {
+        if let Some(value) = patch.max_reexport_chain_depth {
+            self.max_reexport_chain_depth = value;
+        }
+        if let Some(value) = patch.max_scope_chain_depth {
+            self.max_scope_chain_depth = value;
+        }
+        if let Some(value) = patch.resolution_cache_size {
+            self.resolution_cache_size = value;
+        }
+        if let Some(value) = patch.max_wildcard_expansion_size {
+            self.max_wildcard_expansion_size = value;
+        }
+        if let Some(value) = patch.disable_wildcard_expansion {
+            self.disable_wildcard_expansion = value;
+        }
+        if let Some(value) = patch.module_workset_entries {
+            self.module_workset_entries = value;
+        }
+        if let Some(value) = patch.name_bucket_workset_entries {
+            self.name_bucket_workset_entries = value;
+        }
+        if let Some(value) = patch.global_index_workset_entries {
+            self.global_index_workset_entries = value;
+        }
+        if let Some(value) = patch.max_name_candidates_per_bucket {
+            self.max_name_candidates_per_bucket = value;
+        }
+        if let Some(value) = patch.module_workset_bytes {
+            self.module_workset_bytes = value;
+        }
+        if let Some(value) = patch.name_bucket_workset_bytes {
+            self.name_bucket_workset_bytes = value;
         }
     }
 }

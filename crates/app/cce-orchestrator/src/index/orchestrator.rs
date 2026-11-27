@@ -34,8 +34,8 @@ mod incremental;
 
 pub use dead_letter::DeadLetterRetryReport;
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use cce_codegraph::IndexBuilder;
@@ -54,9 +54,7 @@ use cce_metrics::{
     PipelineStageMetrics, RelationMetrics, SummaryMetrics,
 };
 use cce_metrics::{IndexQualityMetrics, ScannerMetrics};
-use cce_parser::summary::{
-    FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
-};
+use cce_parser::summary::{ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
 use cce_scanner::ScanOptions;
 use cce_types::OutputMode;
@@ -87,6 +85,8 @@ pub struct IndexOrchestrator {
     /// the orchestrator retains no builder graph. Query and debug reads go
     /// through this snapshot instead of a long-lived builder.
     last_published_snapshot: Option<Arc<LayeredSnapshotIndex>>,
+    /// Whether a full relation generation is currently being rebuilt.
+    relation_rebuilding: AtomicBool,
     project_fingerprint: Option<String>,
     summary_generator: Box<dyn SummaryGenerator>,
     /// Stored summary config (for deferred ModelEnhancedGenerator creation)
@@ -142,6 +142,7 @@ impl IndexOrchestrator {
             storage: StorageCoordinator::new(project_id)?,
             project_id,
             last_published_snapshot: None,
+            relation_rebuilding: AtomicBool::new(false),
             project_fingerprint: None,
             summary_generator: Box::new(RuleBasedGenerator::default()),
             summary_config: None,
@@ -479,7 +480,6 @@ struct FullIndexContext {
     total_batches: usize,
     relation_spool: Option<RelationBuildSpool>,
     export_spool: Option<ExportSpool>,
-    export_summaries_by_file: HashMap<String, FileSummary>,
     errors: Vec<String>,
     total_indexed: usize,
     total_failed: usize,
@@ -552,10 +552,28 @@ impl IndexOrchestrator {
             .set_checkpoint_context(self.checkpoint_manager.clone(), Some(operation_id.clone()));
         self.storage.begin_project_manifest(&operation_id).await?;
 
+        if options.build_relations {
+            self.begin_relation_rebuild(&operation_id).await;
+        }
+
         // Create file rows for the candidate epoch before summaries, entities
         // and chunks reference them. The change-detector hashes remain
         // unpublished until the project manifest is activated.
-        if let Err(error) = self.storage.ensure_file_records(file_indexer.files()).await {
+        let mut file_record_error = None;
+        for batch_index in 0..file_indexer.total_batches() {
+            let batch = match file_indexer.get_batch(batch_index) {
+                Ok(batch) => batch,
+                Err(error) => {
+                    file_record_error = Some(error);
+                    break;
+                }
+            };
+            if let Err(error) = self.storage.ensure_file_records(&batch).await {
+                file_record_error = Some(error.to_string());
+                break;
+            }
+        }
+        if let Some(error) = file_record_error {
             if let Err(manifest_error) = self
                 .storage
                 .fail_project_manifest(
@@ -570,7 +588,7 @@ impl IndexOrchestrator {
                     "Failed to mark project manifest failed after file record publication error"
                 );
             }
-            return Err(error);
+            return Err(OrchestratorError::index("file_records", error));
         }
 
         // Validate content hash for all completed batches.
@@ -582,7 +600,7 @@ impl IndexOrchestrator {
         stages.scan_ms = scan_started.elapsed().as_millis() as u64;
         stages.rss_after_scan_kb = cce_utils::rss_kb().unwrap_or(0);
 
-        let total_files = file_indexer.files().len();
+        let total_files = file_indexer.file_count();
         let total_batches = file_indexer.total_batches();
 
         tracing::info!(
@@ -676,7 +694,6 @@ impl IndexOrchestrator {
             total_batches,
             relation_spool,
             export_spool,
-            export_summaries_by_file: HashMap::new(),
             errors,
             total_indexed: 0,
             total_failed: 0,

@@ -458,6 +458,13 @@ impl RelationRuntime {
         old_state
     }
 
+    /// Drop any resident generation when no active generation can be served.
+    pub async fn invalidate_snapshot(&self) {
+        let mut inner = self.inner.write().await;
+        inner.published_snapshot = None;
+        inner.state = RelationRuntimeState::Unloaded;
+    }
+
     /// Mark runtime as loading (first load, no old snapshot)
     pub async fn set_loading(&self) {
         self.set_state(RelationRuntimeState::Loading).await;
@@ -542,6 +549,7 @@ impl RelationRuntime {
             available: state.can_serve_queries() && snapshot.is_some(),
             state,
             relation_epoch: snapshot.as_ref().map(|s| s.relation_epoch).unwrap_or(0),
+            relation_rebuilding: state == RelationRuntimeState::Updating,
             entity_count: snapshot.as_ref().map(|s| s.entity_count()).unwrap_or(0),
             relation_count: snapshot.as_ref().map(|s| s.relation_count()).unwrap_or(0),
             integrity: snapshot.as_ref().map(|s| s.integrity),
@@ -590,6 +598,8 @@ pub struct RelationCapabilityInfo {
     pub state: RelationRuntimeState,
     /// Current relation epoch
     pub relation_epoch: i64,
+    /// A full generation rebuild is in progress.
+    pub relation_rebuilding: bool,
     /// Number of entities in current snapshot
     pub entity_count: usize,
     /// Number of relations in current snapshot
@@ -626,6 +636,7 @@ impl RelationCapabilityInfo {
             "available": self.available,
             "state": format!("{:?}", self.state),
             "relation_epoch": self.relation_epoch,
+            "relation_rebuilding": self.relation_rebuilding,
             "entity_count": self.entity_count,
             "relation_count": self.relation_count,
             "integrity": self.integrity.map(|i| format!("{:?}", i)),

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use cce_config::SymbolResolutionConfig;
+use cce_types::EntityId;
 use lru::LruCache;
 use parking_lot::Mutex;
 
@@ -40,7 +41,53 @@ pub struct SymbolViewMetrics {
     pub module_peak_bytes: u64,
     pub candidate_peak_entries: u64,
     pub candidate_peak_bytes: u64,
+    pub name_bucket_peak_candidates: u64,
+    pub global_index_queries: u64,
+    pub global_index_hits: u64,
+    pub namespace_index_queries: u64,
+    pub namespace_index_hits: u64,
+    pub global_index_entries: u64,
+    pub namespace_index_entries: u64,
     pub truncated_candidates: u64,
+}
+
+struct SizedCache<T> {
+    entries: LruCache<String, (T, u64)>,
+    bytes: u64,
+    max_bytes: u64,
+}
+
+impl<T: Clone> SizedCache<T> {
+    fn new(capacity: usize, max_bytes: u64) -> Self {
+        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::MIN);
+        Self {
+            entries: LruCache::new(capacity),
+            bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<T> {
+        self.entries.get(key).map(|(value, _)| value.clone())
+    }
+
+    fn put(&mut self, key: String, value: T, bytes: u64) {
+        while self.bytes.saturating_add(bytes) > self.max_bytes && !self.entries.is_empty() {
+            if let Some((_, (_, evicted_bytes))) = self.entries.pop_lru() {
+                self.bytes = self.bytes.saturating_sub(evicted_bytes);
+            }
+        }
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.entries.put(key, (value, bytes));
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn bytes(&self) -> u64 {
+        self.bytes
+    }
 }
 
 /// Full-build symbol view backed by the relation build store.
@@ -49,8 +96,10 @@ pub struct SymbolViewMetrics {
 /// view supplies the same module and candidate data through bounded caches.
 pub struct BuildSymbolView {
     store: Arc<BuildRelationStore>,
-    modules: Mutex<LruCache<String, Arc<ModuleSymbolTable>>>,
-    candidates: Mutex<LruCache<String, Vec<SymbolCandidate>>>,
+    modules: Mutex<SizedCache<Arc<ModuleSymbolTable>>>,
+    candidates: Mutex<SizedCache<Vec<SymbolCandidate>>>,
+    global_symbols: Mutex<LruCache<String, EntityId>>,
+    namespace_symbols: Mutex<LruCache<String, EntityId>>,
     max_candidates_per_bucket: usize,
     module_queries: AtomicU64,
     module_hits: AtomicU64,
@@ -60,19 +109,32 @@ pub struct BuildSymbolView {
     module_peak_bytes: AtomicU64,
     candidate_peak_entries: AtomicU64,
     candidate_peak_bytes: AtomicU64,
+    global_queries: AtomicU64,
+    global_hits: AtomicU64,
+    namespace_queries: AtomicU64,
+    namespace_hits: AtomicU64,
+    name_bucket_peak_candidates: AtomicU64,
     truncated_candidates: AtomicU64,
 }
 
 impl BuildSymbolView {
     pub fn new(store: Arc<BuildRelationStore>, config: &SymbolResolutionConfig) -> Self {
-        let module_capacity =
-            NonZeroUsize::new(config.module_workset_entries).unwrap_or(NonZeroUsize::MIN);
-        let candidate_capacity =
-            NonZeroUsize::new(config.name_bucket_workset_entries).unwrap_or(NonZeroUsize::MIN);
         Self {
             store,
-            modules: Mutex::new(LruCache::new(module_capacity)),
-            candidates: Mutex::new(LruCache::new(candidate_capacity)),
+            modules: Mutex::new(SizedCache::new(
+                config.module_workset_entries,
+                config.module_workset_bytes,
+            )),
+            candidates: Mutex::new(SizedCache::new(
+                config.name_bucket_workset_entries,
+                config.name_bucket_workset_bytes,
+            )),
+            global_symbols: Mutex::new(LruCache::new(
+                NonZeroUsize::new(config.global_index_workset_entries).unwrap_or(NonZeroUsize::MIN),
+            )),
+            namespace_symbols: Mutex::new(LruCache::new(
+                NonZeroUsize::new(config.global_index_workset_entries).unwrap_or(NonZeroUsize::MIN),
+            )),
             max_candidates_per_bucket: config.max_name_candidates_per_bucket,
             module_queries: AtomicU64::new(0),
             module_hits: AtomicU64::new(0),
@@ -82,6 +144,11 @@ impl BuildSymbolView {
             module_peak_bytes: AtomicU64::new(0),
             candidate_peak_entries: AtomicU64::new(0),
             candidate_peak_bytes: AtomicU64::new(0),
+            global_queries: AtomicU64::new(0),
+            global_hits: AtomicU64::new(0),
+            namespace_queries: AtomicU64::new(0),
+            namespace_hits: AtomicU64::new(0),
+            name_bucket_peak_candidates: AtomicU64::new(0),
             truncated_candidates: AtomicU64::new(0),
         }
     }
@@ -102,7 +169,7 @@ impl BuildSymbolView {
     }
 
     pub fn contains_module(&self, path: &str) -> bool {
-        self.modules.lock().contains(path) || self.store.module_record(path).is_some()
+        self.modules.lock().get(path).is_some() || self.store.module_record(path).is_some()
     }
 
     pub fn module_paths(&self) -> Vec<(String, String)> {
@@ -119,7 +186,7 @@ impl BuildSymbolView {
     /// Materialize one module through the bounded working set.
     pub fn module(&self, path: &str) -> Option<Arc<ModuleSymbolTable>> {
         self.module_queries.fetch_add(1, Ordering::Relaxed);
-        if let Some(module) = self.modules.lock().get(path).cloned() {
+        if let Some(module) = self.modules.lock().get(path) {
             self.module_hits.fetch_add(1, Ordering::Relaxed);
             return Some(module);
         }
@@ -134,12 +201,9 @@ impl BuildSymbolView {
         ));
         {
             let mut cache = self.modules.lock();
-            cache.put(path.to_string(), Arc::clone(&module));
+            cache.put(path.to_string(), Arc::clone(&module), bytes);
             max_atomic(&self.module_peak_entries, cache.len() as u64);
-            max_atomic(
-                &self.module_peak_bytes,
-                bytes.saturating_mul(cache.len() as u64),
-            );
+            max_atomic(&self.module_peak_bytes, cache.bytes());
         }
         Some(module)
     }
@@ -160,34 +224,104 @@ impl BuildSymbolView {
     /// `arg_count` when the call site knows it.
     pub fn candidates(&self, name: &str, arg_count: Option<usize>) -> Vec<SymbolCandidate> {
         self.candidate_queries.fetch_add(1, Ordering::Relaxed);
-        let key = format!(
-            "{name}\0{}",
-            arg_count.map(|count| count.to_string()).unwrap_or_default()
-        );
-        if let Some(cached) = self.candidates.lock().get(&key).cloned() {
-            self.candidate_hits.fetch_add(1, Ordering::Relaxed);
-            return cached;
+        let mut candidates = Vec::new();
+        for arity in self.store.name_candidate_arities(name) {
+            if arg_count.is_some_and(|count| !arity.accepts(count)) {
+                continue;
+            }
+            let key = SymbolCandidate::bucket_id(name, &arity);
+            let bucket = if let Some(cached) = self.candidates.lock().get(&key) {
+                self.candidate_hits.fetch_add(1, Ordering::Relaxed);
+                cached
+            } else {
+                let bucket = self.store.name_candidates_for_arity(name, &arity);
+                let bytes = Self::candidate_bytes(&bucket);
+                max_atomic(&self.name_bucket_peak_candidates, bucket.len() as u64);
+                {
+                    let mut cache = self.candidates.lock();
+                    cache.put(key, bucket.clone(), bytes);
+                    max_atomic(&self.candidate_peak_entries, cache.len() as u64);
+                    max_atomic(&self.candidate_peak_bytes, cache.bytes());
+                }
+                bucket
+            };
+            candidates.extend(bucket);
         }
-        let candidates: Vec<SymbolCandidate> = self
-            .store
-            .name_candidates(name, None)
-            .into_iter()
-            .filter(|candidate| arg_count.is_none_or(|count| candidate.accepts(count)))
-            .collect();
-        let bytes: u64 = candidates
-            .iter()
-            .map(|candidate| candidate.sort_key.len() as u64 + 128)
-            .sum();
-        {
-            let mut cache = self.candidates.lock();
-            cache.put(key, candidates.clone());
-            max_atomic(&self.candidate_peak_entries, cache.len() as u64);
-            max_atomic(
-                &self.candidate_peak_bytes,
-                bytes.saturating_mul(cache.len() as u64),
-            );
-        }
+        candidates.sort_by(|left, right| left.sort_key.cmp(&right.sort_key));
         candidates
+    }
+
+    /// Read one global qualified key through the bounded working set.
+    pub fn global_symbol(&self, key: &str) -> Option<EntityId> {
+        self.global_queries.fetch_add(1, Ordering::Relaxed);
+        if let Some(entity_id) = self.global_symbols.lock().get(key).copied() {
+            self.global_hits.fetch_add(1, Ordering::Relaxed);
+            return Some(entity_id);
+        }
+        let entity_id = self.store.global_symbol(key)?;
+        self.global_symbols.lock().put(key.to_string(), entity_id);
+        Some(entity_id)
+    }
+
+    pub fn insert_global_symbol(&self, key: &str, entity_id: EntityId) -> Result<(), String> {
+        self.store.write_global_symbol(key, entity_id)?;
+        self.global_symbols.lock().put(key.to_string(), entity_id);
+        Ok(())
+    }
+
+    pub fn remove_global_symbol(&self, key: &str) -> Result<(), String> {
+        self.store.remove_global_symbol(key)?;
+        self.global_symbols.lock().pop(key);
+        Ok(())
+    }
+
+    /// Read one namespace qualified key through the bounded working set.
+    pub fn namespace_symbol(&self, key: &str) -> Option<EntityId> {
+        self.namespace_queries.fetch_add(1, Ordering::Relaxed);
+        if let Some(entity_id) = self.namespace_symbols.lock().get(key).copied() {
+            self.namespace_hits.fetch_add(1, Ordering::Relaxed);
+            return Some(entity_id);
+        }
+        let entity_id = self.store.namespace_symbol(key)?;
+        self.namespace_symbols
+            .lock()
+            .put(key.to_string(), entity_id);
+        Some(entity_id)
+    }
+
+    pub fn insert_namespace_symbol(&self, key: &str, entity_id: EntityId) -> Result<(), String> {
+        self.store.write_namespace_symbol(key, entity_id)?;
+        self.namespace_symbols
+            .lock()
+            .put(key.to_string(), entity_id);
+        Ok(())
+    }
+
+    pub fn remove_namespace_symbol(&self, key: &str) -> Result<(), String> {
+        self.store.remove_namespace_symbol(key)?;
+        self.namespace_symbols.lock().pop(key);
+        Ok(())
+    }
+
+    /// Rebuild both qualified indexes from the streaming source.
+    pub fn clear_qualified_symbols(&self) -> Result<(), String> {
+        self.store.clear_qualified_symbols()?;
+        self.global_symbols.lock().clear();
+        self.namespace_symbols.lock().clear();
+        Ok(())
+    }
+
+    /// Drop only resident entries; rows in the round-local store stay intact.
+    pub fn clear_resident_qualified_symbols(&self) {
+        self.global_symbols.lock().clear();
+        self.namespace_symbols.lock().clear();
+    }
+
+    fn candidate_bytes(candidates: &[SymbolCandidate]) -> u64 {
+        candidates
+            .iter()
+            .map(|candidate| candidate.sort_key.len() as u64 + candidate.name.len() as u64 + 128)
+            .sum()
     }
 
     pub fn metrics(&self) -> SymbolViewMetrics {
@@ -200,6 +334,13 @@ impl BuildSymbolView {
             module_peak_bytes: self.module_peak_bytes.load(Ordering::Relaxed),
             candidate_peak_entries: self.candidate_peak_entries.load(Ordering::Relaxed),
             candidate_peak_bytes: self.candidate_peak_bytes.load(Ordering::Relaxed),
+            global_index_queries: self.global_queries.load(Ordering::Relaxed),
+            global_index_hits: self.global_hits.load(Ordering::Relaxed),
+            namespace_index_queries: self.namespace_queries.load(Ordering::Relaxed),
+            namespace_index_hits: self.namespace_hits.load(Ordering::Relaxed),
+            global_index_entries: self.store.global_symbol_count(),
+            namespace_index_entries: self.store.namespace_symbol_count(),
+            name_bucket_peak_candidates: self.name_bucket_peak_candidates.load(Ordering::Relaxed),
             truncated_candidates: self.truncated_candidates.load(Ordering::Relaxed),
         }
     }
@@ -253,6 +394,7 @@ mod tests {
         assert!(loaded.has_export("public_symbol"));
         assert_eq!(loaded.file_path, "src/main.rs");
         assert_eq!(view.metrics().module_queries, 1);
+        assert!(view.metrics().module_peak_bytes > 0);
         assert_eq!(
             view.module("src/main.rs")
                 .map(|module| module.file_path.clone()),
@@ -279,6 +421,49 @@ mod tests {
         let candidates = view.candidates("duplicate", Some(1));
         assert_eq!(candidates.len(), 2);
         assert_eq!(view.truncated_candidates(), 1);
+        assert_eq!(view.metrics().name_bucket_peak_candidates, 2);
+        assert!(view.metrics().candidate_peak_bytes > 0);
         assert!(candidates.iter().all(|item| item.arity.accepts(1)));
+    }
+
+    #[test]
+    fn qualified_symbols_round_trip_through_bounded_view() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let store = Arc::new(
+            BuildRelationStore::new(root.path().join("view.sqlite3")).expect("store must open"),
+        );
+        let config = SymbolResolutionConfig {
+            global_index_workset_entries: 1,
+            ..SymbolResolutionConfig::default()
+        };
+        let view = BuildSymbolView::new(Arc::clone(&store), &config);
+        let first = EntityId(7);
+        let second = EntityId(11);
+        view.insert_global_symbol("pkg::mod::first", first)
+            .expect("global write");
+        view.insert_global_symbol("pkg::mod::second", second)
+            .expect("global write");
+        view.insert_namespace_symbol("pkg::ns::first", first)
+            .expect("namespace write");
+
+        assert_eq!(view.global_symbol("pkg::mod::first"), Some(first));
+        assert_eq!(view.global_symbol("pkg::mod::second"), Some(second));
+        assert_eq!(view.global_symbol("pkg::mod::first"), Some(first));
+        assert_eq!(view.namespace_symbol("pkg::ns::first"), Some(first));
+        assert_eq!(view.namespace_symbol("pkg::ns::first"), Some(first));
+        let metrics = view.metrics();
+        assert_eq!(metrics.global_index_entries, 2);
+        assert_eq!(metrics.namespace_index_entries, 1);
+        assert!(metrics.global_index_queries >= 3);
+        assert!(metrics.namespace_index_hits >= 1);
+
+        view.remove_global_symbol("pkg::mod::first")
+            .expect("global remove");
+        assert_eq!(view.global_symbol("pkg::mod::first"), None);
+        view.clear_resident_qualified_symbols();
+        assert_eq!(view.global_symbol("pkg::mod::second"), Some(second));
+        view.clear_qualified_symbols().expect("qualified clear");
+        assert_eq!(view.global_symbol("pkg::mod::second"), None);
+        assert_eq!(view.namespace_symbol("pkg::ns::first"), None);
     }
 }

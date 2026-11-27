@@ -503,6 +503,11 @@ impl super::CodeContextEngine {
         let capabilities = IndexCapabilities::from(&project_entry.config.orchestrator.indexer)
             .merge(&IndexCapabilities::from(&project_entry.config.relation))
             .with_relation_propagation_depth(project_entry.config.relation.max_propagation_depth);
+        let capabilities = match self.get_relation_runtime(project_id).await {
+            Ok(runtime) => capabilities
+                .with_relation_rebuilding(runtime.get_capability_info().await.relation_rebuilding),
+            Err(_) => capabilities,
+        };
 
         // Searcher construction lives behind the coordinator builder; the
         // engine never names the searcher type, so query assembly cannot

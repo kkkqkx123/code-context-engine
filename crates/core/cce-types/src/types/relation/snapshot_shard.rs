@@ -74,6 +74,39 @@ impl ShardQueryConfig {
         }
         Ok(())
     }
+
+    /// Memory-constrained preset for small build workers.
+    pub fn low_memory() -> Self {
+        Self {
+            max_shard_items: 2048,
+            shard_lru_shards: 2,
+            shard_lru_bytes: 32 * 1024 * 1024,
+            shard_query_shards: 16,
+            route_cache_entries: 1024,
+        }
+    }
+
+    /// Balanced preset that keeps hot shards without competing with a full build.
+    pub fn balanced() -> Self {
+        Self {
+            max_shard_items: 4096,
+            shard_lru_shards: 4,
+            shard_lru_bytes: 64 * 1024 * 1024,
+            shard_query_shards: 32,
+            route_cache_entries: 2048,
+        }
+    }
+
+    /// High-throughput preset for dedicated indexing nodes.
+    pub fn high_throughput() -> Self {
+        Self {
+            max_shard_items: 4096,
+            shard_lru_shards: 8,
+            shard_lru_bytes: 256 * 1024 * 1024,
+            shard_query_shards: 64,
+            route_cache_entries: 4096,
+        }
+    }
 }
 
 /// Stable slot of a normalized project path.

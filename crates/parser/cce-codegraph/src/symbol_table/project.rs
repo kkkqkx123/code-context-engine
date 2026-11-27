@@ -390,6 +390,63 @@ impl ProjectSymbolTable {
         self.build_view.lock().clone()
     }
 
+    fn global_symbol(&self, key: &str) -> Option<EntityId> {
+        if let Some(view) = self.build_view() {
+            view.global_symbol(key)
+        } else {
+            self.global_index.get(key).map(|id| *id)
+        }
+    }
+
+    fn insert_global_symbol(&self, key: String, entity_id: EntityId) {
+        if let Some(view) = self.build_view() {
+            if let Err(error) = view.insert_global_symbol(&key, entity_id) {
+                tracing::error!(%error, key = %key, "Failed to persist global symbol");
+            }
+        } else {
+            self.global_index.insert(key, entity_id);
+        }
+    }
+
+    fn remove_global_symbol(&self, key: &str) {
+        if let Some(view) = self.build_view() {
+            if let Err(error) = view.remove_global_symbol(key) {
+                tracing::error!(%error, key = %key, "Failed to remove global symbol");
+            }
+        } else {
+            self.global_index.remove(key);
+        }
+    }
+
+    fn namespace_symbol(&self, key: &str) -> Option<EntityId> {
+        if let Some(view) = self.build_view() {
+            view.namespace_symbol(key)
+        } else {
+            self.namespace_index.get(key).map(|id| *id)
+        }
+    }
+
+    fn insert_namespace_symbol(&self, key: String, entity_id: EntityId) {
+        if let Some(view) = self.build_view() {
+            if let Err(error) = view.insert_namespace_symbol(&key, entity_id) {
+                tracing::error!(%error, key = %key, "Failed to persist namespace symbol");
+            }
+        } else {
+            self.namespace_index.insert(key, entity_id);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn remove_namespace_symbol(&self, key: &str) {
+        if let Some(view) = self.build_view() {
+            if let Err(error) = view.remove_namespace_symbol(key) {
+                tracing::error!(%error, key = %key, "Failed to remove namespace symbol");
+            }
+        } else {
+            self.namespace_index.remove(key);
+        }
+    }
+
     /// Access the current symbol resolution config.
     pub fn symbol_resolution_config(&self) -> cce_config::SymbolResolutionConfig {
         self.symbol_resolution_config
@@ -438,18 +495,11 @@ impl ProjectSymbolTable {
         symbol_name: &str,
     ) -> Option<SymbolRef> {
         let key = format!("{}::{}::{}", package, namespace, symbol_name);
-        if let Some(entity_id) = self.namespace_index.get(&key).map(|id| *id) {
+        if self.namespace_symbol(&key).is_some() {
             // Try to find metadata via package modules
             if let Some(pkg) = self.get_package_by_name(package) {
                 for module in pkg.modules_in_namespace(namespace) {
                     if let Some(meta) = module.get_export(symbol_name) {
-                        if self
-                            .global_index
-                            .iter()
-                            .any(|e| *e.value() == entity_id && e.key().ends_with(symbol_name))
-                        {
-                            return Some(self.stable_symbol_ref(meta));
-                        }
                         return Some(self.stable_symbol_ref(meta));
                     }
                 }
@@ -473,11 +523,10 @@ impl ProjectSymbolTable {
                     return Some(self.stable_symbol_ref(&meta));
                 }
             }
-            // As last resort, construct via global_index lookup
+            // As last resort, resolve metadata from the qualified key.
             if let Some(metadata) = self.metadata_for_global_key(&key, None) {
                 return Some(self.stable_symbol_ref(&metadata));
             }
-            let _ = entity_id;
         }
         // fallback: traverse namespace modules
         if let Some(pkg) = self.get_package_by_name(package) {
@@ -871,12 +920,12 @@ impl ProjectSymbolTable {
                 && !pkg_name.is_empty()
             {
                 let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
-                self.namespace_index.insert(ns_key, entity_id);
+                self.insert_namespace_symbol(ns_key, entity_id);
             }
         }
         // Update global index for this specific symbol (maintaining cache consistency)
         let file_qualified = format!("{}::{}", file_path, simple_name);
-        self.global_index.insert(file_qualified, entity_id);
+        self.insert_global_symbol(file_qualified, entity_id);
         // Use fine-grained invalidation: only entries that could be affected
         // by this specific symbol are evicted, preserving unrelated cache hits
         // during hot-update prefill where many symbols are inserted.
@@ -946,11 +995,11 @@ impl ProjectSymbolTable {
                     && !pkg_name.is_empty()
                 {
                     let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
-                    self.namespace_index.insert(ns_key, entity_id);
+                    self.insert_namespace_symbol(ns_key, entity_id);
                 }
             }
             let file_qualified = format!("{}::{}", file_path, simple_name);
-            self.global_index.insert(file_qualified, entity_id);
+            self.insert_global_symbol(file_qualified, entity_id);
         }
 
         if self.build_view().is_some() {
@@ -1206,6 +1255,42 @@ impl ProjectSymbolTable {
     /// simple_name_index and package exports, ensuring consistency after
     /// symbol removal or addition.
     pub fn rebuild_global_indices(&self) {
+        if let Some(view) = self.build_view() {
+            if let Err(error) = view.clear_qualified_symbols() {
+                tracing::error!(%error, "Failed to clear persisted qualified indexes");
+                return;
+            }
+            for entries in self.simple_name_index.iter() {
+                let simple_name = entries.key();
+                for entry in entries.value() {
+                    match entry {
+                        SimpleNameEntry::FileSymbol {
+                            file_path,
+                            module_path,
+                            entity_id,
+                            ..
+                        } => {
+                            self.insert_global_symbol(
+                                format!("{}::{}", file_path, simple_name),
+                                *entity_id,
+                            );
+                            self.rebuild_namespace_key(module_path, simple_name, *entity_id);
+                        }
+                        SimpleNameEntry::PackageExport {
+                            package_id,
+                            entity_id,
+                        } => {
+                            self.insert_global_symbol(
+                                format!("{}::{}", package_id, simple_name),
+                                *entity_id,
+                            );
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         self.global_index.clear();
 
         // Rebuild from file symbols (simple_name_index)
@@ -1233,14 +1318,28 @@ impl ProjectSymbolTable {
         }
     }
 
+    fn rebuild_namespace_key(&self, module_path: &str, simple_name: &str, entity_id: EntityId) {
+        use cce_types::NamespacePath;
+        let ns_path = NamespacePath::parse(&format!("{}::{}", module_path, simple_name));
+        if let Some(ns_prefix) = ns_path.namespace_prefix()
+            && let Some(pkg_name) = module_path.split("::").next()
+            && !pkg_name.is_empty()
+        {
+            self.insert_namespace_symbol(
+                format!("{}::{}::{}", pkg_name, ns_prefix, simple_name),
+                entity_id,
+            );
+        }
+    }
+
     /// Resolve a qualified name through the hierarchical structure.
     ///
     /// This method provides an alternative to direct global_index lookup,
     /// querying the hierarchical structure for qualified name resolution.
     pub fn resolve_global_qualified(&self, qualified_name: &str) -> Option<EntityId> {
         // First try the global index (fast path)
-        if let Some(entity_id) = self.global_index.get(qualified_name) {
-            return Some(*entity_id);
+        if let Some(entity_id) = self.global_symbol(qualified_name) {
+            return Some(entity_id);
         }
 
         // Fallback: try to resolve through hierarchical structure

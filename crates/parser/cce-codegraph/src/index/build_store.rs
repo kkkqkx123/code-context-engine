@@ -19,14 +19,14 @@ use cce_types::{
     SnapshotBuildMetadata, StableSymbolKey, SymbolKeyConflictRecord, UnresolvedReason,
     canonical_call_context, canonical_owner_type, normalize_project_path,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::de::DeserializeOwned;
 
 use super::build_view::{BuildEntityView, BuildIndexSink};
 use super::core::{ExportInfo, relation_identity};
 use crate::symbol_table::candidate::SymbolCandidate;
 use crate::symbol_table::{LocalSymbolStore, ModuleRecord};
-use cce_types::CanonicalSnapshotArtifact;
+use cce_types::{CanonicalSnapshotArtifact, StorageError};
 
 /// Build-time relation store backed by a temporary SQLite database.
 pub struct BuildRelationStore {
@@ -108,7 +108,11 @@ impl BuildRelationStore {
                     name TEXT NOT NULL, arity_key TEXT NOT NULL,\
                     sort_key TEXT NOT NULL, candidate_json TEXT NOT NULL,\
                     PRIMARY KEY(name, arity_key, candidate_json));\
-                 CREATE INDEX name_candidates_by_bucket ON name_candidates(name, arity_key, sort_key);",
+                 CREATE INDEX name_candidates_by_bucket ON name_candidates(name, arity_key, sort_key);\
+                 CREATE TABLE global_symbols (
+                    key TEXT PRIMARY KEY, entity_id INTEGER NOT NULL);\
+                 CREATE TABLE namespace_symbols (
+                    key TEXT PRIMARY KEY, entity_id INTEGER NOT NULL);",
             )
             .map_err(|error| error.to_string())?;
         let local_symbols =
@@ -369,6 +373,60 @@ impl BuildRelationStore {
             .collect()
     }
 
+    /// Declared arities present in a name's candidate buckets.
+    pub fn name_candidate_arities(
+        &self,
+        name: &str,
+    ) -> Vec<crate::type_inference::overload::ParamArity> {
+        let Ok(guard) = self.connection.lock() else {
+            return Vec::new();
+        };
+        let Ok(mut statement) = guard.prepare(
+            "SELECT candidate_json FROM name_candidates WHERE name = ?1 GROUP BY arity_key",
+        ) else {
+            return Vec::new();
+        };
+        statement
+            .query_map(params![name], |row| row.get::<_, String>(0))
+            .map(|rows| {
+                rows.filter_map(|row| {
+                    row.ok()
+                        .and_then(|json| Self::decode::<SymbolCandidate>(&json).ok())
+                        .map(|candidate| candidate.arity)
+                })
+                .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Candidates in one stable `(name, arity)` bucket.
+    pub fn name_candidates_for_arity(
+        &self,
+        name: &str,
+        arity: &crate::type_inference::overload::ParamArity,
+    ) -> Vec<SymbolCandidate> {
+        let Ok(guard) = self.connection.lock() else {
+            return Vec::new();
+        };
+        let key = SymbolCandidate::bucket_id(name, arity);
+        let Ok(mut statement) = guard.prepare(
+            "SELECT candidate_json FROM name_candidates \
+             WHERE name = ?1 AND arity_key = ?2 ORDER BY sort_key",
+        ) else {
+            return Vec::new();
+        };
+        statement
+            .query_map(params![name, key], |row| row.get::<_, String>(0))
+            .map(|rows| {
+                rows.filter_map(|row| {
+                    row.ok()
+                        .and_then(|json| Self::decode::<SymbolCandidate>(&json).ok())
+                })
+                .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Number of persisted module records.
     pub fn module_count(&self) -> u64 {
         let Ok(guard) = self.connection.lock() else {
@@ -391,7 +449,11 @@ impl BuildRelationStore {
 
     fn entity_json(&self, id: EntityId) -> Option<Entity> {
         let guard = self.connection.lock().ok()?;
-        guard
+        Self::entity_json_with(&guard, id)
+    }
+
+    fn entity_json_with(connection: &Connection, id: EntityId) -> Option<Entity> {
+        connection
             .query_row(
                 "SELECT entity_json FROM entities WHERE id = ?1",
                 params![id.0 as i64],
@@ -403,11 +465,27 @@ impl BuildRelationStore {
             .and_then(|json| Self::decode(&json).ok())
     }
 
+    fn file_path_with(connection: &Connection, id: EntityId) -> Option<String> {
+        connection
+            .query_row(
+                "SELECT file FROM entities WHERE id = ?1",
+                params![id.0 as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
     /// Stable key of an entity, falling back to the same derived identity the
     /// in-memory artifact writer uses when registration had no stable key.
-    fn entity_key_or_derived(&self, id: EntityId, name_fallback: &str) -> StableSymbolKey {
-        let guard = self.connection.lock().expect("build store lock");
-        let key_json: Option<String> = guard
+    fn key_or_derived_with(
+        connection: &Connection,
+        derived_keys: &AtomicU64,
+        id: EntityId,
+        name_fallback: &str,
+    ) -> StableSymbolKey {
+        let key_json: Option<String> = connection
             .query_row(
                 "SELECT key_json FROM symbol_keys WHERE entity_id = ?1",
                 params![id.0 as i64],
@@ -418,50 +496,26 @@ impl BuildRelationStore {
         if let Some(json) = key_json {
             return Self::decode(&json).expect("stored symbol key must decode");
         }
-        drop(guard);
-        self.entity_derived_keys.fetch_add(1, Ordering::Relaxed);
-        let file = self.get_file_path_by_entity(id).unwrap_or_default();
-        match self.entity_json(id) {
+        derived_keys.fetch_add(1, Ordering::Relaxed);
+        let file = Self::file_path_with(connection, id).unwrap_or_default();
+        match Self::entity_json_with(connection, id) {
             Some(entity) => StableSymbolKey::for_entity(&file, &entity.name, &entity),
             None => StableSymbolKey::new(&file, name_fallback, EntityKind::Unknown, name_fallback),
         }
     }
 
-    fn relation_key_or_derived(&self, id: EntityId, name_fallback: &str) -> StableSymbolKey {
-        let guard = self.connection.lock().expect("build store lock");
-        let key_json: Option<String> = guard
-            .query_row(
-                "SELECT key_json FROM symbol_keys WHERE entity_id = ?1",
-                params![id.0 as i64],
-                |row| row.get(0),
-            )
-            .optional()
-            .expect("symbol key query");
-        if let Some(json) = key_json {
-            return Self::decode(&json).expect("stored symbol key must decode");
-        }
-        drop(guard);
-        self.relation_derived_keys.fetch_add(1, Ordering::Relaxed);
-        let file = self.get_file_path_by_entity(id).unwrap_or_default();
-        match self.entity_json(id) {
-            Some(entity) => StableSymbolKey::for_entity(&file, &entity.name, &entity),
-            None => StableSymbolKey::new(&file, name_fallback, EntityKind::Unknown, name_fallback),
-        }
-    }
-
-    fn canonical_relation(&self, relation: &ResolvedRelation) -> CanonicalRelation {
-        let caller = self.relation_key_or_derived(relation.caller, "");
-        self.canonical_relation_with_caller(caller, relation)
-    }
-
-    fn canonical_relation_with_caller(
+    fn canonical_relation_with<F>(
         &self,
         caller: StableSymbolKey,
         relation: &ResolvedRelation,
-    ) -> CanonicalRelation {
+        key: F,
+    ) -> CanonicalRelation
+    where
+        F: Fn(EntityId, &str) -> StableSymbolKey,
+    {
         let target = if let Some(callee_id) = relation.callee_id {
             CanonicalRelationTarget::Internal {
-                key: self.relation_key_or_derived(callee_id, &relation.callee_name),
+                key: key(callee_id, &relation.callee_name),
             }
         } else if relation.is_external && relation.external_type.is_some() {
             CanonicalRelationTarget::External {
@@ -501,6 +555,108 @@ impl BuildRelationStore {
             entity_derived_key_count: self.entity_derived_keys.load(Ordering::Relaxed),
             relation_derived_key_count: self.relation_derived_keys.load(Ordering::Relaxed),
         }
+    }
+
+    /// Look up one qualified key in the disk-backed global index.
+    pub fn global_symbol(&self, key: &str) -> Option<EntityId> {
+        let guard = self.connection.lock().ok()?;
+        guard
+            .query_row(
+                "SELECT entity_id FROM global_symbols WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .map(|id| EntityId(id as u64))
+    }
+
+    pub fn write_global_symbol(&self, key: &str, entity_id: EntityId) -> Result<(), String> {
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute(
+                "INSERT OR REPLACE INTO global_symbols(key, entity_id) VALUES (?1, ?2)",
+                params![key, entity_id.0 as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn remove_global_symbol(&self, key: &str) -> Result<(), String> {
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute("DELETE FROM global_symbols WHERE key = ?1", params![key])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn global_symbol_count(&self) -> u64 {
+        let guard = self.connection.lock().ok();
+        guard
+            .and_then(|connection| {
+                connection
+                    .query_row("SELECT COUNT(*) FROM global_symbols", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .ok()
+            })
+            .unwrap_or(0) as u64
+    }
+
+    /// Look up one qualified key in the disk-backed namespace index.
+    pub fn namespace_symbol(&self, key: &str) -> Option<EntityId> {
+        let guard = self.connection.lock().ok()?;
+        guard
+            .query_row(
+                "SELECT entity_id FROM namespace_symbols WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .map(|id| EntityId(id as u64))
+    }
+
+    pub fn write_namespace_symbol(&self, key: &str, entity_id: EntityId) -> Result<(), String> {
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute(
+                "INSERT OR REPLACE INTO namespace_symbols(key, entity_id) VALUES (?1, ?2)",
+                params![key, entity_id.0 as i64],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn remove_namespace_symbol(&self, key: &str) -> Result<(), String> {
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute("DELETE FROM namespace_symbols WHERE key = ?1", params![key])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn namespace_symbol_count(&self) -> u64 {
+        let guard = self.connection.lock().ok();
+        guard
+            .and_then(|connection| {
+                connection
+                    .query_row("SELECT COUNT(*) FROM namespace_symbols", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .ok()
+            })
+            .unwrap_or(0) as u64
+    }
+
+    /// Clear both qualified indexes before a full rebuild.
+    pub fn clear_qualified_symbols(&self) -> Result<(), String> {
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute_batch("DELETE FROM global_symbols; DELETE FROM namespace_symbols;")
+            .map_err(|error| error.to_string())
     }
 
     /// Number of resolved edges currently stored.
@@ -550,173 +706,183 @@ impl BuildRelationStore {
             base_relation_epoch: None,
             build_metadata: self.build_metadata(),
         };
+        let reader = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| StorageError::validation(format!("artifact reader: {error}")))?;
+        let entity_key = |id: EntityId, name: &str| {
+            Self::key_or_derived_with(&reader, &self.entity_derived_keys, id, name)
+        };
+        let relation_key = |id: EntityId, name: &str| {
+            Self::key_or_derived_with(&reader, &self.relation_derived_keys, id, name)
+        };
         let mut builder = SnapshotArtifactBuilder::new(header, options)?;
 
-        let file_rows: Vec<(String, String)> = {
+        {
             let guard = self.connection.lock().expect("build store lock");
             let mut statement = guard
                 .prepare("SELECT path, info_json FROM files ORDER BY path")
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
+                .map_err(|error| StorageError::validation(error.to_string()))?;
             let rows = statement
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-        };
-        for (path, info_json) in file_rows {
-            let info: FileInfo = Self::decode(&info_json)
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            let guard = self.connection.lock().expect("build store lock");
-            let imports: Vec<String> = {
-                let mut statement = guard
-                    .prepare("SELECT table_json FROM imports WHERE path = ?1")
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-                statement
-                    .query_map(params![path], |row| row.get::<_, String>(0))
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-            };
-            let import_table = imports
-                .first()
-                .map(|json| Self::decode::<ImportTable>(json))
-                .transpose()
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                .unwrap_or_default();
-            let exports: Vec<String> = {
-                let mut statement = guard
-                    .prepare("SELECT export_json FROM exports WHERE path = ?1 ORDER BY seq")
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-                statement
-                    .query_map(params![path], |row| row.get::<_, String>(0))
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-            };
-            drop(guard);
-            let mut canonical_exports = Vec::with_capacity(exports.len());
-            for json in exports {
-                let export: ExportInfo = Self::decode(&json)
-                    .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-                canonical_exports.push(cce_types::CanonicalExport {
-                    symbol: self.entity_key_or_derived(export.function_id, &export.function_name),
-                    export_type: format!("{:?}", export.export_type).to_lowercase(),
-                });
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            for row in rows {
+                let (path, info_json) =
+                    row.map_err(|error| StorageError::validation(error.to_string()))?;
+                let info: FileInfo = Self::decode(&info_json).map_err(StorageError::validation)?;
+                let imports: Vec<String> = {
+                    let mut lookup = reader
+                        .prepare("SELECT table_json FROM imports WHERE path = ?1")
+                        .map_err(|error| StorageError::validation(error.to_string()))?;
+                    lookup
+                        .query_map(params![path], |row| row.get::<_, String>(0))
+                        .map_err(|error| StorageError::validation(error.to_string()))?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| StorageError::validation(error.to_string()))?
+                };
+                let import_table = imports
+                    .first()
+                    .map(|json| Self::decode::<ImportTable>(json))
+                    .transpose()
+                    .map_err(StorageError::validation)?
+                    .unwrap_or_default();
+                let exports: Vec<String> = {
+                    let mut lookup = reader
+                        .prepare("SELECT export_json FROM exports WHERE path = ?1 ORDER BY seq")
+                        .map_err(|error| StorageError::validation(error.to_string()))?;
+                    lookup
+                        .query_map(params![path], |row| row.get::<_, String>(0))
+                        .map_err(|error| StorageError::validation(error.to_string()))?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| StorageError::validation(error.to_string()))?
+                };
+                let mut canonical_exports = Vec::with_capacity(exports.len());
+                for json in exports {
+                    let export: ExportInfo =
+                        Self::decode(&json).map_err(StorageError::validation)?;
+                    canonical_exports.push(cce_types::CanonicalExport {
+                        symbol: entity_key(export.function_id, &export.function_name),
+                        export_type: format!("{:?}", export.export_type).to_lowercase(),
+                    });
+                }
+                builder.push_file(CanonicalFile {
+                    path: normalize_project_path(&path),
+                    language: info.language,
+                    input_hash: info.file_hash,
+                    file_size: info.file_size,
+                    imports: import_table.standardized_imports,
+                    exports: canonical_exports,
+                })?;
             }
-            builder.push_file(CanonicalFile {
-                path: normalize_project_path(&path),
-                language: info.language,
-                input_hash: info.file_hash,
-                file_size: info.file_size,
-                imports: import_table.standardized_imports,
-                exports: canonical_exports,
-            })?;
         }
 
-        let entity_rows: Vec<(i64, String)> = {
+        {
             let guard = self.connection.lock().expect("build store lock");
             let mut statement = guard
                 .prepare("SELECT id, entity_json FROM entities ORDER BY id")
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            statement
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            let rows = statement
                 .query_map([], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-        };
-        for (id, entity_json) in entity_rows {
-            let entity: Entity = Self::decode(&entity_json)
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            let parent = entity
-                .parent
-                .map(|parent| self.entity_key_or_derived(parent, &entity.name));
-            builder.push_entity(CanonicalEntity {
-                key: self.entity_key_or_derived(EntityId(id as u64), &entity.name),
-                entity_id: Some(id as u64),
-                name: entity.name,
-                signature: entity.signature,
-                parameters: entity.parameters,
-                return_type: entity.return_type,
-                span: entity.span,
-                depth: entity.depth,
-                parent,
-                doc_comment: entity.doc_comment,
-                modifiers: entity.modifiers,
-                attributes: entity.attributes.into_iter().collect(),
-                metadata: entity.metadata.into_iter().collect(),
-                is_stdlib: entity.is_stdlib,
-                stdlib_category: entity.stdlib_category,
-                subtype: entity.subtype,
-            })?;
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            for row in rows {
+                let (id, entity_json) =
+                    row.map_err(|error| StorageError::validation(error.to_string()))?;
+                let entity: Entity =
+                    Self::decode(&entity_json).map_err(StorageError::validation)?;
+                let parent = entity.parent.map(|parent| entity_key(parent, &entity.name));
+                builder.push_entity(CanonicalEntity {
+                    key: entity_key(EntityId(id as u64), &entity.name),
+                    entity_id: Some(id as u64),
+                    name: entity.name,
+                    signature: entity.signature,
+                    parameters: entity.parameters,
+                    return_type: entity.return_type,
+                    span: entity.span,
+                    depth: entity.depth,
+                    parent,
+                    doc_comment: entity.doc_comment,
+                    modifiers: entity.modifiers,
+                    attributes: entity.attributes.into_iter().collect(),
+                    metadata: entity.metadata.into_iter().collect(),
+                    is_stdlib: entity.is_stdlib,
+                    stdlib_category: entity.stdlib_category,
+                    subtype: entity.subtype,
+                })?;
+            }
         }
 
-        let relation_rows: Vec<String> = {
+        {
             let guard = self.connection.lock().expect("build store lock");
             let mut statement = guard
                 .prepare("SELECT relation_json FROM relations ORDER BY seq")
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            statement
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            let rows = statement
                 .query_map([], |row| row.get::<_, String>(0))
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-        };
-        for json in relation_rows {
-            let relation: ResolvedRelation = Self::decode(&json)
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            builder.push_relation(self.canonical_relation(&relation))?;
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            for row in rows {
+                let json = row.map_err(|error| StorageError::validation(error.to_string()))?;
+                let relation: ResolvedRelation =
+                    Self::decode(&json).map_err(StorageError::validation)?;
+                let caller = relation_key(relation.caller, "");
+                builder.push_relation(self.canonical_relation_with(
+                    caller,
+                    &relation,
+                    relation_key,
+                ))?;
+            }
         }
 
-        let file_relation_rows: Vec<(String, String)> = {
+        {
             let guard = self.connection.lock().expect("build store lock");
             let mut statement = guard
                 .prepare("SELECT path, relation_json FROM file_relations ORDER BY seq")
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            statement
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            let rows = statement
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-        };
-        for (path, json) in file_relation_rows {
-            let relation: ResolvedRelation = Self::decode(&json)
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            let key = StableSymbolKey::new(&path, "<file>", EntityKind::Module, "<file>");
-            builder.push_relation(self.canonical_relation_with_caller(key, &relation))?;
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            for row in rows {
+                let (path, json) =
+                    row.map_err(|error| StorageError::validation(error.to_string()))?;
+                let relation: ResolvedRelation =
+                    Self::decode(&json).map_err(StorageError::validation)?;
+                let key = StableSymbolKey::new(&path, "<file>", EntityKind::Module, "<file>");
+                builder.push_relation(self.canonical_relation_with(
+                    key,
+                    &relation,
+                    relation_key,
+                ))?;
+            }
         }
 
-        let dependency_rows: Vec<(String, String)> = {
+        {
             let guard = self.connection.lock().expect("build store lock");
             let mut statement = guard
                 .prepare("SELECT source, target FROM dependencies ORDER BY seq")
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?;
-            statement
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            let rows = statement
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| cce_types::StorageError::validation(error.to_string()))?
-        };
-        for (source, target) in dependency_rows {
-            builder.push_dependency(CanonicalDependency {
-                source_file: source,
-                target_file: normalize_project_path(&target),
-                source: "resolved_or_import".to_string(),
-            })?;
+                .map_err(|error| StorageError::validation(error.to_string()))?;
+            for row in rows {
+                let (source, target) =
+                    row.map_err(|error| StorageError::validation(error.to_string()))?;
+                builder.push_dependency(CanonicalDependency {
+                    source_file: source,
+                    target_file: normalize_project_path(&target),
+                    source: "resolved_or_import".to_string(),
+                })?;
+            }
         }
 
         builder.set_build_metadata(self.build_metadata());
         builder.finish()
     }
 }
-
 impl Drop for BuildRelationStore {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
@@ -1018,20 +1184,17 @@ impl BuildIndexSink for BuildRelationStore {
     }
 
     fn for_each_import<F: FnMut(&str, &ImportTable)>(&self, mut visit: F) {
-        let rows: Vec<(String, String)> = {
-            let guard = self.connection.lock().expect("build store lock");
-            let mut statement = guard
-                .prepare("SELECT path, table_json FROM imports")
-                .expect("import iteration statement");
-            statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .expect("import iteration")
-                .filter_map(|row| row.ok())
-                .collect()
-        };
-        for (path, json) in rows {
+        let guard = self.connection.lock().expect("build store lock");
+        let mut statement = guard
+            .prepare("SELECT path, table_json FROM imports ORDER BY path")
+            .expect("import iteration statement");
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("import iteration");
+        for row in rows.flatten() {
+            let (path, json) = row;
             if let Ok(table) = Self::decode::<ImportTable>(&json) {
                 visit(&path, &table);
             }

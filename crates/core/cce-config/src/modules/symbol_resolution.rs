@@ -37,8 +37,20 @@ fn default_name_bucket_workset_entries() -> usize {
     4096
 }
 
+fn default_global_index_workset_entries() -> usize {
+    4096
+}
+
 fn default_name_candidates_per_bucket() -> usize {
     65536
+}
+
+fn default_module_workset_bytes() -> u64 {
+    96 * 1024 * 1024
+}
+
+fn default_name_bucket_workset_bytes() -> u64 {
+    64 * 1024 * 1024
 }
 
 /// Configuration for the symbol resolution pipeline.
@@ -88,12 +100,24 @@ pub struct SymbolResolutionConfig {
     #[serde(default = "default_name_bucket_workset_entries")]
     pub name_bucket_workset_entries: usize,
 
+    /// Number of qualified global/namespace keys kept resident per LRU.
+    #[serde(default = "default_global_index_workset_entries")]
+    pub global_index_workset_entries: usize,
+
     /// Maximum number of candidates retained in one `(name, arity)` bucket.
     ///
     /// Exceeding the limit aborts the build instead of silently dropping
     /// resolution candidates.
     #[serde(default = "default_name_candidates_per_bucket")]
     pub max_name_candidates_per_bucket: usize,
+
+    /// Estimated byte budget for resident module records.
+    #[serde(default = "default_module_workset_bytes")]
+    pub module_workset_bytes: u64,
+
+    /// Estimated byte budget for resident `(name, arity)` candidate buckets.
+    #[serde(default = "default_name_bucket_workset_bytes")]
+    pub name_bucket_workset_bytes: u64,
 }
 
 impl Default for SymbolResolutionConfig {
@@ -106,7 +130,10 @@ impl Default for SymbolResolutionConfig {
             disable_wildcard_expansion: default_disable_wildcard_expansion(),
             module_workset_entries: default_module_workset_entries(),
             name_bucket_workset_entries: default_name_bucket_workset_entries(),
+            global_index_workset_entries: default_global_index_workset_entries(),
             max_name_candidates_per_bucket: default_name_candidates_per_bucket(),
+            module_workset_bytes: default_module_workset_bytes(),
+            name_bucket_workset_bytes: default_name_bucket_workset_bytes(),
         }
     }
 }
@@ -139,15 +166,21 @@ impl Validate for SymbolResolutionConfig {
             ));
         }
         for (field, value) in [
-            ("module_workset_entries", self.module_workset_entries),
+            ("module_workset_entries", self.module_workset_entries as u64),
             (
                 "name_bucket_workset_entries",
-                self.name_bucket_workset_entries,
+                self.name_bucket_workset_entries as u64,
+            ),
+            (
+                "global_index_workset_entries",
+                self.global_index_workset_entries as u64,
             ),
             (
                 "max_name_candidates_per_bucket",
-                self.max_name_candidates_per_bucket,
+                self.max_name_candidates_per_bucket as u64,
             ),
+            ("module_workset_bytes", self.module_workset_bytes),
+            ("name_bucket_workset_bytes", self.name_bucket_workset_bytes),
         ] {
             if value == 0 {
                 errors.push(ConfigValidationError::invalid_field(
@@ -198,6 +231,36 @@ impl SymbolResolutionConfig {
     pub fn without_wildcard() -> Self {
         Self {
             disable_wildcard_expansion: true,
+            ..Self::default()
+        }
+    }
+
+    /// Memory-constrained preset for small build workers.
+    pub fn low_memory() -> Self {
+        Self {
+            module_workset_entries: 32,
+            name_bucket_workset_entries: 256,
+            global_index_workset_entries: 512,
+            max_name_candidates_per_bucket: 16384,
+            module_workset_bytes: 16 * 1024 * 1024,
+            name_bucket_workset_bytes: 16 * 1024 * 1024,
+            resolution_cache_size: 1024,
+            max_wildcard_expansion_size: 200,
+            ..Self::default()
+        }
+    }
+
+    /// High-throughput preset for dedicated indexing nodes.
+    pub fn high_throughput() -> Self {
+        Self {
+            module_workset_entries: 256,
+            name_bucket_workset_entries: 4096,
+            global_index_workset_entries: 8192,
+            max_name_candidates_per_bucket: 131072,
+            module_workset_bytes: 192 * 1024 * 1024,
+            name_bucket_workset_bytes: 128 * 1024 * 1024,
+            resolution_cache_size: 2048,
+            max_wildcard_expansion_size: 500,
             ..Self::default()
         }
     }

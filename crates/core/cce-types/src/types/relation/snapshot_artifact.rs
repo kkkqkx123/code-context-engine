@@ -369,6 +369,11 @@ impl SnapshotArtifactOptions {
         self.max_shard_items = max_shard_items;
         self
     }
+
+    pub fn with_fingerprint_chunk_bytes(mut self, chunk_bytes: usize) -> Self {
+        self.fingerprint_chunk_bytes = chunk_bytes.max(1024);
+        self
+    }
 }
 
 impl Default for SnapshotArtifactOptions {

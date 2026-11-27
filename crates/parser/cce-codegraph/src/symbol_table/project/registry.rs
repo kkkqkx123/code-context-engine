@@ -29,8 +29,7 @@ impl ProjectSymbolTable {
             if let Some(metadata) = package.get_public_export(&name) {
                 let symbol_ref = self.stable_symbol_ref(&metadata);
                 let qualified_name = format!("{}::{}", package.package_name, name);
-                self.global_index
-                    .insert(qualified_name, symbol_ref.symbol_id);
+                self.insert_global_symbol(qualified_name, symbol_ref.symbol_id);
 
                 // Index by simple name (dedup so repeated add_package calls
                 // for the same package do not accumulate entries)
@@ -88,8 +87,7 @@ impl ProjectSymbolTable {
                 // Survivor after incremental package patch — upsert.
                 let symbol_ref = self.stable_symbol_ref(&metadata);
                 let qualified_name = format!("{}::{}", package.package_name, name);
-                self.global_index
-                    .insert(qualified_name, symbol_ref.symbol_id);
+                self.insert_global_symbol(qualified_name, symbol_ref.symbol_id);
                 if let Some(mut entries) = self.simple_name_index.get_mut(name) {
                     entries.retain(|entry| match entry {
                         SimpleNameEntry::PackageExport {
@@ -108,7 +106,7 @@ impl ProjectSymbolTable {
             } else {
                 // Fully removed by this incremental step.
                 let qualified_name = format!("{}::{}", package.package_name, name);
-                self.global_index.remove(&qualified_name);
+                self.remove_global_symbol(&qualified_name);
                 if let Some(mut entries) = self.simple_name_index.get_mut(name) {
                     entries.retain(|entry| match entry {
                         SimpleNameEntry::PackageExport {
@@ -130,8 +128,7 @@ impl ProjectSymbolTable {
             if let Some(metadata) = package.get_public_export(name) {
                 let symbol_ref = self.stable_symbol_ref(&metadata);
                 let qualified_name = format!("{}::{}", package.package_name, name);
-                self.global_index
-                    .insert(qualified_name, symbol_ref.symbol_id);
+                self.insert_global_symbol(qualified_name, symbol_ref.symbol_id);
                 if let Some(mut entries) = self.simple_name_index.get_mut(name) {
                     entries.retain(|entry| match entry {
                         SimpleNameEntry::PackageExport {

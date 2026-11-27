@@ -16,9 +16,17 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use cce_parser::summary::FileSummary;
 use cce_types::ChunkedResult;
+use serde::{Deserialize, Serialize};
 
 use crate::error::OrchestratorError;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ExportPayload {
+    chunks: Vec<ChunkedResult>,
+    summary: Option<FileSummary>,
+}
 
 /// Per-file chunk payload directory spool.
 pub struct ExportSpool {
@@ -63,6 +71,7 @@ impl ExportSpool {
         &mut self,
         file_path: &str,
         chunks: Vec<ChunkedResult>,
+        summary: Option<FileSummary>,
     ) -> Result<(), OrchestratorError> {
         if chunks.is_empty() {
             return Ok(());
@@ -70,7 +79,7 @@ impl ExportSpool {
         let payload_path = self
             .directory
             .join(format!("{:06}.bin", self.entries.len()));
-        let encoded = encode_chunks(&chunks).map_err(|error| {
+        let encoded = encode_payload(&ExportPayload { chunks, summary }).map_err(|error| {
             OrchestratorError::index(
                 "export_spool",
                 format!("Failed to serialize chunks for {file_path}: {error}"),
@@ -121,12 +130,44 @@ impl ExportSpool {
                 format!("Failed to read spool payload for {file_path}: {error}"),
             )
         })?;
-        decode_chunks(&encoded).map_err(|error| {
+        let payload: ExportPayload = decode_payload(&encoded).map_err(|error| {
             OrchestratorError::index(
                 "export_spool",
                 format!("Failed to decode spool payload for {file_path}: {error}"),
             )
-        })
+        })?;
+        Ok(payload.chunks)
+    }
+
+    /// Load the summary persisted alongside one file's chunks.
+    pub(crate) fn load_summary(
+        &self,
+        file_path: &str,
+    ) -> Result<Option<FileSummary>, OrchestratorError> {
+        let payload = self
+            .entries
+            .iter()
+            .find(|(path, _)| path == file_path)
+            .map(|(_, payload)| payload)
+            .ok_or_else(|| {
+                OrchestratorError::index(
+                    "export_spool",
+                    format!("No spooled export payload for {file_path}"),
+                )
+            })?;
+        let encoded = fs::read(payload).map_err(|error| {
+            OrchestratorError::index(
+                "export_spool",
+                format!("Failed to read spool payload for {file_path}: {error}"),
+            )
+        })?;
+        let payload: ExportPayload = decode_payload(&encoded).map_err(|error| {
+            OrchestratorError::index(
+                "export_spool",
+                format!("Failed to decode spool payload for {file_path}: {error}"),
+            )
+        })?;
+        Ok(payload.summary)
     }
 
     /// All spooled file paths (used for stale-document cleanup).
@@ -168,8 +209,8 @@ impl Drop for ExportSpool {
     }
 }
 
-fn encode_chunks(chunks: &[ChunkedResult]) -> Result<Vec<u8>, OrchestratorError> {
-    let json = serde_json::to_vec(chunks).map_err(|error| {
+fn encode_payload(payload: &ExportPayload) -> Result<Vec<u8>, OrchestratorError> {
+    let json = serde_json::to_vec(payload).map_err(|error| {
         OrchestratorError::index("export_spool", format!("JSON encoding failed: {error}"))
     })?;
     zstd::encode_all(&*json, 3).map_err(|error| {
@@ -177,7 +218,7 @@ fn encode_chunks(chunks: &[ChunkedResult]) -> Result<Vec<u8>, OrchestratorError>
     })
 }
 
-fn decode_chunks(encoded: &[u8]) -> Result<Vec<ChunkedResult>, OrchestratorError> {
+fn decode_payload(encoded: &[u8]) -> Result<ExportPayload, OrchestratorError> {
     let json = zstd::decode_all(encoded).map_err(|error| {
         OrchestratorError::index("export_spool", format!("Zstd decoding failed: {error}"))
     })?;
@@ -240,7 +281,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut spool = ExportSpool::new(1, dir.path()).expect("spool creation");
         let chunks = sample_chunks();
-        spool.append("src/main.rs", chunks.clone()).expect("append");
+        spool
+            .append("src/main.rs", chunks.clone(), None)
+            .expect("append");
         assert_eq!(spool.file_paths(), vec!["src/main.rs".to_string()]);
         let restored = spool.load_chunks("src/main.rs").expect("load");
         assert_eq!(restored.len(), chunks.len());
@@ -274,7 +317,7 @@ mod tests {
         {
             let mut spool = ExportSpool::new(9, dir.path()).expect("spool creation");
             spool
-                .append("src/main.rs", sample_chunks())
+                .append("src/main.rs", sample_chunks(), None)
                 .expect("append");
             assert!(spool_dir.exists());
         }

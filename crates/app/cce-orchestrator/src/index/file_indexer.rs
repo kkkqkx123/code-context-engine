@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::CheckpointManager;
+use crate::index::scan_file_store::ScanFileStore;
 use cce_metrics::ScannerMetrics;
 use cce_scanner::{FSScanner, FileEntry, ScanFailure, ScanOptions};
 use cce_storage_common::metadb::{BatchCheckpointRecord, CheckpointRecord, CheckpointStatus};
@@ -44,8 +45,8 @@ impl RecoveryValidation {
 /// File indexer for deterministic file processing with checkpoint support
 #[derive(Clone)]
 pub struct FileIndexer {
-    /// Sorted file list (for reproducibility)
-    sorted_files: Vec<FileEntry>,
+    /// Sorted file manifest (for reproducibility)
+    store: Arc<ScanFileStore>,
     /// Hash of the sorted file list (for verification)
     file_list_hash: String,
     /// Checkpoint record
@@ -72,6 +73,14 @@ impl FileIndexer {
         scanner_metrics: Option<Arc<ScannerMetrics>>,
         plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
     ) -> Result<Self, StorageError> {
+        if batch_size == 0 {
+            return Err(StorageError::query(
+                "Scan batch size must be greater than zero",
+            ));
+        }
+        let operation_id = format!("full_{}", chrono::Utc::now().timestamp_millis());
+        let store = ScanFileStore::new(root_dir, &operation_id).map_err(StorageError::query)?;
+
         // 1. Scan files
         let mut scanner = FSScanner::new();
         if let Some(ref metrics) = scanner_metrics {
@@ -80,39 +89,50 @@ impl FileIndexer {
         if let Some(registry) = plugin_registry {
             scanner = scanner.with_plugin_registry(registry);
         }
+        let mut write_error = None;
         let report = scanner
-            .scan_report(scan_options)
+            .scan_streaming_report(scan_options, batch_size, |batch| {
+                if write_error.is_none()
+                    && let Err(error) = store.append_batch(batch)
+                {
+                    write_error = Some(error);
+                }
+            })
             .map_err(|e| StorageError::query(format!("Failed to scan files: {}", e)))?;
+        if let Some(error) = write_error {
+            return Err(StorageError::query(format!(
+                "Failed to persist scan manifest: {error}"
+            )));
+        }
         let scan_failures = report.failures;
-        let mut files = report.entries;
 
         info!(
-            count = files.len(),
+            count = report.files_scanned,
             scan_failures = scan_failures.len(),
             root_dir = %root_dir.display(),
             "Scanned files, now sorting for deterministic processing"
         );
 
-        // 2. Sort files deterministically by path
-        files.sort_by(|a, b| a.path.cmp(&b.path));
+        // 2. Sort the on-disk manifest by path for deterministic batching.
+        store.sort_by_path().map_err(StorageError::query)?;
+        let total_files = store.count().map_err(StorageError::query)?;
 
         debug!(
-            count = files.len(),
+            count = total_files,
             "Files sorted by path for deterministic batching"
         );
 
-        // 3. Compute file list hash
-        let file_list_hash = Self::compute_file_list_hash(&files);
+        // 3. Compute file list hash from the sorted manifest.
+        let file_list_hash = Self::compute_file_list_hash_from_store(&store)?;
 
         // 4. Create and persist initial checkpoint (skip if no checkpoint_manager)
-        let operation_id = format!("full_{}", chrono::Utc::now().timestamp_millis());
 
         let project_id = if let Some(ref cm) = checkpoint_manager {
             cm.create_checkpoint(crate::operation::checkpoint::CreateCheckpointParams {
                 operation_id: &operation_id,
                 operation_type: OperationKind::FullIndex,
                 root_dir: &root_dir.to_string_lossy(),
-                total_files: files.len() as u32,
+                total_files: total_files as u32,
                 batch_size: batch_size as u32,
                 file_list_hash: &file_list_hash,
             })
@@ -130,7 +150,7 @@ impl FileIndexer {
             operation_type: OperationKind::FullIndex.to_string(),
 
             root_dir: root_dir.to_string_lossy().to_string(),
-            total_files: files.len() as u32,
+            total_files: total_files as u32,
             batch_size: batch_size as u32,
 
             current_batch_index: 0,
@@ -152,14 +172,14 @@ impl FileIndexer {
 
         info!(
             operation_id = %checkpoint.operation_id,
-            total_files = files.len(),
+            total_files = total_files,
             batch_size = batch_size,
             file_list_hash = %file_list_hash,
             "FileIndexer initialized"
         );
 
         Ok(Self {
-            sorted_files: files,
+            store,
             file_list_hash,
             checkpoint,
             scan_failures,
@@ -171,13 +191,26 @@ impl FileIndexer {
     /// This hash is used to detect if the file list or file contents
     /// have changed between scans. Content hashes are included when
     /// available to detect content changes even when paths are the same.
+    #[cfg(test)]
     fn compute_file_list_hash(files: &[FileEntry]) -> String {
         let mut hasher = DefaultHasher::new();
         for file in files {
-            file.path.to_string_lossy().hash(&mut hasher);
-            file.content_hash.hash(&mut hasher);
+            Self::hash_file(file, &mut hasher);
         }
         format!("{:x}", hasher.finish())
+    }
+
+    fn hash_file(file: &FileEntry, hasher: &mut DefaultHasher) {
+        file.path.to_string_lossy().hash(hasher);
+        file.content_hash.hash(hasher);
+    }
+
+    fn compute_file_list_hash_from_store(store: &ScanFileStore) -> Result<String, StorageError> {
+        let mut hasher = DefaultHasher::new();
+        store
+            .for_each_file(|file| Self::hash_file(&file, &mut hasher))
+            .map_err(StorageError::query)?;
+        Ok(format!("{:x}", hasher.finish()))
     }
 
     /// Validate that a checkpoint is compatible with the current file state
@@ -218,11 +251,14 @@ impl FileIndexer {
         }
 
         // Check file count
-        if checkpoint.total_files != self.sorted_files.len() as u32 {
+        let current_files = self
+            .store
+            .count()
+            .map_err(|error| format!("Failed to read scan manifest: {error}"))?;
+        if checkpoint.total_files != current_files as u32 {
             return Err(format!(
                 "File count changed: {} -> {}",
-                checkpoint.total_files,
-                self.sorted_files.len()
+                checkpoint.total_files, current_files
             ));
         }
 
@@ -283,15 +319,9 @@ impl FileIndexer {
         batch_index: u32,
         recorded: &BatchCheckpointRecord,
     ) -> Result<(), String> {
-        let batch = self.get_batch(batch_index as usize)?;
-        let current_first = batch
-            .first()
-            .map(|file| file.path.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let current_last = batch
-            .last()
-            .map(|file| file.path.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let (current_first, current_last) = self
+            .store
+            .batch_boundary(batch_index as usize, self.checkpoint.batch_size as usize)?;
         if recorded.first_file != current_first || recorded.last_file != current_last {
             return Err(format!(
                 "Batch {batch_index} boundary mismatch: recorded=[{}, {}], current=[{}, {}]",
@@ -301,31 +331,21 @@ impl FileIndexer {
         Ok(())
     }
 
-    /// Get files for a specific batch
+    /// Load one batch from the on-disk manifest.
     ///
-    /// Returns a slice of the sorted file list for the given batch index.
     /// Returns an error if batch_index is out of range.
-    pub fn get_batch(&self, batch_index: usize) -> Result<&[FileEntry], String> {
-        let start = batch_index * self.checkpoint.batch_size as usize;
-        let end =
-            ((batch_index + 1) * self.checkpoint.batch_size as usize).min(self.sorted_files.len());
-
-        if start >= self.sorted_files.len() {
-            return Err(format!(
-                "Batch index {} out of range (total batches: {})",
-                batch_index,
-                self.total_batches()
-            ));
-        }
-
-        Ok(&self.sorted_files[start..end])
+    pub fn get_batch(&self, batch_index: usize) -> Result<Vec<FileEntry>, String> {
+        self.store
+            .get_batch(batch_index, self.checkpoint.batch_size as usize)
     }
 
     /// Get the total number of batches
     pub fn total_batches(&self) -> usize {
-        self.sorted_files
-            .len()
-            .div_ceil(self.checkpoint.batch_size as usize)
+        let batch_size = self.checkpoint.batch_size as usize;
+        if batch_size == 0 {
+            return 0;
+        }
+        self.store.count().unwrap_or(0).div_ceil(batch_size)
     }
 
     /// Recover from an existing checkpoint
@@ -345,27 +365,47 @@ impl FileIndexer {
         existing_checkpoint: CheckpointRecord,
         scanner_metrics: Option<Arc<ScannerMetrics>>,
     ) -> Result<Self, RecoveryValidation> {
+        if batch_size == 0 {
+            return Err(RecoveryValidation::new(
+                "Scan batch size must be greater than zero",
+            ));
+        }
+        let store = ScanFileStore::new(root_dir, &existing_checkpoint.operation_id)
+            .map_err(RecoveryValidation::new)?;
+
         // 1. Scan files
         let mut scanner = FSScanner::new();
         if let Some(ref metrics) = scanner_metrics {
             scanner = scanner.with_scanner_metrics(metrics.clone());
         }
+        let mut write_error = None;
         let report = scanner
-            .scan_report(scan_options)
+            .scan_streaming_report(scan_options, batch_size, |batch| {
+                if write_error.is_none()
+                    && let Err(error) = store.append_batch(batch)
+                {
+                    write_error = Some(error);
+                }
+            })
             .map_err(|e| RecoveryValidation::new(format!("Failed to scan files: {}", e)))?;
+        if let Some(error) = write_error {
+            return Err(RecoveryValidation::new(format!(
+                "Failed to persist scan manifest: {error}"
+            )));
+        }
         let scan_failures = report.failures;
-        let mut files = report.entries;
 
-        // 2. Sort files deterministically by path
-        files.sort_by(|a, b| a.path.cmp(&b.path));
+        // 2. Sort the manifest by path for deterministic batching.
+        store.sort_by_path().map_err(RecoveryValidation::new)?;
 
-        // 3. Compute file list hash
-        let file_list_hash = Self::compute_file_list_hash(&files);
+        // 3. Compute file list hash from the sorted manifest.
+        let file_list_hash = Self::compute_file_list_hash_from_store(&store)
+            .map_err(|error| RecoveryValidation::new(error.to_string()))?;
 
         // 4. Validate existing checkpoint against current file state
         Self::validate_existing_checkpoint(
             &existing_checkpoint,
-            &files,
+            store.count().map_err(RecoveryValidation::new)?,
             &file_list_hash,
             batch_size,
             root_dir,
@@ -374,12 +414,12 @@ impl FileIndexer {
         info!(
             operation_id = %existing_checkpoint.operation_id,
             current_batch_index = existing_checkpoint.current_batch_index,
-            total_files = files.len(),
+            total_files = existing_checkpoint.total_files,
             "Recovered from existing checkpoint"
         );
 
         Ok(Self {
-            sorted_files: files,
+            store,
             file_list_hash,
             checkpoint: existing_checkpoint,
             scan_failures,
@@ -389,7 +429,7 @@ impl FileIndexer {
     /// Validate an existing checkpoint against current file state
     fn validate_existing_checkpoint(
         checkpoint: &CheckpointRecord,
-        files: &[FileEntry],
+        file_count: usize,
         file_list_hash: &str,
         batch_size: usize,
         root_dir: &Path,
@@ -409,11 +449,10 @@ impl FileIndexer {
             )));
         }
 
-        if checkpoint.total_files as usize != files.len() {
+        if checkpoint.total_files as usize != file_count {
             return Err(RecoveryValidation::new(format!(
                 "File count changed: checkpoint={}, current={}",
-                checkpoint.total_files,
-                files.len()
+                checkpoint.total_files, file_count
             )));
         }
 
@@ -438,9 +477,25 @@ impl FileIndexer {
         &self.checkpoint
     }
 
-    /// Get the sorted files list
-    pub fn files(&self) -> &[FileEntry] {
-        &self.sorted_files
+    /// Number of scanned files in the manifest.
+    pub fn file_count(&self) -> usize {
+        self.store.count().unwrap_or(0)
+    }
+
+    /// Visit files in deterministic batch order one at a time.
+    pub fn for_each_file<F>(&self, visitor: F) -> Result<(), String>
+    where
+        F: FnMut(FileEntry),
+    {
+        self.store.for_each_file(visitor)
+    }
+
+    /// Visit batches in deterministic order, releasing each after the visit.
+    pub fn for_each_batch<F>(&self, batch_size: usize, visitor: F) -> Result<(), String>
+    where
+        F: FnMut(Vec<FileEntry>),
+    {
+        self.store.for_each_batch(batch_size, visitor)
     }
 
     /// Get the file list hash
@@ -543,7 +598,7 @@ mod tests {
 
         let result = FileIndexer::validate_existing_checkpoint(
             &checkpoint,
-            &[],
+            0,
             "empty",
             10,
             Path::new("/project-b"),
@@ -568,33 +623,43 @@ mod tests {
         }
     }
 
-    fn test_indexer_with_hash(files: &[FileEntry], file_list_hash: &str) -> FileIndexer {
-        FileIndexer {
-            sorted_files: files.to_vec(),
-            file_list_hash: file_list_hash.to_string(),
-            checkpoint: CheckpointRecord {
-                id: None,
-                project_id: 1,
-                operation_id: "full-test".to_string(),
-                operation_type: OperationKind::FullIndex.to_string(),
-                root_dir: "/project-a".to_string(),
-                total_files: files.len() as u32,
-                batch_size: 2,
-                current_batch_index: 1,
-                current_phase: "Scanning".to_string(),
-                file_list_hash: Some(file_list_hash.to_string()),
-                created_at: String::new(),
-                updated_at: String::new(),
-                last_error: None,
-                failure_count: 0,
-                status: CheckpointStatus::InProgress,
-                active_flag: false,
-                priority: 3,
-                last_heartbeat: None,
-                failed_at: None,
+    fn test_indexer_with_hash(
+        files: &[FileEntry],
+        file_list_hash: &str,
+    ) -> (FileIndexer, tempfile::TempDir) {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ScanFileStore::new(temp.path(), "full-test").expect("manifest must open");
+        store.append_batch(files).expect("append must succeed");
+        store.sort_by_path().expect("sort must succeed");
+        (
+            FileIndexer {
+                store,
+                file_list_hash: file_list_hash.to_string(),
+                checkpoint: CheckpointRecord {
+                    id: None,
+                    project_id: 1,
+                    operation_id: "full-test".to_string(),
+                    operation_type: OperationKind::FullIndex.to_string(),
+                    root_dir: "/project-a".to_string(),
+                    total_files: files.len() as u32,
+                    batch_size: 2,
+                    current_batch_index: 1,
+                    current_phase: "Scanning".to_string(),
+                    file_list_hash: Some(file_list_hash.to_string()),
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                    last_error: None,
+                    failure_count: 0,
+                    status: CheckpointStatus::InProgress,
+                    active_flag: false,
+                    priority: 3,
+                    last_heartbeat: None,
+                    failed_at: None,
+                },
+                scan_failures: Vec::new(),
             },
-            scan_failures: Vec::new(),
-        }
+            temp,
+        )
     }
 
     fn test_checkpoint_record(
@@ -650,7 +715,7 @@ mod tests {
     #[test]
     fn test_validate_checkpoint_rejects_hash_mismatch() {
         let files = vec![test_file_entry("/a.rs"), test_file_entry("/b.rs")];
-        let indexer = test_indexer_with_hash(&files, "current-hash");
+        let (indexer, _temp) = test_indexer_with_hash(&files, "current-hash");
         let checkpoint = test_checkpoint_record(1, "stale-hash", files.len() as u32);
         let boundaries = vec![test_batch_record(1, "/a.rs", "/b.rs")];
 
@@ -668,7 +733,7 @@ mod tests {
             test_file_entry("/c.rs"),
             test_file_entry("/d.rs"),
         ];
-        let indexer = test_indexer_with_hash(&files, "current-hash");
+        let (indexer, _temp) = test_indexer_with_hash(&files, "current-hash");
         let checkpoint = test_checkpoint_record(1, "current-hash", files.len() as u32);
         // Batch 1 (the resume start) is [c.rs, d.rs] with batch_size 2
         let boundaries = vec![test_batch_record(1, "/c.rs", "/d.rs")];
@@ -686,7 +751,7 @@ mod tests {
             test_file_entry("/c.rs"),
             test_file_entry("/d.rs"),
         ];
-        let indexer = test_indexer_with_hash(&files, "current-hash");
+        let (indexer, _temp) = test_indexer_with_hash(&files, "current-hash");
         let checkpoint = test_checkpoint_record(1, "current-hash", files.len() as u32);
         // The start batch carries a stale boundary (file set changed while
         // keeping the same count); the completed predecessor batch [a.rs, b.rs]
@@ -709,7 +774,7 @@ mod tests {
             test_file_entry("/c.rs"),
             test_file_entry("/d.rs"),
         ];
-        let indexer = test_indexer_with_hash(&files, "current-hash");
+        let (indexer, _temp) = test_indexer_with_hash(&files, "current-hash");
         let checkpoint = test_checkpoint_record(1, "current-hash", files.len() as u32);
         // Neither the start batch nor its predecessor matches the current
         // batching: the file list has drifted and recovery must restart.
@@ -732,7 +797,7 @@ mod tests {
             test_file_entry("/c.rs"),
             test_file_entry("/d.rs"),
         ];
-        let indexer = test_indexer_with_hash(&files, "current-hash");
+        let (indexer, _temp) = test_indexer_with_hash(&files, "current-hash");
         let checkpoint = test_checkpoint_record(1, "current-hash", files.len() as u32);
 
         // No persisted boundary records: the batch was never started, so

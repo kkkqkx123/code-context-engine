@@ -27,6 +27,7 @@ mod relation_build_spool;
 pub mod relation_publisher;
 pub mod resolution_pipeline;
 mod result;
+mod scan_file_store;
 mod storage_coordinator;
 pub mod vector_store;
 
@@ -36,7 +37,9 @@ pub use options::IndexOptions;
 pub use orchestrator::DeadLetterRetryReport;
 pub use orchestrator::IndexOrchestrator;
 pub use relation_base_cache::RelationBaseCache;
-pub use relation_publisher::{RelationPublication, RelationSnapshotPublisher};
+pub use relation_publisher::{
+    RelationPublication, RelationRebuildPreparation, RelationSnapshotPublisher,
+};
 pub use resolution_pipeline::ResolutionPipelineService;
 pub use result::{IndexResult, IndexStageTimings};
 pub use storage_coordinator::{

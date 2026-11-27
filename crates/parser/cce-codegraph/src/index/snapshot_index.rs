@@ -433,6 +433,11 @@ impl RelationSnapshotIndex {
         })
     }
 
+    /// Whether queries are served from disk shards instead of resident maps.
+    pub fn is_disk_backed(&self) -> bool {
+        matches!(self.backing, SnapshotBacking::Sharded(_))
+    }
+
     /// Epoch whose shard directory backs this view (for observability).
     pub fn base_epoch(&self) -> i64 {
         match &self.backing {
@@ -1115,6 +1120,10 @@ impl LayeredSnapshotIndex {
             );
         }
         Self { base, deltas }
+    }
+
+    pub fn is_disk_backed(&self) -> bool {
+        self.base.is_disk_backed()
     }
 
     pub fn chain_len(&self) -> usize {

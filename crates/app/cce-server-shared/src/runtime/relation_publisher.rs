@@ -7,7 +7,8 @@ use cce_codegraph::index::RelationIndexView;
 use cce_codegraph::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use cce_orchestrator::index::MetadataStore;
 use cce_orchestrator::index::{
-    RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
+    RelationPublication, RelationRebuildPreparation, RelationSnapshotPublisher,
+    ResolutionPipelineService,
 };
 use cce_storage_common::MetadataStorage;
 use cce_types::relation::RelationSnapshotStore;
@@ -393,6 +394,73 @@ impl ServerRelationSnapshotPublisher {
 
 #[async_trait]
 impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
+    async fn prepare_full_rebuild(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<RelationRebuildPreparation, StorageError> {
+        let _guard = self.publish_lock.lock().await;
+        let active_epoch = match self
+            .store
+            .project_meta_get_int(project_id, "active_relation_epoch")
+            .await
+        {
+            Ok(epoch) => epoch,
+            Err(error) => {
+                tracing::debug!(%error, project_id, "No active relation epoch is recorded yet");
+                0
+            }
+        };
+        if active_epoch <= 0 {
+            self.runtime.invalidate_snapshot().await;
+            return Ok(RelationRebuildPreparation::default());
+        }
+
+        let already_disk_backed = self.runtime.get_snapshot().await.is_some_and(|snapshot| {
+            snapshot.relation_epoch == active_epoch && snapshot.index.is_disk_backed()
+        });
+        if !already_disk_backed {
+            let disk_index = RelationSnapshotIndex::from_store(
+                Arc::new(self.store.clone()),
+                project_id,
+                active_epoch,
+                cce_types::ShardQueryConfig::default(),
+            );
+            match disk_index {
+                Ok(index) => {
+                    let integrity = if index.function_count() == 0 {
+                        SnapshotIntegrity::Empty
+                    } else {
+                        SnapshotIntegrity::Full
+                    };
+                    self.runtime
+                        .publish_snapshot(Arc::new(index), active_epoch, integrity, None)
+                        .await;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        project_id,
+                        operation_id,
+                        active_epoch,
+                        %error,
+                        "No disk-backed generation is available during relation rebuild"
+                    );
+                    self.runtime.invalidate_snapshot().await;
+                    return Ok(RelationRebuildPreparation {
+                        active_epoch,
+                        disk_backed: false,
+                    });
+                }
+            }
+        }
+
+        self.runtime.set_updating().await;
+        Ok(RelationRebuildPreparation {
+            active_epoch,
+            disk_backed: true,
+        })
+    }
+
     async fn publish(
         &self,
         project_id: i64,

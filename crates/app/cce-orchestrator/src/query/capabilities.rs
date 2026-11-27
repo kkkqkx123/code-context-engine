@@ -35,6 +35,8 @@ pub struct IndexCapabilities {
     has_bm25: bool,
     /// Relation index is available
     has_relations: bool,
+    /// A full relation generation is currently being rebuilt.
+    relation_rebuilding: bool,
     /// Cross-file dependency propagation is enabled (`track_cross_file_deps`).
     /// When disabled, call-chain queries may miss cross-file edges.
     relation_propagation_enabled: bool,
@@ -52,6 +54,7 @@ impl Default for IndexCapabilities {
             has_vectors: true,
             has_bm25: true,
             has_relations: true,
+            relation_rebuilding: false,
             relation_propagation_enabled: true,
             relation_propagation_depth: 0,
         }
@@ -65,6 +68,7 @@ impl IndexCapabilities {
             has_vectors: false,
             has_bm25: false,
             has_relations: false,
+            relation_rebuilding: false,
             relation_propagation_enabled: false,
             relation_propagation_depth: 0,
         }
@@ -102,6 +106,12 @@ impl IndexCapabilities {
     ///
     /// When disabled, call-chain queries may miss cross-file edges because
     /// dependent files are not reparsed during hot updates.
+    /// Report whether a full relation generation is being rebuilt.
+    pub fn with_relation_rebuilding(mut self, rebuilding: bool) -> Self {
+        self.relation_rebuilding = rebuilding;
+        self
+    }
+
     pub fn with_relation_propagation(mut self, enabled: bool) -> Self {
         self.relation_propagation_enabled = enabled;
         self
@@ -130,6 +140,11 @@ impl IndexCapabilities {
     /// Check if relation index is available
     pub fn has_relations(&self) -> bool {
         self.has_relations
+    }
+
+    /// Whether a full relation generation is being rebuilt.
+    pub fn relation_rebuilding(&self) -> bool {
+        self.relation_rebuilding
     }
 
     /// Check if cross-file relation propagation is enabled
@@ -173,6 +188,7 @@ impl IndexCapabilities {
             has_vectors: self.has_vectors || other.has_vectors,
             has_bm25: self.has_bm25 || other.has_bm25,
             has_relations: self.has_relations || other.has_relations,
+            relation_rebuilding: self.relation_rebuilding || other.relation_rebuilding,
             relation_propagation_enabled: self.relation_propagation_enabled
                 || other.relation_propagation_enabled,
             // Union: the stronger scope wins (0 = unlimited is the strongest).
@@ -190,6 +206,7 @@ impl IndexCapabilities {
             has_vectors: self.has_vectors && other.has_vectors,
             has_bm25: self.has_bm25 && other.has_bm25,
             has_relations: self.has_relations && other.has_relations,
+            relation_rebuilding: self.relation_rebuilding && other.relation_rebuilding,
             relation_propagation_enabled: self.relation_propagation_enabled
                 && other.relation_propagation_enabled,
             // Intersection: the weaker scope wins (0 = unlimited is the strongest).
@@ -246,6 +263,7 @@ impl From<&crate::index::IndexOptions> for IndexCapabilities {
             has_vectors: options.store_vectors,
             has_bm25: options.store_bm25,
             has_relations: options.build_relations,
+            relation_rebuilding: false,
             relation_propagation_enabled: true,
             // IndexOptions carries no propagation depth; report unlimited so
             // callers fall back to the relation-config depth on merge.
@@ -261,6 +279,7 @@ impl From<&cce_config::IndexerConfig> for IndexCapabilities {
             has_vectors: config.store_vectors,
             has_bm25: config.store_bm25,
             has_relations: config.build_relations,
+            relation_rebuilding: false,
             relation_propagation_enabled: true,
             relation_propagation_depth: 0,
         }
@@ -277,6 +296,7 @@ impl From<&cce_config::RelationConfig> for IndexCapabilities {
             has_vectors: false,
             has_bm25: false,
             has_relations: config.index.enabled,
+            relation_rebuilding: false,
             relation_propagation_enabled: config.track_cross_file_deps,
             relation_propagation_depth: config.max_propagation_depth,
         }
@@ -286,6 +306,18 @@ impl From<&cce_config::RelationConfig> for IndexCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relation_rebuilding_is_reported_without_changing_storage_flags() {
+        let caps = IndexCapabilities::new()
+            .with_vectors(true)
+            .with_relations(true)
+            .with_relation_rebuilding(true);
+        assert!(caps.relation_rebuilding());
+        assert!(caps.has_vectors());
+        assert!(caps.has_relations());
+        assert!(!IndexCapabilities::default().relation_rebuilding());
+    }
 
     #[test]
     fn test_default_capabilities() {

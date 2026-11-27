@@ -8,6 +8,15 @@ use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_types::{CanonicalSnapshotArtifact, SnapshotDelta, StorageError};
 use std::sync::Arc;
 
+/// State of the query path when a full relation rebuild starts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RelationRebuildPreparation {
+    /// Canonical generation still serving queries.
+    pub active_epoch: i64,
+    /// Whether that generation is served from durable shards.
+    pub disk_backed: bool,
+}
+
 /// Result returned after a complete relation snapshot is made active.
 #[derive(Debug, Clone)]
 pub struct RelationPublication {
@@ -27,6 +36,19 @@ pub struct RelationPublication {
 /// implementation also synchronizes its immutable query runtime.
 #[async_trait]
 pub trait RelationSnapshotPublisher: Send + Sync {
+    /// Prepare the query runtime for a full rebuild.
+    ///
+    /// The previous generation stays queryable from durable shards while the
+    /// in-memory orchestrator snapshot and exporter enhancement are released.
+    async fn prepare_full_rebuild(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<RelationRebuildPreparation, StorageError> {
+        let _ = (project_id, operation_id);
+        Ok(RelationRebuildPreparation::default())
+    }
+
     /// Validate, persist, activate, and expose a complete snapshot.
     ///
     /// The artifact is the sole input. Validation, publication and the

@@ -1092,3 +1092,64 @@ async fn maybe_compact_defers_while_candidate_building() {
         "the chain must be left untouched for the next attempt"
     );
 }
+
+#[tokio::test]
+async fn rebuild_window_serves_active_generation_from_disk() {
+    let store = setup_store().await;
+    let runtime = Arc::new(RelationRuntime::new(1));
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
+    let publication = publisher
+        .publish(
+            1,
+            "operation-before-rebuild",
+            &published_artifact(&snapshot()),
+        )
+        .await
+        .expect("first snapshot should publish");
+
+    let preparation = publisher
+        .prepare_full_rebuild(1, "operation-rebuild")
+        .await
+        .expect("rebuild preparation should succeed");
+    assert_eq!(preparation.active_epoch, publication.relation_epoch);
+    assert!(preparation.disk_backed);
+
+    let served = runtime
+        .get_snapshot()
+        .await
+        .expect("previous generation stays queryable");
+    assert_eq!(served.relation_epoch, publication.relation_epoch);
+    assert!(served.index.is_disk_backed());
+    assert!(served.index.contains_file("src/main.rs"));
+    assert_eq!(
+        runtime.get_state().await,
+        super::RelationRuntimeState::Updating
+    );
+    assert!(runtime.get_capability_info().await.relation_rebuilding);
+}
+
+#[tokio::test]
+async fn rebuild_without_active_generation_exposes_no_snapshot() {
+    let store = setup_store().await;
+    let runtime = Arc::new(RelationRuntime::new(1));
+    runtime
+        .publish_snapshot(
+            Arc::new(RelationSnapshotIndex::empty()),
+            7,
+            super::SnapshotIntegrity::Empty,
+            None,
+        )
+        .await;
+    let publisher = ServerRelationSnapshotPublisher::new(store, runtime.clone());
+
+    let preparation = publisher
+        .prepare_full_rebuild(1, "operation-rebuild")
+        .await
+        .expect("missing active generation must not fail the build");
+    assert_eq!(preparation.active_epoch, 0);
+    assert!(runtime.get_snapshot().await.is_none());
+    assert_eq!(
+        runtime.get_state().await,
+        super::RelationRuntimeState::Unloaded
+    );
+}

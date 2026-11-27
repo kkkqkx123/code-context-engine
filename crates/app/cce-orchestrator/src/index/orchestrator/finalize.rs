@@ -31,6 +31,38 @@ fn install_type_context(
 }
 
 impl IndexOrchestrator {
+    /// Release the previous in-memory generation before a full rebuild.
+    ///
+    /// Queries continue against the durable shards of the active generation;
+    /// in-flight callers keep their own snapshot reference until they finish.
+    pub(super) async fn begin_relation_rebuild(&mut self, operation_id: &str) {
+        self.last_published_snapshot = None;
+        if let Some(ref exporter) = self.nl_exporter
+            && exporter.config().enable_relation_enhancement
+        {
+            exporter.clear_relation_enhancement();
+        }
+        self.relation_rebuilding
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(ref publisher) = self.relation_publisher
+            && let Err(error) = publisher
+                .prepare_full_rebuild(self.project_id, operation_id)
+                .await
+        {
+            tracing::warn!(
+                %error,
+                operation_id,
+                "Failed to prepare the disk-backed generation for relation rebuild"
+            );
+        }
+    }
+
+    /// Whether a full relation generation rebuild is in progress.
+    pub fn relation_rebuilding(&self) -> bool {
+        self.relation_rebuilding
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Finalize index after batch processing completes.
     ///
     /// Returns the resolved relation count from the last published snapshot.
@@ -297,7 +329,8 @@ impl IndexOrchestrator {
         trace_rss("symbol_propagation_done");
 
         let artifact_options = cce_types::SnapshotArtifactOptions::default()
-            .with_shard_items(self.relation_config.shard.max_shard_items);
+            .with_shard_items(self.relation_config.shard.max_shard_items)
+            .with_fingerprint_chunk_bytes(self.relation_config.artifact_chunk_bytes);
         let t0 = Instant::now();
         let registered_files = spool
             .for_each(|parsed| {
@@ -360,6 +393,14 @@ impl IndexOrchestrator {
         ctx.stages.symbol_view_module_peak_bytes = view_metrics.module_peak_bytes;
         ctx.stages.symbol_view_name_peak_entries = view_metrics.candidate_peak_entries;
         ctx.stages.symbol_view_name_peak_bytes = view_metrics.candidate_peak_bytes;
+        ctx.stages.symbol_view_name_bucket_peak_candidates =
+            view_metrics.name_bucket_peak_candidates;
+        ctx.stages.symbol_view_global_index_queries = view_metrics.global_index_queries;
+        ctx.stages.symbol_view_global_index_hits = view_metrics.global_index_hits;
+        ctx.stages.symbol_view_namespace_index_queries = view_metrics.namespace_index_queries;
+        ctx.stages.symbol_view_namespace_index_hits = view_metrics.namespace_index_hits;
+        ctx.stages.symbol_view_global_index_entries = view_metrics.global_index_entries;
+        ctx.stages.symbol_view_namespace_index_entries = view_metrics.namespace_index_entries;
         ctx.stages.symbol_view_queries =
             view_metrics.module_queries + view_metrics.candidate_queries;
         ctx.stages.symbol_view_candidate_truncated = view_metrics.truncated_candidates;
@@ -526,6 +567,8 @@ impl IndexOrchestrator {
             }
         }
         ctx.stages.relation_publish_ms = publish_started.elapsed().as_millis() as u64;
+        self.relation_rebuilding
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         let overload_started = Instant::now();
         spool.project_symbols().rebuild_overload_sets();
         ctx.stages.symbol_overload_ms += overload_started.elapsed().as_millis() as u64;
@@ -652,10 +695,13 @@ impl IndexOrchestrator {
                 .unwrap_or_else(|e| {
                     tracing::warn!(error = %e, "State tracking operation failed");
                 });
-            let summary = ctx
-                .export_summaries_by_file
-                .get(&file_path)
-                .map(cce_export::ExportSummaryView::from);
+            let summary = spool.load_summary(&file_path).map_err(|error| {
+                OrchestratorError::index(
+                    "export_spool",
+                    format!("Failed to load spooled summary for {file_path}: {error}"),
+                )
+            })?;
+            let summary = summary.map(cce_export::ExportSummaryView::from);
             match exporter.export_file(&chunks, summary.as_ref()).await {
                 Ok(_) => {
                     export_success += 1;
@@ -770,11 +816,21 @@ impl IndexOrchestrator {
                 }
                 return Err(error);
             }
-            if let Err(error) = self
-                .storage
-                .publish_file_hashes(ctx.file_indexer.files())
-                .await
-            {
+            let mut hash_error = None;
+            for batch_index in 0..ctx.file_indexer.total_batches() {
+                let batch = match ctx.file_indexer.get_batch(batch_index) {
+                    Ok(batch) => batch,
+                    Err(error) => {
+                        hash_error = Some(error);
+                        break;
+                    }
+                };
+                if let Err(error) = self.storage.publish_file_hashes(&batch).await {
+                    hash_error = Some(error.to_string());
+                    break;
+                }
+            }
+            if let Some(error) = hash_error {
                 if let Err(manifest_error) = self
                     .storage
                     .fail_project_manifest(
@@ -789,7 +845,7 @@ impl IndexOrchestrator {
                         "Failed to mark project manifest failed after file hash publication error"
                     );
                 }
-                return Err(error);
+                return Err(OrchestratorError::index("file_hashes", error));
             }
             if let Err(error) = self.storage.gc_stale_generations().await {
                 tracing::warn!(
@@ -910,4 +966,48 @@ async fn collect_export_documents(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_export::ExportConfig;
+
+    #[tokio::test]
+    async fn full_rebuild_releases_previous_generation() {
+        let mut orchestrator = IndexOrchestrator::new(1).expect("orchestrator must build");
+        orchestrator.last_published_snapshot = Some(Arc::new(LayeredSnapshotIndex::empty()));
+        assert!(orchestrator.get_published_relation_snapshot().is_some());
+
+        orchestrator.begin_relation_rebuild("full-test").await;
+        assert!(orchestrator.get_published_relation_snapshot().is_none());
+        assert!(orchestrator.relation_rebuilding());
+
+        orchestrator.last_published_snapshot = Some(Arc::new(LayeredSnapshotIndex::empty()));
+        orchestrator
+            .relation_rebuilding
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(orchestrator.get_published_relation_snapshot().is_some());
+        assert!(!orchestrator.relation_rebuilding());
+
+        orchestrator.last_published_snapshot = None;
+        assert!(orchestrator.get_published_relation_snapshot().is_none());
+    }
+
+    #[tokio::test]
+    async fn full_rebuild_clears_exporter_enhancement() {
+        let mut orchestrator = IndexOrchestrator::new(1).expect("orchestrator must build");
+        let config = ExportConfig::new(std::path::PathBuf::from("/project"), 1)
+            .with_relation_enhancement(true);
+        let exporter = Arc::new(NlDocumentExporter::with_relation_enhancement(
+            config,
+            Arc::new(LayeredSnapshotIndex::empty()),
+            cce_export::RelationEnhancerConfig::default(),
+        ));
+        assert!(exporter.has_relation_enhancement());
+        orchestrator = orchestrator.with_nl_exporter(Arc::clone(&exporter));
+
+        orchestrator.begin_relation_rebuild("full-test").await;
+        assert!(!exporter.has_relation_enhancement());
+    }
 }

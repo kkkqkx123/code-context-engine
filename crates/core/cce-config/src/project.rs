@@ -93,6 +93,13 @@ pub struct ProjectAppConfig {
     #[serde(default)]
     pub relation: Option<ProjectRelationPatch>,
 
+    /// Symbol resolution working sets
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
+    #[serde(default)]
+    pub symbol_resolution: Option<ProjectSymbolResolutionPatch>,
+
     /// AST to NL configuration (chunking, conversion)
     ///
     /// Patch form: every field is optional. Absent fields inherit the global
@@ -433,6 +440,36 @@ pub struct ProjectRelationPatch {
     pub plugin_symbol_extract_enabled: Option<bool>,
     pub manifest_scan_depth: Option<usize>,
     pub index: Option<ProjectRelationIndexPatch>,
+    pub artifact_chunk_bytes: Option<usize>,
+    pub shard: Option<ProjectShardPatch>,
+}
+
+/// Project-level query shard capacity patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectShardPatch {
+    pub max_shard_items: Option<usize>,
+    pub shard_lru_shards: Option<usize>,
+    pub shard_lru_bytes: Option<u64>,
+    pub shard_query_shards: Option<usize>,
+    pub route_cache_entries: Option<usize>,
+}
+
+/// Project-level symbol resolution patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectSymbolResolutionPatch {
+    pub max_reexport_chain_depth: Option<usize>,
+    pub max_scope_chain_depth: Option<usize>,
+    pub resolution_cache_size: Option<usize>,
+    pub max_wildcard_expansion_size: Option<usize>,
+    pub disable_wildcard_expansion: Option<bool>,
+    pub module_workset_entries: Option<usize>,
+    pub name_bucket_workset_entries: Option<usize>,
+    pub global_index_workset_entries: Option<usize>,
+    pub max_name_candidates_per_bucket: Option<usize>,
+    pub module_workset_bytes: Option<u64>,
+    pub name_bucket_workset_bytes: Option<u64>,
 }
 
 /// Project-level BM25 generator patch.
@@ -756,6 +793,11 @@ impl Validate for ProjectAppConfig {
         {
             errors.push(error);
         }
+        if let Some(ref symbol_resolution) = self.symbol_resolution
+            && let Err(error) = symbol_resolution.validate_structured()
+        {
+            errors.push(error);
+        }
         if let Some(ref ast_to_nl) = self.ast_to_nl
             && let Err(error) = ast_to_nl.validate_structured()
         {
@@ -910,6 +952,17 @@ impl Validate for ProjectRelationPatch {
         {
             errors.push(error);
         }
+        if let Some(shard) = &self.shard
+            && let Err(error) = shard.validate_structured()
+        {
+            errors.push(error);
+        }
+        if let Some(0) = self.artifact_chunk_bytes {
+            errors.push(ConfigValidationError::invalid_field(
+                "artifact_chunk_bytes",
+                "must be greater than 0",
+            ));
+        }
         if let Some(0) = self.max_call_depth
             && self.index.as_ref().and_then(|index| index.enabled) != Some(false)
         {
@@ -927,6 +980,105 @@ impl Validate for ProjectRelationPatch {
                 "0.0",
                 "1.0",
             ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectShardPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        for (field, value) in [
+            ("shard.max_shard_items", self.max_shard_items),
+            ("shard.shard_lru_shards", self.shard_lru_shards),
+            ("shard.shard_query_shards", self.shard_query_shards),
+            ("shard.route_cache_entries", self.route_cache_entries),
+        ] {
+            if let Some(0) = value {
+                errors.push(ConfigValidationError::invalid_field(
+                    field,
+                    "must be greater than 0",
+                ));
+            }
+        }
+        if let Some(0) = self.shard_lru_bytes {
+            errors.push(ConfigValidationError::invalid_field(
+                "shard.shard_lru_bytes",
+                "must be greater than 0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectSymbolResolutionPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        for (field, value) in [
+            (
+                "symbol_resolution.max_reexport_chain_depth",
+                self.max_reexport_chain_depth,
+            ),
+            (
+                "symbol_resolution.max_scope_chain_depth",
+                self.max_scope_chain_depth,
+            ),
+            (
+                "symbol_resolution.resolution_cache_size",
+                self.resolution_cache_size,
+            ),
+            (
+                "symbol_resolution.max_wildcard_expansion_size",
+                self.max_wildcard_expansion_size,
+            ),
+            (
+                "symbol_resolution.module_workset_entries",
+                self.module_workset_entries,
+            ),
+            (
+                "symbol_resolution.name_bucket_workset_entries",
+                self.name_bucket_workset_entries,
+            ),
+            (
+                "symbol_resolution.global_index_workset_entries",
+                self.global_index_workset_entries,
+            ),
+            (
+                "symbol_resolution.max_name_candidates_per_bucket",
+                self.max_name_candidates_per_bucket,
+            ),
+        ] {
+            if let Some(0) = value {
+                errors.push(ConfigValidationError::invalid_field(
+                    field,
+                    "must be greater than 0",
+                ));
+            }
+        }
+        for (field, value) in [
+            (
+                "symbol_resolution.module_workset_bytes",
+                self.module_workset_bytes,
+            ),
+            (
+                "symbol_resolution.name_bucket_workset_bytes",
+                self.name_bucket_workset_bytes,
+            ),
+        ] {
+            if let Some(0) = value {
+                errors.push(ConfigValidationError::invalid_field(
+                    field,
+                    "must be greater than 0",
+                ));
+            }
         }
         if errors.is_empty() {
             Ok(())

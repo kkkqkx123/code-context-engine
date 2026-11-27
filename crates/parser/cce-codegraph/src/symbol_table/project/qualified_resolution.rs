@@ -216,7 +216,7 @@ impl ProjectSymbolTable {
 
         // exact global-index match first ({file}::{name} and
         // {package}::{name} keys were never queried before).
-        if let Some(_symbol_id) = self.global_index.get(&joined).map(|id| *id)
+        if self.global_symbol(&joined).is_some()
             && let Some(metadata) = self.metadata_for_global_key(&joined, from_scope)
         {
             return Some(self.stable_symbol_ref(&metadata));

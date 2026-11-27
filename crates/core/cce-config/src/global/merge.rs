@@ -55,6 +55,9 @@ impl AppConfig {
         if let Some(ref relation) = project.relation {
             merged.relation.merge(relation);
         }
+        if let Some(ref symbol_resolution) = project.symbol_resolution {
+            merged.symbol_resolution.merge(symbol_resolution);
+        }
         if let Some(ref ast_to_nl) = project.ast_to_nl {
             merged.ast_to_nl.merge(ast_to_nl);
         }

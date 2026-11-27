@@ -128,3 +128,25 @@
 | 查询错误数 | 0 | 0 |
 
 首次使用 4,096 的候选桶上限时，medium 出现 715 次裁剪并正确地使 manifest 失败；把上限调整为 65,536 后裁剪归零。模块视图工作集峰值在本夹具中为 0，因为该夹具没有触发导入/重导出等按文件模块查询；磁盘记录写入与往返由单测覆盖。磁盘构建 artifact 与参考 canonical artifact 的双指纹、四类行数和关系计数继续由既有单测校验，`relation_query_matrix` 冷/热查询延迟与错误数无回归。large 档仍按设计只留作最终冒烟，本轮未重复运行数小时的长测。
+
+## 常驻内存收敛复测
+
+本轮把 artifact 写出和导入表遍历改为逐行流式处理，把导出摘要写入与 chunk 相同的磁盘 spool，并修正符号视图与局部符号表的字节账本。符号视图新增实际驻留字节与候选桶峰值指标；参数新增 `low-memory`、`balanced`、`high-throughput` 三档预设，项目 profile 可覆盖 `symbol_resolution` 与 `relation.shard` 的显式字段。设计见 `docs/plan/relation-index-resident-memory-reduction-design.md`。
+
+质量门禁：workspace check、cli/server build、workspace lib test、clippy（零 warning）、OpenAPI 快照刷新与 medium 全量复测均通过。
+
+| 指标 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 文件数 / 成功数 / 失败数 | 5,000 / 5,000 / 0 | 5,000 / 5,000 / 0 |
+| 实体数 / 向量数 | 67,484 / 5,000 | 67,484 / 5,000 |
+| 总 wall ms | 145,968.5 | 164,439.6 |
+| `relation_ms` | 109,517 | 127,895 |
+| `symbol_propagation_ms` | 37,288 | 51,373 |
+| `relation_artifact_ms` | 27,274 | 29,171 |
+| 批次结束 RSS KiB | 376,068 | 368,956 |
+| 关系结束 RSS KiB | 488,396 | 483,144 |
+| 峰值 RSS KiB | 488,736 | 483,476 |
+| 关系阶段增量 KiB | 112,328 | 114,188 |
+| 候选裁剪 | 0 | 0 |
+
+`relation-rss` trace 中 artifact 完成前后仅增加 628 KiB，说明 artifact 写出不再把整表收集到堆；关系阶段总耗时存在运行波动，本轮未观察到实体、向量或指纹变化。视图工作集峰值仍为 0，说明该夹具没有触发按文件模块查询或名称候选回源；字节账本由单测覆盖。

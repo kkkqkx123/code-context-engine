@@ -355,3 +355,53 @@ fn insert_symbol_invalidates_positive_resolution_cache() {
         "stale positive cache must not shadow the newly registered symbol"
     );
 }
+
+#[test]
+fn disk_backed_qualified_indexes_match_memory_path() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let store = Arc::new(
+        crate::index::BuildRelationStore::new(root.path().join("symbols.sqlite3"))
+            .expect("build store must open"),
+    );
+    let view = Arc::new(crate::index::BuildSymbolView::new(
+        Arc::clone(&store),
+        &cce_config::SymbolResolutionConfig::default(),
+    ));
+    let memory = ProjectSymbolTable::new(PathBuf::from("/project"));
+    let disk = ProjectSymbolTable::new(PathBuf::from("/project"));
+    disk.attach_build_view(view);
+
+    let package = create_test_package("pkg-a", "crate-a");
+    memory.add_package(Arc::clone(&package));
+    disk.add_package(package);
+    for table in [&memory, &disk] {
+        table.insert_symbol(
+            "crate-a::api::run".to_string(),
+            EntityId(77),
+            "src/api.rs".to_string(),
+            "crate-a::api".to_string(),
+        );
+    }
+
+    let file_key = "src/api.rs::run";
+    let package_key = "crate-a::run";
+    let namespace_key = "crate-a::crate-a::api::run";
+    assert_eq!(
+        memory.get_by_qualified_name(file_key),
+        disk.get_by_qualified_name(file_key)
+    );
+    assert_eq!(disk.get_by_qualified_name(file_key), Some(EntityId(77)));
+    assert_eq!(
+        memory.resolve_global_qualified(package_key),
+        disk.resolve_global_qualified(package_key)
+    );
+    assert_eq!(
+        memory.namespace_symbol(namespace_key),
+        disk.namespace_symbol(namespace_key)
+    );
+    assert_eq!(disk.namespace_symbol(namespace_key), Some(EntityId(77)));
+
+    let metrics = disk.build_view().expect("view attached").metrics();
+    assert_eq!(metrics.global_index_entries, 1);
+    assert_eq!(metrics.namespace_index_entries, 1);
+}

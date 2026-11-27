@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::validation::{Validate, ValidationResult};
-use cce_types::ShardQueryConfig;
 use cce_types::error::config::ConfigValidationError;
+use cce_types::{DEFAULT_FINGERPRINT_CHUNK_BYTES, ShardQueryConfig};
 
 /// Index configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,9 +163,17 @@ pub struct RelationConfig {
     /// Index configuration
     pub index: IndexConfig,
 
+    /// External sort chunk size used while writing canonical artifacts.
+    #[serde(default = "default_artifact_chunk_bytes")]
+    pub artifact_chunk_bytes: usize,
+
     /// Explicit capacity controls for the sharded query index.
     #[serde(default)]
     pub shard: ShardQueryConfig,
+}
+
+fn default_artifact_chunk_bytes() -> usize {
+    DEFAULT_FINGERPRINT_CHUNK_BYTES
 }
 
 impl Default for RelationConfig {
@@ -180,6 +188,7 @@ impl Default for RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::default(),
+            artifact_chunk_bytes: default_artifact_chunk_bytes(),
             shard: ShardQueryConfig::default(),
         }
     }
@@ -196,6 +205,12 @@ impl Validate for RelationConfig {
             errors.push(ConfigValidationError::invalid_field(
                 "max_call_depth",
                 "must be greater than 0 when index is enabled",
+            ));
+        }
+        if self.artifact_chunk_bytes == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "artifact_chunk_bytes",
+                "must be greater than 0",
             ));
         }
         if let Err(error) = self.shard.validate() {
@@ -234,7 +249,8 @@ impl RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::small_codebase(),
-            shard: ShardQueryConfig::default(),
+            artifact_chunk_bytes: default_artifact_chunk_bytes(),
+            shard: ShardQueryConfig::low_memory(),
         }
     }
 
@@ -250,7 +266,8 @@ impl RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::large_codebase(),
-            shard: ShardQueryConfig::default(),
+            artifact_chunk_bytes: 16 * 1024 * 1024,
+            shard: ShardQueryConfig::high_throughput(),
         }
     }
 
@@ -266,7 +283,35 @@ impl RelationConfig {
             plugin_symbol_extract_enabled: false,
             manifest_scan_depth: 0,
             index: IndexConfig::disabled(),
+            artifact_chunk_bytes: default_artifact_chunk_bytes(),
             shard: ShardQueryConfig::default(),
+        }
+    }
+
+    /// Balanced preset for the default medium workload.
+    pub fn balanced() -> Self {
+        Self {
+            shard: ShardQueryConfig::balanced(),
+            ..Self::default()
+        }
+    }
+
+    /// Memory-constrained preset.
+    pub fn low_memory() -> Self {
+        Self {
+            artifact_chunk_bytes: 2 * 1024 * 1024,
+            shard: ShardQueryConfig::low_memory(),
+            index: IndexConfig::small_codebase(),
+            ..Self::default()
+        }
+    }
+
+    /// High-throughput preset for dedicated indexing nodes.
+    pub fn high_throughput() -> Self {
+        Self {
+            artifact_chunk_bytes: 16 * 1024 * 1024,
+            shard: ShardQueryConfig::high_throughput(),
+            ..Self::default()
         }
     }
 

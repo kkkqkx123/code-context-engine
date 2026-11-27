@@ -297,7 +297,7 @@ impl ProjectSymbolTable {
     /// Format: "package::module::symbol"
     pub fn get_by_qualified_name(&self, qualified_name: &str) -> Option<EntityId> {
         // Check global index first
-        if let Some(entity_id) = self.global_index.get(qualified_name).map(|id| *id) {
+        if let Some(entity_id) = self.global_symbol(qualified_name) {
             return Some(entity_id);
         }
         // Fallback: try hierarchical resolution
@@ -316,11 +316,15 @@ impl ProjectSymbolTable {
 
     /// Rebuild all indices
     pub fn rebuild_indices(&self) {
-        self.global_index.clear();
+        if let Some(view) = self.build_view() {
+            view.clear_resident_qualified_symbols();
+        } else {
+            self.global_index.clear();
+            self.namespace_index.clear();
+        }
         self.simple_name_index.clear();
         self.file_symbol_contrib.clear();
         self.file_to_package.clear();
-        self.namespace_index.clear();
         // Resolution entries are keyed by name only; rebuilding may move
         // any name to a new entity id, so both caches must be invalidated.
         self.clear_cache();
@@ -426,10 +430,16 @@ impl ProjectSymbolTable {
     /// Capacity occupied by the project symbol indexes. The byte estimate is
     /// an explicit per-entry approximation; it is reported, not enforced.
     pub fn capacity_counts(&self) -> (u64, u64) {
+        let qualified_entries = if let Some(view) = self.build_view() {
+            let metrics = view.metrics();
+            (metrics.global_index_entries + metrics.namespace_index_entries) as usize
+        } else {
+            self.global_index.len() + self.namespace_index.len()
+        };
         let entries = self.packages.len()
             + self.packages_by_name.len()
             + self.external_deps.len()
-            + self.global_index.len()
+            + qualified_entries
             + self.simple_name_index.len()
             + self.type_inference_contexts.len();
         (entries as u64, entries as u64 * 128)

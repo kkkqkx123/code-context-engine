@@ -207,7 +207,7 @@ impl IndexOrchestrator {
                     .map_err(|error| OrchestratorError::index("checkpoint_recovery", error))?;
 
                 for entry in batch {
-                    let is_code = is_relation_code_file(entry);
+                    let is_code = is_relation_code_file(&entry);
 
                     let path = entry.path.to_string_lossy();
                     let Some(record) = checkpoints.get(path.as_ref()) else {
@@ -446,13 +446,11 @@ impl IndexOrchestrator {
                 // final export of recovered files stays consistent with the
                 // freshly processed batches. Summaries live in the record's
                 // own column, written by the summary phase.
-                if let Some(bytes) = record.summary_data.as_deref()
-                    && let Some(summary_payload) = decode_summary_checkpoint(bytes)
-                {
-                    ctx.export_summaries_by_file
-                        .entry(path_str.clone())
-                        .or_insert_with(|| summary_payload.file_summary);
-                }
+                let summary = record
+                    .summary_data
+                    .as_deref()
+                    .and_then(decode_summary_checkpoint)
+                    .map(|payload| payload.file_summary);
                 let mut processor = self.file_processor.clone();
                 let content_route = cce_types::ContentRoute::detect_from_path(&path_str);
                 // Export recovery has no output-mode context, but the final
@@ -473,7 +471,9 @@ impl IndexOrchestrator {
                                 "export spool missing for recovered export accumulation",
                             ));
                         };
-                        spool.append(&path_str, complete.chunks).map_err(|error| {
+                        spool
+                            .append(&path_str, complete.chunks, summary)
+                            .map_err(|error| {
                             OrchestratorError::index(
                                 "export_spool",
                                 format!(

@@ -234,7 +234,7 @@ impl IndexOrchestrator {
             let stage_started = Instant::now();
             let batch_result = self
                 .process_batch_with_mode(
-                    batch,
+                    &batch,
                     batch_idx,
                     options,
                     output_mode,
@@ -773,17 +773,13 @@ impl IndexOrchestrator {
                         .push(chunk.clone());
                 }
                 for (file_path, chunks) in chunks_by_file {
-                    spool.append(&file_path, chunks).map_err(|error| {
+                    let summary = file_summary_map.get(&file_path).cloned();
+                    spool.append(&file_path, chunks, summary).map_err(|error| {
                         OrchestratorError::index(
                             "export_spool",
                             format!("Failed to spool export chunks for {file_path}: {error}"),
                         )
                     })?;
-                }
-                for (file_path, summary) in &file_summary_map {
-                    ctx.export_summaries_by_file
-                        .entry(file_path.clone())
-                        .or_insert_with(|| summary.clone());
                 }
             }
             ctx.stages.export_spool_ms += export_spool_started.elapsed().as_millis() as u64;

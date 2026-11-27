@@ -29,7 +29,7 @@ pub struct LocalSymbolStore {
 
 #[derive(Debug)]
 struct ResidentTables {
-    cache: LruCache<String, Arc<LocalSymbolTable>>,
+    cache: LruCache<String, (Arc<LocalSymbolTable>, u64)>,
     bytes: u64,
 }
 
@@ -77,7 +77,7 @@ impl LocalSymbolStore {
     /// Load one file's local table, reusing the bounded working set when the
     /// same file is revisited by a later resolution pass.
     pub fn get(&self, path: &str) -> Option<Arc<LocalSymbolTable>> {
-        if let Some(table) = self.resident.lock().cache.get(path).cloned() {
+        if let Some((table, _)) = self.resident.lock().cache.get(path).cloned() {
             return Some(table);
         }
         let json = {
@@ -95,18 +95,18 @@ impl LocalSymbolStore {
         let table = Arc::new(LocalSymbolTable::from_record(record));
         let estimated = json.len() as u64;
         let mut resident = self.resident.lock();
-        while resident.bytes + estimated > MAX_RESIDENT_BYTES && !resident.cache.is_empty() {
-            if let Some((_, evicted)) = resident.cache.pop_lru() {
-                resident.bytes = resident.bytes.saturating_sub(Self::estimate(&evicted));
+        while resident.bytes.saturating_add(estimated) > MAX_RESIDENT_BYTES
+            && !resident.cache.is_empty()
+        {
+            if let Some((_, (_, evicted_bytes))) = resident.cache.pop_lru() {
+                resident.bytes = resident.bytes.saturating_sub(evicted_bytes);
             }
         }
         resident.bytes = resident.bytes.saturating_add(estimated);
-        resident.cache.put(path.to_string(), Arc::clone(&table));
+        resident
+            .cache
+            .put(path.to_string(), (Arc::clone(&table), estimated));
         Some(table)
-    }
-
-    fn estimate(table: &LocalSymbolTable) -> u64 {
-        table.len() as u64 * 128
     }
 }
 
