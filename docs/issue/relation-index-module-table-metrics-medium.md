@@ -103,3 +103,28 @@
 | 查询错误数 | 0 | 0 |
 
 两次优化后运行的 wall 时间分别为 201,869.7 ms 与 127,877.8 ms，关系阶段分别为 163,915 ms 与 91,100 ms；表中列出最后一次完整复测。发布存储耗时从占关系阶段 60.5% 降到 4.8%，跨文件传播也从 79,432 ms 降到 41,753 ms。两次运行存在波动，未进一步归因；实体、向量、fingerprint、关系数量和查询结果均未变化。模块记录磁盘化、视图工作集指标与候选裁剪失败语义仍按 `docs/plan/relation-index-module-table-diskization-design.md` 作为后续任务，本轮未引入第二套解析算法。
+
+## 模块表磁盘化与有界符号视图复测
+
+本轮在 devs 上完成模块记录磁盘化、按 `(name, arity)` 分桶的候选裁剪与操作失败语义。全量构建把模块导出/导入/重导出/类型成员写入同一临时库，解析时通过有界视图按需装载；增量构建与查询路径仍使用内存符号表，解析算法只有一套。视图指标与裁剪计数写入 operation manifest；任一裁剪非零或文件计数不一致都会使 manifest 失败且不激活 generation。
+
+质量门禁：`cargo check --workspace --all-targets`、`cargo build -p cce-cli -p cce-server`、`cargo test --workspace --lib`、`cargo clippy --all-targets --all-features`、`cargo fmt` 全部通过；OpenAPI 快照已按新增 manifest 字段刷新。
+
+| 指标 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 文件数 / 成功数 / 失败数 | 5,000 / 5,000 / 0 | 5,000 / 5,000 / 0 |
+| 实体数 / 向量数 | 67,484 / 5,000 | 67,484 / 5,000 |
+| 总 wall ms | 127,877.8 | 145,968.5 |
+| `relation_ms` | 91,100 | 109,517 |
+| `symbol_propagation_ms` | 41,753 | 37,288 |
+| `relation_publish_store_ms` | 4,404 | 4,511 |
+| 批次结束 RSS KiB | 384,944 | 376,068 |
+| 关系结束 RSS KiB | 669,796 | 488,396 |
+| 峰值 RSS KiB | 688,372 | 488,736 |
+| 相对 shard 基线 1,173,636 KiB | -41.3% | -58.4% |
+| 候选裁剪数 | — | 0 |
+| `caller_out` cold p95 ms | 52 | 51 |
+| `caller_out` warm p95 ms | 0 | 0 |
+| 查询错误数 | 0 | 0 |
+
+首次使用 4,096 的候选桶上限时，medium 出现 715 次裁剪并正确地使 manifest 失败；把上限调整为 65,536 后裁剪归零。模块视图工作集峰值在本夹具中为 0，因为该夹具没有触发导入/重导出等按文件模块查询；磁盘记录写入与往返由单测覆盖。磁盘构建 artifact 与参考 canonical artifact 的双指纹、四类行数和关系计数继续由既有单测校验，`relation_query_matrix` 冷/热查询延迟与错误数无回归。large 档仍按设计只留作最终冒烟，本轮未重复运行数小时的长测。

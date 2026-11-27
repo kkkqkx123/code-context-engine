@@ -10,12 +10,14 @@
 //! - External package symbols
 //! - Visibility rules
 
+use crate::index::build_symbol_view::BuildSymbolView;
 use crate::symbol::{SymbolMetadata, SymbolRef};
+use crate::symbol_table::candidate::{SymbolCandidate, SymbolCandidateKind};
 use crate::symbol_table::local::LocalSymbolTable;
 use crate::symbol_table::type_index::TypeMemberIndex;
 use crate::type_inference::TypeInferenceContext;
 use crate::type_inference::cross_file::CrossFilePropagator;
-use crate::type_inference::overload::{OverloadCandidate, OverloadSet};
+use crate::type_inference::overload::{OverloadCandidate, OverloadSet, ParamArity};
 use crate::type_inference::types::binding::TypeBinding;
 use crate::type_inference::types::{TypeShape, parse_type_shape};
 use cce_metrics::domain::pipeline::RelationMetrics;
@@ -42,13 +44,15 @@ type CurrentLocalTable = Arc<std::sync::RwLock<Option<(String, Arc<LocalSymbolTa
 /// resolution can use the entry's own `module_path`/`entity_id` instead of
 /// treating the stored file path as a package id
 #[derive(Debug, Clone)]
-enum SimpleNameEntry {
+pub(crate) enum SimpleNameEntry {
     /// Symbol defined in a project file (from `insert_symbol`).
     FileSymbol {
         /// Normalized file path of the defining file
         file_path: String,
         /// Module path of the defining file
         module_path: String,
+        /// Declared parameter arity used by disk-backed candidate buckets
+        arity: ParamArity,
         /// Entity ID (unified with runtime entity ID space)
         entity_id: EntityId,
     },
@@ -87,6 +91,43 @@ impl SimpleNameEntry {
         match self {
             SimpleNameEntry::FileSymbol { entity_id, .. }
             | SimpleNameEntry::PackageExport { entity_id, .. } => *entity_id,
+        }
+    }
+
+    fn to_candidate(&self, name: &str, call_frequency: Option<u64>) -> SymbolCandidate {
+        match self {
+            SimpleNameEntry::FileSymbol {
+                file_path,
+                module_path,
+                arity,
+                entity_id,
+            } => SymbolCandidate::for_file(
+                name,
+                *arity,
+                file_path,
+                module_path,
+                *entity_id,
+                call_frequency,
+            ),
+            SimpleNameEntry::PackageExport {
+                package_id,
+                entity_id,
+            } => SymbolCandidate::for_package(name, package_id, *entity_id, call_frequency),
+        }
+    }
+
+    fn from_candidate(candidate: SymbolCandidate) -> Option<Self> {
+        match candidate.kind {
+            SymbolCandidateKind::FileSymbol => Some(Self::FileSymbol {
+                file_path: candidate.file_path?,
+                module_path: candidate.module_path,
+                arity: candidate.arity,
+                entity_id: candidate.entity_id,
+            }),
+            SymbolCandidateKind::PackageExport => Some(Self::PackageExport {
+                package_id: candidate.package_id?,
+                entity_id: candidate.entity_id,
+            }),
         }
     }
 
@@ -235,6 +276,10 @@ pub struct ProjectSymbolTable {
 
     /// Symbol resolution tuning knobs (replaces hard-coded constants).
     symbol_resolution_config: Arc<std::sync::RwLock<cce_config::SymbolResolutionConfig>>,
+
+    /// Disk-backed build view. Full builds stream module and candidate data
+    /// through this view; incremental builds leave it unset.
+    build_view: Mutex<Option<Arc<BuildSymbolView>>>,
 }
 
 /// External dependency symbol information
@@ -332,7 +377,17 @@ impl ProjectSymbolTable {
             namespace_index: DashMap::new(),
             current_local_table: Arc::new(std::sync::RwLock::new(None)),
             symbol_resolution_config: Arc::new(std::sync::RwLock::new(config)),
+            build_view: Mutex::new(None),
         }
+    }
+
+    /// Attach the operation-local disk view before a full symbol build.
+    pub fn attach_build_view(&self, view: Arc<BuildSymbolView>) {
+        *self.build_view.lock() = Some(view);
+    }
+
+    pub fn build_view(&self) -> Option<Arc<BuildSymbolView>> {
+        self.build_view.lock().clone()
     }
 
     /// Access the current symbol resolution config.
@@ -799,6 +854,7 @@ impl ProjectSymbolTable {
             SimpleNameEntry::FileSymbol {
                 file_path: file_path.clone(),
                 module_path: module_path.clone(),
+                arity: ParamArity::unknown(),
                 entity_id,
             },
         );
@@ -837,11 +893,24 @@ impl ProjectSymbolTable {
     where
         I: IntoIterator<Item = (String, EntityId, String, String)>,
     {
+        self.insert_symbols_bulk_with_arity(
+            symbols
+                .into_iter()
+                .map(|(name, id, file, module)| (name, id, file, module, ParamArity::unknown())),
+        );
+    }
+
+    /// Bulk insertion carrying declared arity for bounded disk buckets.
+    pub fn insert_symbols_bulk_with_arity<I>(&self, symbols: I)
+    where
+        I: IntoIterator<Item = (String, EntityId, String, String, ParamArity)>,
+    {
         let mut by_name: HashMap<String, Vec<SimpleNameEntry>> = HashMap::new();
         let mut names_by_file: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut deduped: HashMap<(String, String), (String, EntityId, String)> = HashMap::new();
+        let mut deduped: HashMap<(String, String), (String, EntityId, String, ParamArity)> =
+            HashMap::new();
 
-        for (qualified_name, entity_id, file_path, module_path) in symbols {
+        for (qualified_name, entity_id, file_path, module_path, arity) in symbols {
             let file_path = normalize_project_path(&file_path);
             let simple_name = qualified_name
                 .rsplit("::")
@@ -850,17 +919,18 @@ impl ProjectSymbolTable {
                 .to_string();
             deduped.insert(
                 (simple_name, file_path),
-                (qualified_name, entity_id, module_path),
+                (qualified_name, entity_id, module_path, arity),
             );
         }
 
-        for ((simple_name, file_path), (qualified_name, entity_id, module_path)) in deduped {
+        for ((simple_name, file_path), (qualified_name, entity_id, module_path, arity)) in deduped {
             by_name
                 .entry(simple_name.clone())
                 .or_default()
                 .push(SimpleNameEntry::FileSymbol {
                     file_path: file_path.clone(),
                     module_path: module_path.clone(),
+                    arity,
                     entity_id,
                 });
             names_by_file
@@ -883,14 +953,22 @@ impl ProjectSymbolTable {
             self.global_index.insert(file_qualified, entity_id);
         }
 
-        for (name, mut entries) in by_name {
-            entries.sort_by(|left, right| {
-                let left_freq = self.get_call_frequency(left.entity_id());
-                let right_freq = self.get_call_frequency(right.entity_id());
-                left.sort_key(Some(left_freq))
-                    .cmp(&right.sort_key(Some(right_freq)))
-            });
-            self.simple_name_index.insert(name, entries);
+        if self.build_view().is_some() {
+            for (name, entries) in by_name {
+                for entry in entries {
+                    self.insert_simple_name_entry(&name, entry);
+                }
+            }
+        } else {
+            for (name, mut entries) in by_name {
+                entries.sort_by(|left, right| {
+                    let left_freq = self.get_call_frequency(left.entity_id());
+                    let right_freq = self.get_call_frequency(right.entity_id());
+                    left.sort_key(Some(left_freq))
+                        .cmp(&right.sort_key(Some(right_freq)))
+                });
+                self.simple_name_index.insert(name, entries);
+            }
         }
         for (file_path, names) in names_by_file {
             self.file_symbol_contrib
@@ -975,21 +1053,29 @@ impl ProjectSymbolTable {
             .expect("global_type_index lock");
         global.clear();
         self.file_type_contrib.clear();
-        // Collect per-module type indexes for placeholder completion
+        // Collect per-module type indexes for placeholder completion. The
+        // disk-backed path streams records one at a time; the in-memory path
+        // reads the module tables directly.
         let mut module_indexes: Vec<TypeMemberIndex> = Vec::new();
         let mut total_dups: u64 = 0;
+        let view = self.build_view();
         for package in self.packages.iter() {
-            for module in package.all_modules() {
-                let idx = module.type_index();
+            for file_path in package.module_file_paths() {
+                let idx = match &view {
+                    Some(view) => view.module_type_index(&file_path),
+                    None => package
+                        .get_module(&file_path)
+                        .map(|module| module.type_index().clone()),
+                };
+                let Some(idx) = idx else { continue };
                 if !idx.is_empty() {
-                    // track contribution for incremental
                     let mut set = HashSet::new();
                     for key in idx.type_keys() {
                         set.insert(key.qualified.clone());
                     }
-                    self.file_type_contrib.insert(module.file_path.clone(), set);
+                    self.file_type_contrib.insert(file_path, set);
                     module_indexes.push(idx.clone());
-                    let dups = global.merge_from(idx);
+                    let dups = global.merge_from(&idx);
                     total_dups += dups.len() as u64;
                 }
             }
@@ -1072,6 +1158,15 @@ impl ProjectSymbolTable {
     /// sorted, so lookup paths can iterate the first matching entry without
     /// re-sorting on every resolution
     fn insert_simple_name_entry(&self, name: &str, entry: SimpleNameEntry) {
+        if let Some(view) = self.build_view() {
+            let entity_id = entry.entity_id();
+            let call_frequency = self.get_call_frequency(entity_id);
+            let candidate = entry.to_candidate(name, Some(call_frequency));
+            if let Err(error) = view.install_candidate(&candidate) {
+                tracing::error!(error = %error, name, "failed to persist name candidate");
+            }
+            return;
+        }
         let entity_id = entry.entity_id();
         let call_frequency = self.get_call_frequency(entity_id);
         let mut entries = self.simple_name_index.entry(name.to_string()).or_default();
@@ -1084,6 +1179,25 @@ impl ProjectSymbolTable {
             })
             .unwrap_or_else(|pos| pos);
         entries.insert(pos, entry);
+    }
+
+    /// Candidates for one simple name, bounded by the caller's arity when known.
+    pub(crate) fn simple_name_candidates(
+        &self,
+        name: &str,
+        arg_count: Option<usize>,
+    ) -> Vec<SimpleNameEntry> {
+        if let Some(view) = self.build_view() {
+            return view
+                .candidates(name, arg_count)
+                .into_iter()
+                .filter_map(SimpleNameEntry::from_candidate)
+                .collect();
+        }
+        self.simple_name_index
+            .get(name)
+            .map(|entries| entries.value().clone())
+            .unwrap_or_default()
     }
 
     /// Rebuild the global index from simple_name_index and packages.
@@ -1101,8 +1215,8 @@ impl ProjectSymbolTable {
                 match entry {
                     SimpleNameEntry::FileSymbol {
                         file_path,
-                        module_path: _,
                         entity_id,
+                        ..
                     } => {
                         let qualified_name = format!("{}::{}", file_path, simple_name);
                         self.global_index.insert(qualified_name, *entity_id);

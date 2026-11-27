@@ -66,9 +66,50 @@ pub struct ModuleSymbolTable {
     type_index: TypeMemberIndex,
 }
 
+/// Serializable snapshot of a module record written to the build database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleRecord {
+    pub module_path: String,
+    pub file_path: String,
+    pub language: Language,
+    pub package: String,
+    pub exports: ModuleExportMap,
+    pub imports: HashMap<String, ImportBinding>,
+    pub reexports: HashMap<String, ReexportBinding>,
+    pub wildcard_imports: Vec<WildcardImport>,
+    pub import_table: StandardizedImportTable,
+    pub type_index: TypeMemberIndex,
+}
+
+impl ModuleRecord {
+    /// Exports visible to package-level aggregation, with their visibility.
+    pub fn export_entries(&self) -> Vec<(String, SymbolMetadata, Visibility)> {
+        let mut entries = Vec::new();
+        for (name, metadata) in &self.exports.public {
+            entries.push((name.clone(), metadata.clone(), Visibility::Public));
+        }
+        for (name, metadata) in &self.exports.package {
+            entries.push((name.clone(), metadata.clone(), Visibility::Package));
+        }
+        for (name, metadata) in &self.exports.module {
+            entries.push((name.clone(), metadata.clone(), Visibility::Module));
+        }
+        for (restriction, metadata) in &self.exports.restricted {
+            entries.push((
+                metadata.name.to_string(),
+                metadata.clone(),
+                Visibility::Restricted {
+                    path: restriction.clone(),
+                },
+            ));
+        }
+        entries
+    }
+}
+
 /// Export map organized by visibility
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ModuleExportMap {
+pub struct ModuleExportMap {
     public: HashMap<String, SymbolMetadata>,
     package: HashMap<String, SymbolMetadata>,
     module: HashMap<String, SymbolMetadata>,
@@ -172,6 +213,79 @@ impl ModuleSymbolTable {
     ) -> Self {
         let ns = NamespacePath::parse(&module_path);
         Self::new(ns, file_path, language, package)
+    }
+
+    /// Serialize the routing and symbol content of this module.
+    ///
+    /// File-local scopes stay in their own on-disk store and are reattached
+    /// when the record is materialized.
+    pub fn to_record(&self) -> ModuleRecord {
+        ModuleRecord {
+            module_path: self.module_path.clone(),
+            file_path: self.file_path.clone(),
+            language: self.language,
+            package: self.package.clone(),
+            exports: self.exports.clone(),
+            imports: self
+                .imports
+                .iter()
+                .map(|entry| (entry.key().clone(), entry.value().clone()))
+                .collect(),
+            reexports: self
+                .reexports
+                .iter()
+                .map(|entry| (entry.key().clone(), entry.value().clone()))
+                .collect(),
+            wildcard_imports: self.wildcard_imports.clone(),
+            import_table: self.import_table.clone(),
+            type_index: self.type_index.clone(),
+        }
+    }
+
+    /// Materialize a stored module with an in-memory local table.
+    pub fn from_record(record: ModuleRecord, local_table: Option<Arc<LocalSymbolTable>>) -> Self {
+        Self::from_record_with_source(record, LocalSymbolSource::Memory(local_table))
+    }
+
+    /// Materialize a stored module whose local table lives in the build store.
+    pub fn from_disk_record(
+        record: ModuleRecord,
+        path: &str,
+        store: Arc<LocalSymbolStore>,
+    ) -> Self {
+        Self::from_record_with_source(
+            record,
+            LocalSymbolSource::Disk {
+                path: Arc::from(path),
+                store,
+            },
+        )
+    }
+
+    fn from_record_with_source(record: ModuleRecord, local_table: LocalSymbolSource) -> Self {
+        let namespace_path = NamespacePath::parse(&record.module_path);
+        let imports = DashMap::new();
+        for (name, binding) in record.imports {
+            imports.insert(name, binding);
+        }
+        let reexports = DashMap::new();
+        for (name, binding) in record.reexports {
+            reexports.insert(name, binding);
+        }
+        Self {
+            namespace_path,
+            module_path: record.module_path,
+            file_path: record.file_path,
+            language: record.language,
+            package: record.package,
+            exports: record.exports,
+            local_table,
+            imports,
+            reexports,
+            wildcard_imports: record.wildcard_imports,
+            import_table: record.import_table,
+            type_index: record.type_index,
+        }
     }
 
     // === Export Operations ===

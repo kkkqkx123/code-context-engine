@@ -309,9 +309,9 @@ impl ProjectSymbolTable {
     /// Consistent with `resolve_simple_name`: candidates are kept sorted
     /// deterministically at insert time and the first entry is returned
     pub fn get_by_simple_name(&self, name: &str) -> Option<EntityId> {
-        self.simple_name_index
-            .get(name)
-            .and_then(|entries| entries.first().map(|entry| entry.entity_id()))
+        self.simple_name_candidates(name, None)
+            .first()
+            .map(|entry| entry.entity_id())
     }
 
     /// Rebuild all indices

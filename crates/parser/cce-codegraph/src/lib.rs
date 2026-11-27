@@ -30,7 +30,8 @@ pub use config_parser::{
 pub use dependency_graph::{DependencyGraphError, FileDependencyGraph, ImpactAnalysis};
 pub use error::{IndexError, PersistenceError, RelationError, RelationQueryError, ResolutionError};
 pub use index::{
-    LayeredSnapshotIndex, LocalCallResolver, ThreadSafeIndex,
+    BuildRelationStore, BuildSymbolView, LayeredSnapshotIndex, LocalCallResolver,
+    SymbolViewMetrics, ThreadSafeIndex,
     builder::{IndexBuilder, SymbolBuildSession, SymbolBuildTimings, SymbolTableBuilder},
     compact::CompactRelationIndex,
     core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex},

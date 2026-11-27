@@ -56,8 +56,8 @@ impl ProjectSymbolTable {
             .insert(package.package_name.clone(), Arc::clone(&package));
         self.packages
             .insert(package_id.clone(), Arc::clone(&package));
-        for module in package.all_modules() {
-            let normalized = normalize_project_path(&module.file_path);
+        for file_path in package.module_file_paths() {
+            let normalized = normalize_project_path(&file_path);
             self.file_to_package.insert(normalized, package_id.clone());
         }
         // Fine-grained invalidation: only names exported by this package
@@ -154,8 +154,8 @@ impl ProjectSymbolTable {
             .insert(package.package_name.clone(), Arc::clone(&package));
         self.packages
             .insert(package_id.clone(), Arc::clone(&package));
-        for module in package.all_modules() {
-            let normalized = normalize_project_path(&module.file_path);
+        for file_path in package.module_file_paths() {
+            let normalized = normalize_project_path(&file_path);
             self.file_to_package.insert(normalized, package_id.clone());
         }
         self.invalidate_cache_for_names(&affected);

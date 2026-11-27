@@ -7,18 +7,20 @@
 //!     - ModuleSymbolTable (module/file-level)
 //!       - LocalSymbolTable (entity-level)
 
+use crate::index::build_symbol_view::BuildSymbolView;
 use crate::symbol::{SymbolLocation, SymbolMetadata, Visibility};
 use crate::symbol_table::{
     ImportBinding, LocalSymbolStore, LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable,
     ProjectSymbolTable, ReexportBinding, strip_crate_prefix,
 };
+use crate::type_inference::overload::ParamArity;
 use crate::type_inference::{InferenceContext, TypeInferenceEngine};
 use cce_metrics::domain::pipeline::RelationMetrics;
 use cce_parser_core::determine_module_path;
 use cce_types::entity::EntityId;
 use cce_types::language::Language;
 use cce_types::{Entity, ParsedFile, normalize_project_path};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -82,7 +84,7 @@ pub struct SymbolBuildSession<'a> {
     project_root: PathBuf,
     metrics: Option<Arc<RelationMetrics>>,
     package: Option<Arc<PackageSymbolTable>>,
-    flat_symbols: Vec<(String, EntityId, String, String)>,
+    flat_symbols: Vec<(String, EntityId, String, String, ParamArity)>,
     modules_elapsed: Duration,
     flat_elapsed: Duration,
     stream_contexts: bool,
@@ -126,11 +128,12 @@ impl<'a> SymbolBuildSession<'a> {
         self.file_count += 1;
         let package_name = self.package_name();
         if self.package.is_none() {
-            self.package = Some(Arc::new(PackageSymbolTable::new(
+            self.package = Some(Arc::new(PackageSymbolTable::new_with_view(
                 package_name.clone(),
                 package_name.clone(),
                 self.project_root.to_string_lossy().to_string(),
                 file.language,
+                self.owner.build_view.clone(),
             )));
         }
         let package = self
@@ -182,11 +185,21 @@ impl<'a> SymbolBuildSession<'a> {
         let type_index = build_file_type_index(file, &module_path, &package_name);
         let type_ctx = infer_file_type_context(file, &type_index);
         module_table.set_type_index(type_index);
-        project_symbols.set_type_inference_context(&file.path, type_ctx);
+        let symbol_arities: HashMap<EntityId, ParamArity> = file
+            .entities
+            .iter()
+            .map(|entity| (entity.id, type_ctx.param_arity(entity.id)))
+            .collect();
 
-        if package.add_module(module_table) {
+        let path_collision = if self.owner.build_view.is_some() {
+            package.install_disk_module(module_table)?
+        } else {
+            package.add_module(module_table)
+        };
+        if path_collision {
             self.owner.record_module_path_conflict();
         }
+        project_symbols.set_type_inference_context(&file.path, type_ctx);
         project_symbols.insert_cross_file_for_file(file);
         if self.stream_contexts {
             project_symbols.forget_type_inference_context(&file.path);
@@ -202,6 +215,7 @@ impl<'a> SymbolBuildSession<'a> {
                     entity.id,
                     file.path.clone(),
                     file.path.clone(),
+                    symbol_arities.get(&entity.id).copied().unwrap_or_default(),
                 ));
             }
         }
@@ -216,6 +230,10 @@ impl<'a> SymbolBuildSession<'a> {
                 export.function_id,
                 file.path.clone(),
                 file.path.clone(),
+                symbol_arities
+                    .get(&export.function_id)
+                    .copied()
+                    .unwrap_or_default(),
             ));
         }
         self.flat_elapsed += flat_started.elapsed();
@@ -248,7 +266,7 @@ impl<'a> SymbolBuildSession<'a> {
         }
 
         let flat_started = Instant::now();
-        project_symbols.insert_symbols_bulk(self.flat_symbols);
+        project_symbols.insert_symbols_bulk_with_arity(self.flat_symbols);
         let flat_ms = (self.flat_elapsed + flat_started.elapsed()).as_millis() as u64;
 
         if let Some(metrics) = &self.metrics {
@@ -282,6 +300,7 @@ pub struct SymbolTableBuilder {
     project_root: PathBuf,
     metrics: Option<Arc<RelationMetrics>>,
     local_symbols: Option<Arc<LocalSymbolStore>>,
+    build_view: Option<Arc<BuildSymbolView>>,
 }
 
 impl SymbolTableBuilder {
@@ -291,6 +310,7 @@ impl SymbolTableBuilder {
             project_root,
             metrics: None,
             local_symbols: None,
+            build_view: None,
         }
     }
 
@@ -303,6 +323,12 @@ impl SymbolTableBuilder {
     /// Route file-local tables through the build-local disk store.
     pub fn with_local_symbols(&mut self, store: Option<Arc<LocalSymbolStore>>) -> &mut Self {
         self.local_symbols = store;
+        self
+    }
+
+    /// Route module records and name candidates through the build-local view.
+    pub fn with_build_view(&mut self, view: Option<Arc<BuildSymbolView>>) -> &mut Self {
+        self.build_view = view;
         self
     }
 
@@ -778,5 +804,56 @@ impl SymbolTableBuilder {
 impl Default for SymbolTableBuilder {
     fn default() -> Self {
         Self::new(PathBuf::from("."))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index::{BuildRelationStore, BuildSymbolView};
+    use cce_types::{EntityKind, Language, ParsedFile, Span};
+
+    #[test]
+    fn streaming_build_loads_modules_from_disk_view() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let store = Arc::new(
+            BuildRelationStore::new(root.path().join("symbols.sqlite3")).expect("store must open"),
+        );
+        let view = Arc::new(BuildSymbolView::new(
+            Arc::clone(&store),
+            &cce_config::SymbolResolutionConfig::default(),
+        ));
+        let project = ProjectSymbolTable::new(PathBuf::from("/project"));
+        project.attach_build_view(Arc::clone(&view));
+
+        let mut file = ParsedFile::new(Language::Rust, "src/a.rs".to_string(), "pub fn a() {}");
+        let entity = Entity {
+            id: EntityId(1),
+            kind: EntityKind::Function,
+            name: "a".to_string(),
+            signature: "pub fn a()".to_string(),
+            modifiers: vec!["pub".to_string()],
+            span: Span::default(),
+            ..Entity::default()
+        };
+        file.add_entity(entity);
+
+        let mut builder = SymbolTableBuilder::new(PathBuf::from("/project"));
+        builder.with_build_view(Some(Arc::clone(&view)));
+        let mut session = builder.begin_streaming_build();
+        session
+            .add_file(&file, &project)
+            .expect("file registration");
+        session.finish(&project);
+
+        assert_eq!(store.module_count(), 1);
+        let package = project
+            .get_package_for_file("src/a.rs")
+            .expect("package routed by file");
+        let module = package
+            .get_module("src/a.rs")
+            .expect("module loaded from view");
+        assert!(module.has_export("a"));
+        assert!(view.metrics().module_queries > 0);
     }
 }

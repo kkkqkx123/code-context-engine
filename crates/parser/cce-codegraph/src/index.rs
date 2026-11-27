@@ -35,6 +35,7 @@
 //! 2. `RelationResolver`: Resolves cross-file calls and builds the full index
 
 pub mod build_store;
+pub mod build_symbol_view;
 pub mod build_view;
 pub mod builder;
 pub mod compact;
@@ -57,6 +58,7 @@ mod test_support;
 
 // Re-export main types
 pub use build_store::BuildRelationStore;
+pub use build_symbol_view::{BuildSymbolView, SymbolViewMetrics};
 pub use build_view::{BuildEntityView, BuildIndexSink};
 pub use builder::{
     DiskRelationBuilder, IndexBuilder, build_file_type_index, file_module_path,

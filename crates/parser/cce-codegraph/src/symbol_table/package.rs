@@ -3,6 +3,7 @@
 //! Manages exports within a package/crate, handling visibility
 //! across modules within the same package.
 
+use crate::index::build_symbol_view::BuildSymbolView;
 use crate::symbol::SymbolMetadata;
 use crate::symbol::scope::ScopeContext;
 use cce_types::language::Language;
@@ -72,6 +73,13 @@ pub struct PackageSymbolTable {
 
     /// Namespace index: namespace_name -> Set<module_file_path>
     namespace_modules: DashMap<String, HashSet<String>>,
+
+    /// Disk-backed full-build view. When present, module records live in the
+    /// build database and only a bounded working set is materialized.
+    view: Option<Arc<BuildSymbolView>>,
+
+    /// File paths whose module records are owned by `view`.
+    disk_modules: DashMap<String, ()>,
 }
 
 /// Incremental delta produced by `PackageSymbolTable::add_module_incremental`.
@@ -93,6 +101,17 @@ impl PackageSymbolTable {
         package_path: String,
         language: Language,
     ) -> Self {
+        Self::new_with_view(package_id, package_name, package_path, language, None)
+    }
+
+    /// Create a package whose module records are written to a build view.
+    pub fn new_with_view(
+        package_id: String,
+        package_name: String,
+        package_path: String,
+        language: Language,
+        view: Option<Arc<BuildSymbolView>>,
+    ) -> Self {
         Self {
             package_id,
             package_name: package_name.clone(),
@@ -104,6 +123,82 @@ impl PackageSymbolTable {
             module_path_index: DashMap::new(),
             module_export_contrib: DashMap::new(),
             namespace_modules: DashMap::new(),
+            view,
+            disk_modules: DashMap::new(),
+        }
+    }
+
+    /// Whether this package writes module records to the build database.
+    pub fn is_disk_backed(&self) -> bool {
+        self.view.is_some()
+    }
+
+    /// Store one module on disk and register only its routing metadata.
+    ///
+    /// The full module record is written to the operation-local database;
+    /// the package keeps export and namespace indexes needed by resolution
+    /// without retaining every module table in memory.
+    pub fn install_disk_module(
+        &self,
+        module: super::module::ModuleSymbolTable,
+    ) -> Result<bool, String> {
+        let Some(view) = &self.view else {
+            return Err("disk module registration requires a build view".to_string());
+        };
+        let file_path = module.file_path.clone();
+        let module_path = module.module_path.clone();
+        let namespace_prefix = module.namespace_path.namespace_prefix();
+        let public_exports: HashMap<String, SymbolMetadata> = module
+            .public_exports()
+            .iter()
+            .map(|(name, metadata)| (name.clone(), metadata.clone()))
+            .collect();
+        view.install_module(&self.package_id, &module)?;
+
+        self.disk_modules.insert(file_path.clone(), ());
+        if let Some(ns) = &namespace_prefix {
+            self.register_namespace(ns, &file_path);
+            let segments: Vec<&str> = ns.split("::").collect();
+            for index in 1..segments.len() {
+                let prefix = segments[..index].join("::");
+                self.register_namespace(&prefix, &file_path);
+            }
+        }
+        let collision = if let Some(existing) = self.module_path_index.get(&module_path) {
+            if existing.value() == &file_path {
+                false
+            } else {
+                if is_package_init_file(&file_path) {
+                    self.module_path_index
+                        .insert(module_path, file_path.clone());
+                }
+                true
+            }
+        } else {
+            self.module_path_index
+                .insert(module_path, file_path.clone());
+            false
+        };
+        for (name, metadata) in &public_exports {
+            self.public_exports.insert(name.clone(), metadata.clone());
+        }
+        self.module_export_contrib
+            .insert(file_path, public_exports.into_keys().collect());
+        Ok(collision)
+    }
+
+    /// File paths with a registered module record.
+    pub fn module_file_paths(&self) -> Vec<String> {
+        if self.view.is_some() {
+            self.disk_modules
+                .iter()
+                .map(|entry| entry.key().clone())
+                .collect()
+        } else {
+            self.modules
+                .iter()
+                .map(|entry| entry.key().clone())
+                .collect()
         }
     }
 
@@ -366,6 +461,9 @@ impl PackageSymbolTable {
 
     /// Get a module by file path (shares the stored table via `Arc`)
     pub fn get_module(&self, file_path: &str) -> Option<Arc<super::module::ModuleSymbolTable>> {
+        if let Some(view) = &self.view {
+            return view.module(file_path);
+        }
         self.modules.get(file_path).map(|m| Arc::clone(m.value()))
     }
 
@@ -512,6 +610,9 @@ impl PackageSymbolTable {
     /// Drop per-module type indexes after they have been merged into the
     /// project-global type index. Module resolution never reads them again.
     pub fn clear_type_indexes(&self) {
+        if self.view.is_some() {
+            return;
+        }
         for mut entry in self.modules.iter_mut() {
             Arc::make_mut(entry.value_mut()).clear_type_index();
         }
@@ -519,16 +620,29 @@ impl PackageSymbolTable {
 
     /// Get all modules (shared references)
     pub fn all_modules(&self) -> Vec<Arc<super::module::ModuleSymbolTable>> {
+        if let Some(view) = &self.view {
+            return self
+                .module_file_paths()
+                .into_iter()
+                .filter_map(|path| view.module(&path))
+                .collect();
+        }
         self.modules.iter().map(|m| Arc::clone(m.value())).collect()
     }
 
     /// Check if a module exists
     pub fn has_module(&self, file_path: &str) -> bool {
+        if let Some(view) = &self.view {
+            return self.disk_modules.contains_key(file_path) || view.contains_module(file_path);
+        }
         self.modules.contains_key(file_path)
     }
 
     /// Get module count
     pub fn module_count(&self) -> usize {
+        if self.view.is_some() {
+            return self.disk_modules.len();
+        }
         self.modules.len()
     }
 
@@ -645,6 +759,11 @@ impl PackageSymbolTable {
     /// incremental contribution map so a subsequent
     /// `add_module_incremental` remains consistent.
     pub fn rebuild_exports(&self) {
+        if self.view.is_some() {
+            // Disk registration maintains the export contribution map per
+            // file, so a full rescan would only re-read every record.
+            return;
+        }
         self.public_exports.clear();
         self.internal_exports.clear();
         self.module_export_contrib.clear();

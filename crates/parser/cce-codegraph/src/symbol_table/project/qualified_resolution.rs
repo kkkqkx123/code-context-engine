@@ -298,8 +298,9 @@ impl ProjectSymbolTable {
         from_scope: Option<&ScopeContext>,
         overload_ctx: Option<&OverloadContext>,
     ) -> Option<SymbolRef> {
-        if let Some(entries) = self.simple_name_index.get(name) {
-            let candidates: Vec<SimpleNameEntry> = entries.clone().to_vec();
+        {
+            let candidates: Vec<SimpleNameEntry> =
+                self.simple_name_candidates(name, overload_ctx.and_then(|ctx| ctx.arg_count));
 
             // Prefer the caller's own file first (same semantics as
             // `resolve_simple_name`).
@@ -416,8 +417,9 @@ impl ProjectSymbolTable {
         from_scope: Option<&ScopeContext>,
         overload_ctx: Option<&OverloadContext>,
     ) -> Option<SymbolRef> {
-        if let Some(entries) = self.simple_name_index.get(name) {
-            let candidates: Vec<SimpleNameEntry> = entries.clone().to_vec();
+        {
+            let candidates: Vec<SimpleNameEntry> =
+                self.simple_name_candidates(name, overload_ctx.and_then(|ctx| ctx.arg_count));
 
             if let Some(caller_file) = caller_file
                 && let Some(entry) = candidates

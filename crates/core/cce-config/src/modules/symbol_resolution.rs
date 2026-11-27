@@ -29,6 +29,18 @@ fn default_disable_wildcard_expansion() -> bool {
     false
 }
 
+fn default_module_workset_entries() -> usize {
+    128
+}
+
+fn default_name_bucket_workset_entries() -> usize {
+    4096
+}
+
+fn default_name_candidates_per_bucket() -> usize {
+    65536
+}
+
 /// Configuration for the symbol resolution pipeline.
 ///
 /// All fields have deterministic defaults matching the previous hard-coded
@@ -67,6 +79,21 @@ pub struct SymbolResolutionConfig {
     /// When true, wildcard import expansion is disabled entirely.
     #[serde(default = "default_disable_wildcard_expansion")]
     pub disable_wildcard_expansion: bool,
+
+    /// Number of module records kept resident by a disk-backed build view.
+    #[serde(default = "default_module_workset_entries")]
+    pub module_workset_entries: usize,
+
+    /// Number of `(name, arity)` buckets kept resident by a disk-backed build view.
+    #[serde(default = "default_name_bucket_workset_entries")]
+    pub name_bucket_workset_entries: usize,
+
+    /// Maximum number of candidates retained in one `(name, arity)` bucket.
+    ///
+    /// Exceeding the limit aborts the build instead of silently dropping
+    /// resolution candidates.
+    #[serde(default = "default_name_candidates_per_bucket")]
+    pub max_name_candidates_per_bucket: usize,
 }
 
 impl Default for SymbolResolutionConfig {
@@ -77,6 +104,9 @@ impl Default for SymbolResolutionConfig {
             resolution_cache_size: default_resolution_cache_size(),
             max_wildcard_expansion_size: default_max_wildcard_expansion_size(),
             disable_wildcard_expansion: default_disable_wildcard_expansion(),
+            module_workset_entries: default_module_workset_entries(),
+            name_bucket_workset_entries: default_name_bucket_workset_entries(),
+            max_name_candidates_per_bucket: default_name_candidates_per_bucket(),
         }
     }
 }
@@ -108,6 +138,24 @@ impl Validate for SymbolResolutionConfig {
                 "must be greater than 0 when wildcard expansion is enabled",
             ));
         }
+        for (field, value) in [
+            ("module_workset_entries", self.module_workset_entries),
+            (
+                "name_bucket_workset_entries",
+                self.name_bucket_workset_entries,
+            ),
+            (
+                "max_name_candidates_per_bucket",
+                self.max_name_candidates_per_bucket,
+            ),
+        ] {
+            if value == 0 {
+                errors.push(ConfigValidationError::invalid_field(
+                    format!("symbol_resolution.{field}"),
+                    "must be greater than 0",
+                ));
+            }
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -130,6 +178,7 @@ impl SymbolResolutionConfig {
             resolution_cache_size: 8192,
             max_wildcard_expansion_size: 2000,
             disable_wildcard_expansion: false,
+            ..Self::default()
         }
     }
 
@@ -141,6 +190,7 @@ impl SymbolResolutionConfig {
             resolution_cache_size: 2048,
             max_wildcard_expansion_size: 500,
             disable_wildcard_expansion: false,
+            ..Self::default()
         }
     }
 

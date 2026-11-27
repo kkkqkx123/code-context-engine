@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use cce_types::entity::EntityId;
 use cce_types::language::{Language, effective_language};
+use serde::{Deserialize, Serialize};
 
 pub use super::compatibility::{
     CompatibilityLevel, TypeCompatibility, is_assignable, is_assignable_with_shapes,
@@ -57,7 +58,7 @@ impl OverloadScore {
 /// without re-deriving syntax per language. `known == false` means no
 /// extraction record exists (hand-built test contexts, legacy caches):
 /// arity filtering stays neutral instead of guessing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct ParamArity {
     /// Declared parameter count, including untyped entries.
     pub total: usize,

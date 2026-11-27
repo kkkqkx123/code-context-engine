@@ -781,7 +781,7 @@ impl IndexBuilder {
     ///
     /// The in-memory index is dropped here; only configuration, plugin wiring
     /// and metrics survive into the build session.
-    pub fn into_disk_builder(self, store: BuildRelationStore) -> DiskRelationBuilder {
+    pub fn into_disk_builder(self, store: Arc<BuildRelationStore>) -> DiskRelationBuilder {
         DiskRelationBuilder {
             store,
             config_fingerprint: self.config_fingerprint(),
@@ -794,7 +794,7 @@ impl IndexBuilder {
 
 /// Full-build relation builder writing into an operation-local disk store.
 pub struct DiskRelationBuilder {
-    store: BuildRelationStore,
+    store: Arc<BuildRelationStore>,
     config_fingerprint: String,
     config: BuilderConfig,
     plugin_registry: Option<Arc<PluginRegistry>>,
@@ -820,7 +820,7 @@ impl DiskRelationBuilder {
 
     fn make_file_processor(&self) -> file_processor::FileProcessor<'_, BuildRelationStore> {
         let mut processor = file_processor::FileProcessor::with_registry(
-            &self.store,
+            self.store.as_ref(),
             &self.config,
             self.plugin_registry.as_deref(),
         );
@@ -848,7 +848,7 @@ impl DiskRelationBuilder {
         symbols: &ProjectSymbolTable,
     ) {
         plugin_symbol_replay::register_file_plugin_symbols(
-            &self.store,
+            self.store.as_ref(),
             self.plugin_registry.as_deref(),
             file,
             symbols,
@@ -861,7 +861,7 @@ impl DiskRelationBuilder {
         symbols: &ProjectSymbolTable,
     ) {
         plugin_symbol_replay::inject_plugin_relations(
-            &self.store,
+            self.store.as_ref(),
             self.plugin_registry.as_deref(),
             file,
             symbols,
@@ -869,7 +869,7 @@ impl DiskRelationBuilder {
     }
 
     pub fn derive_implicit_hierarchy_edges(&self, symbols: &ProjectSymbolTable) {
-        derive_implicit_hierarchy_edges(&self.store, symbols);
+        derive_implicit_hierarchy_edges(self.store.as_ref(), symbols);
     }
 
     pub fn record_build(&self, elapsed: std::time::Duration, file_count: usize, edges: usize) {

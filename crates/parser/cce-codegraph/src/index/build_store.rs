@@ -24,7 +24,8 @@ use serde::de::DeserializeOwned;
 
 use super::build_view::{BuildEntityView, BuildIndexSink};
 use super::core::{ExportInfo, relation_identity};
-use crate::symbol_table::LocalSymbolStore;
+use crate::symbol_table::candidate::SymbolCandidate;
+use crate::symbol_table::{LocalSymbolStore, ModuleRecord};
 use cce_types::CanonicalSnapshotArtifact;
 
 /// Build-time relation store backed by a temporary SQLite database.
@@ -78,7 +79,36 @@ impl BuildRelationStore {
                  CREATE TABLE file_relations (\
                     path TEXT NOT NULL, seq INTEGER NOT NULL,\
                     identity TEXT NOT NULL, relation_json TEXT NOT NULL,\
-                    UNIQUE(path, identity));",
+                    UNIQUE(path, identity));\
+                 CREATE TABLE modules (\
+                    path TEXT PRIMARY KEY, package_id TEXT NOT NULL,\
+                    module_path TEXT NOT NULL, namespace TEXT NOT NULL,\
+                    record_json TEXT NOT NULL);\
+                 CREATE INDEX modules_by_path ON modules(module_path);\
+                 CREATE TABLE module_exports (\
+                    name TEXT NOT NULL, path TEXT NOT NULL,\
+                    visibility TEXT NOT NULL, symbol_key TEXT NOT NULL);\
+                 CREATE INDEX module_exports_by_name ON module_exports(name);\
+                 CREATE TABLE module_imports (\
+                    local_name TEXT NOT NULL, path TEXT NOT NULL,\
+                    source TEXT NOT NULL, symbol_name TEXT,\
+                    chain_depth INTEGER NOT NULL);\
+                 CREATE INDEX module_imports_by_name ON module_imports(local_name);\
+                 CREATE TABLE module_reexports (\
+                    local_name TEXT NOT NULL, path TEXT NOT NULL,\
+                    source TEXT NOT NULL, symbol_name TEXT,\
+                    chain_depth INTEGER NOT NULL);\
+                 CREATE INDEX module_reexports_by_name ON module_reexports(local_name);\
+                 CREATE TABLE module_types (\
+                    qualified_name TEXT NOT NULL, simple_name TEXT NOT NULL,\
+                    member_name TEXT NOT NULL, path TEXT NOT NULL,\
+                    entity_id INTEGER NOT NULL, arity_key TEXT NOT NULL);\
+                 CREATE INDEX module_types_by_member ON module_types(member_name, arity_key);\
+                 CREATE TABLE name_candidates (\
+                    name TEXT NOT NULL, arity_key TEXT NOT NULL,\
+                    sort_key TEXT NOT NULL, candidate_json TEXT NOT NULL,\
+                    PRIMARY KEY(name, arity_key, candidate_json));\
+                 CREATE INDEX name_candidates_by_bucket ON name_candidates(name, arity_key, sort_key);",
             )
             .map_err(|error| error.to_string())?;
         let local_symbols =
@@ -98,6 +128,257 @@ impl BuildRelationStore {
     /// Shared disk-backed local symbol table store for this build.
     pub fn local_symbol_store(&self) -> Arc<LocalSymbolStore> {
         Arc::clone(&self.local_symbols)
+    }
+
+    /// Persist one module record and its indexed lookup columns.
+    pub fn write_module_record(
+        &self,
+        package_id: &str,
+        record: &ModuleRecord,
+    ) -> Result<(), String> {
+        let json = serde_json::to_string(record).map_err(|error| error.to_string())?;
+        let namespace = record
+            .type_index
+            .all_types()
+            .first()
+            .and_then(|entry| {
+                entry
+                    .key
+                    .qualified
+                    .rsplit_once("::")
+                    .map(|(prefix, _)| prefix.to_string())
+            })
+            .unwrap_or_default();
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute(
+                "INSERT OR REPLACE INTO modules(path, package_id, module_path, namespace, record_json) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    record.file_path,
+                    package_id,
+                    record.module_path,
+                    namespace,
+                    json
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        for table in [
+            "module_exports",
+            "module_imports",
+            "module_reexports",
+            "module_types",
+        ] {
+            guard
+                .execute(
+                    &format!("DELETE FROM {table} WHERE path = ?1"),
+                    params![record.file_path],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        for (name, _metadata, visibility) in record.export_entries() {
+            guard
+                .execute(
+                    "INSERT INTO module_exports(name, path, visibility, symbol_key) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        name,
+                        record.file_path,
+                        format!("{visibility:?}"),
+                        format!("{}::{}::{}", record.file_path, record.module_path, name)
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        for (local_name, binding) in &record.imports {
+            guard
+                .execute(
+                    "INSERT INTO module_imports(local_name, path, source, symbol_name, chain_depth) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        local_name,
+                        record.file_path,
+                        binding.source_path,
+                        binding.symbol_name,
+                        0i64
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        for (local_name, binding) in &record.reexports {
+            guard
+                .execute(
+                    "INSERT INTO module_reexports(local_name, path, source, symbol_name, chain_depth) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        local_name,
+                        record.file_path,
+                        binding.original_module,
+                        binding.original_name,
+                        binding.chain_depth as i64
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        for entry in record.type_index.all_types() {
+            for (member_name, members) in &entry.members {
+                for member in members {
+                    guard
+                        .execute(
+                            "INSERT INTO module_types(qualified_name, simple_name, member_name, path, entity_id, arity_key) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![
+                                entry.key.qualified,
+                                entry.key.simple,
+                                member_name,
+                                record.file_path,
+                                member.entity_id.0 as i64,
+                                ""
+                            ],
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn module_record(&self, path: &str) -> Option<ModuleRecord> {
+        let guard = self.connection.lock().ok()?;
+        let json = guard
+            .query_row(
+                "SELECT record_json FROM modules WHERE path = ?1",
+                params![path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()?;
+        Self::decode(&json).ok()
+    }
+
+    pub fn module_paths(&self) -> Vec<(String, String)> {
+        let Ok(guard) = self.connection.lock() else {
+            return Vec::new();
+        };
+        let Ok(mut statement) = guard.prepare("SELECT package_id, path FROM modules ORDER BY path")
+        else {
+            return Vec::new();
+        };
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map(|rows| rows.filter_map(|row| row.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Insert one name candidate, keeping only the first `limit` stable keys.
+    /// Returns `true` when the candidate was retained.
+    pub fn write_name_candidate(
+        &self,
+        candidate: &SymbolCandidate,
+        limit: usize,
+    ) -> Result<bool, String> {
+        let arity_key = SymbolCandidate::bucket_id(&candidate.name, &candidate.arity);
+        let json = serde_json::to_string(candidate).map_err(|error| error.to_string())?;
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        let count: i64 = guard
+            .query_row(
+                "SELECT COUNT(*) FROM name_candidates WHERE name = ?1 AND arity_key = ?2",
+                params![candidate.name, arity_key],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let existing: Option<String> = guard
+            .query_row(
+                "SELECT candidate_json FROM name_candidates \
+                 WHERE name = ?1 AND arity_key = ?2 AND candidate_json = ?3",
+                params![candidate.name, arity_key, json],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if existing.is_some() {
+            return Ok(true);
+        }
+        if count as usize >= limit {
+            let worst: Option<String> = guard
+                .query_row(
+                    "SELECT candidate_json FROM name_candidates \
+                     WHERE name = ?1 AND arity_key = ?2 ORDER BY sort_key DESC LIMIT 1",
+                    params![candidate.name, arity_key],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            let Some(worst_json) = worst else {
+                return Ok(false);
+            };
+            let retained = Self::decode::<SymbolCandidate>(&worst_json)
+                .is_ok_and(|worst| candidate.sort_key < worst.sort_key);
+            if !retained {
+                return Ok(false);
+            }
+            guard
+                .execute(
+                    "DELETE FROM name_candidates \
+                     WHERE name = ?1 AND arity_key = ?2 AND candidate_json = ?3",
+                    params![candidate.name, arity_key, worst_json],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        guard
+            .execute(
+                "INSERT OR IGNORE INTO name_candidates(name, arity_key, sort_key, candidate_json) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![candidate.name, arity_key, candidate.sort_key, json],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    pub fn name_candidates(&self, name: &str, arity_key: Option<&str>) -> Vec<SymbolCandidate> {
+        let Ok(guard) = self.connection.lock() else {
+            return Vec::new();
+        };
+        let rows: Vec<String> = if let Some(arity_key) = arity_key {
+            let Ok(mut statement) = guard.prepare(
+                "SELECT candidate_json FROM name_candidates \
+                 WHERE name = ?1 AND arity_key = ?2 ORDER BY sort_key",
+            ) else {
+                return Vec::new();
+            };
+            statement
+                .query_map(params![name, arity_key], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(|row| row.ok()).collect())
+                .unwrap_or_default()
+        } else {
+            let Ok(mut statement) = guard.prepare(
+                "SELECT candidate_json FROM name_candidates WHERE name = ?1 ORDER BY sort_key",
+            ) else {
+                return Vec::new();
+            };
+            statement
+                .query_map(params![name], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(|row| row.ok()).collect())
+                .unwrap_or_default()
+        };
+        rows.iter()
+            .filter_map(|json| Self::decode(json).ok())
+            .collect()
+    }
+
+    /// Number of persisted module records.
+    pub fn module_count(&self) -> u64 {
+        let Ok(guard) = self.connection.lock() else {
+            return 0;
+        };
+        guard
+            .query_row("SELECT COUNT(*) FROM modules", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_or(0) as u64
     }
 
     fn sequence(&self) -> u64 {

@@ -105,14 +105,30 @@ impl IndexOrchestrator {
             OrchestratorError::index("relation_build_spool", "relation spool is unavailable")
         })?;
         let store_path = spool.directory().join("relation-build-store.sqlite3");
-        let store =
+        let store = Arc::new(
             cce_codegraph::index::BuildRelationStore::new(&store_path).map_err(|error| {
                 OrchestratorError::index(
                     "relation_build_store",
                     format!("Failed to create relation build store: {error}"),
                 )
-            })?;
-        let builder = self.create_relation_builder()?.into_disk_builder(store);
+            })?,
+        );
+        let symbol_view = {
+            let project_symbols = spool.project_symbols();
+            let resolution_config = project_symbols.symbol_resolution_config();
+            project_symbols
+                .cross_file_propagator()
+                .set_bucket_limit(resolution_config.max_name_candidates_per_bucket);
+            let view = Arc::new(cce_codegraph::BuildSymbolView::new(
+                Arc::clone(&store),
+                &resolution_config,
+            ));
+            project_symbols.attach_build_view(Arc::clone(&view));
+            view
+        };
+        let builder = self
+            .create_relation_builder()?
+            .into_disk_builder(Arc::clone(&store));
         let local_symbols = builder.store().local_symbol_store();
         let relation_build_started = Instant::now();
         let rss_trace = std::env::var_os("CCE_RELATION_RSS_TRACE").is_some();
@@ -208,6 +224,7 @@ impl IndexOrchestrator {
             cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
         symbol_builder.with_metrics(self.relation_metrics());
         symbol_builder.with_local_symbols(Some(local_symbols));
+        symbol_builder.with_build_view(Some(Arc::clone(&symbol_view)));
         let project_symbols = spool.project_symbols();
         let mut session = symbol_builder.begin_streaming_build();
         let symbols_started = Instant::now();
@@ -338,12 +355,35 @@ impl IndexOrchestrator {
         ctx.stages.relation_edges = edges;
         ctx.stages.relation_estimated_bytes = relation_bytes;
 
-        if registered_files != resolved_files {
-            // explicit check (not only a debug assertion) — a mismatch
-            // between the registration and resolution passes indicates a
-            // spool replay bug that would silently drop relations.
+        let view_metrics = symbol_view.metrics();
+        ctx.stages.symbol_view_module_peak_entries = view_metrics.module_peak_entries;
+        ctx.stages.symbol_view_module_peak_bytes = view_metrics.module_peak_bytes;
+        ctx.stages.symbol_view_name_peak_entries = view_metrics.candidate_peak_entries;
+        ctx.stages.symbol_view_name_peak_bytes = view_metrics.candidate_peak_bytes;
+        ctx.stages.symbol_view_queries =
+            view_metrics.module_queries + view_metrics.candidate_queries;
+        ctx.stages.symbol_view_candidate_truncated = view_metrics.truncated_candidates;
+        ctx.stages.cross_file_candidate_truncated = project_symbols
+            .cross_file_propagator()
+            .truncated_candidate_count();
+
+        let stored_modules = store.module_count() as usize;
+        if registered_files != resolved_files
+            || symbol_files != registered_files
+            || stored_modules != registered_files
+        {
             let error = format!(
-                "relation replay mismatch: registered {registered_files} files but resolved {resolved_files}"
+                "relation replay mismatch: symbols {symbol_files}, registered {registered_files}, \
+                 resolved {resolved_files}, stored modules {stored_modules}"
+            );
+            tracing::error!(operation_id = %ctx.operation_id, "{error}");
+            ctx.errors.push(error);
+            ctx.all_batches_completed = false;
+        }
+        if view_metrics.truncated_candidates > 0 || ctx.stages.cross_file_candidate_truncated > 0 {
+            let error = format!(
+                "symbol candidate bucket limit exceeded: view {}, cross-file {}",
+                view_metrics.truncated_candidates, ctx.stages.cross_file_candidate_truncated
             );
             tracing::error!(operation_id = %ctx.operation_id, "{error}");
             ctx.errors.push(error);

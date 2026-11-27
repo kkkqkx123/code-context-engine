@@ -10,6 +10,7 @@
 //! [`crate::symbol_table::TypeMemberIndex`] cannot determine an owner type.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use cce_types::entity::{Entity, EntityId};
 use cce_types::language::Language;
@@ -41,7 +42,7 @@ const OVERLOAD_CACHE_LIMIT: usize = 16_384;
 /// and a per-file index for incremental invalidation. A name-based secondary
 /// index is maintained for EntityId translation across remapped ID spaces
 /// (parsed-file local IDs vs global index IDs).
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct CrossFilePropagator {
     /// Global cache: function EntityId (as seen in `ScopedTypeContext`) -> return type.
     return_type_cache: DashMap<EntityId, TypeBinding>,
@@ -81,12 +82,33 @@ pub struct CrossFilePropagator {
     field_name_index: DashMap<String, TypeBinding>,
     /// Reverse field name mapping.
     field_id_to_name: DashMap<EntityId, String>,
+    /// Per-bucket limit for overload candidates in full builds (0 = unlimited).
+    bucket_limit: AtomicUsize,
+    /// Candidates rejected by the per-bucket limit.
+    truncated_candidates: AtomicU64,
 }
 
 impl CrossFilePropagator {
     /// Create a new empty propagator.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Bound each `(name, arity)` candidate bucket for full builds.
+    ///
+    /// Rejected candidates are counted; the build manifest must fail when
+    /// the count is non-zero instead of resolving against a partial graph.
+    pub fn with_bucket_limit(self, limit: usize) -> Self {
+        self.set_bucket_limit(limit);
+        self
+    }
+
+    pub fn set_bucket_limit(&self, limit: usize) {
+        self.bucket_limit.store(limit, Ordering::Relaxed);
+    }
+
+    pub fn truncated_candidate_count(&self) -> u64 {
+        self.truncated_candidates.load(Ordering::Relaxed)
     }
 
     pub fn lookup_member_type(&self, type_name: &str, member: &str) -> Option<TypeBinding> {
@@ -151,10 +173,19 @@ impl CrossFilePropagator {
                     arities.push(arity);
                 }
             }
-            self.name_to_ids
-                .entry((func_name.clone(), arity))
-                .or_default()
-                .insert(*entity_id);
+            let bucket = (func_name.clone(), arity);
+            {
+                let mut ids = self.name_to_ids.entry(bucket).or_default();
+                ids.insert(*entity_id);
+                let limit = self.bucket_limit.load(Ordering::Relaxed);
+                if limit > 0 && ids.len() > limit {
+                    let overflow: Vec<EntityId> = ids.iter().skip(limit).copied().collect();
+                    for id in overflow {
+                        ids.remove(&id);
+                    }
+                    self.truncated_candidates.fetch_add(1, Ordering::Relaxed);
+                }
+            }
             file_entries.push((*entity_id, binding_clone));
         }
 
@@ -484,6 +515,7 @@ impl CrossFilePropagator {
 
     /// Clear all caches.
     pub fn clear(&self) {
+        self.truncated_candidates.store(0, Ordering::Relaxed);
         self.return_type_cache.clear();
         self.file_return_index.clear();
         self.name_index.clear();
@@ -545,6 +577,29 @@ mod tests {
             origin: None,
             shape: Some(TypeShape::Named(name.to_string())),
         }
+    }
+
+    #[test]
+    fn candidate_bucket_limit_reports_truncation() {
+        let propagator = CrossFilePropagator::new().with_bucket_limit(1);
+        let mut ctx = ScopedTypeContext::new(Language::Rust);
+        for id in [1, 2, 3] {
+            ctx.add_return_type(EntityId(id), named_binding("i32"));
+        }
+        let entities: Vec<Entity> = [1, 2, 3]
+            .into_iter()
+            .map(|id| Entity {
+                id: EntityId(id),
+                name: "shared".to_string(),
+                ..Entity::default()
+            })
+            .collect();
+        propagator.insert_file("src/a.rs", &ctx, &entities);
+        assert_eq!(propagator.truncated_candidate_count(), 2);
+        let bucket = propagator
+            .name_to_ids
+            .get(&("shared".to_string(), ParamArity::unknown()));
+        assert_eq!(bucket.map(|ids| ids.len()), Some(1));
     }
 
     #[test]
