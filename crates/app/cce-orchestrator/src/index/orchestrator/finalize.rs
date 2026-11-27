@@ -236,6 +236,7 @@ impl IndexOrchestrator {
             ));
         }
         let symbol_timings = session.finish(project_symbols);
+        ctx.stages.relation_symbol_register_ms = symbols_started.elapsed().as_millis() as u64;
         trace_rss("symbol_add_files_done");
         record_pass(symbols_started.elapsed(), total_bytes);
         let symbols_ms = symbols_started.elapsed().as_millis() as u64;
@@ -271,6 +272,7 @@ impl IndexOrchestrator {
                 )
             })?;
         ctx.stages.symbol_cross_file_ms += propagation_started.elapsed().as_millis() as u64;
+        ctx.stages.symbol_propagation_ms = propagation_started.elapsed().as_millis() as u64;
         record_pass(propagation_started.elapsed(), total_bytes);
         project_symbols
             .cross_file_propagator()
@@ -293,6 +295,7 @@ impl IndexOrchestrator {
                     format!("Failed to replay relation entities: {error}"),
                 )
             })?;
+        ctx.stages.relation_register_ms = t0.elapsed().as_millis() as u64;
         record_pass(t0.elapsed(), total_bytes);
         if let Some(parser) = &self.cached_build_config {
             Self::inject_governance_edges(builder.store(), parser);
@@ -323,6 +326,7 @@ impl IndexOrchestrator {
                     format!("Failed to replay relation edges: {error}"),
                 )
             })?;
+        ctx.stages.relation_resolve_ms = t1.elapsed().as_millis() as u64;
         record_pass(t1.elapsed(), total_bytes);
         trace_rss("relation_resolution_done");
 
@@ -361,10 +365,13 @@ impl IndexOrchestrator {
         ctx.stages.relation_edges = relation_count as u64;
         ctx.stages.relation_estimated_bytes = relation_bytes;
 
+        let artifact_started = Instant::now();
         let artifact_result = builder
             .store()
             .write_artifact(builder.config_fingerprint().to_string(), artifact_options);
+        ctx.stages.relation_artifact_ms = artifact_started.elapsed().as_millis() as u64;
         trace_rss("artifact_finish_done");
+        let publish_started = Instant::now();
         match artifact_result {
             Ok(artifact) => {
                 let counts = artifact.counts();
@@ -388,10 +395,13 @@ impl IndexOrchestrator {
                 }
                 match &self.relation_publisher {
                     Some(publisher) => {
-                        match publisher
+                        let publish_store_started = Instant::now();
+                        let publish_result = publisher
                             .publish(self.project_id, &ctx.operation_id, &artifact)
-                            .await
-                        {
+                            .await;
+                        ctx.stages.relation_publish_store_ms =
+                            publish_store_started.elapsed().as_millis() as u64;
+                        match publish_result {
                             Ok(publication) => {
                                 ctx.published_relation_epoch = Some(publication.relation_epoch);
                                 // Retain the shared product for read-only queries; the
@@ -415,6 +425,7 @@ impl IndexOrchestrator {
                                 // per-batch marking ran before the build and could
                                 // report success for an operation whose relation
                                 // phase was skipped entirely (batch failure).
+                                let state_mark_started = Instant::now();
                                 let mut relation_paths: Vec<std::path::PathBuf> = Vec::new();
                                 if let Err(error) = spool.for_each(|parsed| {
                                     relation_paths
@@ -445,6 +456,8 @@ impl IndexOrchestrator {
                                             );
                                         });
                                 }
+                                ctx.stages.relation_state_mark_ms =
+                                    state_mark_started.elapsed().as_millis() as u64;
                             }
                             Err(error) => {
                                 ctx.errors.push(format!(
@@ -472,6 +485,7 @@ impl IndexOrchestrator {
                 ctx.all_batches_completed = false;
             }
         }
+        ctx.stages.relation_publish_ms = publish_started.elapsed().as_millis() as u64;
         let overload_started = Instant::now();
         spool.project_symbols().rebuild_overload_sets();
         ctx.stages.symbol_overload_ms += overload_started.elapsed().as_millis() as u64;

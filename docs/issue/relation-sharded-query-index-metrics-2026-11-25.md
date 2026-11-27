@@ -91,3 +91,18 @@ shard 基线分别为 1,173,636 KiB 与 9,103,100 KiB。medium 关系阶段增�
 冷/热 p95 均明显低于 146/168 ms 的两倍上界，热查询低于 1 ms；分片 LRU、目录与单次查询 64 分片上限未改动。
 
 **状态**：关系边与 artifact 构建期磁盘化已完成，medium 峰值下降 33.2%、large 下降 39.6%，查询延迟和一致性通过；符号表磁盘化未完成，因此 50% 峰值和 500 MiB 阶段增量验收项尚未全部达成。
+
+## 符号表磁盘化后最终复测（devs）
+
+局部符号表已移入同一操作临时 SQLite，物化工作集上限为 128 个文件 / 约 96 MiB；全量构建回放当前文件时直接安装已解码的局部表，避免逐次查询反序列化。日志为 `check-symbolview-raw.log`、`test-symbolview-raw.log`、`clippy-symbolview-raw.log`、`build-symbolview-raw.log`、`bench-symbolview-medium4.log`、`bench-symbolview-large5.log`、`bench-symbolview-query.log`。
+
+| 档位 | 文件数 | 批次结束 RSS KiB | 关系结束 RSS KiB | 关系阶段增量 KiB | 峰值 RSS KiB | 相对 shard 基线 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| medium | 5,000 | 370,428 | 694,928 | 324,500 | 694,992 | -40.8% |
+| large | 50,000 | 1,383,572 | 4,628,292 | 3,244,720 | 4,631,348 | -49.1% |
+
+medium 用时 286,940.5 ms，与上一轮 289,622.8 ms 持平；关系阶段增量已稳定低于 500 MiB。large 峰值下降接近 50%，但仍差约 1.7%，且阶段增量仍为 3.2 GiB：剩余占用来自 `PackageSymbolTable` 的模块导出/导入/重导出表、全局名称与类型索引，它们仍未磁盘化。只有把模块表整体纳入同一临时库并按文件加载，才可能达到 500 MiB 硬上界。
+
+查询矩阵结果：cold `caller_out` p95 51 ms、warm p95 0 ms、错误数 0，分片上限与 LRU 未改动。workspace check/test/clippy 与 CLI/server 构建全部通过；新增局部表往返单测验证了实体内容、数量和作用域链一致。
+
+**状态**：`BuildEntityView` 与局部符号表磁盘化均已完成；medium 阶段增量达标，large 峰值下降 49.1%，查询延迟与一致性通过。完整 50% 峰值目标和 500 MiB 阶段增量尚未全部达成，不能宣布原计划全部验收通过。

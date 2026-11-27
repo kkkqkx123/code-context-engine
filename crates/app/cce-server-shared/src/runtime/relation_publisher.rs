@@ -442,7 +442,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         };
 
         let project_candidate = self.has_project_publication_candidate(project_id).await?;
-        if !project_candidate {
+        let published = if !project_candidate {
             let data_epoch = self.active_data_epoch(project_id).await?;
             if let Err(error) = self
                 .store
@@ -457,7 +457,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 Arc::new(self.store.clone()),
                 project_id,
                 epoch,
-                shard_config.clone(),
+                shard_config,
             )?);
             self.runtime
                 .publish_snapshot(
@@ -467,14 +467,15 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                     Some(operation_id.to_string()),
                 )
                 .await;
-        }
-
-        let published = Arc::new(RelationSnapshotIndex::from_store(
-            Arc::new(self.store.clone()),
-            project_id,
-            epoch,
-            shard_config,
-        )?);
+            published
+        } else {
+            Arc::new(RelationSnapshotIndex::from_store(
+                Arc::new(self.store.clone()),
+                project_id,
+                epoch,
+                shard_config,
+            )?)
+        };
         Ok(RelationPublication {
             relation_epoch: epoch,
             snapshot: Arc::new(LayeredSnapshotIndex::new(published)),

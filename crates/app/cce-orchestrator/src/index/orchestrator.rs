@@ -737,7 +737,9 @@ impl IndexOrchestrator {
 
         // Finalize relation index and wire up export enhancements in the correct order.
         // This guarantees relation data is fully resolved before derived consumers use it.
+        let finalize_started = Instant::now();
         let total_relations = self.finalize_index();
+        ctx.stages.finalize_index_ms = finalize_started.elapsed().as_millis() as u64;
         ctx.stages.relation_ms = relation_started.elapsed().as_millis() as u64;
         ctx.stages.rss_after_relation_kb = cce_utils::rss_kb().unwrap_or(0);
 
