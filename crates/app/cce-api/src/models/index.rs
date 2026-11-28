@@ -95,6 +95,7 @@ pub struct IndexStageTimingsDto {
     pub relation_spool_bytes: u64,
     pub symbol_table_entries: u64,
     pub symbol_table_estimated_bytes: u64,
+    pub symbol_table_persisted_entries: u64,
     pub symbol_view_module_peak_entries: u64,
     pub symbol_view_module_peak_bytes: u64,
     pub symbol_view_name_peak_entries: u64,

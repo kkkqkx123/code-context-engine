@@ -35,6 +35,12 @@ impl IndexOrchestrator {
     ///
     /// Queries continue against the durable shards of the active generation;
     /// in-flight callers keep their own snapshot reference until they finish.
+    ///
+    /// A preparation failure is logged rather than propagated. Aborting here
+    /// would turn a rebuild that can still publish into a hard failure, and the
+    /// query path already degrades to an explicit unavailable state instead of
+    /// returning an empty graph. Every terminal path settles through
+    /// [`Self::settle_failed_relation_rebuild`], so the marker cannot dangle.
     pub(super) async fn begin_relation_rebuild(&mut self, operation_id: &str) {
         self.last_published_snapshot = None;
         if let Some(ref exporter) = self.nl_exporter
@@ -42,6 +48,7 @@ impl IndexOrchestrator {
         {
             exporter.clear_relation_enhancement();
         }
+        self.relation_rebuild_operation = Some(operation_id.to_string());
         self.relation_rebuilding
             .store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some(ref publisher) = self.relation_publisher
@@ -52,9 +59,62 @@ impl IndexOrchestrator {
             tracing::warn!(
                 %error,
                 operation_id,
-                "Failed to prepare the disk-backed generation for relation rebuild"
+                "Failed to prepare the disk-backed generation for relation rebuild; \
+                 continuing, queries stay unavailable until a generation is published"
             );
         }
+    }
+
+    /// Retire the rebuild marker once a generation was published.
+    fn mark_relation_rebuild_published(&mut self) {
+        self.relation_rebuild_operation = None;
+        self.relation_rebuilding
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Settle a full rebuild that ended without publishing a generation.
+    ///
+    /// Every terminal path of a run funnels here: early build errors, a batch
+    /// phase that never reached the relation stage, and a failed publish. The
+    /// runtime leaves the updating state and serves the previous generation,
+    /// the orchestrator drops its rebuild marker, and no in-memory generation
+    /// is retained (a failed rebuild never produced one).
+    pub(super) async fn settle_failed_relation_rebuild(&mut self, reason: String) {
+        self.relation_rebuilding
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.last_published_snapshot = None;
+        if let Some(ref exporter) = self.nl_exporter
+            && exporter.config().enable_relation_enhancement
+        {
+            exporter.clear_relation_enhancement();
+        }
+        let operation_id = self.relation_rebuild_operation.take();
+        let Some(publisher) = self.relation_publisher.clone() else {
+            tracing::warn!(
+                project_id = self.project_id,
+                error = %reason,
+                "Relation rebuild failed without a publisher to settle"
+            );
+            return;
+        };
+        let operation = operation_id.unwrap_or_else(|| "unknown".to_string());
+        if let Err(error) = publisher
+            .report_full_rebuild_failure(self.project_id, &operation, &reason)
+            .await
+        {
+            tracing::warn!(
+                project_id = self.project_id,
+                operation_id = %operation,
+                error = %error,
+                "Failed to report the aborted relation rebuild to the query runtime"
+            );
+        }
+        tracing::warn!(
+            project_id = self.project_id,
+            operation_id = %operation,
+            error = %reason,
+            "Relation rebuild settled without a new generation"
+        );
     }
 
     /// Whether a full relation generation rebuild is in progress.
@@ -380,9 +440,10 @@ impl IndexOrchestrator {
         record_pass(t1.elapsed(), total_bytes);
         trace_rss("relation_resolution_done");
 
-        let (symbol_entries, symbol_bytes) = project_symbols.capacity_counts();
-        ctx.stages.symbol_table_entries = symbol_entries;
-        ctx.stages.symbol_table_estimated_bytes = symbol_bytes;
+        let symbol_capacity = project_symbols.capacity_counts();
+        ctx.stages.symbol_table_entries = symbol_capacity.resident_entries;
+        ctx.stages.symbol_table_estimated_bytes = symbol_capacity.resident_bytes;
+        ctx.stages.symbol_table_persisted_entries = symbol_capacity.persisted_entries;
         let (nodes, edges, relation_bytes) = builder.store().capacity_counts();
         ctx.stages.relation_nodes = nodes;
         ctx.stages.relation_edges = edges;
@@ -567,8 +628,12 @@ impl IndexOrchestrator {
             }
         }
         ctx.stages.relation_publish_ms = publish_started.elapsed().as_millis() as u64;
-        self.relation_rebuilding
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+        // The rebuild marker is retired only when a generation was actually
+        // activated. Every other terminal state keeps it set so the run-level
+        // settlement reports the failure to the query runtime.
+        if ctx.published_relation_epoch.is_some() {
+            self.mark_relation_rebuild_published();
+        }
         let overload_started = Instant::now();
         spool.project_symbols().rebuild_overload_sets();
         ctx.stages.symbol_overload_ms += overload_started.elapsed().as_millis() as u64;
@@ -817,7 +882,14 @@ impl IndexOrchestrator {
                 return Err(error);
             }
             let mut hash_error = None;
-            for batch_index in 0..ctx.file_indexer.total_batches() {
+            let manifest_batches = match ctx.file_indexer.total_batches() {
+                Ok(batches) => batches,
+                Err(error) => {
+                    hash_error = Some(error.to_string());
+                    0
+                }
+            };
+            for batch_index in 0..manifest_batches {
                 let batch = match ctx.file_indexer.get_batch(batch_index) {
                     Ok(batch) => batch,
                     Err(error) => {
@@ -992,6 +1064,182 @@ mod tests {
 
         orchestrator.last_published_snapshot = None;
         assert!(orchestrator.get_published_relation_snapshot().is_none());
+    }
+
+    /// Publisher double that records settlement calls instead of touching a
+    /// runtime.
+    #[derive(Default)]
+    struct RecordingPublisher {
+        failures: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingPublisher {
+        fn failures(&self) -> Vec<String> {
+            self.failures.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::index::RelationSnapshotPublisher for RecordingPublisher {
+        async fn publish(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _artifact: &cce_types::CanonicalSnapshotArtifact,
+        ) -> Result<crate::index::RelationPublication, cce_types::StorageError> {
+            Err(cce_types::StorageError::validation("not published"))
+        }
+
+        async fn publish_delta(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _delta: cce_types::SnapshotDelta,
+            _base: Option<LayeredSnapshotIndex>,
+        ) -> Result<crate::index::RelationPublication, cce_types::StorageError> {
+            Err(cce_types::StorageError::validation("not published"))
+        }
+
+        async fn report_full_rebuild_failure(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            reason: &str,
+        ) -> Result<(), cce_types::StorageError> {
+            self.failures.lock().expect("lock").push(reason.to_string());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_rebuild_settles_the_runtime_and_clears_the_marker() {
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut orchestrator = IndexOrchestrator::new(1)
+            .expect("orchestrator must build")
+            .with_relation_publisher(publisher.clone());
+        orchestrator
+            .begin_relation_rebuild("operation-rebuild")
+            .await;
+        assert!(orchestrator.relation_rebuilding());
+
+        orchestrator
+            .settle_failed_relation_rebuild("relation build aborted".to_string())
+            .await;
+
+        assert!(!orchestrator.relation_rebuilding());
+        assert!(orchestrator.get_published_relation_snapshot().is_none());
+        assert_eq!(publisher.failures(), vec!["relation build aborted"]);
+    }
+
+    #[tokio::test]
+    async fn settlement_is_idempotent_for_an_already_settled_rebuild() {
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut orchestrator = IndexOrchestrator::new(1)
+            .expect("orchestrator must build")
+            .with_relation_publisher(publisher.clone());
+        orchestrator
+            .begin_relation_rebuild("operation-rebuild")
+            .await;
+        orchestrator
+            .settle_failed_relation_rebuild("first failure".to_string())
+            .await;
+        orchestrator
+            .settle_failed_relation_rebuild("second failure".to_string())
+            .await;
+
+        // Both notifications are forwarded; the runtime is responsible for
+        // ignoring one that arrives outside an in-flight rebuild.
+        assert_eq!(publisher.failures().len(), 2);
+        assert!(!orchestrator.relation_rebuilding());
+    }
+
+    /// Publisher double whose preparation step always fails.
+    #[derive(Default)]
+    struct PrepareFailingPublisher {
+        preparations: std::sync::atomic::AtomicUsize,
+        failures: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::index::RelationSnapshotPublisher for PrepareFailingPublisher {
+        async fn prepare_full_rebuild(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+        ) -> Result<crate::index::RelationRebuildPreparation, cce_types::StorageError> {
+            self.preparations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err(cce_types::StorageError::validation(
+                "disk projection unavailable",
+            ))
+        }
+
+        async fn publish(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _artifact: &cce_types::CanonicalSnapshotArtifact,
+        ) -> Result<crate::index::RelationPublication, cce_types::StorageError> {
+            Err(cce_types::StorageError::validation("not published"))
+        }
+
+        async fn publish_delta(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            _delta: cce_types::SnapshotDelta,
+            _base: Option<LayeredSnapshotIndex>,
+        ) -> Result<crate::index::RelationPublication, cce_types::StorageError> {
+            Err(cce_types::StorageError::validation("not published"))
+        }
+
+        async fn report_full_rebuild_failure(
+            &self,
+            _project_id: i64,
+            _operation_id: &str,
+            reason: &str,
+        ) -> Result<(), cce_types::StorageError> {
+            self.failures.lock().expect("lock").push(reason.to_string());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_preparation_keeps_the_rebuild_running_until_it_settles() {
+        let publisher = Arc::new(PrepareFailingPublisher::default());
+        let mut orchestrator = IndexOrchestrator::new(1)
+            .expect("orchestrator must build")
+            .with_relation_publisher(publisher.clone());
+        orchestrator.last_published_snapshot = Some(Arc::new(LayeredSnapshotIndex::empty()));
+
+        orchestrator
+            .begin_relation_rebuild("operation-rebuild")
+            .await;
+
+        // The failed preparation does not abort the run nor leave it silent:
+        // the marker still describes an in-flight rebuild.
+        assert_eq!(
+            publisher
+                .preparations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        assert!(orchestrator.relation_rebuilding());
+        assert!(orchestrator.get_published_relation_snapshot().is_none());
+        assert!(
+            publisher.failures.lock().expect("lock").is_empty(),
+            "preparation failure is not a terminal settlement"
+        );
+
+        orchestrator
+            .settle_failed_relation_rebuild("relation build aborted".to_string())
+            .await;
+
+        assert!(!orchestrator.relation_rebuilding());
+        assert_eq!(
+            publisher.failures.lock().expect("lock").clone(),
+            vec!["relation build aborted".to_string()]
+        );
     }
 
     #[tokio::test]

@@ -12,7 +12,9 @@
 
 use std::sync::Arc;
 
-use super::{ExternalSymbolTable, ProjectStats, ProjectSymbolTable, SimpleNameEntry};
+use super::{
+    ExternalSymbolTable, ProjectStats, ProjectSymbolTable, SimpleNameEntry, SymbolCapacity,
+};
 use crate::symbol::SymbolRef;
 use crate::symbol_table::package;
 use crate::type_inference::TypeInferenceContext;
@@ -55,6 +57,10 @@ impl ProjectSymbolTable {
         }
     }
 
+    /// Drop every cached resolution artifact.
+    ///
+    /// Resident working sets of a disk-backed build are caches too, so they are
+    /// dropped with the rest; the persisted rows they front stay intact.
     pub fn clear_cache(&self) {
         if let Some(mut cache) = self.resolution_cache.try_lock() {
             cache.clear();
@@ -63,6 +69,19 @@ impl ProjectSymbolTable {
         self.wildcard_expansion_cache.clear();
         self.invalidate_sorted_packages();
         self.invalidate_sorted_external();
+        if let Some(view) = self.build_view() {
+            view.clear_resident_qualified_symbols();
+        }
+    }
+
+    /// Clear cached state through one entry point.
+    ///
+    /// Disk-backed builds keep their symbol rows: clearing is a cache
+    /// operation, never a data operation, so a rebuild can keep streaming from
+    /// the operation-local store. Callers that intentionally discard the
+    /// symbol data use [`Self::rebuild_indices`] instead.
+    pub fn clear(&self) {
+        self.clear_cache();
     }
 
     /// Invalidate resolution cache entries that involve the given file.
@@ -327,7 +346,7 @@ impl ProjectSymbolTable {
         self.file_to_package.clear();
         // Resolution entries are keyed by name only; rebuilding may move
         // any name to a new entity id, so both caches must be invalidated.
-        self.clear_cache();
+        self.clear();
 
         for package in self.packages.iter() {
             for name in package.public_export_names() {
@@ -427,22 +446,37 @@ impl ProjectSymbolTable {
         }
     }
 
-    /// Capacity occupied by the project symbol indexes. The byte estimate is
-    /// an explicit per-entry approximation; it is reported, not enforced.
-    pub fn capacity_counts(&self) -> (u64, u64) {
-        let qualified_entries = if let Some(view) = self.build_view() {
-            let metrics = view.metrics();
-            (metrics.global_index_entries + metrics.namespace_index_entries) as usize
-        } else {
-            self.global_index.len() + self.namespace_index.len()
+    /// Capacity occupied by the project symbol indexes.
+    ///
+    /// `resident_*` describes what the process actually holds: package tables,
+    /// resident name buckets and the bounded qualified working sets. Persisted
+    /// rows of a disk-backed build are reported separately because they are
+    /// the total index size, not a memory cost; conflating the two makes a
+    /// disk-backed build look larger than an in-memory one.
+    pub fn capacity_counts(&self) -> SymbolCapacity {
+        let (resident_qualified, persisted_qualified) = match self.build_view() {
+            Some(view) => (
+                view.resident_qualified_entries(),
+                view.persisted_qualified_entries(),
+            ),
+            // Without a build store nothing is persisted: the in-memory
+            // indexes are resident by definition.
+            None => (
+                (self.global_index.len() + self.namespace_index.len()) as u64,
+                0,
+            ),
         };
-        let entries = self.packages.len()
-            + self.packages_by_name.len()
-            + self.external_deps.len()
-            + qualified_entries
-            + self.simple_name_index.len()
-            + self.type_inference_contexts.len();
-        (entries as u64, entries as u64 * 128)
+        let resident_entries = self.packages.len() as u64
+            + self.packages_by_name.len() as u64
+            + self.external_deps.len() as u64
+            + resident_qualified
+            + self.simple_name_index.len() as u64
+            + self.type_inference_contexts.len() as u64;
+        SymbolCapacity {
+            resident_entries,
+            resident_bytes: resident_entries * 128,
+            persisted_entries: persisted_qualified,
+        }
     }
 
     /// Update the cross-file cache for a single file (incremental path).

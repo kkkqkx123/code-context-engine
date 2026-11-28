@@ -108,7 +108,7 @@ fn main() {
         start.elapsed().as_secs_f64() * 1000.0,
         "ok",
     );
-    let total_batches = indexer.total_batches();
+    let total_batches = indexer.total_batches().expect("batch count");
 
     // Completed-scale curve: crash at different batch indices. Recovery
     // always rescans everything, so cost must be flat in completed work.

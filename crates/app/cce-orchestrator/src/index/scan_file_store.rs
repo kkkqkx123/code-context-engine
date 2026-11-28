@@ -264,9 +264,11 @@ mod tests {
     fn streaming_resident_entries_never_exceed_one_batch() {
         let root = tempfile::tempdir().expect("temp dir");
         let store = ScanFileStore::new(root.path(), "op").expect("manifest must open");
-        let batch_size = 16;
+        // Medium-tier scale: the bound has to hold for a file count near the
+        // measured corpus, not only for a toy batch count.
+        let batch_size = 512;
         let mut peak = 0usize;
-        for batch_number in 0..8 {
+        for batch_number in 0..64 {
             let batch: Vec<_> = (0..batch_size)
                 .map(|index| entry(&format!("{:03}.rs", batch_number * batch_size + index)))
                 .collect();
@@ -283,7 +285,7 @@ mod tests {
             .expect("replay must succeed");
         assert_eq!(resident, batch_size);
         assert!(peak <= batch_size);
-        assert_eq!(store.count().expect("count"), 8 * batch_size);
+        assert_eq!(store.count().expect("count"), 64 * batch_size);
     }
 
     #[test]

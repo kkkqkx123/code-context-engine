@@ -706,3 +706,88 @@ fn snapshot_preserves_supertypes() {
     let names: Vec<&str> = subs.iter().map(|e| e.key.simple.as_str()).collect();
     assert_eq!(names, vec!["Circle", "MiniCircle", "Rectangle"]);
 }
+
+/// The durable build record is JSON, so a populated index used to fail while
+/// serializing: both keyed maps are keyed by a struct and by an entity id.
+#[test]
+fn populated_index_survives_json_round_trip() {
+    let mut idx = TypeMemberIndex::new();
+    let key = make_key("a::Foo", "Foo", "src/a.rs");
+    idx.insert_type(
+        key.clone(),
+        TypeEntry::new(
+            EntityId(1),
+            key.clone(),
+            EntityKind::Struct,
+            Language::Rust,
+            Visibility::Public,
+        ),
+    );
+    idx.insert_member(
+        &key,
+        MemberEntry {
+            entity_id: EntityId(2),
+            name: "bar".to_string(),
+            kind: EntityKind::Method,
+            visibility: Visibility::Public,
+            is_static: false,
+            is_associated: false,
+            span: dummy_span(),
+            file_path: "src/a.rs".to_string(),
+            module_path: Some("a".to_string()),
+            package: "pkg".to_string(),
+        },
+    );
+
+    let json = serde_json::to_string(&idx).expect("a populated index must serialize");
+    let restored: TypeMemberIndex = serde_json::from_str(&json).expect("index must deserialize");
+
+    assert_eq!(restored.len_types(), 1);
+    assert_eq!(
+        restored.get_members("a::Foo", "bar").expect("member").len(),
+        1
+    );
+    assert_eq!(restored.owner_of(EntityId(2)).expect("owner").simple, "Foo");
+}
+
+/// Insertion order must not leak into the persisted bytes, otherwise the same
+/// index would produce a different record on every run.
+#[test]
+fn index_json_is_stable_across_insertion_order() {
+    let keys = [
+        make_key("a::Foo", "Foo", "src/a.rs"),
+        make_key("a::Bar", "Bar", "src/b.rs"),
+        make_key("a::Baz", "Baz", "src/c.rs"),
+    ];
+    let mut forward = TypeMemberIndex::new();
+    for (index, key) in keys.iter().enumerate() {
+        forward.insert_type(
+            key.clone(),
+            TypeEntry::new(
+                EntityId(index as u64 + 1),
+                key.clone(),
+                EntityKind::Struct,
+                Language::Rust,
+                Visibility::Public,
+            ),
+        );
+    }
+    let mut backward = TypeMemberIndex::new();
+    for (index, key) in keys.iter().enumerate().rev() {
+        backward.insert_type(
+            key.clone(),
+            TypeEntry::new(
+                EntityId(index as u64 + 1),
+                key.clone(),
+                EntityKind::Struct,
+                Language::Rust,
+                Visibility::Public,
+            ),
+        );
+    }
+
+    assert_eq!(
+        serde_json::to_string(&forward).expect("forward"),
+        serde_json::to_string(&backward).expect("backward")
+    );
+}

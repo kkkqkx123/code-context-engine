@@ -405,3 +405,52 @@ fn disk_backed_qualified_indexes_match_memory_path() {
     assert_eq!(metrics.global_index_entries, 1);
     assert_eq!(metrics.namespace_index_entries, 1);
 }
+
+/// Disk-backed symbol tables keep their rows across a cache clear, and the
+/// rebuild re-derives the namespace projection from the persisted keys
+/// instead of dropping it.
+#[test]
+fn disk_backed_clear_and_rebuild_preserve_qualified_symbols() {
+    use crate::index::{BuildRelationStore, BuildSymbolView};
+    use cce_config::SymbolResolutionConfig;
+
+    let root = tempfile::tempdir().expect("temp dir");
+    let store = Arc::new(
+        BuildRelationStore::new(root.path().join("project-symbols.sqlite3"))
+            .expect("build store must open"),
+    );
+    let config = SymbolResolutionConfig {
+        global_index_workset_entries: 2,
+        ..SymbolResolutionConfig::default()
+    };
+    let view = Arc::new(BuildSymbolView::new(Arc::clone(&store), &config));
+    let table = ProjectSymbolTable::new_with_config(PathBuf::from("/project"), config);
+    table.attach_build_view(Arc::clone(&view));
+
+    let qualified = "src/main.rs::run";
+    let module_path = "src/main.rs";
+    let entity_id = EntityId(11);
+    table.insert_symbol(
+        qualified.to_string(),
+        entity_id,
+        "src/main.rs".to_string(),
+        module_path.to_string(),
+    );
+    let namespace_key =
+        crate::symbol_table::namespace_index_key(qualified, module_path).expect("namespaced key");
+
+    assert_eq!(table.get_by_qualified_name(qualified), Some(entity_id));
+    assert_eq!(view.namespace_symbol(&namespace_key), Some(entity_id));
+
+    // Clearing drops resident caches only: the persisted rows still answer.
+    table.clear();
+    assert_eq!(view.resident_qualified_entries(), 0);
+    assert_eq!(table.get_by_qualified_name(qualified), Some(entity_id));
+
+    // Rebuilding keeps the persisted keys and restores the namespace
+    // projection from them, without repopulating the resident working sets.
+    table.rebuild_indices();
+    assert_eq!(view.resident_qualified_entries(), 0);
+    assert_eq!(table.get_by_qualified_name(qualified), Some(entity_id));
+    assert_eq!(view.namespace_symbol(&namespace_key), Some(entity_id));
+}

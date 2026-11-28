@@ -1153,3 +1153,121 @@ async fn rebuild_without_active_generation_exposes_no_snapshot() {
         super::RelationRuntimeState::Unloaded
     );
 }
+
+#[tokio::test]
+async fn rebuild_publish_success_activates_the_new_generation() {
+    let store = setup_store().await;
+    let runtime = Arc::new(RelationRuntime::new(1));
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
+    let first = publisher
+        .publish(
+            1,
+            "operation-before-rebuild",
+            &published_artifact(&snapshot()),
+        )
+        .await
+        .expect("first snapshot should publish");
+
+    publisher
+        .prepare_full_rebuild(1, "operation-rebuild")
+        .await
+        .expect("rebuild preparation should succeed");
+    assert!(runtime.get_capability_info().await.relation_rebuilding);
+
+    let rebuilt = publisher
+        .publish(1, "operation-rebuild", &published_artifact(&snapshot()))
+        .await
+        .expect("rebuild publication should succeed");
+
+    let info = runtime.get_capability_info().await;
+    assert!(!info.relation_rebuilding);
+    assert!(info.available);
+    assert!(rebuilt.relation_epoch > first.relation_epoch);
+    assert_eq!(info.relation_epoch, rebuilt.relation_epoch);
+    assert_eq!(
+        runtime.get_state().await,
+        super::RelationRuntimeState::Available
+    );
+}
+
+#[tokio::test]
+async fn rebuild_publish_failure_and_settlement_keep_the_previous_generation() {
+    let store = setup_store().await;
+    let runtime = Arc::new(RelationRuntime::new(1));
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
+    let first = publisher
+        .publish(
+            1,
+            "operation-before-rebuild",
+            &published_artifact(&snapshot()),
+        )
+        .await
+        .expect("first snapshot should publish");
+
+    publisher
+        .prepare_full_rebuild(1, "operation-rebuild")
+        .await
+        .expect("rebuild preparation should succeed");
+
+    // A candidate built from a stale base is rejected before activation.
+    let mut stale = snapshot();
+    stale.base_relation_epoch = Some(0);
+    publisher
+        .publish(1, "operation-rebuild", &published_artifact(&stale))
+        .await
+        .expect_err("a stale base epoch must be rejected");
+
+    publisher
+        .report_full_rebuild_failure(1, "operation-rebuild", "publish rejected")
+        .await
+        .expect("settlement must succeed");
+
+    let info = runtime.get_capability_info().await;
+    assert!(!info.relation_rebuilding);
+    assert!(
+        info.available,
+        "the previous generation must keep serving queries"
+    );
+    assert_eq!(info.relation_epoch, first.relation_epoch);
+    assert_eq!(
+        runtime.get_state().await,
+        super::RelationRuntimeState::Degraded
+    );
+    assert_eq!(runtime.get_metadata().await.failure_count, 1);
+}
+
+#[tokio::test]
+async fn rebuild_abort_without_publish_leaves_no_rebuild_in_flight() {
+    let store = setup_store().await;
+    let runtime = Arc::new(RelationRuntime::new(1));
+    let publisher = ServerRelationSnapshotPublisher::new(store.clone(), runtime.clone());
+    let first = publisher
+        .publish(
+            1,
+            "operation-before-rebuild",
+            &published_artifact(&snapshot()),
+        )
+        .await
+        .expect("first snapshot should publish");
+
+    publisher
+        .prepare_full_rebuild(1, "operation-rebuild")
+        .await
+        .expect("rebuild preparation should succeed");
+    publisher
+        .report_full_rebuild_failure(1, "operation-rebuild", "batch phase failed")
+        .await
+        .expect("settlement must succeed");
+
+    let info = runtime.get_capability_info().await;
+    assert!(!info.relation_rebuilding);
+    assert_eq!(info.relation_epoch, first.relation_epoch);
+    assert!(runtime.get_snapshot().await.is_some());
+
+    // A duplicated notification after the rebuild was settled is inert.
+    publisher
+        .report_full_rebuild_failure(1, "operation-rebuild", "duplicate")
+        .await
+        .expect("duplicate settlement must succeed");
+    assert_eq!(runtime.get_metadata().await.failure_count, 1);
+}

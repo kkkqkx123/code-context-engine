@@ -40,6 +40,12 @@ pub trait RelationSnapshotPublisher: Send + Sync {
     ///
     /// The previous generation stays queryable from durable shards while the
     /// in-memory orchestrator snapshot and exporter enhancement are released.
+    ///
+    /// A returned error reports that the previous generation could not be
+    /// projected for the rebuild window. It does not abort the build: the
+    /// publish that follows is the only step that can restore service, so the
+    /// caller continues and relies on the terminal settlement when no
+    /// generation is published.
     async fn prepare_full_rebuild(
         &self,
         project_id: i64,
@@ -60,6 +66,23 @@ pub trait RelationSnapshotPublisher: Send + Sync {
         operation_id: &str,
         artifact: &CanonicalSnapshotArtifact,
     ) -> Result<RelationPublication, StorageError>;
+
+    /// Settle a full rebuild that ended without publishing a new generation.
+    ///
+    /// Every terminal path of a full relation rebuild reports here — early
+    /// build errors, an aborted batch phase, and a failed publish — so the
+    /// query runtime never stays in the updating state. Implementations must
+    /// keep the previously active generation queryable when one exists and
+    /// must ignore notifications that arrive outside an in-flight rebuild.
+    async fn report_full_rebuild_failure(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        let _ = (project_id, operation_id, reason);
+        Ok(())
+    }
 
     /// Publish an incremental delta on top of an existing base snapshot.
     ///

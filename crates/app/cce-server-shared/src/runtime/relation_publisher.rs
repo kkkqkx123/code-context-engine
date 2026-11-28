@@ -550,6 +550,28 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         })
     }
 
+    async fn report_full_rebuild_failure(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        let _guard = self.publish_lock.lock().await;
+        tracing::warn!(
+            project_id,
+            operation_id,
+            reason = %reason,
+            "Full relation rebuild ended without publishing a generation"
+        );
+        // The runtime keeps the previously active generation (if any) while
+        // reporting the degraded state; a stale notification outside an
+        // in-flight rebuild is ignored by the runtime.
+        self.runtime
+            .report_rebuild_failure(reason.to_string())
+            .await;
+        Ok(())
+    }
+
     async fn publish_delta(
         &self,
         project_id: i64,

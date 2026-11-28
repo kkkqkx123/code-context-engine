@@ -339,13 +339,22 @@ impl FileIndexer {
             .get_batch(batch_index, self.checkpoint.batch_size as usize)
     }
 
-    /// Get the total number of batches
-    pub fn total_batches(&self) -> usize {
+    /// Get the total number of batches.
+    ///
+    /// Counting the manifest can fail; that failure is propagated instead of
+    /// collapsing to an empty batch range, which would make a run look
+    /// complete while nothing was processed.
+    pub fn total_batches(&self) -> Result<usize, StorageError> {
         let batch_size = self.checkpoint.batch_size as usize;
         if batch_size == 0 {
-            return 0;
+            return Err(StorageError::query(
+                "Scan batch size must be greater than zero",
+            ));
         }
-        self.store.count().unwrap_or(0).div_ceil(batch_size)
+        self.store
+            .count()
+            .map(|count| count.div_ceil(batch_size))
+            .map_err(StorageError::query)
     }
 
     /// Recover from an existing checkpoint
@@ -478,8 +487,10 @@ impl FileIndexer {
     }
 
     /// Number of scanned files in the manifest.
-    pub fn file_count(&self) -> usize {
-        self.store.count().unwrap_or(0)
+    ///
+    /// Failures are propagated for the same reason as [`Self::total_batches`].
+    pub fn file_count(&self) -> Result<usize, StorageError> {
+        self.store.count().map_err(StorageError::query)
     }
 
     /// Visit files in deterministic batch order one at a time.
@@ -805,5 +816,51 @@ mod tests {
         indexer
             .validate_checkpoint(&checkpoint, &[])
             .expect("Missing boundary records must not block recovery");
+    }
+
+    #[test]
+    fn manifest_counts_come_from_the_persisted_manifest() {
+        let files: Vec<FileEntry> = (0..5)
+            .map(|index| test_file_entry(&format!("/f{index}.rs")))
+            .collect();
+        let (indexer, _temp) = test_indexer_with_hash(&files, "manifest-hash");
+
+        assert_eq!(indexer.file_count().expect("file count"), 5);
+        assert_eq!(indexer.total_batches().expect("batch count"), 3);
+    }
+
+    #[test]
+    fn batch_boundaries_and_hash_are_stable_across_scan_orders() {
+        let mut forward: Vec<FileEntry> = ["/a.rs", "/b.rs", "/c.rs", "/d.rs", "/e.rs"]
+            .iter()
+            .map(|path| test_file_entry(path))
+            .collect();
+        forward.sort_by(|left, right| left.path.cmp(&right.path));
+        let hash = FileIndexer::compute_file_list_hash(&forward);
+
+        let (first, _first_temp) = test_indexer_with_hash(&forward, &hash);
+        let mut reversed = forward.clone();
+        reversed.reverse();
+        let (second, _second_temp) = test_indexer_with_hash(&reversed, &hash);
+
+        assert_eq!(first.file_list_hash(), second.file_list_hash());
+        assert_eq!(
+            first.total_batches().expect("batch count"),
+            second.total_batches().expect("batch count")
+        );
+        for batch in 0..first.total_batches().expect("batch count") {
+            let left = first.get_batch(batch).expect("batch");
+            let right = second.get_batch(batch).expect("batch");
+            assert_eq!(
+                left.first().map(|entry| entry.path.clone()),
+                right.first().map(|entry| entry.path.clone()),
+                "batch {batch} must start at the same path"
+            );
+            assert_eq!(
+                left.last().map(|entry| entry.path.clone()),
+                right.last().map(|entry| entry.path.clone()),
+                "batch {batch} must end at the same path"
+            );
+        }
     }
 }

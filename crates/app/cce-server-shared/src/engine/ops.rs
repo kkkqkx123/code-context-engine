@@ -343,6 +343,26 @@ impl super::CodeContextEngine {
         let result: IndexResult = match orchestrator.execute(options).await {
             Ok(result) => result,
             Err(error) => {
+                // A hard failure can escape before the orchestrator settles an
+                // announced relation rebuild; report it here so the query
+                // runtime never stays in the updating state. The runtime
+                // ignores the notification when no rebuild is in flight.
+                if build_relations
+                    && let Err(notify_error) = self
+                        .notify_relation_rebuild_failure(
+                            project_id,
+                            &operation_id,
+                            &error.to_string(),
+                        )
+                        .await
+                {
+                    tracing::warn!(
+                        project_id,
+                        operation_id = %operation_id,
+                        error = %notify_error,
+                        "Failed to settle the relation runtime after a hard index failure"
+                    );
+                }
                 if let Err(clear_error) = operation_coordinator
                     .clear_active_by_operation(&operation_id)
                     .await

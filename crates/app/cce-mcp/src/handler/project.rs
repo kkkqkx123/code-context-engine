@@ -201,6 +201,22 @@ pub async fn incremental_index(
     }
 }
 
+/// Relation fields exposed by the health tool.
+///
+/// The shape is diagnostic-only: existing keys keep their meaning and the
+/// rebuild marker is added so a client can distinguish "serving a stale
+/// generation while a full rebuild runs" from "index needs a rebuild".
+fn relation_health_json(
+    info: &cce_server_shared::runtime::RelationCapabilityInfo,
+) -> serde_json::Value {
+    json!({
+        "active_epoch": info.active_epoch,
+        "runtime_epoch": info.runtime_epoch,
+        "rebuild_required": info.rebuild_required,
+        "relation_rebuilding": info.relation_rebuilding,
+    })
+}
+
 /// Run the engine health tool call.
 pub async fn health(
     state: &Arc<SharedContext>,
@@ -211,13 +227,7 @@ pub async fn health(
         .get_relation_capability_info(args.project_id)
         .await
         .ok()
-        .map(|info| {
-            json!({
-                "active_epoch": info.active_epoch,
-                "runtime_epoch": info.runtime_epoch,
-                "rebuild_required": info.rebuild_required,
-            })
-        });
+        .map(|info| relation_health_json(&info));
     let bm25_enabled = { state.engine.fulltext().diagnose_summary().await.reachable };
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({
@@ -248,5 +258,39 @@ mod tests {
         assert!(is_valid_deleted_shape(1, 3));
         assert!(is_valid_deleted_shape(3, 3));
         assert!(!is_valid_deleted_shape(2, 3));
+    }
+
+    #[test]
+    fn relation_health_json_reports_the_rebuild_marker() {
+        let mut info = cce_server_shared::runtime::RelationCapabilityInfo {
+            enabled: true,
+            available: true,
+            state: cce_server_shared::runtime::RelationRuntimeState::Updating,
+            relation_epoch: 7,
+            relation_rebuilding: true,
+            entity_count: 10,
+            relation_count: 20,
+            integrity: None,
+            last_error: None,
+            failure_count: 0,
+            stale: true,
+            stale_reason: None,
+            last_successful_epoch: 7,
+            pending_operation_id: None,
+            active_epoch: 7,
+            runtime_epoch: 7,
+            snapshot_integrity: None,
+            rebuild_required: false,
+        };
+        let value = relation_health_json(&info);
+        assert_eq!(value["relation_rebuilding"], serde_json::json!(true));
+        assert_eq!(value["runtime_epoch"], serde_json::json!(7));
+        assert_eq!(value["rebuild_required"], serde_json::json!(false));
+
+        info.relation_rebuilding = false;
+        assert_eq!(
+            relation_health_json(&info)["relation_rebuilding"],
+            serde_json::json!(false)
+        );
     }
 }

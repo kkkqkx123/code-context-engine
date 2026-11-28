@@ -68,6 +68,50 @@ impl super::CodeContextEngine {
         )))
     }
 
+    /// Project ids whose relation runtime is rebuilding a full generation.
+    ///
+    /// Only cached runtimes are inspected: an unseen project has no rebuild in
+    /// flight by definition, and materialising a runtime per known project to
+    /// answer a diagnostic would defeat the purpose.
+    pub async fn relation_rebuilding_projects(&self) -> Vec<i64> {
+        let mut runtimes: Vec<(i64, Arc<RelationRuntime>)> = Vec::new();
+        self.relation_runtime_cache
+            .for_each(|project_id, runtime| runtimes.push((project_id, Arc::clone(runtime))))
+            .await;
+        let mut rebuilding = Vec::new();
+        for (project_id, runtime) in runtimes {
+            if runtime.get_capability_info().await.relation_rebuilding {
+                rebuilding.push(project_id);
+            }
+        }
+        rebuilding.sort_unstable();
+        rebuilding
+    }
+
+    /// Settle an announced relation rebuild that failed outside the build.
+    ///
+    /// The orchestrator funnels its own terminal paths through the same
+    /// publisher entry point; the engine reports hard failures that escape the
+    /// run so a single code path owns the runtime transition. Notifications
+    /// arriving outside an in-flight rebuild are ignored by the runtime.
+    pub async fn notify_relation_rebuild_failure(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        reason: &str,
+    ) -> Result<(), EngineError> {
+        let publisher = self.get_relation_snapshot_publisher(project_id).await?;
+        publisher
+            .report_full_rebuild_failure(project_id, operation_id, reason)
+            .await
+            .map_err(|error| {
+                EngineError::Index(cce_orchestrator::OrchestratorError::index(
+                    "relation_rebuild_failure",
+                    error.to_string(),
+                ))
+            })
+    }
+
     async fn refresh_relation_runtime_if_needed(
         &self,
         project_id: i64,

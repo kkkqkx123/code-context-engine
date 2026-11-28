@@ -420,8 +420,11 @@ impl SymbolTableBuilder {
             let end = s.end_byte;
             let source_bytes = file.source.as_bytes();
             if end <= source_bytes.len() {
-                // Look back up to 200 characters for context (e.g., try/except, #[cfg])
-                let lookback = start.saturating_sub(200);
+                // Look back up to 200 bytes for context (e.g., try/except, #[cfg]).
+                // The window start is snapped to a char boundary so a multibyte
+                // character at the edge cannot split the UTF-8 sequence.
+                let lookback =
+                    cce_utils::floor_char_boundary(&file.source, start.saturating_sub(200));
                 std::str::from_utf8(&source_bytes[lookback..end]).ok()
             } else {
                 None

@@ -87,6 +87,11 @@ pub struct IndexOrchestrator {
     last_published_snapshot: Option<Arc<LayeredSnapshotIndex>>,
     /// Whether a full relation generation is currently being rebuilt.
     relation_rebuilding: AtomicBool,
+    /// Operation that announced the in-flight relation rebuild.
+    ///
+    /// Kept so a failed rebuild can be reported to the publisher even when the
+    /// failure escapes the build itself (aborted batch phase, early error).
+    relation_rebuild_operation: Option<String>,
     project_fingerprint: Option<String>,
     summary_generator: Box<dyn SummaryGenerator>,
     /// Stored summary config (for deferred ModelEnhancedGenerator creation)
@@ -143,6 +148,7 @@ impl IndexOrchestrator {
             project_id,
             last_published_snapshot: None,
             relation_rebuilding: AtomicBool::new(false),
+            relation_rebuild_operation: None,
             project_fingerprint: None,
             summary_generator: Box::new(RuleBasedGenerator::default()),
             summary_config: None,
@@ -494,6 +500,42 @@ struct FullIndexContext {
 }
 
 impl IndexOrchestrator {
+    /// Execute one full index run.
+    ///
+    /// Every terminal path of a run is settled here: a run that announced a
+    /// relation rebuild but produced no generation reports the failure to the
+    /// publisher, so the query runtime never stays in the updating state.
+    pub async fn execute(
+        &mut self,
+        options: IndexOptions,
+    ) -> Result<IndexResult, OrchestratorError> {
+        let outcome = self.execute_index(options).await;
+
+        // A full relation rebuild is announced before the batch phase, so any
+        // exit of the run must settle it. The published path clears the flag
+        // itself; a leftover flag means the rebuild never produced a
+        // generation and the runtime has to leave the updating state.
+        if self.relation_rebuilding() {
+            let reason = match &outcome {
+                Ok(result) => {
+                    let errors = result.errors();
+                    if errors.is_empty() {
+                        "full index ended without a published relation generation".to_string()
+                    } else {
+                        format!(
+                            "full index ended without a published relation generation: {}",
+                            errors.join("; ")
+                        )
+                    }
+                }
+                Err(error) => error.to_string(),
+            };
+            self.settle_failed_relation_rebuild(reason).await;
+        }
+
+        outcome
+    }
+
     /// Execute indexing with batch processing
     ///
     /// This method uses a batch processing model:
@@ -501,7 +543,7 @@ impl IndexOrchestrator {
     /// 2. Split files into batches (controlled by scan_batch_size)
     /// 3. Process each batch and store results immediately
     /// 4. Release memory before next batch
-    pub async fn execute(
+    async fn execute_index(
         &mut self,
         options: IndexOptions,
     ) -> Result<IndexResult, OrchestratorError> {
@@ -560,7 +602,8 @@ impl IndexOrchestrator {
         // and chunks reference them. The change-detector hashes remain
         // unpublished until the project manifest is activated.
         let mut file_record_error = None;
-        for batch_index in 0..file_indexer.total_batches() {
+        let manifest_batches = file_indexer.total_batches()?;
+        for batch_index in 0..manifest_batches {
             let batch = match file_indexer.get_batch(batch_index) {
                 Ok(batch) => batch,
                 Err(error) => {
@@ -600,8 +643,8 @@ impl IndexOrchestrator {
         stages.scan_ms = scan_started.elapsed().as_millis() as u64;
         stages.rss_after_scan_kb = cce_utils::rss_kb().unwrap_or(0);
 
-        let total_files = file_indexer.file_count();
-        let total_batches = file_indexer.total_batches();
+        let total_files = file_indexer.file_count()?;
+        let total_batches = file_indexer.total_batches()?;
 
         tracing::info!(
             "Found {} files to index, processing in batches of {} (file_list_hash: {})",

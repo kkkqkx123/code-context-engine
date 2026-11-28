@@ -53,20 +53,21 @@ impl IndexOrchestrator {
                     ) {
                         Ok(indexer) => {
                             let next_batch = (indexer.checkpoint().current_batch_index) as usize;
-                            let next_batch = if next_batch <= indexer.total_batches() {
+                            let recovered_total_batches = indexer.total_batches()?;
+                            let next_batch = if next_batch <= recovered_total_batches {
                                 tracing::info!(
                                     "Recovered checkpoint: operation_id={}, last_completed_batch={}, resuming from batch {}/{}",
                                     indexer.operation_id(),
                                     indexer.checkpoint().current_batch_index,
                                     next_batch,
-                                    indexer.total_batches()
+                                    recovered_total_batches
                                 );
                                 next_batch
                             } else {
                                 tracing::warn!(
                                     "Checkpoint batch_index {} is at or beyond total_batches {} (file set shrank or boundary drifted); discarding checkpoint and restarting as a fresh full index",
                                     indexer.checkpoint().current_batch_index,
-                                    indexer.total_batches()
+                                    recovered_total_batches
                                 );
                                 0
                             };

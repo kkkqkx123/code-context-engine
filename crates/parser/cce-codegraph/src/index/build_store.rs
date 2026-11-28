@@ -659,6 +659,38 @@ impl BuildRelationStore {
             .map_err(|error| error.to_string())
     }
 
+    /// Read every persisted qualified key with its entity id.
+    ///
+    /// Used to rebuild the namespace projection from the authoritative
+    /// persisted keys instead of re-deriving them from resident maps.
+    pub fn global_symbol_rows(&self) -> Vec<(String, EntityId)> {
+        let Ok(guard) = self.connection.lock() else {
+            return Vec::new();
+        };
+        let Ok(mut statement) = guard.prepare("SELECT key, entity_id FROM global_symbols") else {
+            return Vec::new();
+        };
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    EntityId(row.get::<_, i64>(1)? as u64),
+                ))
+            })
+            .map(|rows| rows.filter_map(|row| row.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Drop the persisted namespace projection and the resident entries
+    /// caching it, leaving the global projection untouched.
+    pub fn clear_namespace_symbols(&self) -> Result<(), String> {
+        let guard = self.connection.lock().map_err(|error| error.to_string())?;
+        guard
+            .execute("DELETE FROM namespace_symbols", [])
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// Number of resolved edges currently stored.
     pub fn relation_count(&self) -> usize {
         let guard = self.connection.lock().expect("build store lock");

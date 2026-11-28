@@ -494,7 +494,32 @@ impl RelationRuntime {
     /// If there's an old snapshot, it continues to be served.
     /// If no old snapshot exists, queries will return 503.
     pub async fn report_failure(&self, error: String) {
+        self.transition_to_failure(error, false).await;
+    }
+
+    /// Settle an in-flight full rebuild that ended without a new generation.
+    ///
+    /// Only a runtime in the `Updating` state is settled: the build either
+    /// published (state already `Available`) or the runtime is already
+    /// degraded, so a late or duplicated notification must not pull a healthy
+    /// runtime down. The previously published generation keeps serving
+    /// queries; without one, queries report the runtime as unavailable.
+    pub async fn report_rebuild_failure(&self, error: String) {
+        self.transition_to_failure(error, true).await;
+    }
+
+    /// Shared failure transition; `only_when_updating` restricts the
+    /// transition to an in-flight rebuild so stale notifications are inert.
+    async fn transition_to_failure(&self, error: String, only_when_updating: bool) {
         let mut inner = self.inner.write().await;
+        if only_when_updating && inner.state != RelationRuntimeState::Updating {
+            tracing::debug!(
+                project_id = self.project_id,
+                state = ?inner.state,
+                "Ignoring relation rebuild failure notification outside the updating state"
+            );
+            return;
+        }
         let has_snapshot = inner.published_snapshot.is_some();
         inner.metadata.last_error = Some(error.clone());
         inner.metadata.failure_count += 1;
@@ -779,5 +804,52 @@ mod tests {
             assert_eq!(*project_id, 1);
             assert!(error.contains("delta validation failed"));
         }
+    }
+
+    #[tokio::test]
+    async fn rebuild_failure_settles_updating_and_keeps_serving() {
+        let runtime = RelationRuntime::new(1);
+        let index = RelationIndex::new();
+        runtime
+            .publish_snapshot(
+                Arc::new(RelationSnapshotIndex::from_index(&index)),
+                4,
+                SnapshotIntegrity::Full,
+                None,
+            )
+            .await;
+        runtime.set_updating().await;
+
+        runtime
+            .report_rebuild_failure("rebuild aborted".to_string())
+            .await;
+
+        assert_eq!(runtime.get_state().await, RelationRuntimeState::Degraded);
+        let info = runtime.get_capability_info().await;
+        assert!(!info.relation_rebuilding);
+        assert!(info.available, "the previous generation keeps serving");
+        assert_eq!(info.relation_epoch, 4);
+        assert_eq!(runtime.get_metadata().await.failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn rebuild_failure_is_inert_outside_the_updating_state() {
+        let runtime = RelationRuntime::new(1);
+        runtime
+            .publish_snapshot(
+                Arc::new(RelationSnapshotIndex::from_index(&RelationIndex::new())),
+                2,
+                SnapshotIntegrity::Full,
+                None,
+            )
+            .await;
+
+        runtime
+            .report_rebuild_failure("stale notification".to_string())
+            .await;
+
+        assert_eq!(runtime.get_state().await, RelationRuntimeState::Available);
+        assert_eq!(runtime.get_metadata().await.failure_count, 0);
+        assert!(runtime.get_capability_info().await.available);
     }
 }

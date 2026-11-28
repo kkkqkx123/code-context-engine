@@ -10,9 +10,9 @@ use axum::extract::{Query, State};
 use crate::api::response::ApiResult;
 use cce_api::models::{
     Bm25HealthResponse, EmbeddingHealthResponse, ErrorResponse, HealthStatus, QdrantDiagnostic,
-    QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
-    RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueQuery,
-    RetryQueueStatusResponse, ServiceStatus,
+    QdrantHealthResponse, RelationHealthStatus, RetryQueueClearResponse,
+    RetryQueueDeadClearResponse, RetryQueueDeadEntry, RetryQueueDeadResponse,
+    RetryQueueProcessResponse, RetryQueueQuery, RetryQueueStatusResponse, ServiceStatus,
 };
 use cce_server_shared::context::SharedContext;
 use cce_storage_common::MetadataStorage;
@@ -39,11 +39,16 @@ pub async fn handle_health(State(state): State<SharedContext>) -> ApiResult<Heal
     let all_healthy =
         qdrant_health.reachable && bm25_health.reachable && embedding_health.reachable;
 
+    // Diagnostics only: relation rebuilds do not change service health, but an
+    // operator needs to see which projects are rebuilding right now.
+    let relation = RelationHealthStatus::new(state.engine.relation_rebuilding_projects().await);
+
     ApiResult::Success(HealthStatus {
         healthy: all_healthy,
         qdrant: qdrant_health,
         bm25: bm25_health,
         embedding: embedding_health,
+        relation: Some(relation),
     })
 }
 

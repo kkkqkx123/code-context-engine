@@ -84,6 +84,7 @@ fn index_stages_dto(result: &IndexResult) -> IndexStageTimingsDto {
         relation_spool_bytes: stages.relation_spool_bytes,
         symbol_table_entries: stages.symbol_table_entries,
         symbol_table_estimated_bytes: stages.symbol_table_estimated_bytes,
+        symbol_table_persisted_entries: stages.symbol_table_persisted_entries,
         symbol_view_module_peak_entries: stages.symbol_view_module_peak_entries,
         symbol_view_module_peak_bytes: stages.symbol_view_module_peak_bytes,
         symbol_view_name_peak_entries: stages.symbol_view_name_peak_entries,

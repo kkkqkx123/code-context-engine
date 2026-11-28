@@ -912,16 +912,10 @@ impl ProjectSymbolTable {
             .or_default()
             .insert(simple_name.clone());
         // namespace-level index: "package::namespace::symbol"
+        if let Some(ns_key) =
+            crate::symbol_table::namespace_index_key(&qualified_name, &module_path)
         {
-            use cce_types::NamespacePath;
-            let ns_path = NamespacePath::parse(&qualified_name);
-            if let Some(ns_prefix) = ns_path.namespace_prefix()
-                && let Some(pkg_name) = module_path.split("::").next()
-                && !pkg_name.is_empty()
-            {
-                let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
-                self.insert_namespace_symbol(ns_key, entity_id);
-            }
+            self.insert_namespace_symbol(ns_key, entity_id);
         }
         // Update global index for this specific symbol (maintaining cache consistency)
         let file_qualified = format!("{}::{}", file_path, simple_name);
@@ -987,16 +981,10 @@ impl ProjectSymbolTable {
                 .or_default()
                 .insert(simple_name.clone());
 
+            if let Some(ns_key) =
+                crate::symbol_table::namespace_index_key(&qualified_name, &module_path)
             {
-                use cce_types::NamespacePath;
-                let ns_path = NamespacePath::parse(&qualified_name);
-                if let Some(ns_prefix) = ns_path.namespace_prefix()
-                    && let Some(pkg_name) = module_path.split("::").next()
-                    && !pkg_name.is_empty()
-                {
-                    let ns_key = format!("{}::{}::{}", pkg_name, ns_prefix, simple_name);
-                    self.insert_namespace_symbol(ns_key, entity_id);
-                }
+                self.insert_namespace_symbol(ns_key, entity_id);
             }
             let file_qualified = format!("{}::{}", file_path, simple_name);
             self.insert_global_symbol(file_qualified, entity_id);
@@ -1254,40 +1242,18 @@ impl ProjectSymbolTable {
     /// This method reconstructs the flat global_index from the hierarchical
     /// simple_name_index and package exports, ensuring consistency after
     /// symbol removal or addition.
+    ///
+    /// In a disk-backed build the qualified tables are already the
+    /// authoritative source: every insertion writes its key once and every
+    /// removal deletes it, so there is nothing to re-derive from resident
+    /// maps. The namespace projection is recomputed from the persisted keys
+    /// instead of being dropped and rebuilt from an empty resident index.
     pub fn rebuild_global_indices(&self) {
         if let Some(view) = self.build_view() {
-            if let Err(error) = view.clear_qualified_symbols() {
-                tracing::error!(%error, "Failed to clear persisted qualified indexes");
-                return;
+            if let Err(error) = view.rebuild_namespace_symbols() {
+                tracing::error!(%error, "Failed to rebuild persisted namespace index");
             }
-            for entries in self.simple_name_index.iter() {
-                let simple_name = entries.key();
-                for entry in entries.value() {
-                    match entry {
-                        SimpleNameEntry::FileSymbol {
-                            file_path,
-                            module_path,
-                            entity_id,
-                            ..
-                        } => {
-                            self.insert_global_symbol(
-                                format!("{}::{}", file_path, simple_name),
-                                *entity_id,
-                            );
-                            self.rebuild_namespace_key(module_path, simple_name, *entity_id);
-                        }
-                        SimpleNameEntry::PackageExport {
-                            package_id,
-                            entity_id,
-                        } => {
-                            self.insert_global_symbol(
-                                format!("{}::{}", package_id, simple_name),
-                                *entity_id,
-                            );
-                        }
-                    }
-                }
-            }
+            self.clear_cache();
             return;
         }
 
@@ -1315,20 +1281,6 @@ impl ProjectSymbolTable {
                     }
                 }
             }
-        }
-    }
-
-    fn rebuild_namespace_key(&self, module_path: &str, simple_name: &str, entity_id: EntityId) {
-        use cce_types::NamespacePath;
-        let ns_path = NamespacePath::parse(&format!("{}::{}", module_path, simple_name));
-        if let Some(ns_prefix) = ns_path.namespace_prefix()
-            && let Some(pkg_name) = module_path.split("::").next()
-            && !pkg_name.is_empty()
-        {
-            self.insert_namespace_symbol(
-                format!("{}::{}::{}", pkg_name, ns_prefix, simple_name),
-                entity_id,
-            );
         }
     }
 
@@ -1396,6 +1348,21 @@ pub struct ProjectStats {
 
     /// Total number of symbols
     pub total_symbols: usize,
+}
+
+/// Capacity report for the project symbol indexes.
+///
+/// Separates what the process holds from what the operation-local store
+/// persists: only the former is a memory cost, so a disk-backed build must not
+/// be measured by its total key count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SymbolCapacity {
+    /// Resident entry estimate (packages, name buckets, working sets).
+    pub resident_entries: u64,
+    /// Resident byte estimate (explicit per-entry approximation).
+    pub resident_bytes: u64,
+    /// Qualified keys persisted in the operation-local store.
+    pub persisted_entries: u64,
 }
 
 mod enhanced_resolution;

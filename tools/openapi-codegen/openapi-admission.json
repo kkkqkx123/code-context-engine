@@ -205,7 +205,7 @@
           "Search"
         ],
         "summary": "Handle entity search request using FTS5",
-        "description": "# Endpoint\n\n`POST /api/entities/search`\n\n# Query Syntax\n\nSupports FTS5 query syntax:\n- Prefix matching: `auth*` matches \"authenticate\", \"authorization\", etc.\n- Phrase matching: `\"test function\"` matches exact phrase\n- Boolean operators: `AND`, `OR`, `NOT`\n- Field-specific: `name:main` searches only in name field\n\n# Examples\n\n```json\n{\n  \"query\": \"auth*\",\n  \"project_id\": 1,\n  \"limit\": 20\n}\n```",
+        "description": "# Endpoint\n\n`POST /api/entities/search`\n\n# Query Syntax\n\nThe shared contract accepts space-separated substring terms combined with\nAND across `name`, `signature` and `scoped_name`; at most 8 terms are used\nand an empty query returns no rows. Result order is backend-defined.\n\nFTS5-only syntax (`auth*`, `\"exact phrase\"`, `AND`/`OR`/`NOT`, `name:main`)\nis a local-backend enhancement and is not portable across backends. Do not\nrely on it when the PostgreSQL branch may serve the request.\n\n# Examples\n\n```json\n{\n  \"query\": \"auth login\",\n  \"project_id\": 1,\n  \"limit\": 20\n}\n```",
         "operationId": "handle_entity_search",
         "requestBody": {
           "content": {
@@ -5106,6 +5106,198 @@
         }
       }
     },
+    "/api/project/{project_id}/wiki/context": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "summary": "Handle Wiki Context Package export.",
+        "operationId": "handle_wiki_context",
+        "parameters": [
+          {
+            "name": "external_deps_mode",
+            "in": "path",
+            "description": "External dependency presentation mode: `symbol` (default) or `package`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "include_snippets",
+            "in": "path",
+            "description": "Whether entity entries carry short source snippets.",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "include_mermaid",
+            "in": "path",
+            "description": "Whether the package carries deterministic Mermaid graph skeletons.",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/wiki/diff": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "summary": "Handle incremental invalidation diff against baseline hashes.",
+        "operationId": "handle_wiki_diff",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WikiDiffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiDiffResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/qdrant/process/restart": {
       "post": {
         "tags": [
@@ -8107,7 +8299,7 @@
       },
       "EntitySearchRequest": {
         "type": "object",
-        "description": "Entity search request (FTS5)",
+        "description": "Entity search request (portable substring syntax)",
         "required": [
           "query"
         ],
@@ -8141,7 +8333,7 @@
           },
           "query": {
             "type": "string",
-            "description": "Search query (supports FTS5 syntax)"
+            "description": "Space-separated substring terms, combined with AND over entity name,\nsignature and scoped name; at most 8 terms are used.\n\nFTS5-only syntax (prefix `*`, phrases, boolean operators, field\nqualifiers) is a local-backend enhancement, not portable across\nstorage backends, and must not be relied upon by callers."
           }
         }
       },
@@ -9427,6 +9619,17 @@
           "qdrant": {
             "$ref": "#/components/schemas/ServiceStatus",
             "description": "Qdrant status"
+          },
+          "relation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RelationHealthStatus",
+                "description": "Relation rebuild diagnostics (additive; absent when unavailable)"
+              }
+            ]
           }
         }
       },
@@ -9603,6 +9806,10 @@
             "description": "Files with deterministic failures skipped without retry.",
             "minimum": 0
           },
+          "stages": {
+            "$ref": "#/components/schemas/IndexStageTimingsDto",
+            "description": "Per-stage accounting for the run."
+          },
           "success": {
             "type": "boolean"
           },
@@ -9616,6 +9823,610 @@
           },
           "total_vectors": {
             "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "IndexStageTimingsDto": {
+        "type": "object",
+        "description": "Wall-clock accounting for one full-index run.",
+        "required": [
+          "scan_ms",
+          "batch_process_ms",
+          "batch_setup_ms",
+          "entity_store_ms",
+          "vector_store_ms",
+          "bm25_store_ms",
+          "summary_ms",
+          "relation_ms",
+          "export_ms",
+          "relation_spool_ms",
+          "relation_spool_write_ms",
+          "relation_symbols_ms",
+          "symbol_modules_ms",
+          "symbol_type_index_ms",
+          "symbol_overload_ms",
+          "symbol_flat_ms",
+          "symbol_cross_file_ms",
+          "export_spool_ms",
+          "manifest_ms",
+          "batch_overhead_ms",
+          "state_projection_ms",
+          "checkpoint_ms",
+          "progress_ms",
+          "batch_dispatch_ms",
+          "write_commit_ms",
+          "batches",
+          "vector_store_calls",
+          "entity_store_calls",
+          "bm25_store_calls",
+          "vector_txns_applied",
+          "vector_points_written",
+          "vector_wal_flushes",
+          "vector_wal_txns",
+          "vector_commit_wait_ms",
+          "vector_hnsw_builds",
+          "vector_hnsw_build_ms",
+          "vector_checkpoints",
+          "vector_checkpoint_ms",
+          "bm25_commits",
+          "bm25_documents",
+          "bm25_document_ms",
+          "bm25_commit_ms",
+          "bm25_refresh_ms",
+          "bm25_merge_ms",
+          "bm25_staged_documents",
+          "rss_after_scan_kb",
+          "rss_after_batches_kb",
+          "rss_after_relation_kb",
+          "rss_final_kb",
+          "rss_peak_batch_kb",
+          "vector_pending_points_max",
+          "bm25_pending_documents_max",
+          "vector_embed_ms",
+          "vector_point_build_ms",
+          "vector_metadata_ms",
+          "vector_work_unit_ms",
+          "vector_flush_ms",
+          "vector_stage_push_ms",
+          "vector_entity_lookup_ms",
+          "vector_delay_ms",
+          "vector_work_unit_queries",
+          "vector_work_unit_query_ms",
+          "vector_microbatches",
+          "vector_chunk_rows",
+          "vector_entity_mappings",
+          "vector_staged_records_max",
+          "relation_spool_entries",
+          "relation_spool_bytes",
+          "symbol_table_entries",
+          "symbol_table_estimated_bytes",
+          "symbol_table_persisted_entries",
+          "symbol_view_module_peak_entries",
+          "symbol_view_module_peak_bytes",
+          "symbol_view_name_peak_entries",
+          "symbol_view_name_peak_bytes",
+          "symbol_view_name_bucket_peak_candidates",
+          "symbol_view_global_index_queries",
+          "symbol_view_global_index_hits",
+          "symbol_view_namespace_index_queries",
+          "symbol_view_namespace_index_hits",
+          "symbol_view_global_index_entries",
+          "symbol_view_namespace_index_entries",
+          "symbol_view_queries",
+          "symbol_view_candidate_truncated",
+          "cross_file_candidate_truncated",
+          "relation_nodes",
+          "relation_edges",
+          "relation_estimated_bytes",
+          "relation_snapshot_entries",
+          "relation_snapshot_estimated_bytes",
+          "canonical_write_batches",
+          "canonical_write_buffer_peak_bytes",
+          "relation_shard_count",
+          "relation_shard_directory_entries",
+          "relation_shard_directory_estimated_bytes",
+          "published_snapshot_entries",
+          "export_spool_entries",
+          "export_spool_bytes",
+          "entity_id_map_entries",
+          "entity_id_map_estimated_bytes"
+        ],
+        "properties": {
+          "batch_dispatch_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batch_overhead_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batch_process_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batch_setup_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "batches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bm25_commit_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_commits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_document_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_documents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_merge_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_pending_documents_max": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_refresh_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_staged_documents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bm25_store_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bm25_store_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "canonical_write_batches": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "canonical_write_buffer_peak_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "checkpoint_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cross_file_candidate_truncated": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_id_map_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_id_map_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_store_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "entity_store_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_spool_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_spool_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "export_spool_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "manifest_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "progress_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "published_snapshot_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_edges": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_nodes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_shard_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_shard_directory_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_shard_directory_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_snapshot_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_snapshot_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_spool_write_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "relation_symbols_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_after_batches_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_after_relation_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_after_scan_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_final_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rss_peak_batch_kb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "scan_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "state_projection_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "summary_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_cross_file_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_flat_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_modules_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_overload_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_table_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_table_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_table_persisted_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_type_index_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_candidate_truncated": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_global_index_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_global_index_hits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_global_index_queries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_module_peak_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_module_peak_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_name_bucket_peak_candidates": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_name_peak_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_name_peak_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_namespace_index_entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_namespace_index_hits": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_namespace_index_queries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_view_queries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_checkpoint_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_checkpoints": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_chunk_rows": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_commit_wait_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_delay_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_embed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_entity_lookup_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_entity_mappings": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_flush_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_hnsw_build_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_hnsw_builds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_metadata_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_microbatches": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_pending_points_max": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_point_build_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_points_written": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_stage_push_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_staged_records_max": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_store_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vector_store_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_txns_applied": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_wal_flushes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_wal_txns": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_work_unit_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_work_unit_queries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vector_work_unit_query_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "write_commit_ms": {
+            "type": "integer",
+            "format": "int64",
             "minimum": 0
           }
         }
@@ -11365,7 +12176,10 @@
           "rewrite_ms",
           "embedding_ms",
           "embedding_provider_ms",
+          "embedding_first_ms",
           "embedding_overhead_ms",
+          "embedding_cache_hits",
+          "response_render_ms",
           "vector_search_ms",
           "bm25_retrieval_ms",
           "fusion_ms",
@@ -11388,6 +12202,18 @@
             "type": "integer",
             "format": "int64",
             "description": "Wall-clock time spent resolving the project and building the query coordinator.",
+            "minimum": 0
+          },
+          "embedding_cache_hits": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of query embeddings served without a remote call.",
+            "minimum": 0
+          },
+          "embedding_first_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Provider time of the first transport call made by this client.",
             "minimum": 0
           },
           "embedding_ms": {
@@ -11424,6 +12250,12 @@
             "type": "integer",
             "format": "int64",
             "description": "Wall-clock time spent enriching and post-processing results.",
+            "minimum": 0
+          },
+          "response_render_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time spent converting query results into the response DTO.",
             "minimum": 0
           },
           "rewrite_ms": {
@@ -11523,6 +12355,23 @@
               "null"
             ],
             "description": "Code snippet (optional, when include_snippet is true)"
+          }
+        }
+      },
+      "RelationHealthStatus": {
+        "type": "object",
+        "description": "Relation-runtime diagnostics carried by the health response.\n\nOnly in-flight full rebuilds are reported: a rebuild releases the resident\ngeneration, so operators need a way to attribute a temporary capability\ndip to an ongoing rebuild instead of a fault.",
+        "required": [
+          "rebuilding_projects"
+        ],
+        "properties": {
+          "rebuilding_projects": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Projects whose full relation generation is currently being rebuilt."
           }
         }
       },
@@ -12776,6 +13625,593 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "WikiCluster": {
+        "type": "object",
+        "description": "One connected component of the relation graph, projected to files.",
+        "required": [
+          "files",
+          "entity_count"
+        ],
+        "properties": {
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "WikiClusters": {
+        "type": "object",
+        "description": "Connected-component clusters of the relation graph.",
+        "required": [
+          "clusters",
+          "truncated"
+        ],
+        "properties": {
+          "clusters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiCluster"
+            },
+            "description": "Largest component first."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiContextResponse": {
+        "type": "object",
+        "description": "The full Wiki Context Package export response.",
+        "required": [
+          "success",
+          "manifest",
+          "files",
+          "entities",
+          "entities_truncated",
+          "dep_graph",
+          "external_deps",
+          "metrics",
+          "clusters",
+          "reading_path",
+          "relation_epoch"
+        ],
+        "properties": {
+          "clusters": {
+            "$ref": "#/components/schemas/WikiClusters"
+          },
+          "dep_graph": {
+            "$ref": "#/components/schemas/WikiDepGraph"
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiEntityEntry"
+            }
+          },
+          "entities_truncated": {
+            "type": "boolean",
+            "description": "Whether the entity catalog was truncated at the export cap."
+          },
+          "external_deps": {
+            "$ref": "#/components/schemas/WikiExternalDeps"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileEntry"
+            }
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/WikiManifest"
+          },
+          "mermaid": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WikiMermaid"
+              }
+            ]
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileMetrics"
+            }
+          },
+          "reading_path": {
+            "$ref": "#/components/schemas/WikiReadingPath"
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {
+            "description": "Staleness payload when the relation index is degraded."
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiDepEdge": {
+        "type": "object",
+        "description": "One file-level dependency edge.",
+        "required": [
+          "from_file",
+          "to_file",
+          "target",
+          "relation",
+          "domain",
+          "is_external"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Coarse relation domain of `relation`."
+          },
+          "from_file": {
+            "type": "string"
+          },
+          "is_external": {
+            "type": "boolean"
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relation type string (`dependency.import.standard`, ...)."
+          },
+          "target": {
+            "type": "string",
+            "description": "Raw relation target as written in the source."
+          },
+          "to_file": {
+            "type": "string",
+            "description": "Target file inside the project; empty for external targets."
+          }
+        }
+      },
+      "WikiDepGraph": {
+        "type": "object",
+        "description": "File-level dependency graph.",
+        "required": [
+          "nodes",
+          "edges",
+          "exports",
+          "truncated"
+        ],
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiDepEdge"
+            }
+          },
+          "exports": {
+            "type": "object",
+            "description": "Exported stable symbol ids per file.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sorted project file paths that participate in at least one edge."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiDiffRequest": {
+        "type": "object",
+        "description": "Baseline hashes for an incremental invalidation diff.",
+        "required": [
+          "baseline"
+        ],
+        "properties": {
+          "baseline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileHash"
+            },
+            "description": "File hashes as recorded by a previous export or diff."
+          }
+        }
+      },
+      "WikiDiffResponse": {
+        "type": "object",
+        "description": "Incremental invalidation result for wiki page regeneration.",
+        "required": [
+          "success",
+          "relation_epoch",
+          "changes",
+          "affected_files",
+          "affected_modules"
+        ],
+        "properties": {
+          "affected_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Changed files plus their one-hop dependency neighbours."
+          },
+          "affected_modules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Module labels of the affected files (wiki module pages)."
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiFileChange"
+            }
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {},
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiEntityEntry": {
+        "type": "object",
+        "description": "One entity (symbol) of the project.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "file_path",
+          "source_location"
+        ],
+        "properties": {
+          "doc_comment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable symbol id, joinable against the graph and relation tools."
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scoped_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snippet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short source snippet; present only when `include_snippets` is on."
+          },
+          "source_location": {
+            "type": "string",
+            "description": "One-based line marker, `L12` or `L12-L34`."
+          }
+        }
+      },
+      "WikiExternalDep": {
+        "type": "object",
+        "description": "One external dependency entry.",
+        "required": [
+          "name",
+          "used_by",
+          "relations"
+        ],
+        "properties": {
+          "external_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "External classification (`standard_library`, `external_library`, ...)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Symbol name (symbol mode) or package name (package mode)."
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relation type strings seen for the dependency, sorted."
+          },
+          "used_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Project files that reference the dependency, sorted."
+          }
+        }
+      },
+      "WikiExternalDeps": {
+        "type": "object",
+        "description": "External dependency listing in the configured presentation mode.",
+        "required": [
+          "mode",
+          "entries",
+          "truncated"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiExternalDep"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "description": "Mode in effect: `symbol` or `package`."
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WikiFileChange": {
+        "type": "object",
+        "description": "One file-level change classification.",
+        "required": [
+          "path",
+          "change"
+        ],
+        "properties": {
+          "change": {
+            "type": "string",
+            "description": "`added`, `changed` or `removed`."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiFileEntry": {
+        "type": "object",
+        "description": "One file of the project.",
+        "required": [
+          "path",
+          "language",
+          "category",
+          "entry_candidate"
+        ],
+        "properties": {
+          "category": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entry_candidate": {
+            "type": "boolean",
+            "description": "Whether the entry-point heuristic marked this file as a reading start."
+          },
+          "language": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiFileHash": {
+        "type": "object",
+        "description": "One file's content hash as remembered by a previous export.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiFileMetrics": {
+        "type": "object",
+        "description": "File-level importance metrics aggregated from entity graph metrics.",
+        "required": [
+          "path",
+          "pagerank",
+          "degree_centrality",
+          "entity_count"
+        ],
+        "properties": {
+          "degree_centrality": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean entity degree centrality inside the file."
+          },
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pagerank": {
+            "type": "number",
+            "format": "double",
+            "description": "Sum of entity PageRank scores inside the file."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiManifest": {
+        "type": "object",
+        "description": "Export manifest: snapshot identity and package-level statistics.",
+        "required": [
+          "project_id",
+          "root_path",
+          "index_epoch",
+          "relation_epoch",
+          "entity_epoch",
+          "epoch_aligned",
+          "language_stats",
+          "file_count",
+          "entity_count",
+          "external_deps_mode",
+          "include_snippets"
+        ],
+        "properties": {
+          "entity_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "entity_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Epoch of the file inventory and entity catalog (the data generation).\n\nType entities supplemented from metadata share this epoch with the\nfile list, so downstream can join entity → file without a cross-epoch\nmismatch."
+          },
+          "epoch_aligned": {
+            "type": "boolean",
+            "description": "Whether `index_epoch`/`entity_epoch` and `relation_epoch` belong to the\nsame publication. `false` means the relation snapshot lagged the\nactive metadata generation and the package spans two generations."
+          },
+          "external_deps_mode": {
+            "type": "string",
+            "description": "External dependency presentation mode in effect (`symbol`/`package`)."
+          },
+          "file_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "include_snippets": {
+            "type": "boolean"
+          },
+          "index_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Data epoch of the exported generation."
+          },
+          "language_stats": {
+            "type": "object",
+            "description": "File counts per detected language.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "root_path": {
+            "type": "string"
+          }
+        }
+      },
+      "WikiMermaid": {
+        "type": "object",
+        "description": "Deterministic Mermaid skeletons of the dependency graph.",
+        "required": [
+          "file_graph",
+          "module_graph"
+        ],
+        "properties": {
+          "file_graph": {
+            "type": "string",
+            "description": "File-level dependency graph."
+          },
+          "module_graph": {
+            "type": "string",
+            "description": "Module-level (top directory) dependency graph."
+          }
+        }
+      },
+      "WikiReadingEntry": {
+        "type": "object",
+        "description": "One reading-path recommendation.",
+        "required": [
+          "path",
+          "reason",
+          "pagerank"
+        ],
+        "properties": {
+          "pagerank": {
+            "type": "number",
+            "format": "double"
+          },
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`entry_candidate` or `pagerank_order`."
+          }
+        }
+      },
+      "WikiReadingPath": {
+        "type": "object",
+        "description": "Suggested reading order derived from entry candidates and PageRank.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiReadingEntry"
+            }
           }
         }
       }

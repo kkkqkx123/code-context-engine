@@ -311,6 +311,56 @@ impl BuildSymbolView {
         Ok(())
     }
 
+    /// Rebuild the namespace projection from the persisted qualified keys.
+    ///
+    /// The persisted global keys are the authoritative insertion record, so
+    /// the projection is recomputed from them rather than from resident maps
+    /// (which hold only a bounded working set). Rows are written straight to
+    /// the store; the resident caches are dropped afterwards instead of being
+    /// repopulated with the full key set.
+    pub fn rebuild_namespace_symbols(&self) -> Result<(), String> {
+        let rows = self.store.global_symbol_rows();
+        // Module records carry the module path used at insertion time, which
+        // is the other input of the namespace key. Read each file once.
+        let mut module_paths: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (_package_id, path) in self.store.module_paths() {
+            if let Some(record) = self.store.module_record(&path) {
+                module_paths.insert(path, record.module_path);
+            }
+        }
+        self.store.clear_namespace_symbols()?;
+        for (key, entity_id) in rows {
+            let module_path = key
+                .split_once("::")
+                .map(|(path, _)| path)
+                .unwrap_or(key.as_str());
+            let module_path = module_paths
+                .get(module_path)
+                .map(String::as_str)
+                .unwrap_or(module_path);
+            if let Some(namespace_key) = crate::symbol_table::namespace_index_key(&key, module_path)
+            {
+                self.store
+                    .write_namespace_symbol(&namespace_key, entity_id)?;
+            }
+        }
+        // Resident entries still point at the pre-rebuild projection.
+        self.global_symbols.lock().clear();
+        self.namespace_symbols.lock().clear();
+        Ok(())
+    }
+
+    /// Resident entries currently held by the qualified working sets.
+    pub fn resident_qualified_entries(&self) -> u64 {
+        (self.global_symbols.lock().len() + self.namespace_symbols.lock().len()) as u64
+    }
+
+    /// Persisted qualified keys (global plus namespace projections).
+    pub fn persisted_qualified_entries(&self) -> u64 {
+        self.store.global_symbol_count() + self.store.namespace_symbol_count()
+    }
+
     /// Drop only resident entries; rows in the round-local store stay intact.
     pub fn clear_resident_qualified_symbols(&self) {
         self.global_symbols.lock().clear();

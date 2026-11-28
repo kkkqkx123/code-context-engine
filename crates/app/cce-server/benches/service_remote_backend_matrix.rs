@@ -270,7 +270,7 @@ fn main() {
     let mut index_stages_out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
         "service_remote_backend_index_stages.tsv",
-        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tstate_projection_ms\tcheckpoint_ms\tprogress_ms\tbatch_dispatch_ms\twrite_commit_ms\tbatches\tvector_store_calls\tentity_store_calls\tbm25_store_calls\tvector_txns_applied\tvector_points_written\tvector_wal_flushes\tvector_wal_txns\tvector_commit_wait_ms\tvector_hnsw_builds\tvector_hnsw_build_ms\tvector_checkpoints\tvector_checkpoint_ms\tbm25_commits\tbm25_documents\tbm25_document_ms\tbm25_commit_ms\tbm25_refresh_ms\tbm25_merge_ms\tbm25_staged_documents\trss_after_scan_kb\trss_after_batches_kb\trss_after_relation_kb\trss_final_kb\trss_peak_batch_kb\tvector_pending_points_max\tbm25_pending_documents_max\tvector_embed_ms\tvector_point_build_ms\tvector_metadata_ms\tvector_work_unit_ms\tvector_microbatches\tvector_chunk_rows\tvector_entity_mappings\tvector_staged_records_max\tvector_flush_ms\tvector_stage_push_ms\tvector_entity_lookup_ms\tvector_delay_ms\tvector_work_unit_queries\tvector_work_unit_query_ms\trelation_spool_entries\trelation_spool_bytes\tsymbol_table_entries\tsymbol_table_estimated_bytes\trelation_nodes\trelation_edges\trelation_estimated_bytes\trelation_snapshot_entries\trelation_snapshot_estimated_bytes\tcanonical_write_batches\tcanonical_write_buffer_peak_bytes\tpublished_snapshot_entries\texport_spool_entries\texport_spool_bytes\tentity_id_map_entries\tentity_id_map_estimated_bytes",
+        "# run_id\tservice_version\tbackend_combination\tfile_tier\tscan_ms\tbatch_process_ms\tbatch_setup_ms\tentity_store_ms\tvector_store_ms\tbm25_store_ms\tsummary_ms\trelation_ms\texport_ms\trelation_spool_ms\trelation_spool_write_ms\trelation_symbols_ms\tsymbol_modules_ms\tsymbol_type_index_ms\tsymbol_overload_ms\tsymbol_flat_ms\tsymbol_cross_file_ms\texport_spool_ms\tmanifest_ms\tbatch_overhead_ms\tstate_projection_ms\tcheckpoint_ms\tprogress_ms\tbatch_dispatch_ms\twrite_commit_ms\tbatches\tvector_store_calls\tentity_store_calls\tbm25_store_calls\tvector_txns_applied\tvector_points_written\tvector_wal_flushes\tvector_wal_txns\tvector_commit_wait_ms\tvector_hnsw_builds\tvector_hnsw_build_ms\tvector_checkpoints\tvector_checkpoint_ms\tbm25_commits\tbm25_documents\tbm25_document_ms\tbm25_commit_ms\tbm25_refresh_ms\tbm25_merge_ms\tbm25_staged_documents\trss_after_scan_kb\trss_after_batches_kb\trss_after_relation_kb\trss_final_kb\trss_peak_batch_kb\tvector_pending_points_max\tbm25_pending_documents_max\tvector_embed_ms\tvector_point_build_ms\tvector_metadata_ms\tvector_work_unit_ms\tvector_microbatches\tvector_chunk_rows\tvector_entity_mappings\tvector_staged_records_max\tvector_flush_ms\tvector_stage_push_ms\tvector_entity_lookup_ms\tvector_delay_ms\tvector_work_unit_queries\tvector_work_unit_query_ms\trelation_spool_entries\trelation_spool_bytes\tsymbol_table_entries\tsymbol_table_estimated_bytes\tsymbol_table_persisted_entries\trelation_nodes\trelation_edges\trelation_estimated_bytes\trelation_snapshot_entries\trelation_snapshot_estimated_bytes\tcanonical_write_batches\tcanonical_write_buffer_peak_bytes\tpublished_snapshot_entries\texport_spool_entries\texport_spool_bytes\tentity_id_map_entries\tentity_id_map_estimated_bytes",
     );
     let mut out = cce_bench_kit::open_report_with_header(
         env!("CARGO_MANIFEST_DIR"),
@@ -345,7 +345,7 @@ fn main() {
             let stages = &indexed.stages;
             let _ = writeln!(
                 index_stages_out,
-                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{run_id}\t{service_version}\t{combination}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 size.label(),
                 stages.scan_ms,
                 stages.batch_process_ms,
@@ -417,6 +417,7 @@ fn main() {
                 stages.relation_spool_bytes,
                 stages.symbol_table_entries,
                 stages.symbol_table_estimated_bytes,
+                stages.symbol_table_persisted_entries,
                 stages.relation_nodes,
                 stages.relation_edges,
                 stages.relation_estimated_bytes,

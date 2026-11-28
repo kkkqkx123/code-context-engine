@@ -9242,6 +9242,17 @@
           "qdrant": {
             "$ref": "#/components/schemas/ServiceStatus",
             "description": "Qdrant status"
+          },
+          "relation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RelationHealthStatus",
+                "description": "Relation rebuild diagnostics (additive; absent when unavailable)"
+              }
+            ]
           }
         }
       },
@@ -9513,6 +9524,7 @@
           "relation_spool_bytes",
           "symbol_table_entries",
           "symbol_table_estimated_bytes",
+          "symbol_table_persisted_entries",
           "symbol_view_module_peak_entries",
           "symbol_view_module_peak_bytes",
           "symbol_view_name_peak_entries",
@@ -9827,6 +9839,11 @@
             "minimum": 0
           },
           "symbol_table_estimated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "symbol_table_persisted_entries": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
@@ -11585,6 +11602,23 @@
               "null"
             ],
             "description": "Code snippet (optional, when include_snippet is true)"
+          }
+        }
+      },
+      "RelationHealthStatus": {
+        "type": "object",
+        "description": "Relation-runtime diagnostics carried by the health response.\n\nOnly in-flight full rebuilds are reported: a rebuild releases the resident\ngeneration, so operators need a way to attribute a temporary capability\ndip to an ongoing rebuild instead of a fault.",
+        "required": [
+          "rebuilding_projects"
+        ],
+        "properties": {
+          "rebuilding_projects": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Projects whose full relation generation is currently being rebuilt."
           }
         }
       },

@@ -16,6 +16,8 @@ struct CombinedStatus {
     server_url: String,
     healthy: bool,
     storage: Option<StorageStatus>,
+    /// Projects currently rebuilding a full relation generation.
+    relation_rebuilding_projects: Vec<i64>,
 }
 
 pub async fn execute_with_client(
@@ -29,10 +31,16 @@ pub async fn execute_with_client(
 
     let healthy: bool;
     let mut storage_status = None;
+    let relation_rebuilding_projects: Vec<i64>;
 
     match client.health().await {
         Ok(health) => {
             healthy = health.healthy;
+            relation_rebuilding_projects = health
+                .relation
+                .as_ref()
+                .map(|relation| relation.rebuilding_projects.clone())
+                .unwrap_or_default();
 
             if !matches!(format, crate::cli::OutputFormat::Json) {
                 if health.healthy {
@@ -51,6 +59,18 @@ pub async fn execute_with_client(
                     health.embedding.reachable,
                     &health.embedding.message,
                 );
+                if !relation_rebuilding_projects.is_empty() {
+                    println!();
+                    println!(
+                        "{} Relation Rebuild: project(s) [{}]",
+                        icons::WARNING,
+                        relation_rebuilding_projects
+                            .iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
                 println!();
             }
 
@@ -88,6 +108,7 @@ pub async fn execute_with_client(
             server_url: client.base_url().to_string(),
             healthy,
             storage: storage_status,
+            relation_rebuilding_projects,
         };
         print_output(format, &status);
     }

@@ -13,13 +13,49 @@ pub mod string_pool;
 pub use snapshot::{MemberSummary, TypeMemberSnapshot, TypeSummary};
 pub use string_pool::StringPoolBuilder;
 
+/// Serializes a map as a key-ordered sequence of pairs.
+///
+/// Two reasons: JSON object keys must be strings, so a map keyed by a struct
+/// or a numeric id cannot be written as an object at all (the durable build
+/// record used to fail outright on it); and hash iteration order would
+/// otherwise leak into the persisted bytes, so the same index could produce a
+/// different record on every run.
+mod keyed_pairs {
+    use serde::de::Deserializer;
+    use serde::ser::Serializer;
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
+    use std::hash::Hash;
+
+    pub fn serialize<K, V, S>(map: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        K: Serialize + Ord,
+        V: Serialize,
+        S: Serializer,
+    {
+        let mut entries: Vec<(&K, &V)> = map.iter().collect();
+        entries.sort_by(|left, right| left.0.cmp(right.0));
+        entries.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, K, V, D>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
+    where
+        K: Deserialize<'de> + Eq + Hash,
+        V: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        let entries = Vec::<(K, V)>::deserialize(deserializer)?;
+        Ok(entries.into_iter().collect())
+    }
+}
+
 /// Maximum superclass-chain steps followed by hierarchy helpers.
 ///
 /// Bounds work on cyclic or degenerate hierarchies.
 pub const MAX_HIERARCHY_DEPTH: usize = 32;
 
 /// Stable key identifying a type definition.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TypeKey {
     pub qualified: String,
     pub simple: String,
@@ -128,9 +164,13 @@ impl MemberEntry {
 /// Index maintaining type -> members relationships.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TypeMemberIndex {
+    #[serde(with = "keyed_pairs")]
     types: HashMap<TypeKey, TypeEntry>,
+    #[serde(with = "keyed_pairs")]
     member_to_type: HashMap<EntityId, TypeKey>,
+    #[serde(with = "keyed_pairs")]
     qualified_index: HashMap<String, Vec<TypeKey>>,
+    #[serde(with = "keyed_pairs")]
     simple_index: HashMap<String, Vec<TypeKey>>,
 }
 

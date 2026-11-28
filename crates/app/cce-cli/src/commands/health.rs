@@ -82,6 +82,7 @@ async fn health_check(
                 print_service_status("Qdrant", &response.qdrant);
                 print_service_status("BM25", &response.bm25);
                 print_service_status("Embedding", &response.embedding);
+                print_relation_status(response.relation.as_ref());
                 println!();
                 if response.healthy {
                     print_success("All services are healthy");
@@ -94,6 +95,32 @@ async fn health_check(
     }
 
     Ok(())
+}
+
+/// Print the relation rebuild diagnostics.
+///
+/// A full rebuild releases the resident generation, so a temporary capability
+/// dip is expected; naming the rebuilding projects makes that visible instead
+/// of looking like a fault.
+fn print_relation_status(relation: Option<&cce_api::models::RelationHealthStatus>) {
+    let Some(relation) = relation else {
+        return;
+    };
+    println!();
+    if relation.is_idle() {
+        println!("{} Relation Rebuild: idle", icons::SUCCESS);
+        return;
+    }
+    print_warning(&format!(
+        "Relation Rebuild: {} project(s) rebuilding [{}]",
+        relation.rebuilding_projects.len(),
+        relation
+            .rebuilding_projects
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
 }
 
 /// Print individual service status

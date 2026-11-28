@@ -15,6 +15,34 @@ pub struct HealthStatus {
     pub bm25: ServiceStatus,
     /// Embedding status
     pub embedding: ServiceStatus,
+    /// Relation rebuild diagnostics (additive; absent when unavailable)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation: Option<RelationHealthStatus>,
+}
+
+/// Relation-runtime diagnostics carried by the health response.
+///
+/// Only in-flight full rebuilds are reported: a rebuild releases the resident
+/// generation, so operators need a way to attribute a temporary capability
+/// dip to an ongoing rebuild instead of a fault.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RelationHealthStatus {
+    /// Projects whose full relation generation is currently being rebuilt.
+    pub rebuilding_projects: Vec<i64>,
+}
+
+impl RelationHealthStatus {
+    /// Build from the project ids reported by the engine.
+    pub fn new(rebuilding_projects: Vec<i64>) -> Self {
+        Self {
+            rebuilding_projects,
+        }
+    }
+
+    /// Whether no project is rebuilding relations right now.
+    pub fn is_idle(&self) -> bool {
+        self.rebuilding_projects.is_empty()
+    }
 }
 
 /// Service status

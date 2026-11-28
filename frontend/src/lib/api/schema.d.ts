@@ -87,17 +87,19 @@ export interface paths {
          *
          *     # Query Syntax
          *
-         *     Supports FTS5 query syntax:
-         *     - Prefix matching: `auth*` matches "authenticate", "authorization", etc.
-         *     - Phrase matching: `"test function"` matches exact phrase
-         *     - Boolean operators: `AND`, `OR`, `NOT`
-         *     - Field-specific: `name:main` searches only in name field
+         *     The shared contract accepts space-separated substring terms combined with
+         *     AND across `name`, `signature` and `scoped_name`; at most 8 terms are used
+         *     and an empty query returns no rows. Result order is backend-defined.
+         *
+         *     FTS5-only syntax (`auth*`, `"exact phrase"`, `AND`/`OR`/`NOT`, `name:main`)
+         *     is a local-backend enhancement and is not portable across backends. Do not
+         *     rely on it when the PostgreSQL branch may serve the request.
          *
          *     # Examples
          *
          *     ```json
          *     {
-         *       "query": "auth*",
+         *       "query": "auth login",
          *       "project_id": 1,
          *       "limit": 20
          *     }
@@ -1147,6 +1149,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/{project_id}/wiki/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Handle Wiki Context Package export. */
+        get: operations["handle_wiki_context"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/wiki/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle incremental invalidation diff against baseline hashes. */
+        post: operations["handle_wiki_diff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/qdrant/process/restart": {
         parameters: {
             query?: never;
@@ -2186,7 +2222,7 @@ export interface components {
              */
             score: number;
         };
-        /** @description Entity search request (FTS5) */
+        /** @description Entity search request (portable substring syntax) */
         EntitySearchRequest: {
             /** @description Filter by entity kind */
             kind_filter?: string | null;
@@ -2202,7 +2238,14 @@ export interface components {
             project_id?: number | null;
             /** @description Project root path */
             project_path?: string | null;
-            /** @description Search query (supports FTS5 syntax) */
+            /**
+             * @description Space-separated substring terms, combined with AND over entity name,
+             *     signature and scoped name; at most 8 terms are used.
+             *
+             *     FTS5-only syntax (prefix `*`, phrases, boolean operators, field
+             *     qualifiers) is a local-backend enhancement, not portable across
+             *     storage backends, and must not be relied upon by callers.
+             */
             query: string;
         };
         /** @description Entity search response */
@@ -2631,6 +2674,7 @@ export interface components {
             healthy: boolean;
             /** @description Qdrant status */
             qdrant: components["schemas"]["ServiceStatus"];
+            relation?: null | components["schemas"]["RelationHealthStatus"];
         };
         /** @description Incremental index request */
         IncrementalIndexRequest: {
@@ -2685,10 +2729,211 @@ export interface components {
             message: string;
             /** @description Files with deterministic failures skipped without retry. */
             skipped_permanent?: number;
+            /** @description Per-stage accounting for the run. */
+            stages?: components["schemas"]["IndexStageTimingsDto"];
             success: boolean;
             total_entities: number;
             total_relations: number;
             total_vectors: number;
+        };
+        /** @description Wall-clock accounting for one full-index run. */
+        IndexStageTimingsDto: {
+            /** Format: int64 */
+            batch_dispatch_ms: number;
+            /** Format: int64 */
+            batch_overhead_ms: number;
+            /** Format: int64 */
+            batch_process_ms: number;
+            /** Format: int64 */
+            batch_setup_ms: number;
+            batches: number;
+            /** Format: int64 */
+            bm25_commit_ms: number;
+            /** Format: int64 */
+            bm25_commits: number;
+            /** Format: int64 */
+            bm25_document_ms: number;
+            /** Format: int64 */
+            bm25_documents: number;
+            /** Format: int64 */
+            bm25_merge_ms: number;
+            /** Format: int64 */
+            bm25_pending_documents_max: number;
+            /** Format: int64 */
+            bm25_refresh_ms: number;
+            /** Format: int64 */
+            bm25_staged_documents: number;
+            bm25_store_calls: number;
+            /** Format: int64 */
+            bm25_store_ms: number;
+            /** Format: int64 */
+            canonical_write_batches: number;
+            /** Format: int64 */
+            canonical_write_buffer_peak_bytes: number;
+            /** Format: int64 */
+            checkpoint_ms: number;
+            /** Format: int64 */
+            cross_file_candidate_truncated: number;
+            /** Format: int64 */
+            entity_id_map_entries: number;
+            /** Format: int64 */
+            entity_id_map_estimated_bytes: number;
+            entity_store_calls: number;
+            /** Format: int64 */
+            entity_store_ms: number;
+            /** Format: int64 */
+            export_ms: number;
+            /** Format: int64 */
+            export_spool_bytes: number;
+            /** Format: int64 */
+            export_spool_entries: number;
+            /** Format: int64 */
+            export_spool_ms: number;
+            /** Format: int64 */
+            manifest_ms: number;
+            /** Format: int64 */
+            progress_ms: number;
+            /** Format: int64 */
+            published_snapshot_entries: number;
+            /** Format: int64 */
+            relation_edges: number;
+            /** Format: int64 */
+            relation_estimated_bytes: number;
+            /** Format: int64 */
+            relation_ms: number;
+            /** Format: int64 */
+            relation_nodes: number;
+            /** Format: int64 */
+            relation_shard_count: number;
+            /** Format: int64 */
+            relation_shard_directory_entries: number;
+            /** Format: int64 */
+            relation_shard_directory_estimated_bytes: number;
+            /** Format: int64 */
+            relation_snapshot_entries: number;
+            /** Format: int64 */
+            relation_snapshot_estimated_bytes: number;
+            /** Format: int64 */
+            relation_spool_bytes: number;
+            /** Format: int64 */
+            relation_spool_entries: number;
+            /** Format: int64 */
+            relation_spool_ms: number;
+            /** Format: int64 */
+            relation_spool_write_ms: number;
+            /** Format: int64 */
+            relation_symbols_ms: number;
+            /** Format: int64 */
+            rss_after_batches_kb: number;
+            /** Format: int64 */
+            rss_after_relation_kb: number;
+            /** Format: int64 */
+            rss_after_scan_kb: number;
+            /** Format: int64 */
+            rss_final_kb: number;
+            /** Format: int64 */
+            rss_peak_batch_kb: number;
+            /** Format: int64 */
+            scan_ms: number;
+            /** Format: int64 */
+            state_projection_ms: number;
+            /** Format: int64 */
+            summary_ms: number;
+            /** Format: int64 */
+            symbol_cross_file_ms: number;
+            /** Format: int64 */
+            symbol_flat_ms: number;
+            /** Format: int64 */
+            symbol_modules_ms: number;
+            /** Format: int64 */
+            symbol_overload_ms: number;
+            /** Format: int64 */
+            symbol_table_entries: number;
+            /** Format: int64 */
+            symbol_table_estimated_bytes: number;
+            /** Format: int64 */
+            symbol_table_persisted_entries: number;
+            /** Format: int64 */
+            symbol_type_index_ms: number;
+            /** Format: int64 */
+            symbol_view_candidate_truncated: number;
+            /** Format: int64 */
+            symbol_view_global_index_entries: number;
+            /** Format: int64 */
+            symbol_view_global_index_hits: number;
+            /** Format: int64 */
+            symbol_view_global_index_queries: number;
+            /** Format: int64 */
+            symbol_view_module_peak_bytes: number;
+            /** Format: int64 */
+            symbol_view_module_peak_entries: number;
+            /** Format: int64 */
+            symbol_view_name_bucket_peak_candidates: number;
+            /** Format: int64 */
+            symbol_view_name_peak_bytes: number;
+            /** Format: int64 */
+            symbol_view_name_peak_entries: number;
+            /** Format: int64 */
+            symbol_view_namespace_index_entries: number;
+            /** Format: int64 */
+            symbol_view_namespace_index_hits: number;
+            /** Format: int64 */
+            symbol_view_namespace_index_queries: number;
+            /** Format: int64 */
+            symbol_view_queries: number;
+            /** Format: int64 */
+            vector_checkpoint_ms: number;
+            /** Format: int64 */
+            vector_checkpoints: number;
+            /** Format: int64 */
+            vector_chunk_rows: number;
+            /** Format: int64 */
+            vector_commit_wait_ms: number;
+            /** Format: int64 */
+            vector_delay_ms: number;
+            /** Format: int64 */
+            vector_embed_ms: number;
+            /** Format: int64 */
+            vector_entity_lookup_ms: number;
+            /** Format: int64 */
+            vector_entity_mappings: number;
+            /** Format: int64 */
+            vector_flush_ms: number;
+            /** Format: int64 */
+            vector_hnsw_build_ms: number;
+            /** Format: int64 */
+            vector_hnsw_builds: number;
+            /** Format: int64 */
+            vector_metadata_ms: number;
+            /** Format: int64 */
+            vector_microbatches: number;
+            /** Format: int64 */
+            vector_pending_points_max: number;
+            /** Format: int64 */
+            vector_point_build_ms: number;
+            /** Format: int64 */
+            vector_points_written: number;
+            /** Format: int64 */
+            vector_stage_push_ms: number;
+            /** Format: int64 */
+            vector_staged_records_max: number;
+            vector_store_calls: number;
+            /** Format: int64 */
+            vector_store_ms: number;
+            /** Format: int64 */
+            vector_txns_applied: number;
+            /** Format: int64 */
+            vector_wal_flushes: number;
+            /** Format: int64 */
+            vector_wal_txns: number;
+            /** Format: int64 */
+            vector_work_unit_ms: number;
+            /** Format: int64 */
+            vector_work_unit_queries: number;
+            /** Format: int64 */
+            vector_work_unit_query_ms: number;
+            /** Format: int64 */
+            write_commit_ms: number;
         };
         /** @description Index statistics */
         IndexStatistics: {
@@ -3159,27 +3404,75 @@ export interface components {
         };
         /** @description Per-call query stage accounting shared by single and aggregated search. */
         QueryStageTimingsDto: {
-            /** @description Wall-clock time spent in BM25 recall. */
+            /**
+             * Format: int64
+             * @description Wall-clock time spent in BM25 recall.
+             */
             bm25_retrieval_ms: number;
-            /** @description Wall-clock time spent resolving the project and building the query coordinator. */
-            coordinator_ms: number;
-            /** @description Wall-clock time spent loading the epoch view for the query. */
-            filter_ms: number;
-            /** @description Wall-clock time spent building the query cache key. */
+            /**
+             * Format: int64
+             * @description Wall-clock time spent building the query cache key.
+             */
             cache_key_ms: number;
-            /** @description Time spent in embedding batching and resilience orchestration. */
-            embedding_overhead_ms: number;
-            /** @description Wall-clock time spent producing the query embedding. */
+            /**
+             * Format: int64
+             * @description Wall-clock time spent resolving the project and building the query coordinator.
+             */
+            coordinator_ms: number;
+            /**
+             * Format: int64
+             * @description Number of query embeddings served without a remote call.
+             */
+            embedding_cache_hits: number;
+            /**
+             * Format: int64
+             * @description Provider time of the first transport call made by this client.
+             */
+            embedding_first_ms: number;
+            /**
+             * Format: int64
+             * @description Wall-clock time spent producing the query embedding.
+             */
             embedding_ms: number;
-            /** @description Time spent inside the embedding transport, including connection setup. */
+            /**
+             * Format: int64
+             * @description Time spent in embedding batching and resilience orchestration.
+             */
+            embedding_overhead_ms: number;
+            /**
+             * Format: int64
+             * @description Time spent inside the embedding transport, including connection setup.
+             */
             embedding_provider_ms: number;
-            /** @description Wall-clock time spent fusing recall paths, including key completion. */
+            /**
+             * Format: int64
+             * @description Wall-clock time spent loading the epoch view for the query.
+             */
+            filter_ms: number;
+            /**
+             * Format: int64
+             * @description Wall-clock time spent fusing recall paths, including key completion.
+             */
             fusion_ms: number;
-            /** @description Wall-clock time spent enriching and post-processing results. */
+            /**
+             * Format: int64
+             * @description Wall-clock time spent enriching and post-processing results.
+             */
             post_process_ms: number;
-            /** @description Wall-clock time spent rewriting the query before recall. */
+            /**
+             * Format: int64
+             * @description Time spent converting query results into the response DTO.
+             */
+            response_render_ms: number;
+            /**
+             * Format: int64
+             * @description Wall-clock time spent rewriting the query before recall.
+             */
             rewrite_ms: number;
-            /** @description Wall-clock time spent in the vector engine search. */
+            /**
+             * Format: int64
+             * @description Wall-clock time spent in the vector engine search.
+             */
             vector_search_ms: number;
         };
         /**
@@ -3208,6 +3501,17 @@ export interface components {
             path: string;
             /** @description Code snippet (optional, when include_snippet is true) */
             snippet?: string | null;
+        };
+        /**
+         * @description Relation-runtime diagnostics carried by the health response.
+         *
+         *     Only in-flight full rebuilds are reported: a rebuild releases the resident
+         *     generation, so operators need a way to attribute a temporary capability
+         *     dip to an ongoing rebuild instead of a fault.
+         */
+        RelationHealthStatus: {
+            /** @description Projects whose full relation generation is currently being rebuilt. */
+            rebuilding_projects: number[];
         };
         /** @description Relation info from parse */
         RelationInfo: {
@@ -3655,6 +3959,202 @@ export interface components {
         WatchStatusResponse: {
             status: components["schemas"]["WatchStatus"];
             success: boolean;
+        };
+        /** @description One connected component of the relation graph, projected to files. */
+        WikiCluster: {
+            entity_count: number;
+            files: string[];
+        };
+        /** @description Connected-component clusters of the relation graph. */
+        WikiClusters: {
+            /** @description Largest component first. */
+            clusters: components["schemas"]["WikiCluster"][];
+            truncated: boolean;
+        };
+        /** @description The full Wiki Context Package export response. */
+        WikiContextResponse: {
+            clusters: components["schemas"]["WikiClusters"];
+            dep_graph: components["schemas"]["WikiDepGraph"];
+            entities: components["schemas"]["WikiEntityEntry"][];
+            /** @description Whether the entity catalog was truncated at the export cap. */
+            entities_truncated: boolean;
+            external_deps: components["schemas"]["WikiExternalDeps"];
+            files: components["schemas"]["WikiFileEntry"][];
+            manifest: components["schemas"]["WikiManifest"];
+            mermaid?: null | components["schemas"]["WikiMermaid"];
+            metrics: components["schemas"]["WikiFileMetrics"][];
+            reading_path: components["schemas"]["WikiReadingPath"];
+            /** Format: int64 */
+            relation_epoch: number;
+            /** @description Staleness payload when the relation index is degraded. */
+            relation_info?: unknown;
+            success: boolean;
+        };
+        /** @description One file-level dependency edge. */
+        WikiDepEdge: {
+            /** @description Coarse relation domain of `relation`. */
+            domain: string;
+            from_file: string;
+            is_external: boolean;
+            /** @description Relation type string (`dependency.import.standard`, ...). */
+            relation: string;
+            /** @description Raw relation target as written in the source. */
+            target: string;
+            /** @description Target file inside the project; empty for external targets. */
+            to_file: string;
+        };
+        /** @description File-level dependency graph. */
+        WikiDepGraph: {
+            edges: components["schemas"]["WikiDepEdge"][];
+            /** @description Exported stable symbol ids per file. */
+            exports: {
+                [key: string]: string[];
+            };
+            /** @description Sorted project file paths that participate in at least one edge. */
+            nodes: string[];
+            truncated: boolean;
+        };
+        /** @description Baseline hashes for an incremental invalidation diff. */
+        WikiDiffRequest: {
+            /** @description File hashes as recorded by a previous export or diff. */
+            baseline: components["schemas"]["WikiFileHash"][];
+        };
+        /** @description Incremental invalidation result for wiki page regeneration. */
+        WikiDiffResponse: {
+            /** @description Changed files plus their one-hop dependency neighbours. */
+            affected_files: string[];
+            /** @description Module labels of the affected files (wiki module pages). */
+            affected_modules: string[];
+            changes: components["schemas"]["WikiFileChange"][];
+            /** Format: int64 */
+            relation_epoch: number;
+            relation_info?: unknown;
+            success: boolean;
+        };
+        /** @description One entity (symbol) of the project. */
+        WikiEntityEntry: {
+            doc_comment?: string | null;
+            file_path: string;
+            /** @description Stable symbol id, joinable against the graph and relation tools. */
+            id: string;
+            kind: string;
+            name: string;
+            scoped_name?: string | null;
+            signature?: string | null;
+            /** @description Short source snippet; present only when `include_snippets` is on. */
+            snippet?: string | null;
+            /** @description One-based line marker, `L12` or `L12-L34`. */
+            source_location: string;
+        };
+        /** @description One external dependency entry. */
+        WikiExternalDep: {
+            /** @description External classification (`standard_library`, `external_library`, ...). */
+            external_type?: string | null;
+            /** @description Symbol name (symbol mode) or package name (package mode). */
+            name: string;
+            /** @description Relation type strings seen for the dependency, sorted. */
+            relations: string[];
+            /** @description Project files that reference the dependency, sorted. */
+            used_by: string[];
+        };
+        /** @description External dependency listing in the configured presentation mode. */
+        WikiExternalDeps: {
+            entries: components["schemas"]["WikiExternalDep"][];
+            /** @description Mode in effect: `symbol` or `package`. */
+            mode: string;
+            truncated: boolean;
+        };
+        /** @description One file-level change classification. */
+        WikiFileChange: {
+            /** @description `added`, `changed` or `removed`. */
+            change: string;
+            path: string;
+        };
+        /** @description One file of the project. */
+        WikiFileEntry: {
+            /** Format: int32 */
+            category: number;
+            content_hash?: string | null;
+            /** @description Whether the entry-point heuristic marked this file as a reading start. */
+            entry_candidate: boolean;
+            language: string;
+            path: string;
+        };
+        /** @description One file's content hash as remembered by a previous export. */
+        WikiFileHash: {
+            content_hash?: string | null;
+            path: string;
+        };
+        /** @description File-level importance metrics aggregated from entity graph metrics. */
+        WikiFileMetrics: {
+            /**
+             * Format: double
+             * @description Mean entity degree centrality inside the file.
+             */
+            degree_centrality: number;
+            entity_count: number;
+            /**
+             * Format: double
+             * @description Sum of entity PageRank scores inside the file.
+             */
+            pagerank: number;
+            path: string;
+        };
+        /** @description Export manifest: snapshot identity and package-level statistics. */
+        WikiManifest: {
+            entity_count: number;
+            /**
+             * Format: int64
+             * @description Epoch of the file inventory and entity catalog (the data generation).
+             *
+             *     Type entities supplemented from metadata share this epoch with the
+             *     file list, so downstream can join entity → file without a cross-epoch
+             *     mismatch.
+             */
+            entity_epoch: number;
+            /**
+             * @description Whether `index_epoch`/`entity_epoch` and `relation_epoch` belong to the
+             *     same publication. `false` means the relation snapshot lagged the
+             *     active metadata generation and the package spans two generations.
+             */
+            epoch_aligned: boolean;
+            /** @description External dependency presentation mode in effect (`symbol`/`package`). */
+            external_deps_mode: string;
+            file_count: number;
+            include_snippets: boolean;
+            /**
+             * Format: int64
+             * @description Data epoch of the exported generation.
+             */
+            index_epoch: number;
+            /** @description File counts per detected language. */
+            language_stats: {
+                [key: string]: number;
+            };
+            /** Format: int64 */
+            project_id: number;
+            /** Format: int64 */
+            relation_epoch: number;
+            root_path: string;
+        };
+        /** @description Deterministic Mermaid skeletons of the dependency graph. */
+        WikiMermaid: {
+            /** @description File-level dependency graph. */
+            file_graph: string;
+            /** @description Module-level (top directory) dependency graph. */
+            module_graph: string;
+        };
+        /** @description One reading-path recommendation. */
+        WikiReadingEntry: {
+            /** Format: double */
+            pagerank: number;
+            path: string;
+            /** @description `entry_candidate` or `pagerank_order`. */
+            reason: string;
+        };
+        /** @description Suggested reading order derived from entry candidates and PageRank. */
+        WikiReadingPath: {
+            entries: components["schemas"]["WikiReadingEntry"][];
         };
     };
     responses: never;
@@ -7064,6 +7564,134 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_wiki_context: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description External dependency presentation mode: `symbol` (default) or `package`. */
+                external_deps_mode: string | null;
+                /** @description Whether entity entries carry short source snippets. */
+                include_snippets: boolean | null;
+                /** @description Whether the package carries deterministic Mermaid graph skeletons. */
+                include_mermaid: boolean | null;
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiContextResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Index unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_wiki_diff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WikiDiffRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiDiffResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Index unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

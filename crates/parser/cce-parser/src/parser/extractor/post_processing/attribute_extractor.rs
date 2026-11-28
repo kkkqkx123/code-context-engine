@@ -30,7 +30,8 @@ pub fn extract_rust_attributes(mat: &QueryMatch, source: &str, entity: &mut Enti
         None => return,
     };
 
-    let lookback = main_capture.start_byte.saturating_sub(300);
+    let lookback =
+        cce_utils::floor_char_boundary(source, main_capture.start_byte.saturating_sub(300));
     let preceding_text = &source[lookback..main_capture.start_byte];
 
     let simple_attrs: &[&str] = &[
@@ -139,5 +140,76 @@ pub fn extract_rust_attributes(mat: &QueryMatch, source: &str, entity: &mut Enti
             meta_keys::CFG_PREDICATE.to_string(),
             cfg_predicates.join(" ; "),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree_sitter_query::executor::{Capture, QueryMatch};
+    use cce_types::entity::{EntityId, EntityKind};
+    use std::collections::HashMap;
+
+    fn empty_entity() -> Entity {
+        Entity {
+            id: EntityId(1),
+            kind: EntityKind::Function,
+            name: "target".to_string(),
+            signature: "fn target()".to_string(),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Default::default(),
+            depth: 0,
+            parent: None,
+            children: Vec::new(),
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: HashMap::new(),
+            metadata: HashMap::new(),
+            is_stdlib: false,
+            subtype: None,
+            stdlib_category: None,
+        }
+    }
+
+    fn function_match(start_byte: usize) -> QueryMatch {
+        QueryMatch {
+            index: 0,
+            pattern_index: 0,
+            captures: vec![Capture {
+                name: "entity.function".to_string(),
+                text: "fn target()".to_string(),
+                start_byte,
+                end_byte: start_byte + "fn target()".len(),
+                start_point: (0, 0),
+                end_point: (0, 0),
+            }],
+        }
+    }
+
+    /// The lookback window is a raw byte offset, so a multibyte character at
+    /// its edge used to panic while slicing. The filler length is swept so the
+    /// window start lands inside the three bytes of the multi-byte character
+    /// as well as on either side of it.
+    #[test]
+    fn lookback_window_never_splits_a_multibyte_character() {
+        for filler in 284..=291 {
+            let mut source = "x".repeat(10);
+            source.push('—');
+            source.push_str(&"y".repeat(filler));
+            // No body brace: a `{` between the attribute and the entity means
+            // the attribute belongs to a parent scope.
+            source.push_str("\n#[inline]\nfn target");
+            let start = source.find("fn target").expect("anchor must exist");
+            let mat = function_match(start);
+            let mut entity = empty_entity();
+
+            extract_rust_attributes(&mat, &source, &mut entity);
+
+            assert!(
+                entity.modifiers.iter().any(|m| m == "inline"),
+                "attribute must survive a multibyte window edge (filler={filler})"
+            );
+        }
     }
 }
